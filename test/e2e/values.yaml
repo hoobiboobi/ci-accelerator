@@ -1,0 +1,22 @@
+# Values for test/e2e/run.sh. Deliberately hostile where production can be.
+
+# hostPath, as in production: the cache must survive daemon restarts.
+storage:
+  type: hostPath
+  hostPath:
+    path: /var/lib/ci-accelerator-e2e/buildkit
+
+config:
+  gc:
+    maxUsedSpace: "10GB"
+
+# A trace backend that never answers, for the whole run. Probes must not be
+# affected (they ran into their timeout in production when it was down).
+extraEnv:
+  - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+    value: http://10.255.255.1:4317
+  - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+    value: grpc
+
+# The graceful-stop scenario runs a 30 s build through a SIGTERM.
+terminationGracePeriodSeconds: 120

@@ -48,6 +48,26 @@ unittest: tools ## Run helm-unittest suites
 		$(HELM) unittest --strict $$c || exit 1; \
 	done
 
+KIND_CLUSTER ?= buildkit
+KUBE_CONTEXT ?= kind-$(KIND_CLUSTER)
+export KUBE_CONTEXT
+
+.PHONY: kind-up
+kind-up: ## Create the kind cluster (if missing) and taint its build nodes
+	@kind get clusters 2>/dev/null | grep -qx '$(KIND_CLUSTER)' || \
+		kind create cluster --name $(KIND_CLUSTER) --config examples/kind/kind-config.yaml
+	@kubectl --context $(KUBE_CONTEXT) taint nodes -l ci-accelerator.io/node-role=build \
+		ci-accelerator.io/node-role=build:NoSchedule --overwrite >/dev/null
+	@kubectl --context $(KUBE_CONTEXT) get nodes -L ci-accelerator.io/node-role,topology.kubernetes.io/zone
+
+.PHONY: kind-down
+kind-down: ## Delete the kind cluster
+	kind delete cluster --name $(KIND_CLUSTER)
+
+.PHONY: e2e
+e2e: ## Run end-to-end checks on the kind cluster (KEEP=1 keeps resources)
+	@test/e2e/run.sh
+
 .PHONY: template
 template: ## Render every chart with default values to stdout
 	@for c in $(CHARTS); do \

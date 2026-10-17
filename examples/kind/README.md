@@ -6,12 +6,25 @@ Prerequisites (macOS): Docker Desktop or OrbStack, then
 brew install kind kubectl helm buildkit   # buildkit provides buildctl
 ```
 
-Create the cluster and mark the build nodes:
+Create the cluster and mark the build nodes (idempotent):
 
 ```sh
-kind create cluster --config examples/kind/kind-config.yaml
-kubectl taint nodes -l ci-accelerator.io/node-role=build ci-accelerator.io/node-role=build:NoSchedule
-kubectl get nodes -L ci-accelerator.io/node-role,topology.kubernetes.io/zone
+make kind-up
+```
+
+which runs:
+
+```sh
+kind create cluster --name buildkit --config examples/kind/kind-config.yaml
+kubectl --context kind-buildkit taint nodes -l ci-accelerator.io/node-role=build \
+  ci-accelerator.io/node-role=build:NoSchedule --overwrite
+```
+
+Run the end-to-end checks (separate release, cleans up after itself;
+`KEEP=1` leaves everything for debugging):
+
+```sh
+make e2e
 ```
 
 You get one control-plane and three build workers in three fake zones,
@@ -28,7 +41,7 @@ from the host as `tcp://127.0.0.1:1234`.
 Delete:
 
 ```sh
-kind delete cluster --name buildkit
+make kind-down
 ```
 
 Notes:
