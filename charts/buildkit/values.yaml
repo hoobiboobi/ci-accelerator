@@ -36,6 +36,26 @@ global:
         value: build
         effect: NoSchedule
 
+# Client-facing Service on :1234. A headless Service
+# (<fullname>-headless) is always created for in-cluster discovery.
+service:
+  # -- ClusterIP for CI jobs in the cluster; NodePort to reach daemons from
+  # outside (kind, debugging).
+  type: ClusterIP
+  port: 1234
+  # -- Fixed node port when type is NodePort; empty lets Kubernetes pick.
+  nodePort: ""
+  # -- How in-cluster clients reach a daemon. The cache is per daemon, so
+  # staying on the client's node keeps it warm.
+  #   PreferSameNode: own node's daemon; falls back to another node when it
+  #                   is not ready (cold cache, build still succeeds).
+  #   Local:          own node's daemon only; no daemon ready = no endpoints.
+  #   Cluster:        any daemon.
+  routing: PreferSameNode
+  # -- externalTrafficPolicy for NodePort (Cluster or Local).
+  externalTrafficPolicy: Cluster
+  annotations: {}
+
 # Where the daemon keeps its state (/var/lib/buildkit): the build cache.
 storage:
   # -- emptyDir: cache lives as long as the pod (kind, CI).

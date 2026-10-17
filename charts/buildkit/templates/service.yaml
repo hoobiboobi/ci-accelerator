@@ -1,0 +1,55 @@
+{{- $svc := .Values.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "buildkit.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buildkit.labels" . | nindent 4 }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svc.type }}
+  selector:
+    {{- include "buildkit.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: grpc
+      port: {{ $svc.port }}
+      targetPort: grpc
+      protocol: TCP
+      {{- if and (eq $svc.type "NodePort") $svc.nodePort }}
+      nodePort: {{ $svc.nodePort }}
+      {{- end }}
+  {{- /* Local overrides trafficDistribution, so routing is one enum (D21). */}}
+  {{- if eq $svc.routing "Local" }}
+  internalTrafficPolicy: Local
+  {{- else }}
+  internalTrafficPolicy: Cluster
+  {{- if eq $svc.routing "PreferSameNode" }}
+  trafficDistribution: PreferSameNode
+  {{- end }}
+  {{- end }}
+  {{- if eq $svc.type "NodePort" }}
+  externalTrafficPolicy: {{ $svc.externalTrafficPolicy }}
+  {{- end }}
+---
+# Per-daemon DNS records (<pod-ip>.<name>-headless...) for discovery by
+# other ci-accelerator components. Not for CI jobs.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "buildkit.fullname" . }}-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buildkit.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "buildkit.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: grpc
+      port: {{ $svc.port }}
+      targetPort: grpc
+      protocol: TCP

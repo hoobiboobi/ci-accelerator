@@ -80,6 +80,24 @@
         }
       }
     },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["ClusterIP", "NodePort"] },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "nodePort": {
+          "description": "Empty string or an integer in the node port range.",
+          "oneOf": [
+            { "type": "string", "maxLength": 0 },
+            { "type": "integer", "minimum": 1, "maximum": 65535 }
+          ]
+        },
+        "routing": { "type": "string", "enum": ["PreferSameNode", "Local", "Cluster"] },
+        "externalTrafficPolicy": { "type": "string", "enum": ["Cluster", "Local"] },
+        "annotations": { "$ref": "#/definitions/stringMap" }
+      }
+    },
     "storage": {
       "type": "object",
       "additionalProperties": false,

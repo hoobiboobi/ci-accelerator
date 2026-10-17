@@ -1,0 +1,26 @@
+# Values for the local kind cluster (examples/kind/kind-config.yaml).
+#
+#   helm upgrade --install bk charts/buildkit -n ci-accelerator \
+#     -f examples/kind/values.yaml
+#
+# Exposes the daemons as NodePort 31234. kind maps that port on the first
+# worker to 127.0.0.1:1234 on the host, so buildctl can run on the laptop:
+#
+#   buildctl --addr tcp://127.0.0.1:1234 debug workers
+
+service:
+  type: NodePort
+  nodePort: 31234
+  # Host traffic enters on the first worker only; Local keeps it on that
+  # worker's daemon, so the same cache answers every time.
+  externalTrafficPolicy: Local
+
+storage:
+  type: emptyDir
+  # kind nodes share the Docker VM disk; do not let the cache fill it.
+  emptyDir:
+    sizeLimit: 20Gi
+
+config:
+  gc:
+    maxUsedSpace: "15GB"

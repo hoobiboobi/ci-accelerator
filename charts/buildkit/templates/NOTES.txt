@@ -1,0 +1,19 @@
+BuildKit daemons: DaemonSet {{ include "buildkit.fullname" . }} in namespace {{ .Release.Namespace }}.
+
+Address for CI jobs in the cluster:
+
+  tcp://{{ include "buildkit.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+  (routing: {{ .Values.service.routing }})
+{{- if eq .Values.service.type "NodePort" }}
+
+From outside the cluster: tcp://<node-ip>:<node-port>
+  kubectl get svc {{ include "buildkit.fullname" . }} -n {{ .Release.Namespace }}
+{{- end }}
+
+Check the daemons:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -o wide
+  kubectl exec -n {{ .Release.Namespace }} ds/{{ include "buildkit.fullname" . }} -- buildctl debug workers
+
+WARNING: TLS is not configured yet. Anything that can reach port {{ .Values.service.port }},
+including RUN steps of builds on the daemon itself, can control the daemon.
