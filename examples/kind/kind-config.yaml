@@ -1,0 +1,60 @@
+# Local kind cluster for developing and testing the buildkit chart.
+#
+#   kind create cluster --name buildkit --config examples/kind/kind-config.yaml
+#   kind delete cluster --name buildkit
+#
+# Layout mirrors the production topology the chart is designed for:
+# one control-plane and three workers that act as dedicated build nodes,
+# so nodeSelector / tolerations / node-local Service behaviour can be
+# exercised locally. Labels are set here (kubelet refuses to self-assign
+# node-role.kubernetes.io/* labels, hence our own domain); the taint is applied
+# after creation (kubeadm join patches are fragile across kind versions):
+#
+#   kubectl taint nodes -l ci-accelerator.io/node-role=build \
+#     ci-accelerator.io/node-role=build:NoSchedule
+#
+# The daemon's cache in this cluster lives on the kind node's filesystem
+# (emptyDir or hostPath mode in the chart) — there is no NVMe here, so
+# absolute numbers are meaningless; only cache behaviour (CACHED / dedup)
+# is testable.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: buildkit
+
+# Fixed API port so a kubeconfig stays valid across recreations.
+# apiServerAddress is left at the default (127.0.0.1); set it to 0.0.0.0
+# only if another VM on this machine needs the cluster, and then use
+# `kubectl --tls-server-name 0.0.0.0` (the cert has no LAN IP in its SANs).
+networking:
+  apiServerPort: 6443
+
+nodes:
+  - role: control-plane
+
+  - role: worker
+    labels:
+      ci-accelerator.io/node-role: build
+      topology.kubernetes.io/zone: zone-a
+    extraPortMappings:
+      # buildkitd on this node, reachable from the host as tcp://127.0.0.1:1234
+      # when the chart exposes it via NodePort 31234 (see examples/kind/values.yaml)
+      - containerPort: 31234
+        hostPort: 1234
+        protocol: TCP
+
+  - role: worker
+    labels:
+      ci-accelerator.io/node-role: build
+      topology.kubernetes.io/zone: zone-b
+
+  - role: worker
+    labels:
+      ci-accelerator.io/node-role: build
+      topology.kubernetes.io/zone: zone-c
+
+# Allow the local registry (examples/kind/registry.sh) to be used from the
+# nodes as localhost:5001, same as the upstream kind "local registry" recipe.
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"

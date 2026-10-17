@@ -1,0 +1,68 @@
+# --- OS noise ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*~
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+.project
+.settings/
+.history/
+
+# --- Local tooling and build output ---
+.tools/
+bin/
+dist/
+tmp/
+*.tmp
+*.log
+coverage.out
+*.test
+*.out
+
+# --- Helm ---
+charts/*/charts/*.tgz
+*.tgz
+charts/*/tmpcharts/
+.cr-release-packages/
+.cr-index/
+
+# --- Kubernetes / cluster access ---
+kubeconfig
+*.kubeconfig
+kubeconfig*.yaml
+examples/kind/kubeconfig
+talosconfig
+**/talosconfig
+
+# --- Secrets and credentials ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_ed25519*
+secrets.yaml
+secrets.*.yaml
+*.secret.yaml
+*-secret.yaml
+values.local.yaml
+*.local.yaml
+.docker/config.json
+.netrc
