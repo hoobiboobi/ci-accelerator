@@ -20,6 +20,12 @@ imagePullSecrets: []
 # -- Labels added to every resource the chart creates.
 commonLabels: {}
 
+preflight:
+  # -- Fail the install if the namespace's Pod Security `enforce` level is
+  # not privileged (otherwise no daemon pod is ever created). Needs read
+  # access to the Namespace object; set false if the installer lacks it.
+  podSecurity: true
+
 # Shared with other ci-accelerator charts when installed via the umbrella.
 global:
   # Dedicated build nodes (see docs: label and taint them before install).

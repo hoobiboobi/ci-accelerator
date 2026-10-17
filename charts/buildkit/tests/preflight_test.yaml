@@ -1,0 +1,90 @@
+suite: preflight
+templates:
+  - daemonset.yaml
+release:
+  name: bk
+  namespace: builds
+# Namespace is cluster-scoped; the fake client needs its mapping.
+kubernetesProvider:
+  scheme:
+    "v1/Namespace":
+      gvr:
+        version: v1
+        resource: namespaces
+      namespaced: false
+tests:
+  # On kind a baseline namespace gave "STATUS: deployed" and 0 pods.
+  - it: fails early in a namespace that enforces baseline
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+            labels:
+              pod-security.kubernetes.io/enforce: baseline
+    asserts:
+      - failedTemplate:
+          errorPattern: 'namespace "builds" enforces Pod Security level "baseline".*pod-security.kubernetes.io/enforce=privileged'
+
+  - it: fails early in a namespace that enforces restricted
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+            labels:
+              pod-security.kubernetes.io/enforce: restricted
+    asserts:
+      - failedTemplate:
+          errorPattern: 'level "restricted"'
+
+  - it: installs into a privileged namespace
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+            labels:
+              pod-security.kubernetes.io/enforce: privileged
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  # No enforce label: the cluster-wide default applies, which a chart cannot
+  # read. Do not guess.
+  - it: does not block a namespace without an enforce label
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+            labels:
+              pod-security.kubernetes.io/warn: baseline
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  # helm template / ArgoCD: lookup returns nothing.
+  - it: renders when the namespace cannot be looked up
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: can be switched off
+    set:
+      preflight.podSecurity: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+            labels:
+              pod-security.kubernetes.io/enforce: baseline
+    asserts:
+      - isKind:
+          of: DaemonSet

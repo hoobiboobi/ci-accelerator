@@ -65,6 +65,13 @@
       }
     },
     "commonLabels": { "$ref": "#/definitions/stringMap" },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "podSecurity": { "type": "boolean" }
+      }
+    },
     "global": {
       "description": "Shared with other ci-accelerator charts; unknown keys belong to them.",
       "type": "object",
