@@ -66,6 +66,9 @@ spec:
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          startupProbe:
+            {{- include "buildkit.probeExec" . | nindent 12 }}
+            {{- toYaml .Values.probes.startup | nindent 12 }}
           readinessProbe:
             {{- include "buildkit.probeExec" . | nindent 12 }}
             {{- toYaml .Values.probes.readiness | nindent 12 }}

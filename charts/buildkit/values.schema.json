@@ -136,6 +136,13 @@
             "maxEntries": { "type": "integer", "minimum": 0 }
           }
         },
+        "cdi": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        },
         "maxRegistryConcurrency": { "type": "integer", "minimum": 0 },
         "extraConfig": { "type": "string" }
       }
@@ -144,6 +151,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "startup": { "$ref": "#/definitions/probe" },
         "readiness": { "$ref": "#/definitions/probe" },
         "liveness": { "$ref": "#/definitions/probe" }
       }

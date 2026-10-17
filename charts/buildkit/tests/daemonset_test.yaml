@@ -39,6 +39,31 @@ tests:
           path: spec.template.spec.containers[0].livenessProbe.periodSeconds
           value: 30
 
+  # On kind, readiness with period 30s made a daemon that was up in 15s Ready
+  # only after ~50s. A frequent startup probe fixes that (kubelet runs
+  # readiness immediately once started) and keeps liveness off during a
+  # slow start on a large cache.
+  - it: polls often on startup with a generous budget
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.periodSeconds
+          value: 2
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.timeoutSeconds
+          value: 10
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.failureThreshold
+          value: 150
+      - contains:
+          path: spec.template.spec.containers[0].startupProbe.exec.command
+          content: OTEL_SDK_DISABLED=true
+      # A readiness initialDelay swallows kubelet's immediate post-startup
+      # run; the pod then waits a full readiness period (34s on kind).
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.initialDelaySeconds
+          value: 0
+
   # With tracing configured, a dead trace backend hung the probe and liveness
   # killed every daemon at once.
   - it: runs probes with OTEL disabled and OTLP endpoints removed

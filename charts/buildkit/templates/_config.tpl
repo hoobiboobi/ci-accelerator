@@ -75,6 +75,11 @@ root = "/var/lib/buildkit"
   maxEntries = {{ .maxEntries }}
 {{- end }}
 {{- end }}
+{{- if not .Values.config.cdi.enabled }}
+
+[cdi]
+  disabled = true
+{{- end }}
 {{- with .Values.config.maxRegistryConcurrency }}
 
 [system]

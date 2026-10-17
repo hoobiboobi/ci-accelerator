@@ -8,6 +8,9 @@ matches the reviewed default config:
         # unix socket: used by the probes (no TLS needed); tcp: used by CI jobs.
         address = ["unix:///run/buildkit/buildkitd.sock", "tcp://0.0.0.0:1234"]
 
+      [cdi]
+        disabled = true
+
       [worker.oci]
         enabled = true
         gc = true

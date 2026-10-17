@@ -93,6 +93,20 @@ tests:
           path: data["buildkitd.toml"]
           pattern: '\[history\]\n  maxAge = "168h"\n  maxEntries = 0\n'
 
+  - it: disables CDI by default
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[cdi\]\n  disabled = true\n'
+
+  - it: leaves CDI to buildkit defaults when enabled
+    set:
+      config.cdi.enabled: true
+    asserts:
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[cdi\]'
+
   - it: renders the registry concurrency limit only when set
     set:
       config.maxRegistryConcurrency: 8

@@ -84,20 +84,37 @@ config:
   # Empty keeps buildkit defaults (48h / 50).
   history: {}
 
+  # -- Container Device Interface (GPUs and other devices for RUN steps).
+  # Off by default: CI builds need no devices, and it removes an attack
+  # surface (see GHSA-r456-g3gm-cvxf, fixed in v0.33.1).
+  cdi:
+    enabled: false
+
   # -- Max concurrent connections per registry; 0 keeps the buildkit
   # default. See moby/buildkit#7275 before raising it.
   maxRegistryConcurrency: 0
 
   # -- Raw TOML appended verbatim. Must not repeat tables the chart renders
-  # ([grpc], [worker.oci], [worker.containerd], [history], [system]).
+  # ([grpc], [worker.oci], [worker.containerd], [history], [system], [cdi]).
   extraConfig: ""
 
 # Probes call `buildctl debug workers` on the local unix socket, with OTEL
 # disabled. A busy daemon can take seconds to answer; the Kubernetes default
 # timeout (1s) restarts healthy daemons under load.
 probes:
+  # -- Polls often until the daemon answers, then hands over to readiness
+  # (run immediately by kubelet) and liveness. Liveness is off meanwhile, so
+  # a slow start on a large cache is not killed. Budget: 2s x 150 = 5 min.
+  startup:
+    initialDelaySeconds: 2
+    periodSeconds: 2
+    timeoutSeconds: 10
+    failureThreshold: 150
   readiness:
-    initialDelaySeconds: 5
+    # -- Keep 0: kubelet triggers readiness right after startup succeeds,
+    # but skips that run if it falls inside initialDelaySeconds — the pod
+    # then waits a full period (seen on kind: 34s instead of ~4s).
+    initialDelaySeconds: 0
     periodSeconds: 30
     timeoutSeconds: 10
     failureThreshold: 3
