@@ -3,33 +3,57 @@
   "title": "buildkit chart values",
   "type": "object",
   "additionalProperties": false,
+  "definitions": {
+    "diskSpace": {
+      "description": "Bytes, a size with unit (512MB, 2TB, 10GiB) or a percentage of the disk (75%). Empty means unset.",
+      "type": "string",
+      "pattern": "^([0-9]+(\\.[0-9]+)? ?[kKmMgGtTpP]?[iI]?[bB]?|[0-9]{1,2}%|100%)?$"
+    },
+    "duration": {
+      "description": "Seconds or a Go duration (48h, 336h, 90m). Go has no 'd' unit. Empty means unset.",
+      "type": "string",
+      "pattern": "^([0-9]+|([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+)?$"
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["periodSeconds", "timeoutSeconds", "failureThreshold"],
+      "properties": {
+        "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+        "periodSeconds": { "type": "integer", "minimum": 1 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 },
+        "failureThreshold": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "gcPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "all": { "type": "boolean" },
+        "filters": { "type": "array", "items": { "type": "string" } },
+        "keepDuration": { "$ref": "#/definitions/duration" },
+        "reservedSpace": { "$ref": "#/definitions/diskSpace" },
+        "maxUsedSpace": { "$ref": "#/definitions/diskSpace" },
+        "minFreeSpace": { "$ref": "#/definitions/diskSpace" }
+      }
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
   "properties": {
-    "nameOverride": {
-      "type": "string"
-    },
-    "fullnameOverride": {
-      "type": "string"
-    },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
     "image": {
       "type": "object",
       "additionalProperties": false,
       "required": ["repository"],
       "properties": {
-        "repository": {
-          "type": "string",
-          "minLength": 1
-        },
-        "tag": {
-          "type": "string"
-        },
-        "digest": {
-          "type": "string",
-          "pattern": "^(sha256:[a-f0-9]{64})?$"
-        },
-        "pullPolicy": {
-          "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"]
-        }
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^(sha256:[a-f0-9]{64})?$" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
       }
     },
     "imagePullSecrets": {
@@ -37,21 +61,102 @@
       "items": {
         "type": "object",
         "required": ["name"],
-        "properties": {
-          "name": {
-            "type": "string"
+        "properties": { "name": { "type": "string" } }
+      }
+    },
+    "commonLabels": { "$ref": "#/definitions/stringMap" },
+    "global": {
+      "description": "Shared with other ci-accelerator charts; unknown keys belong to them.",
+      "type": "object",
+      "properties": {
+        "buildNodes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "selector": { "$ref": "#/definitions/stringMap" },
+            "tolerations": { "type": "array", "items": { "type": "object" } }
           }
         }
       }
     },
-    "commonLabels": {
+    "storage": {
       "type": "object",
-      "additionalProperties": {
-        "type": "string"
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "enum": ["emptyDir", "hostPath"] },
+        "emptyDir": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sizeLimit": { "type": "string" }
+          }
+        },
+        "hostPath": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string", "pattern": "^/" }
+          }
+        }
       }
     },
-    "global": {
-      "type": "object"
-    }
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxParallelism": { "type": "integer", "minimum": 0 },
+        "gc": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reservedSpace": { "$ref": "#/definitions/diskSpace" },
+            "maxUsedSpace": { "$ref": "#/definitions/diskSpace" },
+            "minFreeSpace": { "$ref": "#/definitions/diskSpace" },
+            "cacheMounts": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "keepDuration": { "$ref": "#/definitions/duration" },
+                "maxUsedSpace": { "$ref": "#/definitions/diskSpace" }
+              }
+            }
+          }
+        },
+        "gcPolicy": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/gcPolicy" }
+        },
+        "history": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxAge": { "$ref": "#/definitions/duration" },
+            "maxEntries": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "maxRegistryConcurrency": { "type": "integer", "minimum": 0 },
+        "extraConfig": { "type": "string" }
+      }
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readiness": { "$ref": "#/definitions/probe" },
+        "liveness": { "$ref": "#/definitions/probe" }
+      }
+    },
+    "resources": { "type": "object" },
+    "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+    "updateStrategy": { "type": "object" },
+    "nodeSelector": { "$ref": "#/definitions/stringMap" },
+    "tolerations": { "type": "array", "items": { "type": "object" } },
+    "affinity": { "type": "object" },
+    "priorityClassName": { "type": "string" },
+    "podLabels": { "$ref": "#/definitions/stringMap" },
+    "podAnnotations": { "$ref": "#/definitions/stringMap" },
+    "extraEnv": { "type": "array", "items": { "type": "object" } }
   }
 }

@@ -1,0 +1,208 @@
+suite: daemonset
+templates:
+  - daemonset.yaml
+  - configmap.yaml
+tests:
+  - it: is a DaemonSet in the release namespace
+    template: daemonset.yaml
+    release:
+      name: bk
+      namespace: ci-accelerator
+    asserts:
+      - isKind:
+          of: DaemonSet
+      - equal:
+          path: metadata.name
+          value: bk-buildkit
+      - equal:
+          path: metadata.namespace
+          value: ci-accelerator
+
+  # A busy daemon answers `buildctl debug workers` in seconds; the 1s
+  # Kubernetes default restarted healthy daemons in production.
+  - it: uses probe timeouts that tolerate a busy daemon
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.timeoutSeconds
+          value: 10
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.failureThreshold
+          value: 3
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.timeoutSeconds
+          value: 15
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.failureThreshold
+          value: 6
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.periodSeconds
+          value: 30
+
+  # With tracing configured, a dead trace backend hung the probe and liveness
+  # killed every daemon at once.
+  - it: runs probes with OTEL disabled and OTLP endpoints removed
+    template: daemonset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command
+          content: OTEL_SDK_DISABLED=true
+      - contains:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command
+          content: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+      - contains:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command
+          content: OTEL_EXPORTER_OTLP_ENDPOINT
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec
+          value:
+            command:
+              - env
+              - -u
+              - OTEL_EXPORTER_OTLP_ENDPOINT
+              - -u
+              - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              - OTEL_SDK_DISABLED=true
+              - buildctl
+              - --addr
+              - unix:///run/buildkit/buildkitd.sock
+              - debug
+              - workers
+
+  - it: runs a privileged rootful daemon (D12) without an API token
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.privileged
+          value: true
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: schedules onto labelled and tainted build nodes by default
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            ci-accelerator.io/node-role: build
+      - contains:
+          path: spec.template.spec.tolerations
+          content:
+            key: ci-accelerator.io/node-role
+            operator: Equal
+            value: build
+            effect: NoSchedule
+
+  - it: can run on any node when build nodes are switched off
+    template: daemonset.yaml
+    set:
+      global.buildNodes.enabled: false
+    asserts:
+      - notExists:
+          path: spec.template.spec.nodeSelector
+      - notExists:
+          path: spec.template.spec.tolerations
+
+  - it: keeps user nodeSelector/tolerations when build nodes are off
+    template: daemonset.yaml
+    set:
+      global.buildNodes.enabled: false
+      nodeSelector:
+        kubernetes.io/arch: arm64
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            kubernetes.io/arch: arm64
+
+  - it: merges nodeSelector over the global selector
+    template: daemonset.yaml
+    set:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            ci-accelerator.io/node-role: build
+            kubernetes.io/arch: arm64
+
+  - it: uses emptyDir state by default
+    template: daemonset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: state
+            emptyDir: {}
+
+  - it: applies an emptyDir size limit
+    template: daemonset.yaml
+    set:
+      storage.emptyDir.sizeLimit: 50Gi
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: state
+            emptyDir:
+              sizeLimit: 50Gi
+
+  - it: uses a hostPath for persistent cache
+    template: daemonset.yaml
+    set:
+      storage.type: hostPath
+      storage.hostPath.path: /mnt/nvme/buildkit
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: state
+            hostPath:
+              path: /mnt/nvme/buildkit
+              type: DirectoryOrCreate
+
+  - it: defaults the image tag to appVersion
+    template: daemonset.yaml
+    chart:
+      appVersion: v0.33.1
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: moby/buildkit:v0.33.1
+
+  - it: prefers a digest over the tag
+    template: daemonset.yaml
+    set:
+      image.tag: v0.99.0
+      image.digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: moby/buildkit@sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+  - it: carries a config checksum so config changes roll the pods
+    template: daemonset.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/config"]
+          pattern: '^[a-f0-9]{64}$'
+
+  - it: mounts the rendered config where buildkitd reads it
+    template: daemonset.yaml
+    release:
+      name: bk
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/buildkit
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config
+            configMap:
+              name: bk-buildkit-config

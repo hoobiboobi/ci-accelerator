@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "buildkit.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buildkit.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "buildkit.selectorLabels" . | nindent 6 }}
+  {{- with .Values.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "buildkit.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include "buildkit.config" . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # The daemon never talks to the Kubernetes API.
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with (include "buildkit.nodeSelector" .) }}
+      nodeSelector:
+        {{- . | nindent 8 }}
+      {{- end }}
+      {{- with (include "buildkit.tolerations" .) }}
+      tolerations:
+        {{- . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: buildkitd
+          image: {{ include "buildkit.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/buildkit/buildkitd.toml
+          securityContext:
+            # Rootful daemon (D12). The rootless variant is not supported yet.
+            privileged: true
+          ports:
+            - name: grpc
+              containerPort: 1234
+              protocol: TCP
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            {{- include "buildkit.probeExec" . | nindent 12 }}
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+          livenessProbe:
+            {{- include "buildkit.probeExec" . | nindent 12 }}
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/buildkit
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/buildkit
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "buildkit.fullname" . }}-config
+        - name: state
+          {{- if eq .Values.storage.type "hostPath" }}
+          hostPath:
+            path: {{ .Values.storage.hostPath.path }}
+            type: DirectoryOrCreate
+          {{- else }}
+          {{- with .Values.storage.emptyDir.sizeLimit }}
+          emptyDir:
+            sizeLimit: {{ . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+          {{- end }}

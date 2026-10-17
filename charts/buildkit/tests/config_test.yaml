@@ -1,0 +1,126 @@
+suite: buildkitd.toml
+templates:
+  - configmap.yaml
+tests:
+  - it: matches the reviewed default config
+    asserts:
+      - matchSnapshot:
+          path: data["buildkitd.toml"]
+
+  - it: listens on the unix socket (probes) and tcp (clients)
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: 'address = \["unix:///run/buildkit/buildkitd.sock", "tcp://0.0.0.0:1234"\]'
+
+  - it: never enables the unauthenticated debug server (D19)
+    asserts:
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: debugAddress
+
+  # D18: buildkit drops worker-level caps once explicit policies exist, so
+  # the three unfiltered policies must carry the caps themselves.
+  - it: injects the shared caps into every unfiltered policy
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '(?s)(reservedSpace = "10GB"\n  maxUsedSpace = "75%"\n  minFreeSpace = "15%".*){3}'
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[\[worker.oci.gcpolicy\]\]\n  all = true\n  reservedSpace = "10GB"'
+
+  - it: does not put caps at worker level, where buildkit ignores them
+    asserts:
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[worker.oci\]\n  enabled = true\n  gc = true\n  (reservedSpace|maxUsedSpace|minFreeSpace)'
+
+  - it: keeps cache mounts for two weeks, without a cap, by default
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: 'filters = \["type==exec.cachemount"\]\n  keepDuration = "336h"\n\n'
+
+  - it: renders cache mount overrides
+    set:
+      config.gc.cacheMounts.keepDuration: 720h
+      config.gc.cacheMounts.maxUsedSpace: 1TB
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: 'filters = \["type==exec.cachemount"\]\n  keepDuration = "720h"\n  maxUsedSpace = "1TB"\n'
+
+  - it: skips empty caps instead of rendering empty strings
+    set:
+      config.gc.reservedSpace: ""
+    asserts:
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: 'reservedSpace = ""'
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: reservedSpace
+
+  - it: replaces the whole policy set with config.gcPolicy
+    set:
+      config.gcPolicy:
+        - all: true
+          maxUsedSpace: 500GB
+    asserts:
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: exec.cachemount
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[\[worker.oci.gcpolicy\]\]\n  all = true\n  maxUsedSpace = "500GB"\n\n\[worker.containerd\]'
+
+  - it: renders max-parallelism only when set
+    set:
+      config.maxParallelism: 28
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\n  max-parallelism = 28\n'
+
+  - it: renders history, including maxEntries = 0
+    set:
+      config.history:
+        maxAge: 168h
+        maxEntries: 0
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[history\]\n  maxAge = "168h"\n  maxEntries = 0\n'
+
+  - it: renders the registry concurrency limit only when set
+    set:
+      config.maxRegistryConcurrency: 8
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[system\]\n  maxRegistryConcurrency = 8\n'
+
+  - it: appends extraConfig verbatim at the end
+    set:
+      config.extraConfig: |
+        [registry."docker.io"]
+          mirrors = ["mirror.example:5000"]
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '(?s)\[worker.containerd\].*# --- extraConfig ---\n\[registry."docker.io"\]\n  mirrors = \["mirror.example:5000"\]\n$'
+
+  - it: rejects a duration with a "d" unit (Go has none)
+    set:
+      config.gc.cacheMounts.keepDuration: 14d
+    asserts:
+      - failedTemplate:
+          errorPattern: keepDuration
+
+  - it: rejects a malformed disk size
+    set:
+      config.gc.maxUsedSpace: lots
+    asserts:
+      - failedTemplate:
+          errorPattern: maxUsedSpace

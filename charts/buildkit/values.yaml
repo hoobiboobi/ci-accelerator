@@ -21,4 +21,116 @@ imagePullSecrets: []
 commonLabels: {}
 
 # Shared with other ci-accelerator charts when installed via the umbrella.
-global: {}
+global:
+  # Dedicated build nodes (see docs: label and taint them before install).
+  buildNodes:
+    # -- false: ignore selector/tolerations below and run on any node.
+    # (A switch, because Helm merges `selector: {}` with the default
+    # instead of clearing it.)
+    enabled: true
+    selector:
+      ci-accelerator.io/node-role: build
+    tolerations:
+      - key: ci-accelerator.io/node-role
+        operator: Equal
+        value: build
+        effect: NoSchedule
+
+# Where the daemon keeps its state (/var/lib/buildkit): the build cache.
+storage:
+  # -- emptyDir: cache lives as long as the pod (kind, CI).
+  # hostPath: cache survives restarts; point it at a local NVMe mount.
+  type: emptyDir
+  emptyDir:
+    # -- e.g. "50Gi"; empty means no limit. Exceeding it evicts the pod.
+    sizeLimit: ""
+  hostPath:
+    path: /var/lib/ci-accelerator/buildkit
+
+# Rendered into /etc/buildkit/buildkitd.toml.
+config:
+  # -- Max parallel build steps per daemon; 0 keeps the buildkit default
+  # (number of CPUs). Production example: 28 on a 48-CPU daemon.
+  maxParallelism: 0
+
+  # Garbage collection. Sizes: bytes, "512MB"/"2TB", or "N%" of the disk.
+  # Units are binary: buildkit reads "10GB" as 10 GiB.
+  # Durations: seconds or Go durations ("48h", "336h"; no "d" unit).
+  # The chart always renders the full policy set itself; buildkit ignores
+  # worker-level caps once any explicit policy exists.
+  gc:
+    # -- Never reclaim below this much cache.
+    reservedSpace: "10GB"
+    # -- Reclaim when the cache grows above this.
+    maxUsedSpace: "75%"
+    # -- Reclaim when free disk space drops below this.
+    minFreeSpace: "15%"
+    cacheMounts:
+      # -- Keep RUN --mount=type=cache contents this long after last use.
+      # buildkit's default is 48h, which makes package caches cold after a
+      # weekend.
+      keepDuration: "336h"
+      # -- Expire cache mounts only while the WHOLE cache is above this size
+      # (buildkit compares policy caps with total usage, not with the
+      # filtered records). Empty: expire after keepDuration unconditionally.
+      maxUsedSpace: ""
+
+  # -- Replace the chart's GC policies entirely. Each item: filters, all,
+  # keepDuration, reservedSpace, maxUsedSpace, minFreeSpace.
+  gcPolicy: []
+
+  # -- Build history API (used by the console in later releases).
+  # Keys: maxAge (duration), maxEntries (int; 0 disables recording).
+  # Empty keeps buildkit defaults (48h / 50).
+  history: {}
+
+  # -- Max concurrent connections per registry; 0 keeps the buildkit
+  # default. See moby/buildkit#7275 before raising it.
+  maxRegistryConcurrency: 0
+
+  # -- Raw TOML appended verbatim. Must not repeat tables the chart renders
+  # ([grpc], [worker.oci], [worker.containerd], [history], [system]).
+  extraConfig: ""
+
+# Probes call `buildctl debug workers` on the local unix socket, with OTEL
+# disabled. A busy daemon can take seconds to answer; the Kubernetes default
+# timeout (1s) restarts healthy daemons under load.
+probes:
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+  liveness:
+    initialDelaySeconds: 5
+    periodSeconds: 30
+    timeoutSeconds: 15
+    failureThreshold: 6
+
+# -- Daemon resources. Do not let it take the whole node: kubelet and
+# containerd need headroom. A hard CPU limit throttles builds; prefer
+# requests close to the expected load. Production example:
+#   requests: {cpu: "48", memory: 128Gi}
+#   limits:   {memory: 128Gi}
+resources: {}
+
+# -- Seconds a stopping daemon gets to finish in-flight requests.
+terminationGracePeriodSeconds: 300
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# -- Merged over global.buildNodes.selector.
+nodeSelector: {}
+# -- Appended to global.buildNodes.tolerations.
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+podLabels: {}
+podAnnotations: {}
+
+# -- Extra environment variables for the daemon container.
+extraEnv: []

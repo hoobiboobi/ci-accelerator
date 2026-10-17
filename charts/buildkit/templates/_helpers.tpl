@@ -55,6 +55,41 @@ ci-accelerator.io/component: buildkit
 {{- end }}
 
 {{/*
+Build-node placement from global.buildNodes, or nothing when it is disabled.
+*/}}
+{{- define "buildkit.buildNodes" -}}
+{{- $bn := default (dict) .Values.global.buildNodes }}
+{{- if ne (toString $bn.enabled) "false" }}
+{{- toJson $bn }}
+{{- else }}
+{{- toJson (dict) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Node selector: global.buildNodes.selector with nodeSelector merged over it.
+*/}}
+{{- define "buildkit.nodeSelector" -}}
+{{- $bn := include "buildkit.buildNodes" . | fromJson }}
+{{- $global := default (dict) $bn.selector }}
+{{- $sel := merge (deepCopy .Values.nodeSelector) $global }}
+{{- with $sel }}
+{{- toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Tolerations: global.buildNodes.tolerations followed by tolerations.
+*/}}
+{{- define "buildkit.tolerations" -}}
+{{- $bn := include "buildkit.buildNodes" . | fromJson }}
+{{- $global := default (list) $bn.tolerations }}
+{{- with concat $global .Values.tolerations }}
+{{- toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
 Container image reference. Digest wins over tag; tag defaults to appVersion.
 */}}
 {{- define "buildkit.image" -}}
@@ -63,4 +98,25 @@ Container image reference. Digest wins over tag; tag defaults to appVersion.
 {{- else }}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
 {{- end }}
+{{- end }}
+
+{{/*
+Probe command. Exec probes inherit the container env, so OTEL is switched
+off and the OTLP endpoints are removed explicitly: with tracing configured,
+a dead trace backend hangs the probe and liveness kills every daemon at once.
+*/}}
+{{- define "buildkit.probeExec" -}}
+exec:
+  command:
+    - env
+    - -u
+    - OTEL_EXPORTER_OTLP_ENDPOINT
+    - -u
+    - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+    - OTEL_SDK_DISABLED=true
+    - buildctl
+    - --addr
+    - unix:///run/buildkit/buildkitd.sock
+    - debug
+    - workers
 {{- end }}

@@ -1,0 +1,42 @@
+matches the reviewed default config:
+  1: |
+    |
+      # Rendered by the ci-accelerator buildkit chart. Do not edit in the cluster.
+      root = "/var/lib/buildkit"
+
+      [grpc]
+        # unix socket: used by the probes (no TLS needed); tcp: used by CI jobs.
+        address = ["unix:///run/buildkit/buildkitd.sock", "tcp://0.0.0.0:1234"]
+
+      [worker.oci]
+        enabled = true
+        gc = true
+
+      [[worker.oci.gcpolicy]]
+        filters = ["type==source.local","type==source.git.checkout"]
+        keepDuration = "48h"
+        maxUsedSpace = "512MB"
+
+      [[worker.oci.gcpolicy]]
+        filters = ["type==exec.cachemount"]
+        keepDuration = "336h"
+
+      [[worker.oci.gcpolicy]]
+        keepDuration = "1440h"
+        reservedSpace = "10GB"
+        maxUsedSpace = "75%"
+        minFreeSpace = "15%"
+
+      [[worker.oci.gcpolicy]]
+        reservedSpace = "10GB"
+        maxUsedSpace = "75%"
+        minFreeSpace = "15%"
+
+      [[worker.oci.gcpolicy]]
+        all = true
+        reservedSpace = "10GB"
+        maxUsedSpace = "75%"
+        minFreeSpace = "15%"
+
+      [worker.containerd]
+        enabled = false
