@@ -1,0 +1,24 @@
+# Default values for the buildkit chart.
+# Every key here is validated by values.schema.json; unknown keys are rejected.
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the full resource name (<release>-<chart> by default).
+fullnameOverride: ""
+
+image:
+  repository: moby/buildkit
+  # -- Defaults to the chart appVersion.
+  tag: ""
+  # -- Pin by digest (sha256:...); takes precedence over tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets for private mirrors of the buildkit image.
+imagePullSecrets: []
+
+# -- Labels added to every resource the chart creates.
+commonLabels: {}
+
+# Shared with other ci-accelerator charts when installed via the umbrella.
+global: {}

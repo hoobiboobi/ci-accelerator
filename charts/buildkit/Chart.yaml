@@ -1,0 +1,22 @@
+apiVersion: v2
+name: buildkit
+description: >-
+  Persistent BuildKit daemons as a shared build service for CI, with
+  production-tested defaults for probes, garbage collection and tracing.
+type: application
+version: 0.1.0
+# Upstream moby/buildkit release; the default image tag is derived from it.
+appVersion: "v0.33.1"
+kubeVersion: ">=1.28.0-0"
+home: https://github.com/hoobiboobi/ci-accelerator
+sources:
+  - https://github.com/hoobiboobi/ci-accelerator
+  - https://github.com/moby/buildkit
+keywords:
+  - buildkit
+  - ci
+  - docker
+  - build-cache
+maintainers:
+  - name: hoobiboobi
+    url: https://github.com/hoobiboobi
