@@ -1,22 +1,33 @@
 # Values for test/e2e/run.sh. Deliberately hostile where production can be.
 
-# hostPath, as in production: the cache must survive daemon restarts.
+# hostPath, as in production: the cache must survive daemon restarts. run.sh
+# sets storage.hostPath.path to a per-namespace directory it creates on every
+# build node, so `type: Directory` (the chart default) is exercised.
 storage:
   type: hostPath
-  hostPath:
-    path: /var/lib/ci-accelerator-e2e/buildkit
 
 config:
   gc:
-    maxUsedSpace: "10GB"
+    # Small caps, so the GC scenario can prove that buildkit enforces them; the
+    # other fixtures are tiny. minFreeSpace stays out of the way: the kind
+    # nodes share the Docker VM disk.
+    reservedSpace: "200MB"
+    maxUsedSpace: "1GB"
+    minFreeSpace: "1%"
 
-# A trace backend that never answers, for the whole run. Probes must not be
-# affected (they ran into their timeout in production when it was down).
+# Standard OpenTelemetry configuration (the upstream README form) pointing at a
+# trace backend that never answers, for the whole run. The probes must not be
+# affected: buildctl would otherwise wait 10 s per call to flush its span.
 extraEnv:
+  - name: OTEL_TRACES_EXPORTER
+    value: otlp
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: http://10.255.255.1:4317
   - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
     value: http://10.255.255.1:4317
-  - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+  - name: OTEL_EXPORTER_OTLP_PROTOCOL
     value: grpc
 
-# The graceful-stop scenario runs a 30 s build through a SIGTERM.
+# The graceful-stop scenario runs a 45 s build through a SIGTERM: longer than
+# the Kubernetes default grace (30 s), so this value must be applied.
 terminationGracePeriodSeconds: 120
