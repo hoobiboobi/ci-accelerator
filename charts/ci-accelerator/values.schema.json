@@ -9,7 +9,8 @@
     "buildkit",
     "gitlab-runner",
     "victoria-metrics-single",
-    "victoria-traces-single"
+    "victoria-traces-single",
+    "preflight"
   ],
   "properties": {
     "global": {
@@ -102,6 +103,18 @@
       ],
       "properties": {
         "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runnerSecret"
+      ],
+      "properties": {
+        "runnerSecret": {
           "type": "boolean"
         }
       }

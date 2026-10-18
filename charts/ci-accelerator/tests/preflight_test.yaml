@@ -1,0 +1,115 @@
+suite: preflight
+templates:
+  - validate.yaml
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+tests:
+  - it: accepts a Secret with a token and the empty registration key
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: {name: gitlab-runner-token, namespace: ci-accelerator}
+          data:
+            runner-token: Z2xydC1hYmNEZUYxMjMuNDU2X3h5eg==
+            runner-registration-token: ""
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Seen on a first install: the runner pod hung in ContainerCreating.
+  - it: refuses a Secret without the registration key and shows the patch
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: {name: gitlab-runner-token, namespace: ci-accelerator}
+          data:
+            runner-token: Z2xydC1hYmNEZUYxMjMuNDU2X3h5eg==
+    asserts:
+      - failedTemplate:
+          errorPattern: 'has no runner-registration-token key\..*kubectl -n ci-accelerator patch secret gitlab-runner-token --type merge'
+
+  # Seen on a first install: a copied placeholder, "is not valid" in the log.
+  - it: refuses a placeholder instead of a token
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: {name: gitlab-runner-token, namespace: ci-accelerator}
+          data:
+            # glrt-ТВОЙ_ТОКЕН
+            runner-token: Z2xydC3QotCS0J7QmV/QotCe0JrQldCd
+            runner-registration-token: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'runner-token does not look like a token'
+
+  - it: refuses a Secret without any token
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: {name: gitlab-runner-token, namespace: ci-accelerator}
+          data:
+            runner-token: ""
+            runner-registration-token: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'has no token: put the runner authentication token'
+
+  # It may be created after the chart; the runner pod waits for it.
+  - it: accepts a Secret that does not exist yet
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: does not look at Secrets in other namespaces
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: {name: gitlab-runner-token, namespace: elsewhere}
+          data:
+            runner-token: ""
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: can skip the check
+    set:
+      preflight.runnerSecret: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: {name: gitlab-runner-token, namespace: ci-accelerator}
+          data:
+            runner-token: ""
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: does not check without its own runner
+    set:
+      gitlab-runner.enabled: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: {name: gitlab-runner-token, namespace: ci-accelerator}
+          data:
+            runner-token: ""
+    asserts:
+      - hasDocuments:
+          count: 0

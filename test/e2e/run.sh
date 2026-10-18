@@ -875,6 +875,20 @@ s_box() {
     --set "global.jobs.architecture=$arch" --wait --timeout 8m >"$LOGS/box-install.log" 2>&1 \
     || { fail "install the box (see $LOGS/box-install.log)"; return; }
   pass "the box installs with two required values and gets ready"
+  # A token Secret without the empty registration key (seen on a first
+  # install) is refused before anything is created.
+  kc -n "$BOX_NS" delete secret bad-runner-token --ignore-not-found >/dev/null
+  kc -n "$BOX_NS" create secret generic bad-runner-token --from-literal=runner-token=glrt-e2e-not-a-real-token >/dev/null
+  if hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" -f "$ROOT/test/e2e/box-values.yaml" --dry-run=server \
+      --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=bad-runner-token \
+      --set "global.jobs.namespace=$BOX_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$BOX_JOBS_NS" \
+      --set "global.jobs.architecture=$arch" >"$LOGS/box-bad-secret.log" 2>&1; then
+    fail "a runner token Secret without runner-registration-token was accepted"
+  elif grep -q "has no runner-registration-token key" "$LOGS/box-bad-secret.log"; then
+    pass "a runner token Secret without runner-registration-token is refused with the fix"
+  else
+    fail "the bad runner Secret failed for another reason (see $LOGS/box-bad-secret.log)"
+  fi
   check "the jobs namespace enforces Pod Security baseline" \
     test "$(kc get namespace "$BOX_JOBS_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')" = baseline
   check "the client certificate is issued into the jobs namespace" \

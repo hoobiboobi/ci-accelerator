@@ -33,6 +33,16 @@ global:
     # runner picks its helper image by it.
     architecture: amd64
 
+# Install-time checks against the live cluster. Skipped by `helm template`
+# and by GitOps tools that render offline.
+preflight:
+  # -- Fail if gitlab-runner.runners.secret exists but lacks a key the
+  # runner chart mounts (runner-token, and runner-registration-token, which
+  # may be empty), or if runner-token does not look like a token (e.g. a
+  # copied placeholder). A Secret that does not exist yet is not an error.
+  # Needs read access to Secrets in the release namespace.
+  runnerSecret: true
+
 # The jobs namespace, created by this release (and deleted with it, together
 # with everything in it).
 jobsNamespace:
