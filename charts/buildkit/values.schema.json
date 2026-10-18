@@ -10,7 +10,9 @@
     "tls",
     "service",
     "storage",
+    "networkPolicy",
     "config",
+    "otel",
     "probes",
     "updateStrategy",
     "terminationGracePeriodSeconds",
@@ -82,6 +84,12 @@
     "dnsLabelOrEmpty": { "type": "string", "maxLength": 63, "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$" },
     "dnsLabel": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
     "dnsSubdomainOrEmpty": { "type": "string", "maxLength": 253, "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$" },
+    "urlOrEmpty": { "type": "string", "pattern": "^(https?://[^\\s]+)?$" },
+    "cidr": {
+      "description": "IPv4 or IPv6 CIDR with a prefix length.",
+      "type": "string",
+      "pattern": "^([0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}|[0-9a-fA-F:]+/[0-9]{1,3})$"
+    },
     "certDuration": {
       "description": "Go duration in hours, minutes or seconds (8760h). cert-manager requires at least 1h.",
       "type": "string",
@@ -303,6 +311,51 @@
           }
         },
         "extraConfig": { "type": "string" }
+      }
+    },
+    "otel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metricsEndpoint", "tracesEndpoint", "protocol", "metricsIntervalSeconds", "resourceAttributes"],
+      "properties": {
+        "metricsEndpoint": { "$ref": "#/definitions/urlOrEmpty" },
+        "tracesEndpoint": { "$ref": "#/definitions/urlOrEmpty" },
+        "protocol": { "type": "string", "enum": ["http/protobuf", "grpc"] },
+        "metricsIntervalSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "resourceAttributes": {
+          "description": "Keys and values without ',' or '=' (they are joined into OTEL_RESOURCE_ATTRIBUTES).",
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z0-9_.-]+$" },
+          "additionalProperties": { "type": "string", "pattern": "^[^,=]*$" }
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "ingress", "egress"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespaces", "extraFrom"],
+          "properties": {
+            "namespaces": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/dnsLabel" } },
+            "extraFrom": { "type": "array", "items": { "type": "object" } }
+          }
+        },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["blockedCIDRs", "clusterCIDRs", "dns", "extraRules"],
+          "properties": {
+            "blockedCIDRs": { "type": "array", "items": { "$ref": "#/definitions/cidr" } },
+            "clusterCIDRs": { "type": "array", "items": { "$ref": "#/definitions/cidr" } },
+            "dns": { "type": "array", "items": { "type": "object" } },
+            "extraRules": { "type": "array", "items": { "type": "object" } }
+          }
+        }
       }
     },
     "probes": {

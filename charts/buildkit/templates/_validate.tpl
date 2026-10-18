@@ -123,6 +123,11 @@ the install/upgrade with the fix in the message.
 {{- end }}
 {{- end }}
 
+{{- /* A NetworkPolicy without ingress peers would cut every client off. */}}
+{{- if and $v.networkPolicy.enabled (not (include "buildkit.clientNamespaces" . | fromJsonArray)) (not $v.networkPolicy.ingress.extraFrom) }}
+{{- fail "networkPolicy.enabled: no client could reach the daemons. List the CI job namespaces in tls.client.namespaces or networkPolicy.ingress.namespaces, or add peers to networkPolicy.ingress.extraFrom." }}
+{{- end }}
+
 {{- /* workerOCI must not shadow the keys the chart renders in [worker.oci]. */}}
 {{- range $k, $_ := $v.config.workerOCI }}
 {{- if not (regexMatch "^[A-Za-z0-9_-]+$" $k) }}

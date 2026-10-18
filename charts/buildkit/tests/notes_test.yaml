@@ -152,3 +152,16 @@ tests:
     asserts:
       - notMatchRegexRaw:
           pattern: 'has no pod-security.kubernetes.io/enforce label'
+
+  - it: warns that builds reach metadata and the cluster without a NetworkPolicy
+    asserts:
+      - matchRegexRaw:
+          pattern: 'networkPolicy.enabled is false: RUN steps share the daemon''s network, so every build can reach cloud instance metadata'
+
+  - it: drops that warning with a NetworkPolicy
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.namespaces: [ci-jobs]
+    asserts:
+      - notMatchRegexRaw:
+          pattern: networkPolicy.enabled is false

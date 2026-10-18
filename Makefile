@@ -8,7 +8,7 @@ CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
 # Values the charts require and the files above leave to the installer.
 # helm lint cannot fake the cert-manager API, so checks render the
 # existingSecret mode; validate renders the cert-manager mode as well.
-RENDER_SET := --set tls.source=existingSecret --set tls.existingSecret=lint-tls --set storage.hostPath.path=/var/lib/ci-accelerator-lint
+RENDER_SET := --set tls.source=existingSecret --set tls.existingSecret=lint-tls --set storage.hostPath.path=/var/lib/ci-accelerator-lint --set networkPolicy.ingress.namespaces={ci-jobs}
 CERT_MANAGER_SET := --api-versions cert-manager.io/v1 --set storage.hostPath.path=/var/lib/ci-accelerator-lint --set tls.client.namespaces={ci-jobs}
 # kubeconform has no schemas for cert-manager's kinds; the e2e checks them
 # against the real CRDs.

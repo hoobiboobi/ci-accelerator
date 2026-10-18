@@ -1,0 +1,13 @@
+# VictoriaMetrics single for the otel scenario (chart 0.48.0, checksum in
+# run.sh). The image is pinned to the v1.153.0 index digest on Docker Hub
+# (2026-10-18). Throwaway storage; runs on the control-plane node because
+# every kind worker is a tainted build node.
+rbac:
+  create: false
+server:
+  image:
+    tag: v1.153.0@sha256:5eff7af5341e401471002f58d106d399e614a62f3d240f2dbc21901e49eed5dd
+  persistentVolume:
+    enabled: false
+  tolerations:
+    - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}

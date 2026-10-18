@@ -18,7 +18,9 @@
 # cert-manager (installed into the cluster when missing, and left there as
 # the prerequisite it is) issues a dedicated CA, the daemon certificate and a
 # client certificate that the clients mount, as job pods will. The
-# existingSecret source is exercised by switching to it and back. Never run two e2e runs against the
+# existingSecret source is exercised by switching to it and back. The
+# daemons run behind their NetworkPolicy; a second, short-lived release
+# pushes metrics and traces to a throwaway VictoriaMetrics/VictoriaTraces. Never run two e2e runs against the
 # same namespace at the same time.
 #
 # Compatible with bash 3.2 (macOS). Refuses to run against anything that is
@@ -35,7 +37,10 @@ CTX=${KUBE_CONTEXT:-kind-buildkit}
 NS=${E2E_NAMESPACE:-ci-accelerator-e2e}
 JOBS_NS=$NS-jobs
 PSA_NS=$NS-psa
+OTHER_NS=$NS-other
+OBS_NS=$NS-obs
 REL=e2e
+OTEL_REL=$REL-otel
 SVC_HOST=$REL-buildkit.$NS.svc
 ADDR=tcp://$SVC_HOST:1234
 CLIENT_SECRET=$REL-buildkit-client
@@ -45,6 +50,12 @@ CA_NAME=$NS-$REL-buildkit-ca
 CERT_MANAGER_VERSION=v1.21.2
 # sha256 of the chart archive pulled from oci://quay.io/jetstack/charts.
 CERT_MANAGER_SHA256=73a56e1728edd6c99f1f31082618c3259d279a76b7ebd3d4bdc5475c2442d34a
+# OTLP backends for the otel scenario, from the VictoriaMetrics Helm repo.
+VICTORIA_REPO=https://victoriametrics.github.io/helm-charts/
+VM_CHART_VERSION=0.48.0
+VM_CHART_SHA256=51d26125182388a734f5d9dc65086811436a67d5aede08fde5f2a4247b532381
+VT_CHART_VERSION=0.1.11
+VT_CHART_SHA256=59471db9c6e053fc740b1ad0eb6365dc872bba3f0c9e06f5780ddde9655c9e88
 # Every client call: the client certificate, and the Service name for the
 # server certificate check also when a call goes to a pod IP.
 TLS=(--tlsdir /certs --tlsservername "$SVC_HOST")
@@ -55,7 +66,7 @@ E2E_LABEL=ci-accelerator.io/e2e
 KEEP=${KEEP:-0}
 SCENARIOS=${SCENARIOS:-all}
 MODE=${1:-run}
-ALL_SCENARIOS="preflight tls certmanager existing cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
+ALL_SCENARIOS="preflight tls certmanager existing netpol otel cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
 
 refuse() { echo "refusing to run e2e: $*" >&2; exit 2; }
 
@@ -126,7 +137,7 @@ eventually() {
 
 BASE_ARGS=(-f "$VALUES")
 for extra in ${E2E_EXTRA_VALUES:-}; do BASE_ARGS+=(-f "$extra"); done
-BASE_ARGS+=(--set "storage.hostPath.path=$HOST_PATH")
+BASE_ARGS+=(--set "storage.hostPath.path=$HOST_PATH" --set "networkPolicy.ingress.namespaces={$JOBS_NS}")
 # Helm applies --set after --set-json whatever the order, so the client
 # namespaces stay out of BASE_ARGS for installs that must clear them.
 INSTALL_ARGS=("${BASE_ARGS[@]}" --set "tls.client.namespaces={$JOBS_NS}")
@@ -234,14 +245,17 @@ create_state() {
 # Uninstall a previous run and wait until its daemons are gone, so their
 # state dir is not deleted under running processes.
 remove_release() {
-  if hc status "$REL" -n "$NS" >/dev/null 2>&1; then
-    hc uninstall "$REL" -n "$NS" --wait --timeout 5m >/dev/null 2>&1 || true
-  fi
-  kc -n "$NS" wait --for=delete pod -l "app.kubernetes.io/instance=$REL" --timeout=300s >/dev/null 2>&1 || true
-  # The CA key Secret outlives its Certificate (cert-manager does not delete
-  # Secrets), in cert-manager's namespace.
-  kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$REL,ci-accelerator.io/component=buildkit" \
-    --ignore-not-found >/dev/null 2>&1 || true
+  local r
+  for r in "$REL" "$OTEL_REL"; do
+    if hc status "$r" -n "$NS" >/dev/null 2>&1; then
+      hc uninstall "$r" -n "$NS" --wait --timeout 5m >/dev/null 2>&1 || true
+    fi
+    kc -n "$NS" wait --for=delete pod -l "app.kubernetes.io/instance=$r" --timeout=300s >/dev/null 2>&1 || true
+    # The CA key Secret outlives its Certificate (cert-manager does not
+    # delete Secrets), in cert-manager's namespace.
+    kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$r,ci-accelerator.io/component=buildkit" \
+      --ignore-not-found >/dev/null 2>&1 || true
+  done
 }
 
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
@@ -288,14 +302,14 @@ cleanup() {
     echo "logs and diagnostics: $LOGS (rerun with KEEP=1 to keep the cluster state)"
   fi
   if [ "$KEEP" = "1" ]; then
-    echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS and $STATE_DIR on the nodes (make e2e-clean removes them)"
+    echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS (and $OTHER_NS, $OBS_NS) and $STATE_DIR on the nodes (make e2e-clean removes them)"
     return
   fi
   echo; echo "== [$(elapsed)] cleanup"
   remove_release
   echo "   release removed at $(elapsed)"
   local ns
-  for ns in "$NS" "$JOBS_NS" "$PSA_NS"; do
+  for ns in "$NS" "$JOBS_NS" "$PSA_NS" "$OTHER_NS" "$OBS_NS"; do
     if [ "$(kc get namespace "$ns" -o jsonpath="{.metadata.labels.ci-accelerator\.io/e2e}" 2>/dev/null)" = true ]; then
       kc delete namespace "$ns" --wait=true --timeout=180s >/dev/null 2>&1 || true
     fi
@@ -558,6 +572,122 @@ s_existing() {
   kc -n "$NS" rollout status "ds/$REL-buildkit" --timeout=300s >/dev/null || fail "rollout back to cert-manager"
   check "back on cert-manager, its client is served again" eventually 15 has_answer client-build
   settle
+}
+
+# pull_chart <name> <version> <sha256>: a pinned chart archive into $LOGS.
+pull_chart() {
+  local tgz=$LOGS/$1-$2.tgz
+  [ -f "$tgz" ] || helm pull "$1" --repo "$VICTORIA_REPO" --version "$2" -d "$LOGS" >/dev/null 2>&1 || return 1
+  echo "$3  $tgz" | sha256 -c - >/dev/null 2>&1 || { echo "checksum mismatch for $tgz" >&2; return 1; }
+  echo "$tgz"
+}
+
+s_netpol() {
+  step "netpol: builds reach DNS and the internet, not the cluster; clients only from the jobs namespace"
+  local target out k
+  kc -n "$JOBS_NS" delete pod np-target --ignore-not-found --wait=true >/dev/null
+  kc -n "$JOBS_NS" run np-target --image="$IMAGE" --restart=Never \
+    --overrides="{\"spec\":{\"nodeName\":\"$BUILD_NODE\",\"terminationGracePeriodSeconds\":0}}" \
+    --command -- sh -c 'while true; do echo ok | nc -l -p 8080; done' >/dev/null
+  kc -n "$JOBS_NS" wait --for=condition=Ready pod/np-target --timeout=60s >/dev/null || { fail "target pod not ready"; return; }
+  target=$(kc -n "$JOBS_NS" get pod np-target -o jsonpath='{.status.podIP}')
+  # Positive control: the target answers a pod without a policy.
+  check "control: the in-cluster target answers an unrestricted pod" \
+    eventually 10 quiet kc -n "$JOBS_NS" exec client-build -- nc -z -w 3 "$target" 8080
+  next_id
+  build client-build netpol --opt "build-arg:BUST=$ID" --opt "build-arg:TARGET=$target" >"$LOGS/netpol.log" 2>&1
+  check "the RUN step builds" test $? = 0
+  check "a RUN step resolves cluster DNS" printed "$LOGS/netpol.log" DNS_OK
+  check "a RUN step reaches the internet (registry-1.docker.io:443)" printed "$LOGS/netpol.log" WORLD_OK
+  check "a RUN step cannot reach a pod in the cluster CIDRs" printed "$LOGS/netpol.log" CLUSTER_BLOCKED
+  # Ingress: a pod with a valid client certificate in another namespace.
+  ensure_ns "$OTHER_NS" baseline
+  mkdir -p "$LOGS/outsider"
+  for k in tls.crt tls.key ca.crt; do pem "$JOBS_NS" "$CLIENT_SECRET" "$k" >"$LOGS/outsider/$k"; done
+  kc -n "$OTHER_NS" delete pod outsider --ignore-not-found --wait=true >/dev/null
+  kc -n "$OTHER_NS" run outsider --image="$IMAGE" --restart=Never \
+    --overrides="{\"spec\":{\"nodeName\":\"$BUILD_NODE\",\"terminationGracePeriodSeconds\":0}}" \
+    --command -- sleep 3600 >/dev/null
+  kc -n "$OTHER_NS" wait --for=condition=Ready pod/outsider --timeout=60s >/dev/null || { fail "outsider pod not ready"; return; }
+  kc -n "$OTHER_NS" cp "$LOGS/outsider" outsider:/c >/dev/null || { fail "copy certificates to the outsider"; return; }
+  out=$(kc -n "$OTHER_NS" exec outsider -- buildctl --addr "$ADDR" --tlsdir /c --tlsservername "$SVC_HOST" \
+    --timeout 5 debug workers -v 2>&1)
+  if printf '%s' "$out" | grep -q worker.hostname; then
+    fail "a client in $OTHER_NS reached the daemons"
+  elif printf '%s' "$out" | grep -qiE 'deadline exceeded|i/o timeout'; then
+    pass "a client with a valid certificate in another namespace gets no connection"
+  else
+    fail "the outsider failed for another reason: $(printf '%s' "$out" | tail -1)"
+  fi
+  check "the same certificate works from the jobs namespace" has_answer client-build
+  kc -n "$JOBS_NS" delete pod np-target --wait=false >/dev/null
+}
+
+s_otel() {
+  step "otel: metrics and traces reach VictoriaMetrics and VictoriaTraces over OTLP"
+  local vm vt vm_svc vt_svc tid sid series trace
+  ensure_ns "$OBS_NS" baseline
+  vm=$(pull_chart victoria-metrics-single "$VM_CHART_VERSION" "$VM_CHART_SHA256") || { fail "pull VictoriaMetrics chart"; return; }
+  vt=$(pull_chart victoria-traces-single "$VT_CHART_VERSION" "$VT_CHART_SHA256") || { fail "pull VictoriaTraces chart"; return; }
+  hc upgrade --install vm "$vm" -n "$OBS_NS" -f "$ROOT/test/e2e/victoria-metrics-values.yaml" \
+    --wait --timeout 5m >"$LOGS/vm.log" 2>&1 || { fail "install VictoriaMetrics"; return; }
+  hc upgrade --install vt "$vt" -n "$OBS_NS" -f "$ROOT/test/e2e/victoria-traces-values.yaml" \
+    --wait --timeout 5m >"$LOGS/vt.log" 2>&1 || { fail "install VictoriaTraces"; return; }
+  vm_svc=http://vm-victoria-metrics-single-server.$OBS_NS.svc:8428
+  vt_svc=http://vt-vt-single-server.$OBS_NS.svc:10428
+  # A second release with its own (emptyDir) state and exporters, without a
+  # NetworkPolicy: the main release keeps its dead trace backend.
+  hc upgrade --install "$OTEL_REL" "$CHART" -n "$NS" \
+    --set "tls.client.namespaces={$JOBS_NS}" \
+    --set "otel.metricsEndpoint=$vm_svc/opentelemetry/v1/metrics" \
+    --set "otel.tracesEndpoint=$vt_svc/insert/opentelemetry/v1/traces" \
+    --set otel.metricsIntervalSeconds=5 \
+    --wait --timeout 5m >"$LOGS/otel-install.log" 2>&1 || { fail "install $OTEL_REL"; return; }
+  eventually 30 quiet kc -n "$JOBS_NS" get secret "$OTEL_REL-buildkit-client" || { fail "no client certificate for $OTEL_REL"; return; }
+  mkdir -p "$LOGS/otel-client"
+  for k in tls.crt tls.key ca.crt; do pem "$JOBS_NS" "$OTEL_REL-buildkit-client" "$k" >"$LOGS/otel-client/$k"; done
+  kc -n "$JOBS_NS" cp "$LOGS/otel-client" client-build:/otel >/dev/null || { fail "copy the $OTEL_REL client certificate"; return; }
+  # A CI job's trace context, as the CI component will set it.
+  tid=$(openssl rand -hex 16); sid=$(openssl rand -hex 8)
+  next_id
+  kc -n "$JOBS_NS" exec client-build -- env "TRACEPARENT=00-$tid-$sid-01" \
+    "OTEL_RESOURCE_ATTRIBUTES=ci.pipeline.id=e2e-pipeline,ci.job.id=e2e-job" \
+    buildctl --addr "tcp://$OTEL_REL-buildkit.$NS.svc:1234" --tlsdir /otel --tlsservername "$OTEL_REL-buildkit.$NS.svc" \
+    build --frontend dockerfile.v0 --local context=/f/cache --local dockerfile=/f/cache \
+    --opt "build-arg:BUST=$ID" --progress plain >"$LOGS/otel-build.log" 2>&1
+  check "a build on the exporting daemons succeeds" test $? = 0
+  series_ok() {
+    series=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- \
+      "$vm_svc/api/v1/series?match%5B%5D=%7B__name__%3D%22buildkit.builds%22%7D" 2>/dev/null)
+    printf '%s' "$series" | grep -q "\"k8s.pod.name\":\"$OTEL_REL-buildkit-"
+  }
+  check "buildkit.builds arrives, labelled with the daemon pod" eventually 30 series_ok
+  check "the series carries the node and namespace" \
+    eval 'printf "%s" "$series" | grep -q "\"k8s.node.name\":\"" && printf "%s" "$series" | grep -q "\"k8s.namespace.name\":\"$NS\""'
+  trace_ok() {
+    trace=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "$vt_svc/select/jaeger/api/traces/$tid" 2>/dev/null)
+    printf '%s' "$trace" | grep -q '"serviceName":"buildkitd"'
+  }
+  check "the build's trace holds daemon spans" eventually 30 trace_ok
+  printf '%s' "$trace" >"$LOGS/otel-trace.json"
+  check "buildctl spans hang under the CI job's span, with its attributes" \
+    python3 - "$LOGS/otel-trace.json" "$sid" "$OTEL_REL-buildkit-" <<'PY'
+import json, sys
+path, parent, pod_prefix = sys.argv[1:4]
+t = json.load(open(path))["data"][0]
+procs = t["processes"]
+def tags(p): return {x["key"]: x["value"] for x in procs[p].get("tags", [])}
+# Spans whose parent is the CI job's span: buildctl's, with the job's attributes.
+roots = [s for s in t["spans"] if any(r["spanID"] == parent for r in s.get("references", []))]
+ok = bool(roots) and all(procs[s["processID"]]["serviceName"] == "buildctl"
+                         and tags(s["processID"]).get("ci.job.id") == "e2e-job" for s in roots)
+# Daemon spans name their pod.
+daemon = [p for p in procs if procs[p]["serviceName"] == "buildkitd"]
+ok = ok and bool(daemon) and all(tags(p).get("k8s.pod.name", "").startswith(pod_prefix) for p in daemon)
+sys.exit(0 if ok else 1)
+PY
+  hc uninstall "$OTEL_REL" -n "$NS" --wait --timeout 5m >/dev/null 2>&1 || true
+  kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$OTEL_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
 }
 
 s_cache() {

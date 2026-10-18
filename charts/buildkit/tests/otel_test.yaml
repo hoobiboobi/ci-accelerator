@@ -1,0 +1,122 @@
+suite: OpenTelemetry
+templates:
+  - daemonset.yaml
+  - configmap.yaml
+values:
+  - values/tls.yaml
+release:
+  name: bk
+  namespace: builds
+tests:
+  # Without endpoints nothing is exported, but the daemon still names itself
+  # for an exporter set through extraEnv.
+  - it: exports nothing by default and names the daemon
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - name: CI_ACCELERATOR_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CI_ACCELERATOR_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: k8s.namespace.name=builds,k8s.pod.name=$(CI_ACCELERATOR_POD_NAME),k8s.node.name=$(CI_ACCELERATOR_NODE_NAME)
+
+  # Per-signal endpoints are used as given; a base endpoint would get
+  # /v1/<signal> appended and miss VictoriaMetrics' and VictoriaTraces' paths.
+  - it: pushes metrics and traces to per-signal endpoints over http/protobuf
+    template: daemonset.yaml
+    set:
+      otel.metricsEndpoint: http://vm:8428/opentelemetry/v1/metrics
+      otel.tracesEndpoint: http://vt:10428/insert/opentelemetry/v1/traces
+      otel.metricsIntervalSeconds: 15
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://vm:8428/opentelemetry/v1/metrics"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, value: http/protobuf}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_METRIC_EXPORT_INTERVAL, value: "15000"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, value: "http://vt:10428/insert/opentelemetry/v1/traces"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, value: http/protobuf}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_ENDPOINT}
+          any: true
+
+  - it: can export only traces, over gRPC
+    template: daemonset.yaml
+    set:
+      otel.tracesEndpoint: http://collector:4317
+      otel.protocol: grpc
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, value: grpc}
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT}
+          any: true
+
+  - it: appends user resource attributes
+    template: daemonset.yaml
+    set:
+      otel.resourceAttributes:
+        deployment.environment: prod
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_RESOURCE_ATTRIBUTES
+            value: k8s.namespace.name=builds,k8s.pod.name=$(CI_ACCELERATOR_POD_NAME),k8s.node.name=$(CI_ACCELERATOR_NODE_NAME),deployment.environment=prod
+
+  - it: rejects attribute values that would break the list
+    template: daemonset.yaml
+    set:
+      otel.resourceAttributes:
+        team: a,b=c
+    asserts:
+      - failedTemplate:
+          errorPattern: resourceAttributes
+
+  - it: rejects an endpoint that is not a URL
+    template: daemonset.yaml
+    set:
+      otel.metricsEndpoint: vm:8428
+    asserts:
+      - failedTemplate:
+          errorPattern: metricsEndpoint
+
+  # The debug server serves /metrics next to pprof and cache endpoints, and
+  # builds share the daemon's network.
+  - it: never enables the debug server, with or without endpoints
+    template: configmap.yaml
+    set:
+      otel.metricsEndpoint: http://vm:8428/opentelemetry/v1/metrics
+    asserts:
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: (?i)debugAddress
+
+  # The probes must stay independent of a slow trace or metrics backend.
+  - it: keeps the probes on an empty environment with exporters configured
+    template: daemonset.yaml
+    set:
+      otel.metricsEndpoint: http://vm:8428/opentelemetry/v1/metrics
+      otel.tracesEndpoint: http://vt:10428/insert/opentelemetry/v1/traces
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command
+          value: [env, -i, OTEL_TRACES_EXPORTER=none, /usr/bin/buildctl, --addr, "unix:///run/buildkit/buildkitd.sock", debug, workers]

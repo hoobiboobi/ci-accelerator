@@ -155,6 +155,52 @@ exec:
 {{- end }}
 
 {{/*
+OpenTelemetry environment of the daemon. buildkitd reads its exporters from
+the environment only. Resource attributes name the daemon on every metric
+and span; the probes start buildctl with an empty environment, so none of
+this reaches them. extraEnv comes after this and can override it.
+*/}}
+{{- define "buildkit.otelEnv" -}}
+{{- $o := .Values.otel }}
+{{- $attrs := list (printf "k8s.namespace.name=%s" .Release.Namespace) "k8s.pod.name=$(CI_ACCELERATOR_POD_NAME)" "k8s.node.name=$(CI_ACCELERATOR_NODE_NAME)" }}
+{{- range $k, $v := $o.resourceAttributes }}
+{{- $attrs = append $attrs (printf "%s=%s" $k $v) }}
+{{- end }}
+- name: CI_ACCELERATOR_POD_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+- name: CI_ACCELERATOR_NODE_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: spec.nodeName
+- name: OTEL_RESOURCE_ATTRIBUTES
+  value: {{ join "," $attrs | quote }}
+{{- with $o.metricsEndpoint }}
+- name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+  value: {{ . | quote }}
+- name: OTEL_EXPORTER_OTLP_METRICS_PROTOCOL
+  value: {{ $o.protocol | quote }}
+- name: OTEL_METRIC_EXPORT_INTERVAL
+  value: {{ mul (int64 $o.metricsIntervalSeconds) 1000 | quote }}
+{{- end }}
+{{- with $o.tracesEndpoint }}
+- name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+  value: {{ . | quote }}
+- name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+  value: {{ $o.protocol | quote }}
+{{- end }}
+{{- end }}
+
+{{/*
+Namespaces whose pods may reach the daemons: the client certificate
+namespaces plus networkPolicy.ingress.namespaces. As a JSON list.
+*/}}
+{{- define "buildkit.clientNamespaces" -}}
+{{- toJson (uniq (concat (default (list) .Values.tls.client.namespaces) .Values.networkPolicy.ingress.namespaces)) }}
+{{- end }}
+
+{{/*
 Path of the rendered buildkitd.toml inside the container. Kept out of
 /etc/buildkit so the image's own files there (cdi, cni.json, provenance.d)
 stay visible to buildkitd.

@@ -257,10 +257,9 @@ tests:
             - name: grpc
               containerPort: 1234
               protocol: TCP
-      - notExists:
-          path: spec.template.spec.containers[0].env
 
-  - it: passes extraEnv through
+  # After the chart's own variables, so a user value wins over the chart's.
+  - it: passes extraEnv through after the chart's variables
     template: daemonset.yaml
     set:
       extraEnv:
@@ -268,10 +267,13 @@ tests:
           value: otlp
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].env
+          path: spec.template.spec.containers[0].env[3]
           value:
-            - name: OTEL_TRACES_EXPORTER
-              value: otlp
+            name: OTEL_TRACES_EXPORTER
+            value: otlp
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 4
 
   # Mounting over /etc/buildkit hid the image's own files (cdi, cni.json).
   - it: mounts the config outside /etc/buildkit, the state at /var/lib/buildkit and the TLS Secret read-only

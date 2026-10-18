@@ -1,0 +1,169 @@
+suite: NetworkPolicy
+templates:
+  - networkpolicy.yaml
+  - daemonset.yaml
+values:
+  - values/tls.yaml
+release:
+  name: bk
+  namespace: builds
+tests:
+  - it: renders nothing by default
+    template: networkpolicy.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: selects the daemon pods and restricts both directions
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.namespaces: [ci-jobs]
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels
+          value:
+            app.kubernetes.io/name: buildkit
+            app.kubernetes.io/instance: bk
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress, Egress]
+
+  - it: admits clients on port 1234 from the client namespaces only
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      tls.source: certManager
+      tls.client.namespaces: [ci-jobs, other]
+      networkPolicy.ingress.namespaces: [other, more]
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    asserts:
+      - equal:
+          path: spec.ingress
+          value:
+            - ports:
+                - port: grpc
+                  protocol: TCP
+              from:
+                - namespaceSelector:
+                    matchExpressions:
+                      - key: kubernetes.io/metadata.name
+                        operator: In
+                        values: [ci-jobs, other, more]
+
+  - it: adds extra ingress peers
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.extraFrom:
+        - ipBlock: {cidr: 192.168.0.0/24}
+    asserts:
+      - equal:
+          path: spec.ingress[0].from
+          value:
+            - ipBlock: {cidr: 192.168.0.0/24}
+
+  # With no peers every client is cut off: refuse instead.
+  - it: refuses a policy that admits no client
+    template: daemonset.yaml
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: 'networkPolicy.enabled: no client could reach the daemons'
+
+  # RUN steps share the daemon's network: this is what builds can reach.
+  - it: allows DNS and the world but never cloud metadata
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.namespaces: [ci-jobs]
+    asserts:
+      - equal:
+          path: spec.egress
+          value:
+            - to:
+                - namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: kube-system
+                  podSelector:
+                    matchLabels:
+                      k8s-app: kube-dns
+              ports:
+                - port: 53
+                  protocol: UDP
+                - port: 53
+                  protocol: TCP
+            - to:
+                - ipBlock:
+                    cidr: 0.0.0.0/0
+                    except: [169.254.169.254/32]
+                - ipBlock:
+                    cidr: ::/0
+                    except: [fd00:ec2::254/128]
+
+  - it: blocks the cluster CIDRs per address family and appends extra rules
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.namespaces: [ci-jobs]
+      networkPolicy.egress.clusterCIDRs: [10.244.0.0/16, 10.96.0.0/12, fd00:10::/56]
+      networkPolicy.egress.extraRules:
+        - to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: observability
+          ports:
+            - port: 8428
+    asserts:
+      - equal:
+          path: spec.egress[1].to
+          value:
+            - ipBlock:
+                cidr: 0.0.0.0/0
+                except: [169.254.169.254/32, 10.244.0.0/16, 10.96.0.0/12]
+            - ipBlock:
+                cidr: ::/0
+                except: [fd00:ec2::254/128, fd00:10::/56]
+      - equal:
+          path: spec.egress[2].ports
+          value:
+            - port: 8428
+
+  - it: leaves out an empty except list
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.namespaces: [ci-jobs]
+      networkPolicy.egress.blockedCIDRs: [169.254.169.254/32]
+    asserts:
+      - equal:
+          path: spec.egress[1].to[1]
+          value:
+            ipBlock:
+              cidr: ::/0
+
+  - it: rejects a CIDR without a prefix length
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.namespaces: [ci-jobs]
+      networkPolicy.egress.clusterCIDRs: [10.96.0.1]
+    asserts:
+      - failedTemplate:
+          errorPattern: clusterCIDRs
+
+  # The namespaces that get client certificates are admitted by themselves.
+  - it: admits the client certificate namespaces without listing them again
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      tls.source: certManager
+      tls.client.namespaces: [ci-jobs]
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-jobs]

@@ -1,0 +1,70 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $namespaces := include "buildkit.clientNamespaces" . | fromJsonArray }}
+{{- $v4 := list }}
+{{- $v6 := list }}
+{{- range concat $np.egress.blockedCIDRs $np.egress.clusterCIDRs }}
+{{- if contains ":" . }}{{ $v6 = append $v6 . }}{{ else }}{{ $v4 = append $v4 . }}{{ end }}
+{{- end }}
+# The daemon pods, and with them every RUN step of every build: steps share
+# the daemon's network namespace, so these egress rules are what builds can
+# reach.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "buildkit.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buildkit.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "buildkit.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Clients (CI jobs); mutual TLS still decides who gets in.
+    - ports:
+        - port: grpc
+          protocol: TCP
+      from:
+        {{- with $namespaces }}
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  {{- toYaml . | nindent 18 }}
+        {{- end }}
+        {{- with $np.ingress.extraFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+  egress:
+    {{- with $np.egress.dns }}
+    - to:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- end }}
+    # Registries, git hosts, package mirrors: anywhere but the blocked ranges.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with $v4 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            {{- with $v6 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+    {{- with $np.egress.extraRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

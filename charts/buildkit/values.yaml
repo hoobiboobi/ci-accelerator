@@ -151,6 +151,43 @@ service:
   externalTrafficPolicy: Cluster
   annotations: {}
 
+# Who may talk to the daemons and where builds may connect. RUN steps share
+# the daemon pod's network, so the egress rules below are also what every
+# build can reach. Needs a CNI that enforces NetworkPolicy.
+networkPolicy:
+  # -- Render a NetworkPolicy for the daemon pods.
+  enabled: false
+  ingress:
+    # -- Namespaces whose pods may connect to port 1234, in addition to
+    # tls.client.namespaces.
+    namespaces: []
+    # -- More NetworkPolicyPeer entries for port 1234 (e.g. an ipBlock for
+    # NodePort clients outside the cluster).
+    extraFrom: []
+  egress:
+    # -- Never reachable: cloud instance metadata (node credentials) for
+    # IPv4 and IPv6.
+    blockedCIDRs:
+      - 169.254.169.254/32
+      - fd00:ec2::254/128
+    # -- The cluster's pod and Service CIDRs. Listed here, the daemons and
+    # every build lose access to in-cluster services (allow what they need
+    # in extraRules, e.g. an in-cluster registry or the OTLP backends). The
+    # API offers no way to discover them. Traffic to the node itself is
+    # always allowed by Kubernetes, and whether the API server can be
+    # blocked depends on the CNI.
+    clusterCIDRs: []
+    # -- Peers that serve DNS on port 53.
+    dns:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+    # -- More NetworkPolicyEgressRule entries.
+    extraRules: []
+
 # Where the daemon keeps its state (/var/lib/buildkit): the build cache.
 storage:
   # -- emptyDir: the cache lives as long as the pod, on the node's root disk
@@ -246,6 +283,30 @@ config:
   # [worker.containerd], [history], [system] or [cdi]; the chart validates the
   # result and fails the render otherwise.
   extraConfig: ""
+
+# Metrics and traces, pushed by buildkitd over OTLP. Its debug HTTP server
+# (/metrics next to pprof and cache endpoints) is never enabled: builds share
+# the daemon's network and could reach it.
+otel:
+  # -- Full OTLP URL for metrics (with the path, e.g.
+  # http://<victoria-metrics>:8428/opentelemetry/v1/metrics). Empty: no
+  # metrics are pushed.
+  metricsEndpoint: ""
+  # -- Full OTLP URL for traces (e.g.
+  # http://<victoria-traces>:10428/insert/opentelemetry/v1/traces). Empty:
+  # no traces are exported. CI jobs join a build to their own trace by
+  # setting TRACEPARENT for buildctl.
+  tracesEndpoint: ""
+  # -- http/protobuf (VictoriaMetrics and VictoriaTraces accept only this
+  # over HTTP) or grpc.
+  protocol: http/protobuf
+  # -- Seconds between metric pushes. Counters are deltas per interval:
+  # query them with sum_over_time, not rate.
+  metricsIntervalSeconds: 60
+  # -- More resource attributes for every metric and span. The chart always
+  # adds k8s.namespace.name, k8s.pod.name and k8s.node.name, so each series
+  # and span names its daemon.
+  resourceAttributes: {}
 
 # Probes call `buildctl debug workers` on the local unix socket with an empty
 # environment (tracing variables would make buildctl wait for a trace

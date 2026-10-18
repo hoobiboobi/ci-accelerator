@@ -31,3 +31,12 @@ extraEnv:
 # The graceful-stop scenario runs a 45 s build through a SIGTERM: longer than
 # the Kubernetes default grace (30 s), so this value must be applied.
 terminationGracePeriodSeconds: 120
+
+# RUN steps share the daemon's network: the policy is what builds can reach.
+# run.sh admits the jobs namespace; kind's default pod and Service CIDRs.
+networkPolicy:
+  enabled: true
+  egress:
+    clusterCIDRs:
+      - 10.244.0.0/16
+      - 10.96.0.0/16

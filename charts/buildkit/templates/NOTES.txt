@@ -85,6 +85,9 @@ so the cluster default applies. Where that default is baseline or restricted
 {{- if not .Values.resources }}
 {{- $notes = append $notes "resources is empty: the daemon runs BestEffort, so it is the first to be OOM-killed or evicted, and builds can starve kubelet. Set requests sized to the build load." }}
 {{- end }}
+{{- if not .Values.networkPolicy.enabled }}
+{{- $notes = append $notes "networkPolicy.enabled is false: RUN steps share the daemon's network, so every build can reach cloud instance metadata (node credentials) and every in-cluster service. Enable it (and list the cluster CIDRs in networkPolicy.egress.clusterCIDRs) where the CNI enforces NetworkPolicy." }}
+{{- end }}
 {{- if not .Values.config.maxParallelism }}
 {{- $notes = append $notes "config.maxParallelism is 0 (unlimited): every concurrent build step runs at once. Set a limit on build nodes." }}
 {{- end }}
