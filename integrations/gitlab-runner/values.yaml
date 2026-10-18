@@ -1,0 +1,96 @@
+# Values fragment for the official gitlab-runner Helm chart that sends CI jobs
+# to the buildkit daemons of this project. Tested with chart 0.93.0 and
+# runner 19.4.1 (see README.md next to this file).
+#
+#   helm upgrade --install gitlab-runner gitlab-runner \
+#     --repo https://charts.gitlab.io --version 0.93.0 \
+#     -n ci-accelerator -f integrations/gitlab-runner/values.yaml -f my-values.yaml
+#
+# Replace the names marked ADJUST if your buildkit release is not
+# "ci-accelerator" in namespace "ci-accelerator" with jobs in
+# "ci-accelerator-jobs". runners.config is one TOML string: Helm does not
+# merge it with yours, so keep every line below if you write your own.
+
+# 19.4.0 lists pod events on every poll and overloaded API servers; 19.4.1
+# fixes that. The chart 0.93.0 default would be 19.4.0.
+image:
+  tag: alpine-v19.4.1
+
+# ADJUST: your GitLab.
+gitlabUrl: https://gitlab.example.com/
+
+runners:
+  # ADJUST: a Secret in the runner's namespace with the runner authentication
+  # token (runner-token: glrt-...) and an empty runner-registration-token key
+  # (the chart mounts both).
+  secret: gitlab-runner-token
+  # Job pods run untrusted code: keep them out of the namespace of the
+  # runner and the daemons. Its Pod Security level can be "baseline".
+  # ADJUST.
+  jobNamespace: ci-accelerator-jobs
+  config: |
+    [[runners]]
+      # The contract with the CI component: where the daemons are and where
+      # the client certificate is mounted. Job variables of the same name
+      # override these.
+      # ADJUST: tcp://<buildkit fullname>.<buildkit namespace>.svc:1234
+      environment = [
+        "BUILDKIT_REMOTE_ADDR=tcp://ci-accelerator-buildkit.ci-accelerator.svc:1234",
+        "BUILDKIT_TLS_DIR=/certs",
+      ]
+      [runners.kubernetes]
+        namespace = "{{ default .Release.Namespace .Values.runners.jobNamespace }}"
+        image = "alpine:3.22"
+        pull_policy = "if-not-present"
+        # The job only drives buildctl; the build runs in the daemon.
+        cpu_request = "50m"
+        memory_request = "64Mi"
+        memory_limit = "512Mi"
+        helper_cpu_request = "10m"
+        helper_memory_request = "32Mi"
+        helper_memory_limit = "256Mi"
+        service_cpu_request = "10m"
+        service_memory_request = "32Mi"
+        # Jobs run untrusted code: no Kubernetes API token in their pods.
+        automount_service_account_token = false
+        # On the build nodes, next to a daemon: the buildkit Service prefers
+        # the daemon on the client's node, whose cache is warm.
+        # The executor picks the helper image's architecture from
+        # kubernetes.io/arch here and assumes amd64 without it, so jobs on
+        # arm64 nodes would fail to pull it. ADJUST: arm64 build nodes.
+        [runners.kubernetes.node_selector]
+          "ci-accelerator.io/node-role" = "build"
+          "kubernetes.io/arch" = "amd64"
+        [runners.kubernetes.node_tolerations]
+          "ci-accelerator.io/node-role=build" = "NoSchedule"
+        [runners.kubernetes.pod_labels]
+          "ci-accelerator.io/component" = "ci-job"
+        # The client certificate cert-manager issues into the jobs namespace
+        # (buildkit chart: tls.client.namespaces).
+        # ADJUST: <buildkit fullname>-client
+        [[runners.kubernetes.volumes.secret]]
+          name = "ci-accelerator-buildkit-client"
+          mount_path = "/certs"
+          read_only = true
+
+# The chart's default Role grants everything on core resources in the jobs
+# namespace. These are the permissions the Kubernetes executor needs with its
+# default feature flags (docs: executors/kubernetes, "Configure runner API
+# permissions"); the chart creates them in runners.jobNamespace.
+rbac:
+  create: true
+  rules:
+    - resources: ["pods"]
+      verbs: ["create", "delete", "get", "list", "watch"]
+    - resources: ["pods/attach", "pods/exec"]
+      verbs: ["create", "delete", "get", "patch"]
+    - resources: ["pods/log"]
+      verbs: ["get", "list"]
+    - resources: ["secrets"]
+      verbs: ["create", "delete", "get", "update"]
+    - resources: ["serviceaccounts"]
+      verbs: ["get"]
+    - resources: ["services"]
+      verbs: ["create", "get"]
+    - resources: ["events"]
+      verbs: ["list"]

@@ -8,7 +8,7 @@
 #
 # For checking the checks: E2E_CHART=<chart dir> runs against another copy of
 # the chart, E2E_EXTRA_VALUES="<file> ..." adds values files after the e2e
-# ones. A deliberately broken chart or value must turn scenarios red.
+# ones, E2E_RUNNER_FRAGMENT=<file> replaces integrations/gitlab-runner/values.yaml. A deliberately broken chart or value must turn scenarios red.
 #
 # Installs its own release ("e2e") in its own namespace, so a development
 # release in the same cluster is not touched, and runs CI-job-like clients
@@ -20,7 +20,10 @@
 # client certificate that the clients mount, as job pods will. The
 # existingSecret source is exercised by switching to it and back. The
 # daemons run behind their NetworkPolicy; a second, short-lived release
-# pushes metrics and traces to a throwaway VictoriaMetrics/VictoriaTraces. Never run two e2e runs against the
+# pushes metrics and traces to a throwaway VictoriaMetrics/VictoriaTraces.
+# A real gitlab-runner (official chart + integrations/gitlab-runner) takes
+# jobs from a stand-in GitLab API (test/e2e/fake-gitlab) and runs buildctl
+# in job pods it creates. Never run two e2e runs against the
 # same namespace at the same time.
 #
 # Compatible with bash 3.2 (macOS). Refuses to run against anything that is
@@ -56,6 +59,12 @@ VM_CHART_VERSION=0.48.0
 VM_CHART_SHA256=51d26125182388a734f5d9dc65086811436a67d5aede08fde5f2a4247b532381
 VT_CHART_VERSION=0.1.11
 VT_CHART_SHA256=59471db9c6e053fc740b1ad0eb6365dc872bba3f0c9e06f5780ddde9655c9e88
+# The official gitlab-runner chart the integration fragment is written for.
+RUNNER_REPO=https://charts.gitlab.io
+RUNNER_CHART_VERSION=0.93.0
+RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
+# The stand-in GitLab API runs on this image (python stdlib only).
+PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # Every client call: the client certificate, and the Service name for the
 # server certificate check also when a call goes to a pod IP.
 TLS=(--tlsdir /certs --tlsservername "$SVC_HOST")
@@ -66,7 +75,7 @@ E2E_LABEL=ci-accelerator.io/e2e
 KEEP=${KEEP:-0}
 SCENARIOS=${SCENARIOS:-all}
 MODE=${1:-run}
-ALL_SCENARIOS="preflight tls certmanager existing netpol otel cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
+ALL_SCENARIOS="preflight tls certmanager existing netpol otel runner cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
 
 refuse() { echo "refusing to run e2e: $*" >&2; exit 2; }
 
@@ -246,6 +255,9 @@ create_state() {
 # state dir is not deleted under running processes.
 remove_release() {
   local r
+  if hc status gitlab-runner -n "$NS" >/dev/null 2>&1; then
+    hc uninstall gitlab-runner -n "$NS" --wait --timeout 3m >/dev/null 2>&1 || true
+  fi
   for r in "$REL" "$OTEL_REL"; do
     if hc status "$r" -n "$NS" >/dev/null 2>&1; then
       hc uninstall "$r" -n "$NS" --wait --timeout 5m >/dev/null 2>&1 || true
@@ -574,10 +586,10 @@ s_existing() {
   settle
 }
 
-# pull_chart <name> <version> <sha256>: a pinned chart archive into $LOGS.
+# pull_chart <name> <version> <sha256> [repo]: a pinned chart archive into $LOGS.
 pull_chart() {
   local tgz=$LOGS/$1-$2.tgz
-  [ -f "$tgz" ] || helm pull "$1" --repo "$VICTORIA_REPO" --version "$2" -d "$LOGS" >/dev/null 2>&1 || return 1
+  [ -f "$tgz" ] || helm pull "$1" --repo "${4:-$VICTORIA_REPO}" --version "$2" -d "$LOGS" >/dev/null 2>&1 || return 1
   echo "$3  $tgz" | sha256 -c - >/dev/null 2>&1 || { echo "checksum mismatch for $tgz" >&2; return 1; }
   echo "$tgz"
 }
@@ -688,6 +700,139 @@ sys.exit(0 if ok else 1)
 PY
   hc uninstall "$OTEL_REL" -n "$NS" --wait --timeout 5m >/dev/null 2>&1 || true
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$OTEL_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+}
+
+# fake_gitlab <method> <path> [json]: call the stand-in GitLab from a client.
+fake_gitlab() {
+  if [ "$1" = POST ]; then
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- --header 'Content-Type: application/json' \
+      --post-data "$3" "http://fake-gitlab.$NS.svc$2"
+  else
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://fake-gitlab.$NS.svc$2"
+  fi
+}
+
+# run_job <name>: queue the e2e CI job, wait for it, keep its pod spec and
+# trace in $LOGS/job-<name>.{pod.json,trace,state}.
+run_job() {
+  local name=$1 id state i pod_seen=0
+  id=$(fake_gitlab POST /e2e/jobs "$JOB_SPEC" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') \
+    || { fail "queue job $name"; return 1; }
+  for i in $(seq 1 120); do
+    if [ "$pod_seen" = 0 ]; then
+      kc -n "$JOBS_NS" get pods -l ci-accelerator.io/component=ci-job -o json >"$LOGS/job-$name.pod.json" 2>/dev/null
+      grep -q '"nodeName"' "$LOGS/job-$name.pod.json" && pod_seen=1
+    fi
+    fake_gitlab GET "/e2e/jobs/$id" >"$LOGS/job-$name.json" 2>/dev/null
+    state=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["state"])' "$LOGS/job-$name.json" 2>/dev/null)
+    case "$state" in success|failed) break ;; esac
+    sleep 2
+  done
+  # The trace as plain lines: without colour codes, carriage returns and
+  # the runner's "<timestamp> <stream><O|E>[+] " prefix.
+  python3 -c 'import json,re,sys
+t = re.sub(r"\x1b\[[0-9;]*[A-Za-z]|\r", "", json.load(open(sys.argv[1]))["trace"])
+print("\n".join(re.sub(r"^\d{4}-\d\d-\d\dT[0-9:.]+Z [0-9]+[OE]\+? ?", "", l) for l in t.split("\n")))' \
+    "$LOGS/job-$name.json" >"$LOGS/job-$name.trace" 2>/dev/null
+  echo "${state:-unknown}" >"$LOGS/job-$name.state"
+}
+
+# job_printed <name> <regex>: a whole output line of the job. The runner also
+# echoes every script line, so a plain grep would match the command itself.
+job_printed() { grep -qE "^$2\$" "$LOGS/job-$1.trace"; }
+
+s_runner() {
+  step "runner: a real gitlab-runner with integrations/gitlab-runner sends CI jobs to the daemons"
+  local chart frag pod node daemon_node arch
+  # The stand-in GitLab API.
+  kc -n "$NS" create configmap fake-gitlab --from-file="$ROOT/test/e2e/fake-gitlab/server.py" \
+    --dry-run=client -o yaml | kc apply -f - >/dev/null
+  kc -n "$NS" apply -f - >/dev/null <<EOF_FAKE
+apiVersion: v1
+kind: Pod
+metadata: {name: fake-gitlab, labels: {app: fake-gitlab}}
+spec:
+  tolerations: [{key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}]
+  containers:
+    - name: api
+      image: $PYTHON_IMAGE
+      command: [python3, -u, /app/server.py]
+      ports: [{containerPort: 8080}]
+      volumeMounts: [{name: app, mountPath: /app}]
+      readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 2}
+  volumes: [{name: app, configMap: {name: fake-gitlab}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fake-gitlab}
+spec:
+  selector: {app: fake-gitlab}
+  ports: [{port: 80, targetPort: 8080}]
+EOF_FAKE
+  kc -n "$NS" wait --for=condition=Ready pod/fake-gitlab --timeout=120s >/dev/null || { fail "fake GitLab not ready"; return; }
+  kc -n "$NS" create secret generic gitlab-runner-token --from-literal=runner-token=glrt-e2e-not-a-real-token \
+    --from-literal=runner-registration-token= --dry-run=client -o yaml | kc apply -f - >/dev/null
+  # The fragment as a user would adapt it: the names marked ADJUST.
+  frag=$LOGS/runner-fragment.yaml
+  # e2e only: every job on one build node, so the second job meets the
+  # daemon whose cache the first one filled (the cache is per daemon).
+  arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
+  sed -e "s|ci-accelerator-buildkit.ci-accelerator.svc|$SVC_HOST|" \
+      -e "s|\"kubernetes.io/arch\" = \"amd64\"|\"kubernetes.io/arch\" = \"$arch\"|" \
+      -e "s|ci-accelerator-buildkit-client|$CLIENT_SECRET|" \
+      -e "s|^\( *\)\"ci-accelerator.io/node-role\" = \"build\"|&\\
+\1\"kubernetes.io/hostname\" = \"$BUILD_NODE\"|" \
+      "${E2E_RUNNER_FRAGMENT:-$ROOT/integrations/gitlab-runner/values.yaml}" >"$frag"
+  check "the fragment's ADJUST names were all replaced" \
+    eval '! grep -q "ci-accelerator-buildkit" "$frag"'
+  chart=$(pull_chart gitlab-runner "$RUNNER_CHART_VERSION" "$RUNNER_CHART_SHA256" "$RUNNER_REPO") \
+    || { fail "pull the gitlab-runner chart"; return; }
+  hc upgrade --install gitlab-runner "$chart" -n "$NS" -f "$frag" -f "$ROOT/test/e2e/runner-values.yaml" \
+    --set "gitlabUrl=http://fake-gitlab.$NS.svc/" --set runners.secret=gitlab-runner-token \
+    --set "runners.jobNamespace=$JOBS_NS" --wait --timeout 5m >"$LOGS/runner-install.log" 2>&1 \
+    || { fail "install gitlab-runner (see $LOGS/runner-install.log)"; return; }
+  pass "the official chart with the fragment registers and gets ready"
+  check "gitlab-runner lint accepts the generated config.toml" \
+    quiet kc -n "$NS" exec deploy/gitlab-runner -- gitlab-runner lint -c /home/gitlab-runner/.gitlab-runner/config.toml
+  # The CI job: what the CI component will do, plus evidence for the checks.
+  JOB_SPEC=$(python3 - "$IMAGE" <<'PY'
+import json, sys
+print(json.dumps({"image": sys.argv[1], "script": [
+    'env | grep "^BUILDKIT_" | sort',
+    'ls "$BUILDKIT_TLS_DIR"',
+    'if [ -e /var/run/secrets/kubernetes.io/serviceaccount/token ]; then echo SA_TOKEN_PRESENT; else echo NO_SA_TOKEN; fi',
+    'mkdir -p ctx && echo "FROM alpine:3.22" > ctx/Dockerfile && echo "RUN sleep 2 && echo deps > /deps" >> ctx/Dockerfile',
+    'echo "ARG BUST" >> ctx/Dockerfile && echo "RUN echo bust=\$BUST" >> ctx/Dockerfile',
+    'buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" debug workers -v | grep worker.hostname',
+    'buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build --frontend dockerfile.v0 --local context=ctx --local dockerfile=ctx --opt build-arg:BUST=$CI_JOB_ID --progress plain',
+]}))
+PY
+)
+  run_job first
+  check "the first job succeeds" test "$(cat "$LOGS/job-first.state")" = success
+  pod=$LOGS/job-first.pod.json
+  check "the job pod runs in $JOBS_NS (PSA baseline)" grep -q "\"namespace\": \"$JOBS_NS\"" "$pod"
+  node=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["items"][0]["spec"]["nodeName"])' "$pod" 2>/dev/null)
+  check "the job pod landed on a build node (${node:-none})" \
+    eval 'case " $BUILD_NODES " in *" $node "*) true ;; *) false ;; esac'
+  check "the job gets BUILDKIT_REMOTE_ADDR for the daemons" job_printed first "BUILDKIT_REMOTE_ADDR=tcp://$SVC_HOST:1234"
+  check "the job gets BUILDKIT_TLS_DIR" job_printed first "BUILDKIT_TLS_DIR=/certs"
+  check "the client certificate is mounted at BUILDKIT_TLS_DIR" \
+    eval 'job_printed first ca.crt && job_printed first tls.crt && job_printed first tls.key'
+  check "no Kubernetes API token in the job pod" job_printed first NO_SA_TOKEN
+  check "the build container asks for the small tier (50m CPU)" \
+    eval 'python3 -c "import json,sys; c=[x for x in json.load(open(sys.argv[1]))[\"items\"][0][\"spec\"][\"containers\"] if x[\"name\"]==\"build\"][0]; sys.exit(0 if c[\"resources\"][\"requests\"][\"cpu\"]==\"50m\" else 1)" "$pod"'
+  daemon_node=$(kc -n "$NS" get pod "$(grep -o 'worker.hostname: *[^ ]*' "$LOGS/job-first.trace" | head -1 | awk '{print $2}')" \
+    -o jsonpath='{.spec.nodeName}' 2>/dev/null)
+  check "the daemon that answered runs on the job's node (${daemon_node:-?})" test -n "$node" -a "$daemon_node" = "$node"
+  check "the first job's dependency step ran (cold baseline)" \
+    eval '! grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-first.trace" | grep -q "CACHED"'
+  run_job second
+  check "the second job succeeds" test "$(cat "$LOGS/job-second.state")" = success
+  check "the second job's dependency step is CACHED" \
+    eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-second.trace" | grep -q "^#[0-9]* CACHED$"'
+  hc uninstall gitlab-runner -n "$NS" --wait --timeout 3m >/dev/null 2>&1 || true
+  kc -n "$NS" delete pod fake-gitlab --wait=false >/dev/null 2>&1
 }
 
 s_cache() {

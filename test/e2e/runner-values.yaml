@@ -1,0 +1,12 @@
+# e2e-only values for the gitlab-runner chart, after
+# integrations/gitlab-runner/values.yaml (whose ADJUST names run.sh replaces
+# for the e2e release). gitlabUrl, runners.secret and runners.jobNamespace
+# come from run.sh.
+#
+# The manager runs on the control-plane node: every kind worker is a tainted
+# build node (job pods go there through the fragment's toleration).
+tolerations:
+  - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+# Ask the fake GitLab for jobs every second instead of every 3.
+checkInterval: 1
+concurrent: 2

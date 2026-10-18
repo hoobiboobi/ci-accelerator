@@ -35,6 +35,11 @@ SHELLCHECK_SHA256_darwin_amd64 := c2c15e08df0e8fbc374c335b230a7ee958c313fa571481
 SHELLCHECK_SHA256_linux_arm64  := 68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc
 SHELLCHECK_SHA256_linux_amd64  := b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
 
+# The official gitlab-runner chart integrations/gitlab-runner/values.yaml is
+# written for; make validate renders it with the fragment.
+RUNNER_CHART_VERSION := 0.93.0
+RUNNER_CHART_SHA256  := a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
+
 OS   := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 SC_ARCH := $(if $(filter amd64,$(ARCH)),x86_64,aarch64)
@@ -49,6 +54,7 @@ HELM_PLUGINS   := $(HELM_DATA_HOME)/plugins
 export HELM_DATA_HOME HELM_PLUGINS
 KUBECONFORM := $(TOOLS)/kubeconform-$(KUBECONFORM_VERSION)/kubeconform
 SHELLCHECK  := $(TOOLS)/shellcheck-v$(SHELLCHECK_VERSION)/shellcheck
+RUNNER_CHART := $(TOOLS)/charts/gitlab-runner-$(RUNNER_CHART_VERSION).tgz
 
 # kind cluster for e2e. The context is derived from the cluster name and never
 # taken from the environment, so `make` cannot be pointed at another cluster.
@@ -75,7 +81,7 @@ define fetch
 endef
 
 .PHONY: tools
-tools: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) $(KUBECONFORM) $(SHELLCHECK) ## Install the pinned test tools into .tools/
+tools: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) $(KUBECONFORM) $(SHELLCHECK) $(RUNNER_CHART) ## Install the pinned test tools into .tools/
 
 # Installed from a verified, extracted copy: works on Helm 3 and 4 and needs
 # no signature flags.
@@ -91,6 +97,9 @@ $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION):
 $(KUBECONFORM):
 	$(call fetch,https://github.com/yannh/kubeconform/releases/download/v$(KUBECONFORM_VERSION)/kubeconform-$(OS)-$(ARCH).tar.gz,$(TOOLS)/dl/kubeconform-$(KUBECONFORM_VERSION).tgz,$(KUBECONFORM_SHA256_$(OS)_$(ARCH)))
 	@mkdir -p $(dir $@) && tar -xzf $(TOOLS)/dl/kubeconform-$(KUBECONFORM_VERSION).tgz -C $(dir $@) kubeconform
+
+$(RUNNER_CHART):
+	$(call fetch,https://gitlab-charts.s3.amazonaws.com/gitlab-runner-$(RUNNER_CHART_VERSION).tgz,$@,$(RUNNER_CHART_SHA256))
 
 $(SHELLCHECK):
 	$(call fetch,https://github.com/koalaman/shellcheck/releases/download/v$(SHELLCHECK_VERSION)/shellcheck-v$(SHELLCHECK_VERSION).$(OS).$(SC_ARCH).tar.gz,$(TOOLS)/dl/shellcheck-$(SHELLCHECK_VERSION).tgz,$(SHELLCHECK_SHA256_$(OS)_$(ARCH)))
@@ -119,7 +128,7 @@ unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) ## Run helm-unittes
 	done
 
 .PHONY: validate
-validate: $(KUBECONFORM) ## Validate rendered manifests against Kubernetes schemas
+validate: $(KUBECONFORM) $(RUNNER_CHART) ## Validate rendered manifests (our charts, gitlab-runner + fragment) against Kubernetes schemas
 	@for c in $(CHARTS); do \
 		for k in $(KUBE_VERSIONS); do \
 			for v in "" $(CHART_VALUES); do \
@@ -131,6 +140,12 @@ validate: $(KUBECONFORM) ## Validate rendered manifests against Kubernetes schem
 			$(HELM) template test $$c --kube-version $$k $(CERT_MANAGER_SET) \
 				| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 		done; \
+	done
+	@for k in $(KUBE_VERSIONS); do \
+		echo "==> kubeconform gitlab-runner $(RUNNER_CHART_VERSION) + integrations/gitlab-runner k8s $$k"; \
+		$(HELM) template gitlab-runner $(RUNNER_CHART) --kube-version $$k -n ci-accelerator \
+			-f integrations/gitlab-runner/values.yaml \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
 	done
 
 .PHONY: template
