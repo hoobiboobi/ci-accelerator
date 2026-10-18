@@ -150,7 +150,7 @@ build:
 
 Add `.git` to `.dockerignore`. Every job has a fresh clone, so with `.git`
 in the build context, every step after `COPY . .` runs again in every
-pipeline.
+pipeline. More in [docs/dockerfile-guide.md](docs/dockerfile-guide.md).
 
 **Pushing an image** is not wrapped yet:
 
@@ -274,6 +274,7 @@ make e2e                      # ~13 min end-to-end on kind
 | `scripts/buildkit-certs.sh` | CA and certificates for `charts/buildkit` without cert-manager (`tls.source=existingSecret`) |
 | `docs/architecture.md` | How the parts fit together: build path, cache, certificates, telemetry, rollouts |
 | `docs/troubleshooting.md` | Symptoms and fixes, runbooks |
+| `docs/dockerfile-guide.md` | Writing Dockerfiles that stay cached |
 | `docs/adr` | Architecture decision records: why the charts are the way they are |
 | `examples/kind` | Local cluster for development |
 | `test/` | End-to-end checks and helpers |
