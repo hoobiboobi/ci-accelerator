@@ -1,0 +1,29 @@
+# Architecture decision records
+
+Short records of the decisions that shape the charts: context, decision, consequences. Dates are when the decision was taken; several come from measurements on a local cluster or from the production setup this project is derived from.
+
+| ADR | Decision |
+|---|---|
+| [0001](0001-umbrella-and-standalone-charts.md) | An umbrella chart over standalone subcharts |
+| [0002](0002-helm-and-gitops.md) | Helm 3 and 4, schemas, GitOps-friendly |
+| [0003](0003-runner-integration-contract.md) | The runner integration is a contract |
+| [0004](0004-shared-values.md) | Shared contracts live in global values |
+| [0005](0005-build-node-label.md) | Build nodes are marked with our own label and taint |
+| [0006](0006-privileged-rootful-daemon.md) | Rootful, privileged daemons by default |
+| [0007](0007-storage-modes.md) | Storage modes and their guard rails |
+| [0008](0008-typed-config.md) | A typed buildkitd.toml core with an escape hatch |
+| [0009](0009-gc-policies.md) | The chart always renders the full GC policy set |
+| [0010](0010-namespaces.md) | One box namespace and a separate jobs namespace |
+| [0011](0011-routing.md) | Same-node routing with fallback |
+| [0012](0012-probes.md) | Probes with an empty environment and tolerant timings |
+| [0013](0013-stable-pod-template.md) | A pod template that chart releases do not change |
+| [0014](0014-termination.md) | Draining builds on shutdown |
+| [0015](0015-pinning.md) | Everything pinned and verified |
+| [0016](0016-mutual-tls.md) | Mutual TLS is mandatory |
+| [0017](0017-cert-manager-prerequisite.md) | cert-manager is a prerequisite, never a subchart |
+| [0018](0018-otlp-only.md) | Metrics and traces only via OTLP push |
+| [0019](0019-network-policy.md) | A NetworkPolicy for daemons and builds; no per-step network |
+| [0020](0020-bundled-observability.md) | Bundled metrics and traces storage |
+| [0021](0021-observability-access.md) | Builds can reach the observability data (accepted for v0.1) |
+| [0022](0022-license.md) | Apache License 2.0 |
+| [0023](0023-values-compatibility.md) | Values compatibility from 0.1.0 on |

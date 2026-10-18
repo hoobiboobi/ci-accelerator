@@ -272,6 +272,7 @@ make e2e                      # ~13 min end-to-end on kind
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
 | `scripts/buildkit-certs.sh` | CA and certificates for `charts/buildkit` without cert-manager (`tls.source=existingSecret`) |
+| `docs/adr` | Architecture decision records: why the charts are the way they are |
 | `examples/kind` | Local cluster for development |
 | `test/` | End-to-end checks and helpers |
 
