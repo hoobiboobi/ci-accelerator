@@ -84,7 +84,11 @@
     "dnsLabelOrEmpty": { "type": "string", "maxLength": 63, "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$" },
     "dnsLabel": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
     "dnsSubdomainOrEmpty": { "type": "string", "maxLength": 253, "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$" },
-    "urlOrEmpty": { "type": "string", "pattern": "^(https?://[^\\s]+)?$" },
+    "urlOrEmpty": {
+      "description": "An http(s) URL, empty, or a template rendered with tpl (checked after rendering).",
+      "type": "string",
+      "pattern": "^(https?://[^\\s]+|.*\\{\\{.*\\}\\}.*)?$"
+    },
     "cidr": {
       "description": "IPv4 or IPv6 CIDR with a prefix length.",
       "type": "string",

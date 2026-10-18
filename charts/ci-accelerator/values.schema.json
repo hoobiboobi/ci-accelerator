@@ -3,19 +3,44 @@
   "title": "ci-accelerator chart values",
   "description": "Only this chart's own keys are typed; buildkit validates its block with its own schema, gitlab-runner's block is the upstream chart's.",
   "type": "object",
-  "required": ["global", "jobsNamespace", "buildkit", "gitlab-runner"],
+  "required": [
+    "global",
+    "jobsNamespace",
+    "buildkit",
+    "gitlab-runner",
+    "victoria-metrics-single",
+    "victoria-traces-single"
+  ],
   "properties": {
     "global": {
       "type": "object",
-      "required": ["buildNodes", "tls", "jobs"],
+      "required": [
+        "buildNodes",
+        "tls",
+        "jobs"
+      ],
       "properties": {
         "jobs": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["namespace", "architecture"],
+          "required": [
+            "namespace",
+            "architecture"
+          ],
           "properties": {
-            "namespace": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
-            "architecture": { "type": "string", "enum": ["amd64", "arm64"] }
+            "namespace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+            },
+            "architecture": {
+              "type": "string",
+              "enum": [
+                "amd64",
+                "arm64"
+              ]
+            }
           }
         }
       }
@@ -23,19 +48,62 @@
     "jobsNamespace": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["create", "podSecurity"],
+      "required": [
+        "create",
+        "podSecurity"
+      ],
       "properties": {
-        "create": { "type": "boolean" },
-        "podSecurity": { "type": "string", "enum": ["baseline", "restricted", "privileged"] }
+        "create": {
+          "type": "boolean"
+        },
+        "podSecurity": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "restricted",
+            "privileged"
+          ]
+        }
       }
     },
-    "buildkit": { "type": "object" },
+    "buildkit": {
+      "type": "object"
+    },
     "gitlab-runner": {
       "type": "object",
-      "required": ["enabled"],
+      "required": [
+        "enabled"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "gitlabUrl": { "type": "string", "pattern": "^(https?://[^\\s]+)?$" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "gitlabUrl": {
+          "type": "string",
+          "pattern": "^(https?://[^\\s]+)?$"
+        }
+      }
+    },
+    "victoria-metrics-single": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "victoria-traces-single": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
       }
     }
   }

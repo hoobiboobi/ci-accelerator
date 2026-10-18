@@ -187,7 +187,7 @@ networkPolicy:
         podSelector:
           matchLabels:
             k8s-app: kube-dns
-    # -- More NetworkPolicyEgressRule entries.
+    # -- More NetworkPolicyEgressRule entries (rendered with tpl).
     extraRules: []
 
 # Where the daemon keeps its state (/var/lib/buildkit): the build cache.
@@ -292,7 +292,8 @@ config:
 otel:
   # -- Full OTLP URL for metrics (with the path, e.g.
   # http://<victoria-metrics>:8428/opentelemetry/v1/metrics). Empty: no
-  # metrics are pushed.
+  # metrics are pushed. Both endpoints are rendered with tpl, so a parent
+  # chart can build them from the release name.
   metricsEndpoint: ""
   # -- Full OTLP URL for traces (e.g.
   # http://<victoria-traces>:10428/insert/opentelemetry/v1/traces). Empty:

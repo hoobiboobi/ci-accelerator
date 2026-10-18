@@ -131,6 +131,14 @@ the install/upgrade with the fix in the message.
 {{- end }}
 {{- end }}
 
+{{- /* OTLP endpoints may be templates: check what they render to. */}}
+{{- range $key := list "metricsEndpoint" "tracesEndpoint" }}
+{{- $url := tpl (get $v.otel $key) $ }}
+{{- if and $url (not (regexMatch "^https?://[^\\s]+$" $url)) }}
+{{- fail (printf "otel.%s renders to %q, which is not an http(s) URL." $key $url) }}
+{{- end }}
+{{- end }}
+
 {{- /* A NetworkPolicy without ingress peers would cut every client off. */}}
 {{- if and $v.networkPolicy.enabled (not (include "buildkit.clientNamespaces" . | fromJsonArray)) (not $v.networkPolicy.ingress.extraFrom) }}
 {{- fail "networkPolicy.enabled: no client could reach the daemons. List the CI job namespaces in tls.client.namespaces or networkPolicy.ingress.namespaces, or add peers to networkPolicy.ingress.extraFrom." }}

@@ -23,8 +23,8 @@ annotations:
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
-# Exact versions: `make deps` vendors them into charts/ (the gitlab-runner
-# archive checked against a pinned sha256).
+# Exact versions: `make deps` vendors them into charts/ (third-party
+# archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
     version: 0.1.0
@@ -33,3 +33,11 @@ dependencies:
     version: 0.93.0
     repository: https://charts.gitlab.io
     condition: gitlab-runner.enabled
+  - name: victoria-metrics-single
+    version: 0.48.0
+    repository: https://victoriametrics.github.io/helm-charts/
+    condition: victoria-metrics-single.enabled
+  - name: victoria-traces-single
+    version: 0.1.11
+    repository: https://victoriametrics.github.io/helm-charts/
+    condition: victoria-traces-single.enabled

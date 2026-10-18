@@ -176,7 +176,7 @@ this reaches them. extraEnv comes after this and can override it.
       fieldPath: spec.nodeName
 - name: OTEL_RESOURCE_ATTRIBUTES
   value: {{ join "," $attrs | quote }}
-{{- with $o.metricsEndpoint }}
+{{- with (tpl $o.metricsEndpoint $) }}
 - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
   value: {{ . | quote }}
 - name: OTEL_EXPORTER_OTLP_METRICS_PROTOCOL
@@ -184,7 +184,7 @@ this reaches them. extraEnv comes after this and can override it.
 - name: OTEL_METRIC_EXPORT_INTERVAL
   value: {{ mul (int64 $o.metricsIntervalSeconds) 1000 | quote }}
 {{- end }}
-{{- with $o.tracesEndpoint }}
+{{- with (tpl $o.tracesEndpoint $) }}
 - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
   value: {{ . | quote }}
 - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL

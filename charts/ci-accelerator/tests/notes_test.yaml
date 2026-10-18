@@ -22,3 +22,24 @@ tests:
     asserts:
       - matchRegexRaw:
           pattern: 'No runner is installed: configure yours with integrations/gitlab-runner/values.yaml\n\(BUILDKIT_REMOTE_ADDR=tcp://box-buildkit.ci-accelerator.svc:1234\)'
+
+  - it: shows how to look at metrics and traces and warns who can reach them
+    asserts:
+      - matchRegexRaw:
+          pattern: 'port-forward svc/box-victoria-metrics-single-server 8428'
+      - matchRegexRaw:
+          pattern: 'port-forward svc/box-vt-single-server 10428'
+      - matchRegexRaw:
+          pattern: 'Builds can reach this storage: they can read other projects'' traces'
+
+  - it: says nothing about storage that is switched off
+    set:
+      victoria-metrics-single.enabled: false
+      victoria-traces-single.enabled: false
+      buildkit.otel.metricsEndpoint: ""
+      buildkit.otel.tracesEndpoint: ""
+    asserts:
+      - notMatchRegexRaw:
+          pattern: port-forward
+      - notMatchRegexRaw:
+          pattern: Metrics and traces of the daemons

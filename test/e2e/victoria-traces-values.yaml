@@ -1,9 +1,9 @@
 # VictoriaTraces for the otel scenario (chart 0.1.11, checksum in run.sh).
-# The image is pinned to the v0.11.0 index digest on Docker Hub
-# (2026-10-18). Throwaway storage; runs on the control-plane node.
+# The image is v0.12.0 (as in charts/ci-accelerator), pinned to its index
+# digest on Docker Hub (2026-10-18). Throwaway storage; runs on the control-plane node.
 server:
   image:
-    tag: v0.11.0@sha256:9947b14b6b9baa61b8efef64467a7118ee54ccd6be6b7c1849f6fdd65d8e17fd
+    tag: v0.12.0@sha256:80919fcc85cc6dd87f598d20ccf42d0ab1120de8f25d4dcf08c5ea2515a496ba
   persistentVolume:
     enabled: false
   tolerations:

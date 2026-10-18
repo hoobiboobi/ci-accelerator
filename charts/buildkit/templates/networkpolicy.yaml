@@ -65,6 +65,6 @@ spec:
               {{- toYaml . | nindent 14 }}
             {{- end }}
     {{- with $np.egress.extraRules }}
-    {{- toYaml . | nindent 4 }}
+    {{- tpl (toYaml .) $ | nindent 4 }}
     {{- end }}
 {{- end }}

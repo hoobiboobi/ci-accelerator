@@ -180,3 +180,20 @@ tests:
       - equal:
           path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
           value: [builds-jobs]
+
+  # A parent chart allows its own backends by release-derived labels.
+  - it: renders extra egress rules through tpl
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.namespaces: [ci-jobs]
+      networkPolicy.egress.extraRules:
+        - to:
+            - podSelector:
+                matchLabels:
+                  app.kubernetes.io/instance: "{{ .Release.Name }}"
+    asserts:
+      - equal:
+          path: spec.egress[2].to[0].podSelector.matchLabels
+          value:
+            app.kubernetes.io/instance: bk

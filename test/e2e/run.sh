@@ -858,7 +858,7 @@ s_runner() {
 }
 
 s_box() {
-  step "box: charts/ci-accelerator installs daemons, runner and jobs namespace that work together"
+  step "box: charts/ci-accelerator installs daemons, runner, jobs namespace and storage that work together"
   local node arch
   ensure_ns "$BOX_NS" privileged
   ensure_fake_gitlab "$BOX_NS" || return
@@ -884,6 +884,18 @@ s_box() {
   node=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["items"][0]["spec"]["nodeName"])' "$LOGS/job-box.pod.json" 2>/dev/null)
   check "the box's job pod landed on a build node (${node:-none})" \
     eval 'case " $BUILD_NODES " in *" $node "*) true ;; *) false ;; esac'
+  # The daemons push to the box's own storage.
+  box_metrics() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
+      "http://$BOX_REL-victoria-metrics-single-server.$BOX_NS.svc:8428/api/v1/series?match%5B%5D=%7B__name__%3D%22buildkit.builds%22%7D" 2>/dev/null \
+      | grep -q "\"k8s.namespace.name\":\"$BOX_NS\""
+  }
+  check "the box's VictoriaMetrics receives the daemons' build metrics" eventually 30 box_metrics
+  box_traces() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
+      "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/jaeger/api/services" 2>/dev/null | grep -q '"buildkitd"'
+  }
+  check "the box's VictoriaTraces receives the daemons' spans" eventually 30 box_traces
   hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the box"
   check "uninstall removes the jobs namespace" \
     eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'

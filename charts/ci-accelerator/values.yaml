@@ -54,6 +54,29 @@ buildkit:
   # networkPolicy.egress.clusterCIDRs to keep builds out of the cluster.
   networkPolicy:
     enabled: true
+    egress:
+      # The metrics and traces storage of this release stays reachable when
+      # clusterCIDRs are listed.
+      extraRules:
+        - to:
+            - podSelector:
+                matchLabels:
+                  app.kubernetes.io/instance: "{{ .Release.Name }}"
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values: [victoria-metrics-single, vt-single]
+          ports:
+            - port: 8428
+              protocol: TCP
+            - port: 10428
+              protocol: TCP
+  # Metrics and traces of every daemon go to this release's VictoriaMetrics
+  # and VictoriaTraces. With either switched off, point the endpoint at your
+  # own OTLP backend or set it to "".
+  otel:
+    metricsEndpoint: 'http://{{ include "ci-accelerator.vmName" . }}-server.{{ .Release.Namespace }}.svc:8428/opentelemetry/v1/metrics'
+    tracesEndpoint: 'http://{{ include "ci-accelerator.vtName" . }}-server.{{ .Release.Namespace }}.svc:10428/insert/opentelemetry/v1/traces'
 
 # The official gitlab-runner chart. Set enabled=false to keep your own
 # runner and use integrations/gitlab-runner/values.yaml with it instead.
@@ -132,3 +155,42 @@ gitlab-runner:
         verbs: ["create", "get"]
       - resources: ["events"]
         verbs: ["list"]
+
+# Metrics storage (VictoriaMetrics single, v1.153.0). Daemons push over
+# OTLP; nothing is scraped. Look at it with
+#   kubectl port-forward svc/<release>-victoria-metrics-single-server 8428
+# and http://localhost:8428/vmui. Counters arrive as deltas: query them with
+# sum_over_time, not rate. Builds can reach it (see NOTES).
+victoria-metrics-single:
+  enabled: true
+  # No scrape configuration, so no cluster-wide RBAC for service discovery
+  # and no API token in the pod.
+  rbac:
+    create: false
+  serviceAccount:
+    automountToken: false
+  server:
+    # Pinned to the v1.153.0 index digest (2026-10-18).
+    image:
+      tag: v1.153.0@sha256:5eff7af5341e401471002f58d106d399e614a62f3d240f2dbc21901e49eed5dd
+    # -- How long metrics are kept (the chart's unit is months without a
+    # suffix).
+    retentionPeriod: 30d
+    persistentVolume:
+      size: 16Gi
+
+# Traces storage (VictoriaTraces). Look at it with
+#   kubectl port-forward svc/<release>-vt-single-server 10428
+# and http://localhost:10428/select/vmui (Jaeger API under /select/jaeger).
+victoria-traces-single:
+  enabled: true
+  server:
+    # v0.12.0 instead of the chart's v0.11.0: it makes the delete and
+    # internal endpoints POST-only (SSRF fix) and ships the trace UI.
+    # Pinned to the index digest (2026-10-18).
+    image:
+      tag: v0.12.0@sha256:80919fcc85cc6dd87f598d20ccf42d0ab1120de8f25d4dcf08c5ea2515a496ba
+    # -- How long traces are kept.
+    retentionPeriod: 14d
+    persistentVolume:
+      size: 10Gi

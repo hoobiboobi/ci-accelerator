@@ -120,3 +120,36 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].livenessProbe.exec.command
           value: [env, -i, OTEL_TRACES_EXPORTER=none, /usr/bin/buildctl, --addr, "unix:///run/buildkit/buildkitd.sock", debug, workers]
+
+  # A parent chart builds the endpoints from the release name.
+  - it: renders the endpoints through tpl
+    template: daemonset.yaml
+    set:
+      otel.metricsEndpoint: "http://{{ .Release.Name }}-vm.{{ .Release.Namespace }}.svc:8428/opentelemetry/v1/metrics"
+      otel.tracesEndpoint: "http://{{ .Release.Name }}-vt.{{ .Release.Namespace }}.svc:10428/insert/opentelemetry/v1/traces"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://bk-vm.builds.svc:8428/opentelemetry/v1/metrics"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, value: "http://bk-vt.builds.svc:10428/insert/opentelemetry/v1/traces"}
+
+  - it: checks what a templated endpoint renders to
+    template: daemonset.yaml
+    set:
+      otel.tracesEndpoint: "{{ .Release.Name }}:4318"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'otel.tracesEndpoint renders to "bk:4318", which is not an http\(s\) URL'
+
+  # A template that renders to nothing exports nothing.
+  - it: skips an endpoint that renders empty
+    template: daemonset.yaml
+    set:
+      otel.metricsEndpoint: "{{ if false }}http://x{{ end }}"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT}
+          any: true
