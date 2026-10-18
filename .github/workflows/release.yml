@@ -1,0 +1,132 @@
+# Publishes both charts as OCI artifacts to ghcr.io when a version tag is
+# pushed:  git tag v0.1.0 && git push origin v0.1.0
+# The tag must match the charts' version (scripts/check-release-version.sh).
+# Tags with a pre-release part (v0.1.0-rc.1) become GitHub pre-releases.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write   # the GitHub Release
+      packages: write   # ghcr.io
+      id-token: write   # keyless signing
+    env:
+      CI_HELM_VERSION: v4.3.0
+      CHARTS_REPO: ghcr.io/${{ github.repository_owner }}/charts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools
+          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.0-${{ hashFiles('Makefile') }}
+
+      - name: Check the tag against the charts
+        id: version
+        run: echo "version=$(scripts/check-release-version.sh "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+
+      - name: Install helm, kind, kubectl
+        run: |
+          make ci-tools
+          echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
+
+      # The same checks as on every push; the dependencies are vendored here.
+      - name: Lint, unit tests, schema validation
+        run: make deps lint unittest validate
+
+      # Reproducible archives: Helm 4 stamps every file with
+      # SOURCE_DATE_EPOCH, and the archive's own mtime becomes the OCI
+      # "created" annotation.
+      - name: Package
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          mkdir -p dist
+          helm package charts/buildkit charts/ci-accelerator -d dist
+          touch -d "@$SOURCE_DATE_EPOCH" dist/*.tgz
+          sha256sum dist/*.tgz | tee dist/SHA256SUMS
+
+      - name: Push to ghcr.io
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "$GH_ACTOR" --password-stdin
+          : > dist/digests
+          for tgz in dist/*.tgz; do
+            out=$(helm push "$tgz" "oci://$CHARTS_REPO")
+            echo "$out"
+            ref=$(printf '%s\n' "$out" | awk '/^Pushed:/ {print $2}')
+            digest=$(printf '%s\n' "$out" | awk '/^Digest:/ {print $2}')
+            echo "${ref%:*}@$digest" >> dist/digests
+          done
+          cat dist/digests
+
+      # Keyless signatures record the repository in Sigstore's public
+      # transparency log, so only once the repository is public.
+      - name: Install cosign
+        if: ${{ !github.event.repository.private }}
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Sign
+        if: ${{ !github.event.repository.private }}
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GH_TOKEN" | cosign login ghcr.io -u "$GH_ACTOR" --password-stdin
+          while read -r artifact; do cosign sign --yes "$artifact"; done < dist/digests
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          {
+            echo "## Install"
+            echo
+            echo '```sh'
+            echo "helm install ci-accelerator oci://$CHARTS_REPO/ci-accelerator --version $VERSION ..."
+            echo '```'
+            echo
+            echo "The daemons alone: \`oci://$CHARTS_REPO/buildkit --version $VERSION\`."
+            if [ "$PRIVATE" != "true" ]; then
+              echo
+              echo "## Verify"
+              echo
+              echo '```sh'
+              echo "cosign verify $CHARTS_REPO/ci-accelerator:$VERSION \\"
+              echo "  --certificate-identity https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$GITHUB_REF_NAME \\"
+              echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+              echo '```'
+            fi
+            echo
+            echo "## Digests"
+            echo
+            echo '```'
+            cat dist/digests
+            echo '```'
+          } > dist/notes.md
+          prerelease=()
+          case "$VERSION" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/*.tgz dist/SHA256SUMS \
+            --verify-tag --title "$GITHUB_REF_NAME" --notes "$(cat dist/notes.md)" --generate-notes \
+            ${prerelease[@]+"${prerelease[@]}"}
