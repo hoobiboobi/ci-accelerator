@@ -89,9 +89,10 @@ $(SHELLCHECK):
 	@tar -xzf $(TOOLS)/dl/shellcheck-$(SHELLCHECK_VERSION).tgz -C $(TOOLS)
 
 .PHONY: lint
-lint: $(SHELLCHECK) ## helm lint --strict (default and example values), shellcheck
+lint: $(SHELLCHECK) ## helm lint --strict (default and example values), chart LICENSE copies, shellcheck
 	@for c in $(CHARTS); do \
 		echo "==> lint $$c"; \
+		cmp -s LICENSE $$c/LICENSE || { echo "$$c/LICENSE differs from LICENSE (the packaged chart must carry the license text)"; exit 1; }; \
 		$(HELM) lint --strict $$c >/dev/null || { $(HELM) lint --strict $$c; exit 1; }; \
 		for v in $(CHART_VALUES); do \
 			echo "==> lint $$c -f $$v"; \

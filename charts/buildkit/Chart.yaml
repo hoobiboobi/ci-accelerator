@@ -18,6 +18,8 @@ keywords:
   - ci
   - docker
   - build-cache
+annotations:
+  artifacthub.io/license: Apache-2.0
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
