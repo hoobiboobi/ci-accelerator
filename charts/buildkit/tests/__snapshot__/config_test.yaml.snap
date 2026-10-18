@@ -28,18 +28,18 @@ matches the reviewed default config:
         keepDuration = "1440h"
         reservedSpace = "10GB"
         maxUsedSpace = "75%"
-        minFreeSpace = "15%"
+        minFreeSpace = "30%"
 
       [[worker.oci.gcpolicy]]
         reservedSpace = "10GB"
         maxUsedSpace = "75%"
-        minFreeSpace = "15%"
+        minFreeSpace = "30%"
 
       [[worker.oci.gcpolicy]]
         all = true
         reservedSpace = "10GB"
         maxUsedSpace = "75%"
-        minFreeSpace = "15%"
+        minFreeSpace = "30%"
 
       [worker.containerd]
         enabled = false

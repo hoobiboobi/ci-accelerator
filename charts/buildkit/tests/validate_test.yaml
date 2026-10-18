@@ -1,0 +1,246 @@
+suite: render-time validation
+templates:
+  - daemonset.yaml
+tests:
+  - it: renders with the defaults
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  # A policy without caps and without keepDuration deletes every unused
+  # record after each build; for the unfiltered policies that is the cache.
+  - it: refuses default policies without any cap
+    set:
+      config.gc.maxUsedSpace: ""
+      config.gc.minFreeSpace: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.gc: set maxUsedSpace or minFreeSpace'
+
+  - it: treats zero sizes like empty ones
+    set:
+      config.gc.maxUsedSpace: "0GB"
+      config.gc.minFreeSpace: "0%"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.gc: set maxUsedSpace or minFreeSpace'
+
+  - it: accepts minFreeSpace as the only cap
+    set:
+      config.gc.maxUsedSpace: ""
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: refuses a zero cache-mount keepDuration
+    set:
+      config.gc.cacheMounts.keepDuration: 0s
+    asserts:
+      - failedTemplate:
+          errorPattern: 'cacheMounts.keepDuration: must be a non-zero duration'
+
+  - it: refuses an empty cache-mount keepDuration
+    set:
+      config.gc.cacheMounts.keepDuration: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'cacheMounts.keepDuration'
+
+  - it: accepts no keepDuration when cache mounts have their own cap
+    set:
+      config.gc.cacheMounts.keepDuration: ""
+      config.gc.cacheMounts.maxUsedSpace: 100GB
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: refuses an unfiltered custom policy without caps or keepDuration
+    set:
+      config.gcPolicy:
+        - all: true
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.gcPolicy\[0\]: has no filters, no keepDuration and no caps'
+
+  - it: accepts a filtered custom policy that deletes its records outright
+    set:
+      config.gcPolicy:
+        - filters: ["type==source.local"]
+        - all: true
+          maxUsedSpace: 500GB
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  # Percentages refer to the node disk, not to the emptyDir; exceeding the
+  # sizeLimit gets the pod evicted with about 1 s grace.
+  - it: refuses percentage caps together with an emptyDir sizeLimit
+    set:
+      storage.emptyDir.sizeLimit: 50Gi
+      config.gc.maxUsedSpace: 75%
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.gc.maxUsedSpace is 75%, but storage.emptyDir.sizeLimit is set'
+
+  - it: refuses an empty maxUsedSpace together with an emptyDir sizeLimit
+    set:
+      storage.emptyDir.sizeLimit: 50Gi
+      config.gc.maxUsedSpace: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'set config.gc.maxUsedSpace to an absolute size of at most 80% of it \(e.g. "40GB"\)'
+
+  - it: refuses a maxUsedSpace above 80% of the sizeLimit
+    set:
+      storage.emptyDir.sizeLimit: 50Gi
+      config.gc.maxUsedSpace: 45GB
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.gc.maxUsedSpace \(45GB\) exceeds 80% of storage.emptyDir.sizeLimit'
+
+  - it: compares binary buildkit units with decimal Kubernetes quantities
+    set:
+      storage.emptyDir.sizeLimit: 50G
+      config.gc.maxUsedSpace: 40GB
+      config.gc.reservedSpace: 1GB
+    asserts:
+      - failedTemplate:
+          errorPattern: 'exceeds 80% of storage.emptyDir.sizeLimit'
+
+  - it: refuses a reservedSpace above the sizeLimit budget
+    set:
+      storage.emptyDir.sizeLimit: 10Gi
+      config.gc.maxUsedSpace: 6GB
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.gc.reservedSpace \(10GB\) exceeds 80%'
+
+  - it: refuses a percentage cache-mount cap together with a sizeLimit
+    set:
+      storage.emptyDir.sizeLimit: 50Gi
+      config.gc.maxUsedSpace: 40GB
+      config.gc.cacheMounts.maxUsedSpace: 10%
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.gc.cacheMounts.maxUsedSpace is 10%'
+
+  - it: checks the caps of custom policies against the sizeLimit
+    set:
+      storage.emptyDir.sizeLimit: 20Gi
+      config.gcPolicy:
+        - all: true
+          maxUsedSpace: 80%
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.gcPolicy\[0\].maxUsedSpace is 80%'
+
+  - it: accepts absolute caps within the sizeLimit budget
+    set:
+      storage.emptyDir.sizeLimit: 50Gi
+      config.gc.maxUsedSpace: 40GB
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: requires an explicit hostPath path
+    set:
+      storage.type: hostPath
+    asserts:
+      - failedTemplate:
+          errorPattern: 'storage.hostPath.path is required'
+
+  # buildkitd locks its state dir: a surge pod on the same node never starts.
+  - it: refuses maxSurge with hostPath
+    set:
+      storage.type: hostPath
+      storage.hostPath.path: /var/mnt/nvme/buildkit
+      updateStrategy.rollingUpdate.maxSurge: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: 'maxSurge is 1, which cannot work with storage.type=hostPath'
+
+  - it: accepts maxSurge "0%" with hostPath
+    set:
+      storage.type: hostPath
+      storage.hostPath.path: /var/mnt/nvme/buildkit
+      updateStrategy.rollingUpdate.maxSurge: 0%
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: accepts maxSurge with emptyDir
+    set:
+      updateStrategy.rollingUpdate.maxSurge: 1
+      updateStrategy.rollingUpdate.maxUnavailable: 0
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: refuses extraConfig that repeats a table the chart renders
+    set:
+      config.extraConfig: |
+        [worker.oci]
+          snapshotter = "native"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.extraConfig: the rendered buildkitd.toml is invalid'
+
+  - it: refuses extraConfig that redefines a top-level key
+    set:
+      config.extraConfig: |
+        root = "/elsewhere"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.extraConfig: the rendered buildkitd.toml is invalid'
+
+  - it: refuses extraConfig with a syntax error
+    set:
+      config.extraConfig: |
+        [registry."docker.io"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.extraConfig: the rendered buildkitd.toml is invalid'
+
+  - it: refuses GC policies smuggled in through extraConfig
+    set:
+      config.extraConfig: |
+        [[worker.oci.gcpolicy]]
+          all = true
+    asserts:
+      - failedTemplate:
+          errorPattern: 'set GC policies with config.gcPolicy instead'
+
+  - it: accepts top-level keys and new tables in extraConfig
+    set:
+      config.extraConfig: |
+        insecure-entitlements = ["network.host"]
+        [registry."docker.io"]
+          mirrors = ["mirror.example:5000"]
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: refuses workerOCI keys the chart sets itself
+    set:
+      config.workerOCI:
+        max-parallelism: 4
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.workerOCI.max-parallelism: the chart sets this \[worker.oci\] key itself \(use config.maxParallelism\)'
+
+  - it: refuses workerOCI keys that are not bare TOML keys
+    set:
+      config.workerOCI:
+        "bad key": x
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.workerOCI: "bad key" is not a bare TOML key'
+
+  # Helm drops a null key before schema validation; without required lists
+  # the templates would fail with a nil-pointer message instead.
+  - it: explains a nulled required block
+    set:
+      config.cdi: null
+    asserts:
+      - failedTemplate:
+          errorPattern: "missing property 'cdi'"

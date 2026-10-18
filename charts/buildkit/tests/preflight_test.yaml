@@ -4,13 +4,18 @@ templates:
 release:
   name: bk
   namespace: builds
-# Namespace is cluster-scoped; the fake client needs its mapping.
+# Namespace and Node are cluster-scoped; the fake client needs their mapping.
 kubernetesProvider:
   scheme:
     "v1/Namespace":
       gvr:
         version: v1
         resource: namespaces
+      namespaced: false
+    "v1/Node":
+      gvr:
+        version: v1
+        resource: nodes
       namespaced: false
 tests:
   # On kind a baseline namespace gave "STATUS: deployed" and 0 pods.
@@ -49,12 +54,19 @@ tests:
             name: builds
             labels:
               pod-security.kubernetes.io/enforce: privileged
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: build-1
+            labels:
+              kubernetes.io/os: linux
+              ci-accelerator.io/node-role: build
     asserts:
       - isKind:
           of: DaemonSet
 
   # No enforce label: the cluster-wide default applies, which a chart cannot
-  # read. Do not guess.
+  # read. Do not guess (NOTES warns instead).
   - it: does not block a namespace without an enforce label
     kubernetesProvider:
       objects:
@@ -64,17 +76,24 @@ tests:
             name: builds
             labels:
               pod-security.kubernetes.io/warn: baseline
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: build-1
+            labels:
+              kubernetes.io/os: linux
+              ci-accelerator.io/node-role: build
     asserts:
       - isKind:
           of: DaemonSet
 
-  # helm template / ArgoCD: lookup returns nothing.
-  - it: renders when the namespace cannot be looked up
+  # helm template / GitOps: lookup returns nothing.
+  - it: renders when nothing can be looked up
     asserts:
       - isKind:
           of: DaemonSet
 
-  - it: can be switched off
+  - it: can skip the Pod Security check
     set:
       preflight.podSecurity: false
     kubernetesProvider:
@@ -85,6 +104,96 @@ tests:
             name: builds
             labels:
               pod-security.kubernetes.io/enforce: baseline
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: build-1
+            labels:
+              kubernetes.io/os: linux
+              ci-accelerator.io/node-role: build
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  # helm install --wait reported success with zero daemons when no node was
+  # labelled.
+  - it: fails when no node matches the build-node selector
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: worker-1
+            labels:
+              kubernetes.io/os: linux
+    asserts:
+      - failedTemplate:
+          errorPattern: 'no node matches the build-node selector .*ci-accelerator.io/node-role.*so no daemon would run'
+
+  - it: requires every selector label on the same node
+    set:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: worker-1
+            labels:
+              kubernetes.io/os: linux
+              kubernetes.io/arch: amd64
+              ci-accelerator.io/node-role: build
+    asserts:
+      - failedTemplate:
+          errorPattern: 'no node matches the build-node selector'
+
+  - it: passes when a node carries every selector label
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: worker-1
+            labels:
+              kubernetes.io/os: linux
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: worker-2
+            labels:
+              kubernetes.io/os: linux
+              ci-accelerator.io/node-role: build
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: does not check nodes when build nodes are switched off
+    set:
+      global.buildNodes.enabled: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: windows-1
+            labels:
+              kubernetes.io/os: windows
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: can skip the build-node check
+    set:
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Node
+          metadata:
+            name: worker-1
+            labels:
+              kubernetes.io/os: linux
     asserts:
       - isKind:
           of: DaemonSet

@@ -8,5 +8,6 @@
 *.bak
 *.tmp
 *~
-# helm-unittest suites and snapshots are not part of the package.
-tests/
+# helm-unittest suites and snapshots are not part of the package (anchored, so
+# a future templates/tests/ is still packaged).
+/tests/

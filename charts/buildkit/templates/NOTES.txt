@@ -1,19 +1,56 @@
-BuildKit daemons: DaemonSet {{ include "buildkit.fullname" . }} in namespace {{ .Release.Namespace }}.
+{{- $fullname := include "buildkit.fullname" . -}}
+{{- $ns := .Release.Namespace -}}
+BuildKit daemons: DaemonSet {{ $fullname }} in namespace {{ $ns }}.
 
 Address for CI jobs in the cluster:
 
-  tcp://{{ include "buildkit.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+  tcp://{{ $fullname }}.{{ $ns }}.svc:{{ .Values.service.port }}
   (routing: {{ .Values.service.routing }})
 {{- if eq .Values.service.type "NodePort" }}
 
-From outside the cluster: tcp://<node-ip>:<node-port>
-  kubectl get svc {{ include "buildkit.fullname" . }} -n {{ .Release.Namespace }}
+From outside the cluster: tcp://<any-node-ip>:{{ .Values.service.nodePort | default "<node-port>" }}
+  kubectl get svc {{ $fullname }} -n {{ $ns }}
 {{- end }}
 
-Check the daemons:
+Check the daemons (DESIRED 0 means no node matches the build-node selector):
 
-  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -o wide
-  kubectl exec -n {{ .Release.Namespace }} ds/{{ include "buildkit.fullname" . }} -- buildctl debug workers
+  kubectl get ds {{ $fullname }} -n {{ $ns }}
+  kubectl get pods -n {{ $ns }} -l app.kubernetes.io/name={{ include "buildkit.name" . }},app.kubernetes.io/instance={{ .Release.Name }} -o wide
+  kubectl exec -n {{ $ns }} ds/{{ $fullname }} -- env -i OTEL_TRACES_EXPORTER=none /usr/bin/buildctl debug workers
+{{- if .Values.preflight.podSecurity }}
+{{- /* Empty lookup on a live install = the namespace did not exist when the
+       chart was rendered (helm --create-namespace), so it has no label
+       either. helm template and GitOps tools do not show NOTES. */}}
+{{- $nsObj := lookup "v1" "Namespace" "" $ns }}
+{{- if not (dig "metadata" "labels" "pod-security.kubernetes.io/enforce" "" $nsObj) }}
 
-WARNING: TLS is not configured yet. Anything that can reach port {{ .Values.service.port }},
+WARNING: namespace {{ $ns }} has no pod-security.kubernetes.io/enforce label
+{{- if not $nsObj }} (it did not exist yet when the chart was rendered, e.g. --create-namespace){{ end }},
+so the cluster default applies. Where that default is baseline or restricted
+(e.g. Talos), no daemon pod is ever created. Label it:
+  kubectl label namespace {{ $ns }} pod-security.kubernetes.io/enforce=privileged --overwrite
+{{- end }}
+{{- end }}
+
+WARNING: TLS is not configured yet. Anything that can reach container port 1234
+{{- if eq .Values.service.type "NodePort" }} or node port {{ .Values.service.nodePort | default "<node-port>" }} on every node{{ end }},
 including RUN steps of builds on the daemon itself, can control the daemon.
+{{- $notes := list }}
+{{- if eq .Values.storage.type "emptyDir" }}
+{{- $notes = append $notes "storage.type=emptyDir: every rollout (config or image change) starts the daemons with an empty cache. Use hostPath on a dedicated disk in production." }}
+{{- else }}
+{{- $notes = append $notes (printf "storage.type=hostPath: the cache in %s stays on the nodes after helm uninstall; remove it by hand." .Values.storage.hostPath.path) }}
+{{- end }}
+{{- if not .Values.resources }}
+{{- $notes = append $notes "resources is empty: the daemon runs BestEffort, so it is the first to be OOM-killed or evicted, and builds can starve kubelet. Set requests sized to the build load." }}
+{{- end }}
+{{- if not .Values.config.maxParallelism }}
+{{- $notes = append $notes "config.maxParallelism is 0 (unlimited): every concurrent build step runs at once. Set a limit on build nodes." }}
+{{- end }}
+{{- with $notes }}
+
+Before production:
+{{- range . }}
+  - {{ . }}
+{{- end }}
+{{- end }}

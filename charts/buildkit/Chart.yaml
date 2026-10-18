@@ -1,8 +1,8 @@
 apiVersion: v2
 name: buildkit
 description: >-
-  Persistent BuildKit daemons as a shared build service for CI, with
-  production-tested defaults for probes, garbage collection and tracing.
+  Persistent BuildKit daemons as a shared build service for CI, with probe
+  and garbage-collection defaults derived from a production setup.
 type: application
 version: 0.1.0
 # Upstream moby/buildkit release; the default image tag is derived from it.

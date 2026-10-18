@@ -15,15 +15,15 @@ tests:
           path: spec.type
           value: ClusterIP
       - equal:
-          path: spec.ports[0]
+          path: spec.ports
           value:
-            name: grpc
-            port: 1234
-            targetPort: grpc
-            protocol: TCP
+            - name: grpc
+              port: 1234
+              targetPort: grpc
+              protocol: TCP
 
-  # D21: own node's daemon (warm cache), fallback to another node instead of
-  # failing the build when it is not ready.
+  # Own node's daemon (warm cache), and another node's daemon instead of a
+  # failed build when it is not ready.
   - it: prefers the same node with fallback by default
     documentIndex: 0
     asserts:
@@ -34,7 +34,7 @@ tests:
           path: spec.internalTrafficPolicy
           value: Cluster
 
-  # Local would silently override trafficDistribution, so never render both.
+  # Local silently overrides trafficDistribution, so never render both.
   - it: renders strict node-local routing without trafficDistribution
     documentIndex: 0
     set:
@@ -57,11 +57,15 @@ tests:
       - notExists:
           path: spec.trafficDistribution
 
-  - it: does not set externalTrafficPolicy on ClusterIP
+  - it: does not set externalTrafficPolicy or a node port on ClusterIP
     documentIndex: 0
+    set:
+      service.nodePort: 31234
     asserts:
       - notExists:
           path: spec.externalTrafficPolicy
+      - notExists:
+          path: spec.ports[0].nodePort
 
   - it: renders a fixed NodePort with its external policy
     documentIndex: 0
@@ -95,8 +99,21 @@ tests:
       - failedTemplate:
           errorPattern: routing
 
-  - it: always creates the headless discovery Service (D7)
+  - it: passes Service annotations through
+    documentIndex: 0
+    set:
+      service.annotations:
+        example.com/lb: internal
+    asserts:
+      - equal:
+          path: metadata.annotations
+          value:
+            example.com/lb: internal
+
+  - it: always creates the headless discovery Service on the container port
     documentIndex: 1
+    set:
+      service.port: 4321
     asserts:
       - equal:
           path: metadata.name
@@ -105,8 +122,25 @@ tests:
           path: spec.clusterIP
           value: None
       - equal:
-          path: spec.ports[0].port
-          value: 1234
+          path: spec.ports
+          value:
+            - name: grpc
+              port: 1234
+              targetPort: grpc
+              protocol: TCP
+
+  # Service names are DNS labels: at most 63 characters.
+  - it: keeps the headless Service name valid for long release names
+    documentIndex: 1
+    release:
+      name: a-very-long-release-name-for-a-shared-build-farm-xyz
+    asserts:
+      - matchRegex:
+          path: metadata.name
+          pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
+      - matchRegex:
+          path: metadata.name
+          pattern: '-headless$'
 
   - it: selects only this release's daemons
     asserts:

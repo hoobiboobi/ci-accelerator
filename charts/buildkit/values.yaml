@@ -1,36 +1,53 @@
 # Default values for the buildkit chart.
-# Every key here is validated by values.schema.json; unknown keys are rejected.
+# Every key is validated by values.schema.json; unknown keys are rejected.
+# The chart also refuses, at render time, combinations that would crash
+# buildkitd, stall a rollout or silently delete the cache.
 
-# -- Override the chart name used in resource names.
+# -- Override the chart name used in resource names. Install-time only:
+# changing it later renames every object and conflicts with the immutable
+# DaemonSet selector.
 nameOverride: ""
 # -- Override the full resource name (<release>-<chart> by default).
+# Install-time only, like nameOverride.
 fullnameOverride: ""
 
 image:
   repository: moby/buildkit
   # -- Defaults to the chart appVersion.
   tag: ""
-  # -- Pin by digest (sha256:...); takes precedence over tag.
-  digest: ""
+  # -- Image index digest. The runtime pulls by digest when it is set, so
+  # change or clear it together with tag. Default: the digest of the
+  # appVersion tag (multi-arch index).
+  digest: "sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
   pullPolicy: IfNotPresent
 
 # -- Image pull secrets for private mirrors of the buildkit image.
 imagePullSecrets: []
 
-# -- Labels added to every resource the chart creates.
+# -- Labels added to every resource the chart creates (including the pods:
+# changing them restarts the daemons). They cannot override the chart's own
+# labels.
 commonLabels: {}
 
+# Install-time checks against the live cluster. Skipped under `helm template`
+# and by GitOps tools that render offline.
 preflight:
-  # -- Fail the install if the namespace's Pod Security `enforce` level is
-  # not privileged (otherwise no daemon pod is ever created). Needs read
-  # access to the Namespace object; set false if the installer lacks it.
+  # -- Fail if the namespace's pod-security.kubernetes.io/enforce label is set
+  # to anything but privileged (no daemon pod could start). Needs read access
+  # to the Namespace object, which namespace admins have. A namespace without
+  # the label is not checked (the cluster default applies); NOTES warns.
   podSecurity: true
+  # -- Fail if no node carries every label of the build-node selector (the
+  # DaemonSet would want 0 pods while helm reports success). Needs
+  # cluster-wide list access to Nodes (an installer that is only a namespace
+  # admin gets Forbidden); set false then, or for node pools scaled to zero.
+  buildNodes: true
 
 # Shared with other ci-accelerator charts when installed via the umbrella.
 global:
-  # Dedicated build nodes (see docs: label and taint them before install).
+  # Dedicated build nodes: label and taint them before install.
   buildNodes:
-    # -- false: ignore selector/tolerations below and run on any node.
+    # -- false: ignore selector/tolerations below and run on any Linux node.
     # (A switch, because Helm merges `selector: {}` with the default
     # instead of clearing it.)
     enabled: true
@@ -42,20 +59,25 @@ global:
         value: build
         effect: NoSchedule
 
-# Client-facing Service on :1234. A headless Service
-# (<fullname>-headless) is always created for in-cluster discovery.
+# Client-facing Service on :1234. A headless Service (<fullname>-headless) is
+# always created for discovery by other components.
 service:
-  # -- ClusterIP for CI jobs in the cluster; NodePort to reach daemons from
-  # outside (kind, debugging).
+  # -- ClusterIP for CI jobs in the cluster; NodePort to reach the daemons
+  # from outside (every node IP, unauthenticated until TLS is configured).
   type: ClusterIP
   port: 1234
-  # -- Fixed node port when type is NodePort; empty lets Kubernetes pick.
+  # -- Fixed node port when type is NodePort; must lie in the cluster's
+  # service-node-port-range (default 30000-32767). Empty lets Kubernetes pick.
   nodePort: ""
   # -- How in-cluster clients reach a daemon. The cache is per daemon, so
   # staying on the client's node keeps it warm.
   #   PreferSameNode: own node's daemon; falls back to another node when it
   #                   is not ready (cold cache, build still succeeds).
-  #   Local:          own node's daemon only; no daemon ready = no endpoints.
+  #                   Needs kube-proxy >= 1.34 on every node (or a proxy that
+  #                   implements node hints); older ones silently balance
+  #                   cluster-wide.
+  #   Local:          own node's daemon only; no ready daemon there means no
+  #                   endpoints and the build fails.
   #   Cluster:        any daemon.
   routing: PreferSameNode
   # -- externalTrafficPolicy for NodePort (Cluster or Local).
@@ -64,114 +86,182 @@ service:
 
 # Where the daemon keeps its state (/var/lib/buildkit): the build cache.
 storage:
-  # -- emptyDir: cache lives as long as the pod (kind, CI).
-  # hostPath: cache survives restarts; point it at a local NVMe mount.
+  # -- emptyDir: the cache lives as long as the pod, on the node's root disk
+  # (quick start, CI). Every rollout starts with an empty cache.
+  # hostPath: the cache survives restarts and rollouts (production).
   type: emptyDir
   emptyDir:
-    # -- e.g. "50Gi"; empty means no limit. Exceeding it evicts the pod.
+    # -- Kubernetes quantity, e.g. "50Gi"; empty means no limit. Exceeding it
+    # gets the pod evicted with ~1 s grace (running builds fail, cache lost),
+    # so the chart requires an absolute config.gc.maxUsedSpace of at most 80%
+    # of it whenever it is set.
     sizeLimit: ""
   hostPath:
-    path: /var/lib/ci-accelerator/buildkit
+    # -- Required with storage.type=hostPath. A directory created in advance
+    # on the dedicated cache disk, as a subdirectory of the mount (e.g.
+    # /var/mnt/nvme/buildkit, not /var/mnt/nvme): if the disk is not mounted,
+    # the pod then fails to start instead of filling the OS disk. One release
+    # per path per node (buildkitd locks the directory). The data stays after
+    # `helm uninstall`.
+    path: ""
+    # -- Directory: the path must exist (recommended). DirectoryOrCreate:
+    # kubelet creates it on whatever filesystem is there (test clusters).
+    type: Directory
 
-# Rendered into /etc/buildkit/buildkitd.toml.
+# Rendered into buildkitd.toml.
 config:
-  # -- Max parallel build steps per daemon; 0 keeps the buildkit default
-  # (number of CPUs). Production example: 28 on a 48-CPU daemon.
+  # -- Max concurrently running build operations per daemon: RUN, COPY/ADD
+  # and source operations (image pulls, git, local context). 0 = unlimited,
+  # which is buildkit's default (not the CPU count). Production ran 28 on a
+  # 48-CPU daemon.
   maxParallelism: 0
 
-  # Garbage collection. Sizes: bytes, "512MB"/"2TB", or "N%" of the disk.
-  # Units are binary: buildkit reads "10GB" as 10 GiB.
-  # Durations: seconds or Go durations ("48h", "336h"; no "d" unit).
-  # The chart always renders the full policy set itself; buildkit ignores
-  # worker-level caps once any explicit policy exists.
+  # Garbage collection, for the default policy set rendered by the chart.
+  # Sizes use buildkit's binary units: "10GB" = 10 GiB, "2TB" = 2 TiB.
+  # Kubernetes suffixes ("10Gi") are rejected. Percentages are of the
+  # filesystem that holds the state dir, measured once at daemon start, and
+  # come out at about 0.93 x N%. GC runs after builds (at most once a
+  # minute), not on a timer.
   gc:
-    # -- Never reclaim below this much cache.
+    # -- The capped policies never reclaim below this much cache. Age-based
+    # policies (cache mounts, local context) still expire by age.
     reservedSpace: "10GB"
     # -- Reclaim when the cache grows above this.
     maxUsedSpace: "75%"
-    # -- Reclaim when free disk space drops below this.
-    minFreeSpace: "15%"
+    # -- Reclaim when free space on the state-dir filesystem drops below this.
+    # It is compared with free blocks including the filesystem's root reserve
+    # (ext4: 5%), while kubelet evicts on available blocks at 10-15%. With the
+    # cache on the node's root disk (emptyDir, or hostPath not on its own
+    # disk) keep it at 30% or more; on a dedicated disk use an absolute size
+    # (production: 400GB on a 3 TB NVMe).
+    minFreeSpace: "30%"
     cacheMounts:
-      # -- Keep RUN --mount=type=cache contents this long after last use.
-      # buildkit's default is 48h, which makes package caches cold after a
-      # weekend.
+      # -- Keep RUN --mount=type=cache contents this long after last use
+      # (buildkit's default is 48h, which makes package caches cold after a
+      # weekend). Must be non-zero.
       keepDuration: "336h"
-      # -- Expire cache mounts only while the WHOLE cache is above this size
-      # (buildkit compares policy caps with total usage, not with the
-      # filtered records). Empty: expire after keepDuration unconditionally.
+      # -- Expire cache mounts (whatever their age) only while the WHOLE
+      # cache is above this size: buildkit compares policy caps with the total
+      # usage, not with the filtered records. Empty: expire by age only.
       maxUsedSpace: ""
 
   # -- Replace the chart's GC policies entirely. Each item: filters, all,
-  # keepDuration, reservedSpace, maxUsedSpace, minFreeSpace.
+  # keepDuration, reservedSpace, maxUsedSpace, minFreeSpace. Filters use
+  # buildkit's prune syntax, e.g. "type==exec.cachemount".
   gcPolicy: []
 
-  # -- Build history API (used by the console in later releases).
-  # Keys: maxAge (duration), maxEntries (int; 0 disables recording).
-  # Empty keeps buildkit defaults (48h / 50).
+  # -- Build history (used by the console in later releases). Keys: maxAge
+  # (duration) and maxEntries (int). Set both, or neither: a key that is not
+  # set becomes 0, not the buildkit default (48h / 50); maxEntries 0 stops
+  # recording new history, and maxAge alone drops the 50-entry floor.
   history: {}
 
   # -- Container Device Interface (GPUs and other devices for RUN steps).
-  # Off by default: CI builds need no devices, and it removes an attack
-  # surface (see GHSA-r456-g3gm-cvxf, fixed in v0.33.1).
+  # Off by default: CI builds need no devices. Requires buildkit >= v0.33.1:
+  # older versions panic when a build requests a device while CDI is
+  # disabled (GHSA-r456-g3gm-cvxf).
   cdi:
     enabled: false
 
-  # -- Max concurrent connections per registry; 0 keeps the buildkit
-  # default. See moby/buildkit#7275 before raising it.
+  # -- Max concurrent connections per registry; 0 keeps the buildkit default
+  # (4). Pushes that get stuck hold their slot and can hang every build on
+  # the daemon (moby/buildkit#7275); the probes do not detect that.
   maxRegistryConcurrency: 0
 
-  # -- Raw TOML appended verbatim. Must not repeat tables the chart renders
-  # ([grpc], [worker.oci], [worker.containerd], [history], [system], [cdi]).
+  # -- Extra keys for the [worker.oci] table, e.g. {snapshotter: native}.
+  # Values: strings, numbers, booleans or lists. The keys the chart sets
+  # (enabled, gc, max-parallelism, gcpolicy) are rejected.
+  workerOCI: {}
+
+  # -- Raw TOML inserted after the top-level keys and before the chart's
+  # tables: use it for top-level keys (e.g. insecure-entitlements) and new
+  # tables (e.g. [registry."docker.io"]). Never repeat [grpc], [worker.oci],
+  # [worker.containerd], [history], [system] or [cdi]; the chart validates the
+  # result and fails the render otherwise.
   extraConfig: ""
 
-# Probes call `buildctl debug workers` on the local unix socket, with OTEL
-# disabled. A busy daemon can take seconds to answer; the Kubernetes default
-# timeout (1s) restarts healthy daemons under load.
+# Probes call `buildctl debug workers` on the local unix socket with an empty
+# environment (tracing variables would make buildctl wait for a trace
+# backend). A busy daemon can take seconds to answer; the Kubernetes default
+# timeout (1 s) restarts healthy daemons under load.
 probes:
   # -- Polls often until the daemon answers, then hands over to readiness
-  # (run immediately by kubelet) and liveness. Liveness is off meanwhile, so
-  # a slow start on a large cache is not killed. Budget: 2s x 150 = 5 min.
+  # (kubelet runs it right away) and liveness, which is off meanwhile, so a
+  # slow start on a large cache is not killed. Budget: failureThreshold x
+  # max(periodSeconds, timeoutSeconds) = 5 to 7.5 min.
   startup:
     initialDelaySeconds: 2
     periodSeconds: 2
-    timeoutSeconds: 10
+    timeoutSeconds: 3
     failureThreshold: 150
+    terminationGracePeriodSeconds: 30
   readiness:
-    # -- Keep 0: kubelet triggers readiness right after startup succeeds,
-    # but skips that run if it falls inside initialDelaySeconds — the pod
-    # then waits a full period (seen on kind: 34s instead of ~4s).
+    # -- Keep 0: kubelet runs readiness right after startup succeeds, but
+    # skips that run while still inside initialDelaySeconds; the pod then
+    # waits a full period.
     initialDelaySeconds: 0
-    periodSeconds: 30
+    # -- A daemon that stops answering leaves the endpoints after
+    # periodSeconds x failureThreshold (30 s); until then its node's jobs
+    # still go to it.
+    periodSeconds: 10
     timeoutSeconds: 10
     failureThreshold: 3
   liveness:
-    initialDelaySeconds: 5
+    initialDelaySeconds: 0
     periodSeconds: 30
     timeoutSeconds: 15
     failureThreshold: 6
+    # -- Grace for a restart caused by this probe. A wedged daemon is killed
+    # after this instead of the pod's terminationGracePeriodSeconds.
+    terminationGracePeriodSeconds: 30
 
-# -- Daemon resources. Do not let it take the whole node: kubelet and
-# containerd need headroom. A hard CPU limit throttles builds; prefer
-# requests close to the expected load. Production example:
+# -- Daemon resources. Empty = BestEffort: first to be OOM-killed or evicted,
+# lowest CPU weight. Size requests to the build load and leave kubelet and
+# containerd headroom (an unlimited daemon starved a 192-core node in
+# production). A hard CPU limit throttles builds. A memory limit applies to
+# buildkitd and all RUN steps together, and an OOM kill takes the whole
+# daemon with every running build; leave headroom above max-parallelism x
+# the largest step. Production starting point:
 #   requests: {cpu: "48", memory: 128Gi}
 #   limits:   {memory: 128Gi}
 resources: {}
 
-# -- Seconds a stopping daemon gets to finish in-flight requests.
+# -- Seconds a stopping daemon gets to finish running builds (it stops
+# accepting new ones at once). Builds still running after this are killed.
+# With maxUnavailable 1 a rollout takes up to nodes x this, so pass helm
+# --timeout accordingly. Production builds took 7-21 min: consider 1200-1800
+# there. Pod evictions and node shutdowns do not honour it.
 terminationGracePeriodSeconds: 300
 
+# -- On deletion, keep serving for this long before buildkitd gets SIGTERM,
+# so kube-proxy withdraws the endpoint first and no new connection is
+# refused. Counts against terminationGracePeriodSeconds. 0 disables.
+preStopSleepSeconds: 5
+
+# -- A new daemon must stay ready this long before the rollout moves on to
+# the next node.
+minReadySeconds: 10
+
 updateStrategy:
+  # -- RollingUpdate or OnDelete. With OnDelete, Helm 4's `--wait` (kstatus)
+  # waits for pods that are never replaced: use --wait=legacy or no --wait.
   type: RollingUpdate
   rollingUpdate:
     maxUnavailable: 1
+    # -- Must stay 0 with storage.type=hostPath (buildkitd locks the state
+    # dir, so a surge pod never starts).
+    maxSurge: 0
 
-# -- Merged over global.buildNodes.selector.
+# -- Merged over global.buildNodes.selector (and kubernetes.io/os: linux).
 nodeSelector: {}
 # -- Appended to global.buildNodes.tolerations.
 tolerations: []
 affinity: {}
+# -- A PriorityClass above the CI job pods keeps the daemon from being
+# preempted by them.
 priorityClassName: ""
 
+# -- Extra pod labels. They cannot override the selector or component labels.
 podLabels: {}
 podAnnotations: {}
 

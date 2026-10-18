@@ -7,40 +7,69 @@ tests:
       - matchSnapshot:
           path: data["buildkitd.toml"]
 
-  - it: listens on the unix socket (probes) and tcp (clients)
+  # The snapshot regenerates with -u; the lines that matter most are pinned
+  # explicitly so a careless snapshot update cannot drop them.
+  - it: keeps the state in /var/lib/buildkit and listens on the socket and tcp
     asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '(?m)^root = "/var/lib/buildkit"$'
       - matchRegex:
           path: data["buildkitd.toml"]
           pattern: 'address = \["unix:///run/buildkit/buildkitd.sock", "tcp://0.0.0.0:1234"\]'
 
-  - it: never enables the unauthenticated debug server (D19)
+  - it: never enables the unauthenticated debug server
     asserts:
       - notMatchRegex:
           path: data["buildkitd.toml"]
-          pattern: debugAddress
+          pattern: (?i)debugAddress
 
-  # D18: buildkit drops worker-level caps once explicit policies exist, so
-  # the three unfiltered policies must carry the caps themselves.
-  - it: injects the shared caps into every unfiltered policy
+  - it: enables the OCI worker with GC and disables the containerd worker
     asserts:
       - matchRegex:
           path: data["buildkitd.toml"]
-          pattern: '(?s)(reservedSpace = "10GB"\n  maxUsedSpace = "75%"\n  minFreeSpace = "15%".*){3}'
+          pattern: '\[worker.oci\]\n  enabled = true\n  gc = true\n'
       - matchRegex:
           path: data["buildkitd.toml"]
-          pattern: '\[\[worker.oci.gcpolicy\]\]\n  all = true\n  reservedSpace = "10GB"'
+          pattern: '\[worker.containerd\]\n  enabled = false\n'
 
+  # buildkit ignores worker-level caps as soon as any explicit policy exists,
+  # so caps must never be rendered there.
   - it: does not put caps at worker level, where buildkit ignores them
     asserts:
       - notMatchRegex:
           path: data["buildkitd.toml"]
-          pattern: '\[worker.oci\]\n  enabled = true\n  gc = true\n  (reservedSpace|maxUsedSpace|minFreeSpace)'
+          pattern: '\[worker.oci\]\n(  [^\n]*\n)*  (reservedSpace|maxUsedSpace|minFreeSpace) ='
 
-  - it: keeps cache mounts for two weeks, without a cap, by default
+  - it: renders exactly five default policies
     asserts:
       - matchRegex:
           path: data["buildkitd.toml"]
-          pattern: 'filters = \["type==exec.cachemount"\]\n  keepDuration = "336h"\n\n'
+          pattern: '(?s)(\[\[worker.oci.gcpolicy\]\].*){5}'
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '(?s)(\[\[worker.oci.gcpolicy\]\].*){6}'
+
+  - it: renders the default policies in upstream's shape, cache mounts split out
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[\[worker.oci.gcpolicy\]\]\n  filters = \["type==source.local","type==source.git.checkout"\]\n  keepDuration = "48h"\n  maxUsedSpace = "512MB"\n\n'
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[\[worker.oci.gcpolicy\]\]\n  filters = \["type==exec.cachemount"\]\n  keepDuration = "336h"\n\n'
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[\[worker.oci.gcpolicy\]\]\n  keepDuration = "1440h"\n  reservedSpace = "10GB"\n  maxUsedSpace = "75%"\n  minFreeSpace = "30%"\n\n'
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\n\n\[\[worker.oci.gcpolicy\]\]\n  reservedSpace = "10GB"\n  maxUsedSpace = "75%"\n  minFreeSpace = "30%"\n\n'
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[\[worker.oci.gcpolicy\]\]\n  all = true\n  reservedSpace = "10GB"\n  maxUsedSpace = "75%"\n  minFreeSpace = "30%"\n\n\[worker.containerd\]'
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '(?s)exec\.cachemount.*exec\.cachemount'
 
   - it: renders cache mount overrides
     set:
@@ -51,13 +80,10 @@ tests:
           path: data["buildkitd.toml"]
           pattern: 'filters = \["type==exec.cachemount"\]\n  keepDuration = "720h"\n  maxUsedSpace = "1TB"\n'
 
-  - it: skips empty caps instead of rendering empty strings
+  - it: skips an empty cap instead of rendering an empty string
     set:
       config.gc.reservedSpace: ""
     asserts:
-      - notMatchRegex:
-          path: data["buildkitd.toml"]
-          pattern: 'reservedSpace = ""'
       - notMatchRegex:
           path: data["buildkitd.toml"]
           pattern: reservedSpace
@@ -75,13 +101,32 @@ tests:
           path: data["buildkitd.toml"]
           pattern: '\[\[worker.oci.gcpolicy\]\]\n  all = true\n  maxUsedSpace = "500GB"\n\n\[worker.containerd\]'
 
-  - it: renders max-parallelism only when set
+  - it: renders max-parallelism inside [worker.oci] only when set
     set:
       config.maxParallelism: 28
     asserts:
       - matchRegex:
           path: data["buildkitd.toml"]
-          pattern: '\n  max-parallelism = 28\n'
+          pattern: '\[worker.oci\]\n  enabled = true\n  gc = true\n  max-parallelism = 28\n'
+
+  # Helm parses numbers in values files as float64; printed naively, 1000000
+  # becomes 1e+06 and buildkitd refuses the config.
+  - it: renders large integers from a values file without a float exponent
+    values:
+      - values/large-integers.yaml
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '  max-parallelism = 1000000\n'
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '  maxEntries = 1000000\n'
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '  maxRegistryConcurrency = 1000000\n'
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: 'e\+'
 
   - it: renders history, including maxEntries = 0
     set:
@@ -92,6 +137,16 @@ tests:
       - matchRegex:
           path: data["buildkitd.toml"]
           pattern: '\[history\]\n  maxAge = "168h"\n  maxEntries = 0\n'
+
+  # An empty [history] table makes buildkit delete every completed record.
+  - it: renders no [history] table when its keys are empty
+    set:
+      config.history:
+        maxAge: ""
+    asserts:
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[history\]'
 
   - it: disables CDI by default
     asserts:
@@ -115,19 +170,48 @@ tests:
           path: data["buildkitd.toml"]
           pattern: '\[system\]\n  maxRegistryConcurrency = 8\n'
 
-  - it: appends extraConfig verbatim at the end
+  - it: renders workerOCI keys inside [worker.oci], before the policies
+    set:
+      config.workerOCI:
+        snapshotter: native
+        cniPoolSize: 16
+        platforms: [linux/amd64, linux/arm64]
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[worker.oci\]\n  enabled = true\n  gc = true\n  cniPoolSize = 16\n  platforms = \["linux/amd64","linux/arm64"\]\n  snapshotter = "native"\n\n\[\[worker.oci.gcpolicy\]\]'
+
+  # Top-level keys after a table header would belong to that table, so
+  # extraConfig goes before the chart's tables.
+  - it: inserts extraConfig after the top-level keys and before the tables
     set:
       config.extraConfig: |
+        insecure-entitlements = ["security.insecure"]
         [registry."docker.io"]
           mirrors = ["mirror.example:5000"]
     asserts:
       - matchRegex:
           path: data["buildkitd.toml"]
-          pattern: '(?s)\[worker.containerd\].*# --- extraConfig ---\n\[registry."docker.io"\]\n  mirrors = \["mirror.example:5000"\]\n$'
+          pattern: '(?s)^# [^\n]*\nroot = "/var/lib/buildkit"\n\n# --- config.extraConfig ---\ninsecure-entitlements = \["security.insecure"\]\n\[registry."docker.io"\]\n  mirrors = \["mirror.example:5000"\]\n# --- end of config.extraConfig ---\n\n\[grpc\]'
+
+  # Schema: inputs that pass a loose pattern but crash buildkitd at start.
+  - it: rejects Kubernetes-style size suffixes
+    set:
+      config.gc.maxUsedSpace: 500Gi
+    asserts:
+      - failedTemplate:
+          errorPattern: maxUsedSpace
 
   - it: rejects a duration with a "d" unit (Go has none)
     set:
       config.gc.cacheMounts.keepDuration: 14d
+    asserts:
+      - failedTemplate:
+          errorPattern: keepDuration
+
+  - it: rejects a duration that overflows
+    set:
+      config.gc.cacheMounts.keepDuration: 99999999999h
     asserts:
       - failedTemplate:
           errorPattern: keepDuration
@@ -138,3 +222,12 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: maxUsedSpace
+
+  - it: rejects a malformed GC filter
+    set:
+      config.gcPolicy:
+        - filters: ["type=exec.cachemount"]
+          maxUsedSpace: 10GB
+    asserts:
+      - failedTemplate:
+          errorPattern: filters

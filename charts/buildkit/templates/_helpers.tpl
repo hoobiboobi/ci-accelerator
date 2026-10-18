@@ -23,6 +23,15 @@ name already contains the chart name. Truncated to 63 chars (DNS label).
 {{- end }}
 
 {{/*
+Name of the headless discovery Service: <fullname>-headless, within the
+63-character limit of a Service name. Other components resolve the daemons
+through it, so keep this the only place the name is built.
+*/}}
+{{- define "buildkit.headlessName" -}}
+{{- printf "%s-headless" (include "buildkit.fullname" . | trunc 54 | trimSuffix "-") }}
+{{- end }}
+
+{{/*
 Value for the helm.sh/chart label.
 */}}
 {{- define "buildkit.chart" -}}
@@ -30,28 +39,51 @@ Value for the helm.sh/chart label.
 {{- end }}
 
 {{/*
-Selector labels. Immutable on DaemonSets/StatefulSets — never add anything
-here that can change between upgrades.
+Selector labels. Immutable on DaemonSets — never add anything here that can
+change between upgrades.
 */}}
 {{- define "buildkit.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "buildkit.name" . }}
-app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end }}
 
 {{/*
-Common labels. ci-accelerator.io/component lets resources from other
-ci-accelerator charts (NetworkPolicy, scrape configs) select the daemons.
+Labels every chart-built object carries in addition to the selector labels.
+ci-accelerator.io/component lets resources from other ci-accelerator charts
+(NetworkPolicy, scrape configs) select the daemons.
 */}}
-{{- define "buildkit.labels" -}}
-helm.sh/chart: {{ include "buildkit.chart" . }}
-{{ include "buildkit.selectorLabels" . }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- define "buildkit.componentLabels" -}}
 app.kubernetes.io/part-of: ci-accelerator
 ci-accelerator.io/component: buildkit
-{{- with .Values.commonLabels }}
-{{ toYaml . }}
 {{- end }}
+
+{{/*
+Labels for top-level objects. commonLabels are added, but cannot override
+the chart's own labels (sprig merge keeps the first dict's keys).
+*/}}
+{{- define "buildkit.labels" -}}
+{{- $own := merge
+  (include "buildkit.selectorLabels" . | fromYaml)
+  (include "buildkit.componentLabels" . | fromYaml)
+  (dict
+    "helm.sh/chart" (include "buildkit.chart" .)
+    "app.kubernetes.io/version" .Chart.AppVersion
+    "app.kubernetes.io/managed-by" .Release.Service) }}
+{{- toYaml (merge $own (default (dict) .Values.commonLabels)) }}
+{{- end }}
+
+{{/*
+Labels for the pod template. Deliberately without helm.sh/chart and
+app.kubernetes.io/version: any change of the pod template restarts every
+daemon (and empties an emptyDir cache), so a chart release that changes
+nothing else must not touch it. podLabels and commonLabels cannot override
+the selector or component labels.
+*/}}
+{{- define "buildkit.podLabels" -}}
+{{- $own := merge
+  (include "buildkit.selectorLabels" . | fromYaml)
+  (include "buildkit.componentLabels" . | fromYaml) }}
+{{- toYaml (merge $own (default (dict) .Values.podLabels) (default (dict) .Values.commonLabels)) }}
 {{- end }}
 
 {{/*
@@ -67,15 +99,13 @@ Build-node placement from global.buildNodes, or nothing when it is disabled.
 {{- end }}
 
 {{/*
-Node selector: global.buildNodes.selector with nodeSelector merged over it.
+Node selector: kubernetes.io/os=linux, then global.buildNodes.selector, then
+nodeSelector; later sources win on conflicting keys.
 */}}
 {{- define "buildkit.nodeSelector" -}}
 {{- $bn := include "buildkit.buildNodes" . | fromJson }}
-{{- $global := default (dict) $bn.selector }}
-{{- $sel := merge (deepCopy .Values.nodeSelector) $global }}
-{{- with $sel }}
-{{- toYaml . }}
-{{- end }}
+{{- $sel := merge (deepCopy (default (dict) .Values.nodeSelector)) (default (dict) $bn.selector) (dict "kubernetes.io/os" "linux") }}
+{{- toYaml $sel }}
 {{- end }}
 
 {{/*
@@ -84,39 +114,51 @@ Tolerations: global.buildNodes.tolerations followed by tolerations.
 {{- define "buildkit.tolerations" -}}
 {{- $bn := include "buildkit.buildNodes" . | fromJson }}
 {{- $global := default (list) $bn.tolerations }}
-{{- with concat $global .Values.tolerations }}
+{{- with concat $global (default (list) .Values.tolerations) }}
 {{- toYaml . }}
 {{- end }}
 {{- end }}
 
 {{/*
-Container image reference. Digest wins over tag; tag defaults to appVersion.
+Container image reference: repository:tag@digest when a digest is set (the
+runtime pulls by digest; the tag stays readable), else repository:tag. The
+tag defaults to the chart appVersion.
 */}}
 {{- define "buildkit.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.image.tag }}
 {{- if .Values.image.digest }}
-{{- printf "%s@%s" .Values.image.repository .Values.image.digest }}
+{{- printf "%s:%s@%s" .Values.image.repository $tag .Values.image.digest }}
 {{- else }}
-{{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
+{{- printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}
 {{- end }}
 
 {{/*
-Probe command. Exec probes inherit the container env, so OTEL is switched
-off and the OTLP endpoints are removed explicitly: with tracing configured,
-a dead trace backend hangs the probe and liveness kills every daemon at once.
+Probe command. Exec probes inherit the container environment, and buildctl
+turns standard tracing variables (OTEL_TRACES_EXPORTER, OTEL_EXPORTER_OTLP_*,
+JAEGER_*) into an exporter that flushes on exit: with a slow or dead trace
+backend every probe then takes 10-30 s and probes kill healthy daemons.
+`env -i` starts buildctl with an empty environment; OTEL_TRACES_EXPORTER=none
+is buildkit's own off switch. OTEL_SDK_DISABLED is not read by buildkit.
 */}}
 {{- define "buildkit.probeExec" -}}
 exec:
   command:
     - env
-    - -u
-    - OTEL_EXPORTER_OTLP_ENDPOINT
-    - -u
-    - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-    - OTEL_SDK_DISABLED=true
-    - buildctl
+    - -i
+    - OTEL_TRACES_EXPORTER=none
+    - /usr/bin/buildctl
     - --addr
     - unix:///run/buildkit/buildkitd.sock
     - debug
     - workers
+{{- end }}
+
+{{/*
+Path of the rendered buildkitd.toml inside the container. Kept out of
+/etc/buildkit so the image's own files there (cdi, cni.json, provenance.d)
+stay visible to buildkitd.
+*/}}
+{{- define "buildkit.configDir" -}}
+/etc/buildkitd
 {{- end }}

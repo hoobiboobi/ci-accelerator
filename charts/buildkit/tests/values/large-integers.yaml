@@ -1,0 +1,7 @@
+# Numbers in values files reach the templates as float64.
+config:
+  maxParallelism: 1000000
+  maxRegistryConcurrency: 1000000
+  history:
+    maxAge: 168h
+    maxEntries: 1000000

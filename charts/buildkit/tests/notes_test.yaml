@@ -1,0 +1,92 @@
+suite: NOTES
+templates:
+  - NOTES.txt
+release:
+  name: bk
+  namespace: builds
+kubernetesProvider:
+  scheme:
+    "v1/Namespace":
+      gvr:
+        version: v1
+        resource: namespaces
+      namespaced: false
+tests:
+  - it: prints the in-cluster address and a probe-safe check command
+    asserts:
+      - matchRegexRaw:
+          pattern: 'tcp://bk-buildkit\.builds\.svc:1234\n  \(routing: PreferSameNode\)'
+      - matchRegexRaw:
+          pattern: 'kubectl exec -n builds ds/bk-buildkit -- env -i OTEL_TRACES_EXPORTER=none /usr/bin/buildctl debug workers'
+      - matchRegexRaw:
+          pattern: 'DESIRED 0 means no node matches'
+
+  - it: always warns that TLS is not configured
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: TLS is not configured yet\. Anything that can reach container port 1234,'
+
+  - it: names the node port in the warning for NodePort
+    set:
+      service.type: NodePort
+      service.nodePort: 31234
+    asserts:
+      - matchRegexRaw:
+          pattern: 'From outside the cluster: tcp://<any-node-ip>:31234'
+      - matchRegexRaw:
+          pattern: 'container port 1234 or node port 31234 on every node,'
+
+  - it: lists what is missing for production with the defaults
+    asserts:
+      - matchRegexRaw:
+          pattern: 'Before production:\n  - storage.type=emptyDir: every rollout'
+      - matchRegexRaw:
+          pattern: '  - resources is empty: the daemon runs BestEffort'
+      - matchRegexRaw:
+          pattern: '  - config.maxParallelism is 0 \(unlimited\)'
+
+  - it: drops the items that are configured
+    set:
+      storage.type: hostPath
+      storage.hostPath.path: /var/mnt/nvme/buildkit
+      resources:
+        requests:
+          cpu: "8"
+      config.maxParallelism: 16
+    asserts:
+      - matchRegexRaw:
+          pattern: 'Before production:\n  - storage.type=hostPath: the cache in /var/mnt/nvme/buildkit stays on the nodes after helm uninstall'
+      - notMatchRegexRaw:
+          pattern: 'resources is empty'
+      - notMatchRegexRaw:
+          pattern: 'maxParallelism is 0'
+
+  - it: warns when the namespace has no Pod Security enforce label
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: namespace builds has no pod-security.kubernetes.io/enforce label'
+
+  # helm install --create-namespace renders before the namespace exists.
+  - it: warns when the namespace did not exist at render time
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: namespace builds has no pod-security.kubernetes.io/enforce label \(it did not exist yet when the chart was rendered, e.g. --create-namespace\),'
+
+  - it: does not warn about a privileged namespace
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+            labels:
+              pod-security.kubernetes.io/enforce: privileged
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'has no pod-security.kubernetes.io/enforce label'

@@ -2,12 +2,12 @@ suite: daemonset
 templates:
   - daemonset.yaml
   - configmap.yaml
+release:
+  name: bk
+  namespace: ci-accelerator
 tests:
   - it: is a DaemonSet in the release namespace
     template: daemonset.yaml
-    release:
-      name: bk
-      namespace: ci-accelerator
     asserts:
       - isKind:
           of: DaemonSet
@@ -18,140 +18,395 @@ tests:
           path: metadata.namespace
           value: ci-accelerator
 
-  # A busy daemon answers `buildctl debug workers` in seconds; the 1s
-  # Kubernetes default restarted healthy daemons in production.
+  # The selector is immutable: any change breaks `helm upgrade` for every user.
+  - it: keeps the immutable selector to name and instance
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: buildkit
+            app.kubernetes.io/instance: bk
+
+  # Any pod template change restarts every daemon (and empties emptyDir
+  # caches): a chart release that changes nothing else must not touch it.
+  - it: keeps chart and version labels out of the pod template
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels
+          value:
+            app.kubernetes.io/name: buildkit
+            app.kubernetes.io/instance: bk
+            app.kubernetes.io/part-of: ci-accelerator
+            ci-accelerator.io/component: buildkit
+
+  - it: keeps chart labels on the object itself
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: metadata.labels["helm.sh/chart"]
+          value: buildkit-0.1.0
+      - equal:
+          path: metadata.labels["app.kubernetes.io/version"]
+          value: v0.33.1
+      - equal:
+          path: metadata.labels["ci-accelerator.io/component"]
+          value: buildkit
+
+  - it: adds podLabels and commonLabels to pods without letting them override chart labels
+    template: daemonset.yaml
+    set:
+      podLabels:
+        team: ci
+        app.kubernetes.io/name: hijack
+      commonLabels:
+        cost-center: "42"
+        ci-accelerator.io/component: hijack
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels
+          value:
+            app.kubernetes.io/name: buildkit
+            app.kubernetes.io/instance: bk
+            app.kubernetes.io/part-of: ci-accelerator
+            ci-accelerator.io/component: buildkit
+            team: ci
+            cost-center: "42"
+
+  - it: adds commonLabels to objects without letting them override chart labels
+    template: daemonset.yaml
+    set:
+      commonLabels:
+        cost-center: "42"
+        helm.sh/chart: hijack
+        app.kubernetes.io/instance: hijack
+    asserts:
+      - equal:
+          path: metadata.labels["helm.sh/chart"]
+          value: buildkit-0.1.0
+      - equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: bk
+      - equal:
+          path: metadata.labels.cost-center
+          value: "42"
+
+  - it: rolls one node at a time and never surges
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.updateStrategy
+          value:
+            type: RollingUpdate
+            rollingUpdate:
+              maxUnavailable: 1
+              maxSurge: 0
+      - equal:
+          path: spec.minReadySeconds
+          value: 10
+
+  # Helm merges {type: OnDelete} with the default rollingUpdate block, which
+  # the API rejects for OnDelete.
+  - it: renders OnDelete without a rollingUpdate block
+    template: daemonset.yaml
+    set:
+      updateStrategy.type: OnDelete
+    asserts:
+      - equal:
+          path: spec.updateStrategy
+          value:
+            type: OnDelete
+
+  - it: gives running builds 300 s to finish on deletion
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 300
+
+  - it: renders large integers from a values file as integers
+    template: daemonset.yaml
+    values:
+      - values/large-integers.yaml
+    set:
+      terminationGracePeriodSeconds: 1000000
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 1000000
+
+  - it: carries a config checksum that follows the config
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/config"]
+          value: 032ad0b565aff17ecc4573f07c7522afe5f51d9cee18816ed7bc63d89f61fec2
+
+  - it: changes the config checksum when the config changes
+    template: daemonset.yaml
+    set:
+      config.maxParallelism: 28
+    asserts:
+      - notEqual:
+          path: spec.template.metadata.annotations["checksum/config"]
+          value: 032ad0b565aff17ecc4573f07c7522afe5f51d9cee18816ed7bc63d89f61fec2
+
+  # Tracing variables in the container env made every probe wait 10-30 s for
+  # a trace backend; with a dead one, every daemon was restarted at once.
+  - it: runs every probe with an empty environment
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.exec.command
+          value: &probe [env, -i, OTEL_TRACES_EXPORTER=none, /usr/bin/buildctl, --addr, unix:///run/buildkit/buildkitd.sock, debug, workers]
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command
+          value: *probe
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command
+          value: *probe
+
+  # A busy daemon answers in seconds; the 1 s Kubernetes default restarted
+  # healthy daemons in production.
   - it: uses probe timeouts that tolerate a busy daemon
     template: daemonset.yaml
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].readinessProbe.timeoutSeconds
-          value: 10
+          path: spec.template.spec.containers[0].readinessProbe
+          value:
+            exec:
+              command: *probe
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
       - equal:
-          path: spec.template.spec.containers[0].readinessProbe.failureThreshold
-          value: 3
-      - equal:
-          path: spec.template.spec.containers[0].livenessProbe.timeoutSeconds
-          value: 15
-      - equal:
-          path: spec.template.spec.containers[0].livenessProbe.failureThreshold
-          value: 6
-      - equal:
-          path: spec.template.spec.containers[0].livenessProbe.periodSeconds
-          value: 30
+          path: spec.template.spec.containers[0].livenessProbe
+          value:
+            exec:
+              command: *probe
+            initialDelaySeconds: 0
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 6
+            terminationGracePeriodSeconds: 30
 
-  # On kind, readiness with period 30s made a daemon that was up in 15s Ready
-  # only after ~50s. A frequent startup probe fixes that (kubelet runs
-  # readiness immediately once started) and keeps liveness off during a
-  # slow start on a large cache.
-  - it: polls often on startup with a generous budget
+  # kubelet runs readiness right after the startup probe succeeds, but skips
+  # that run inside readiness initialDelaySeconds (seen on kind: 34 s instead
+  # of ~3 s to Ready).
+  - it: polls often on startup and hands over to readiness at once
     template: daemonset.yaml
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].startupProbe.periodSeconds
-          value: 2
-      - equal:
-          path: spec.template.spec.containers[0].startupProbe.timeoutSeconds
-          value: 10
-      - equal:
-          path: spec.template.spec.containers[0].startupProbe.failureThreshold
-          value: 150
-      - contains:
-          path: spec.template.spec.containers[0].startupProbe.exec.command
-          content: OTEL_SDK_DISABLED=true
-      # A readiness initialDelay swallows kubelet's immediate post-startup
-      # run; the pod then waits a full readiness period (34s on kind).
+          path: spec.template.spec.containers[0].startupProbe
+          value:
+            exec:
+              command: *probe
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 150
+            terminationGracePeriodSeconds: 30
       - equal:
           path: spec.template.spec.containers[0].readinessProbe.initialDelaySeconds
           value: 0
 
-  # With tracing configured, a dead trace backend hung the probe and liveness
-  # killed every daemon at once.
-  - it: runs probes with OTEL disabled and OTLP endpoints removed
+  - it: delays SIGTERM until the endpoint is withdrawn
     template: daemonset.yaml
     asserts:
-      - contains:
-          path: spec.template.spec.containers[0].livenessProbe.exec.command
-          content: OTEL_SDK_DISABLED=true
-      - contains:
-          path: spec.template.spec.containers[0].livenessProbe.exec.command
-          content: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-      - contains:
-          path: spec.template.spec.containers[0].livenessProbe.exec.command
-          content: OTEL_EXPORTER_OTLP_ENDPOINT
       - equal:
-          path: spec.template.spec.containers[0].readinessProbe.exec
+          path: spec.template.spec.containers[0].lifecycle
           value:
-            command:
-              - env
-              - -u
-              - OTEL_EXPORTER_OTLP_ENDPOINT
-              - -u
-              - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-              - OTEL_SDK_DISABLED=true
-              - buildctl
-              - --addr
-              - unix:///run/buildkit/buildkitd.sock
-              - debug
-              - workers
+            preStop:
+              sleep:
+                seconds: 5
 
-  - it: runs a privileged rootful daemon (D12) without an API token
+  - it: can drop the preStop delay
+    template: daemonset.yaml
+    set:
+      preStopSleepSeconds: 0
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].lifecycle
+
+  - it: runs a privileged rootful daemon without an API token
     template: daemonset.yaml
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].securityContext.privileged
-          value: true
+          path: spec.template.spec.containers[0].securityContext
+          value:
+            privileged: true
       - equal:
           path: spec.template.spec.automountServiceAccountToken
           value: false
 
-  - it: schedules onto labelled and tainted build nodes by default
+  # Enabling the debug server (pprof, cache load) through a flag or env var
+  # must not slip past the TOML tests.
+  - it: starts buildkitd with the rendered config only
     template: daemonset.yaml
     asserts:
       - equal:
-          path: spec.template.spec.nodeSelector
+          path: spec.template.spec.containers[0].args
+          value: [--config, /etc/buildkitd/buildkitd.toml]
+      - equal:
+          path: spec.template.spec.containers[0].ports
           value:
-            ci-accelerator.io/node-role: build
+            - name: grpc
+              containerPort: 1234
+              protocol: TCP
+      - notExists:
+          path: spec.template.spec.containers[0].env
+
+  - it: passes extraEnv through
+    template: daemonset.yaml
+    set:
+      extraEnv:
+        - name: OTEL_TRACES_EXPORTER
+          value: otlp
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - name: OTEL_TRACES_EXPORTER
+              value: otlp
+
+  # Mounting over /etc/buildkit hid the image's own files (cdi, cni.json).
+  - it: mounts the config outside /etc/buildkit and the state at /var/lib/buildkit
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts
+          value:
+            - name: config
+              mountPath: /etc/buildkitd
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/buildkit
       - contains:
-          path: spec.template.spec.tolerations
+          path: spec.template.spec.volumes
           content:
-            key: ci-accelerator.io/node-role
-            operator: Equal
-            value: build
-            effect: NoSchedule
+            name: config
+            configMap:
+              name: bk-buildkit-config
 
-  - it: can run on any node when build nodes are switched off
+  - it: schedules onto labelled and tainted Linux build nodes by default
     template: daemonset.yaml
-    set:
-      global.buildNodes.enabled: false
-    asserts:
-      - notExists:
-          path: spec.template.spec.nodeSelector
-      - notExists:
-          path: spec.template.spec.tolerations
-
-  - it: keeps user nodeSelector/tolerations when build nodes are off
-    template: daemonset.yaml
-    set:
-      global.buildNodes.enabled: false
-      nodeSelector:
-        kubernetes.io/arch: arm64
-    asserts:
-      - equal:
-          path: spec.template.spec.nodeSelector
-          value:
-            kubernetes.io/arch: arm64
-
-  - it: merges nodeSelector over the global selector
-    template: daemonset.yaml
-    set:
-      nodeSelector:
-        kubernetes.io/arch: arm64
     asserts:
       - equal:
           path: spec.template.spec.nodeSelector
           value:
             ci-accelerator.io/node-role: build
+            kubernetes.io/os: linux
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - key: ci-accelerator.io/node-role
+              operator: Equal
+              value: build
+              effect: NoSchedule
+
+  - it: still requires Linux when build nodes are switched off
+    template: daemonset.yaml
+    set:
+      global.buildNodes.enabled: false
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            kubernetes.io/os: linux
+      - notExists:
+          path: spec.template.spec.tolerations
+
+  - it: lets nodeSelector override and extend the global selector
+    template: daemonset.yaml
+    set:
+      nodeSelector:
+        ci-accelerator.io/node-role: gpu-build
+        kubernetes.io/arch: arm64
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            ci-accelerator.io/node-role: gpu-build
             kubernetes.io/arch: arm64
+            kubernetes.io/os: linux
+
+  - it: appends user tolerations to the build-node toleration
+    template: daemonset.yaml
+    set:
+      tolerations:
+        - key: dedicated
+          operator: Exists
+          effect: NoSchedule
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - key: ci-accelerator.io/node-role
+              operator: Equal
+              value: build
+              effect: NoSchedule
+            - key: dedicated
+              operator: Exists
+              effect: NoSchedule
+
+  - it: keeps user tolerations when build nodes are off
+    template: daemonset.yaml
+    set:
+      global.buildNodes.enabled: false
+      tolerations:
+        - key: dedicated
+          operator: Exists
+          effect: NoSchedule
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations
+          value:
+            - key: dedicated
+              operator: Exists
+              effect: NoSchedule
+
+  - it: passes scheduling and pull settings through
+    template: daemonset.yaml
+    set:
+      priorityClassName: ci-build-daemons
+      imagePullSecrets:
+        - name: mirror-creds
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: zone
+                    operator: In
+                    values: [a]
+      podAnnotations:
+        example.com/owner: ci
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.priorityClassName
+          value: ci-build-daemons
+      - equal:
+          path: spec.template.spec.imagePullSecrets
+          value:
+            - name: mirror-creds
+      - equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key
+          value: zone
+      - equal:
+          path: spec.template.metadata.annotations["example.com/owner"]
+          value: ci
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: "4"
+              memory: 8Gi
 
   - it: uses emptyDir state by default
     template: daemonset.yaml
@@ -166,6 +421,7 @@ tests:
     template: daemonset.yaml
     set:
       storage.emptyDir.sizeLimit: 50Gi
+      config.gc.maxUsedSpace: 40GB
     asserts:
       - contains:
           path: spec.template.spec.volumes
@@ -174,60 +430,52 @@ tests:
             emptyDir:
               sizeLimit: 50Gi
 
-  - it: uses a hostPath for persistent cache
+  # Directory, not DirectoryOrCreate: if the cache disk is not mounted, the
+  # pod must fail instead of filling the OS disk.
+  - it: uses an existing hostPath directory for a persistent cache
     template: daemonset.yaml
     set:
       storage.type: hostPath
-      storage.hostPath.path: /mnt/nvme/buildkit
+      storage.hostPath.path: /var/mnt/nvme/buildkit
     asserts:
       - contains:
           path: spec.template.spec.volumes
           content:
             name: state
             hostPath:
-              path: /mnt/nvme/buildkit
-              type: DirectoryOrCreate
+              path: /var/mnt/nvme/buildkit
+              type: Directory
 
-  - it: defaults the image tag to appVersion
-    template: daemonset.yaml
-    chart:
-      appVersion: v0.33.1
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[0].image
-          value: moby/buildkit:v0.33.1
-
-  - it: prefers a digest over the tag
+  - it: can let kubelet create the hostPath directory
     template: daemonset.yaml
     set:
-      image.tag: v0.99.0
-      image.digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+      storage.type: hostPath
+      storage.hostPath.path: /var/lib/ci-accelerator/buildkit
+      storage.hostPath.type: DirectoryOrCreate
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].image
-          value: moby/buildkit@sha256:0000000000000000000000000000000000000000000000000000000000000000
-
-  - it: carries a config checksum so config changes roll the pods
-    template: daemonset.yaml
-    asserts:
-      - matchRegex:
-          path: spec.template.metadata.annotations["checksum/config"]
-          pattern: '^[a-f0-9]{64}$'
-
-  - it: mounts the rendered config where buildkitd reads it
-    template: daemonset.yaml
-    release:
-      name: bk
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].volumeMounts
-          content:
-            name: config
-            mountPath: /etc/buildkit
-            readOnly: true
       - contains:
           path: spec.template.spec.volumes
           content:
-            name: config
-            configMap:
-              name: bk-buildkit-config
+            name: state
+            hostPath:
+              path: /var/lib/ci-accelerator/buildkit
+              type: DirectoryOrCreate
+
+  # Uses the real Chart.yaml: the default must stay the reviewed appVersion,
+  # pinned by digest.
+  - it: pins the appVersion image by digest by default
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+  - it: uses the tag alone when the digest is cleared
+    template: daemonset.yaml
+    set:
+      image.tag: v0.34.0
+      image.digest: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: moby/buildkit:v0.34.0
