@@ -66,3 +66,9 @@ values.local.yaml
 *.local.yaml
 .docker/config.json
 .netrc
+
+# Chart templates, chart tests and e2e fixtures are code, never secrets: keep
+# them even when a name matches a pattern above (templates/tls-secret.yaml).
+!charts/**/templates/**
+!charts/**/tests/**
+!test/e2e/fixtures/**
