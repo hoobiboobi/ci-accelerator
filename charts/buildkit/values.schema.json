@@ -7,6 +7,7 @@
     "image",
     "preflight",
     "global",
+    "tls",
     "service",
     "storage",
     "config",
@@ -106,10 +107,25 @@
     "preflight": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["podSecurity", "buildNodes"],
+      "required": ["podSecurity", "buildNodes", "tlsSecret"],
       "properties": {
         "podSecurity": { "type": "boolean" },
-        "buildNodes": { "type": "boolean" }
+        "buildNodes": { "type": "boolean" },
+        "tlsSecret": { "type": "boolean" }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["existingSecret", "reloader"],
+      "properties": {
+        "existingSecret": {
+          "description": "Secret name (DNS subdomain) in the release namespace with tls.crt, tls.key and ca.crt. Required: the chart refuses to render without it.",
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$"
+        },
+        "reloader": { "type": "boolean" }
       }
     },
     "global": {

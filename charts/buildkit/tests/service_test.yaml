@@ -1,6 +1,8 @@
 suite: services
 templates:
   - service.yaml
+values:
+  - values/tls.yaml
 release:
   name: bk
   namespace: ci-accelerator
@@ -21,6 +23,7 @@ tests:
               port: 1234
               targetPort: grpc
               protocol: TCP
+              appProtocol: tls
 
   # Own node's daemon (warm cache), and another node's daemon instead of a
   # failed build when it is not ready.
@@ -128,6 +131,7 @@ tests:
               port: 1234
               targetPort: grpc
               protocol: TCP
+              appProtocol: tls
 
   # Service names are DNS labels: at most 63 characters.
   - it: keeps the headless Service name valid for long release names

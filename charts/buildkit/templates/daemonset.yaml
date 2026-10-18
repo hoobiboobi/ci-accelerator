@@ -7,6 +7,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "buildkit.labels" . | nindent 4 }}
+  {{- if .Values.tls.reloader }}
+  annotations:
+    # Stakater Reloader rolls the daemons when the Secret changes: buildkitd
+    # reads its certificates only at start. The value is an anchored regex.
+    secret.reloader.stakater.com/reload: {{ regexQuoteMeta .Values.tls.existingSecret | quote }}
+  {{- end }}
 spec:
   selector:
     matchLabels:
@@ -98,10 +104,26 @@ spec:
               readOnly: true
             - name: state
               mountPath: /var/lib/buildkit
+            - name: tls
+              mountPath: {{ include "buildkit.tlsDir" . }}
+              readOnly: true
       volumes:
         - name: config
           configMap:
             name: {{ include "buildkit.fullname" . }}-config
+        # Explicit items: a Secret without one of the keys fails the mount
+        # with the key's name in the pod events, before buildkitd starts.
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.existingSecret | quote }}
+            defaultMode: 0400
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+              - key: ca.crt
+                path: ca.crt
         - name: state
           {{- if eq .Values.storage.type "hostPath" }}
           hostPath:

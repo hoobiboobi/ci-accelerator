@@ -63,6 +63,9 @@ secrets.*.yaml
 *.secret.yaml
 *-secret.yaml
 values.local.yaml
+# scripts/buildkit-certs.sh output (CA and client keys)
+buildkit-certs/
+kind-certs/
 *.local.yaml
 .docker/config.json
 .netrc

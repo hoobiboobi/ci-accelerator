@@ -5,8 +5,14 @@ matches the reviewed default config:
       root = "/var/lib/buildkit"
 
       [grpc]
-        # unix socket: used by the probes (no TLS needed); tcp: used by CI jobs.
+        # unix socket: used by the probes, never TLS. tcp: used by CI jobs, mutual
+        # TLS: with a CA set, buildkitd requires a client certificate signed by it.
         address = ["unix:///run/buildkit/buildkitd.sock", "tcp://0.0.0.0:1234"]
+
+      [grpc.tls]
+        cert = "/etc/buildkitd-tls/tls.crt"
+        key = "/etc/buildkitd-tls/tls.key"
+        ca = "/etc/buildkitd-tls/ca.crt"
 
       [cdi]
         disabled = true

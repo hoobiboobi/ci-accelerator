@@ -10,6 +10,28 @@ Address for CI jobs in the cluster:
 
 From outside the cluster: tcp://<any-node-ip>:{{ .Values.service.nodePort | default "<node-port>" }}
   kubectl get svc {{ $fullname }} -n {{ $ns }}
+  (add --tlsservername {{ $fullname }}.{{ $ns }}.svc unless the server
+  certificate covers that address)
+{{- end }}
+
+Clients need mutual TLS: a directory with ca.crt and a client certificate
+(tls.crt, tls.key) signed by the CA in Secret {{ .Values.tls.existingSecret }}:
+
+  buildctl --addr tcp://{{ $fullname }}.{{ $ns }}.svc:{{ .Values.service.port }} --tlsdir <dir> debug workers
+
+Any certificate from that CA can control the daemons: use a dedicated CA.
+buildkitd reads its certificate only at start. After the Secret is renewed,
+{{- if .Values.tls.reloader }}
+Stakater Reloader (if installed) restarts the daemons; otherwise run:
+{{- else }}
+restart the daemons:
+{{- end }}
+  kubectl rollout restart ds/{{ $fullname }} -n {{ $ns }}
+{{- $secret := lookup "v1" "Secret" $ns .Values.tls.existingSecret }}
+{{- if and .Values.preflight.tlsSecret (not $secret) (lookup "v1" "Namespace" "" $ns) }}
+
+WARNING: Secret {{ $ns }}/{{ .Values.tls.existingSecret }} does not exist yet; the daemon pods
+wait in ContainerCreating until it does.
 {{- end }}
 
 Check the daemons (DESIRED 0 means no node matches the build-node selector):
@@ -31,10 +53,6 @@ so the cluster default applies. Where that default is baseline or restricted
   kubectl label namespace {{ $ns }} pod-security.kubernetes.io/enforce=privileged --overwrite
 {{- end }}
 {{- end }}
-
-WARNING: TLS is not configured yet. Anything that can reach container port 1234
-{{- if eq .Values.service.type "NodePort" }} or node port {{ .Values.service.nodePort | default "<node-port>" }} on every node{{ end }},
-including RUN steps of builds on the daemon itself, can control the daemon.
 {{- $notes := list }}
 {{- if eq .Values.storage.type "emptyDir" }}
 {{- $notes = append $notes "storage.type=emptyDir: every rollout (config or image change) starts the daemons with an empty cache. Use hostPath on a dedicated disk in production." }}

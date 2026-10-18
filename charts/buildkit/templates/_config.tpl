@@ -85,8 +85,14 @@ root = "/var/lib/buildkit"
 {{- end }}
 
 [grpc]
-  # unix socket: used by the probes (no TLS needed); tcp: used by CI jobs.
+  # unix socket: used by the probes, never TLS. tcp: used by CI jobs, mutual
+  # TLS: with a CA set, buildkitd requires a client certificate signed by it.
   address = ["unix:///run/buildkit/buildkitd.sock", "tcp://0.0.0.0:1234"]
+
+[grpc.tls]
+  cert = "{{ include "buildkit.tlsDir" . }}/tls.crt"
+  key = "{{ include "buildkit.tlsDir" . }}/tls.key"
+  ca = "{{ include "buildkit.tlsDir" . }}/ca.crt"
 {{- with .Values.config.history }}
 {{- if or .maxAge (hasKey . "maxEntries") }}
 

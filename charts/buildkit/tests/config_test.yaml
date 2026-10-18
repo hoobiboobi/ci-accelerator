@@ -1,6 +1,8 @@
 suite: buildkitd.toml
 templates:
   - configmap.yaml
+values:
+  - values/tls.yaml
 tests:
   - it: matches the reviewed default config
     asserts:
@@ -17,6 +19,15 @@ tests:
       - matchRegex:
           path: data["buildkitd.toml"]
           pattern: 'address = \["unix:///run/buildkit/buildkitd.sock", "tcp://0.0.0.0:1234"\]'
+
+  # With ca set, buildkitd requires and verifies a client certificate on the
+  # tcp listener (the unix socket never uses TLS). Without ca it would accept
+  # any client: all three keys are pinned.
+  - it: always serves the tcp listener with mutual TLS from the mounted Secret
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '(?m)^\[grpc\.tls\]\n  cert = "/etc/buildkitd-tls/tls\.crt"\n  key = "/etc/buildkitd-tls/tls\.key"\n  ca = "/etc/buildkitd-tls/ca\.crt"$'
 
   - it: never enables the unauthenticated debug server
     asserts:

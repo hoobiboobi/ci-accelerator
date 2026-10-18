@@ -1,6 +1,8 @@
 suite: preflight
 templates:
   - daemonset.yaml
+values:
+  - values/tls.yaml
 release:
   name: bk
   namespace: builds
@@ -17,6 +19,11 @@ kubernetesProvider:
         version: v1
         resource: nodes
       namespaced: false
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
 tests:
   # On kind a baseline namespace gave "STATUS: deployed" and 0 pods.
   - it: fails early in a namespace that enforces baseline
@@ -194,6 +201,104 @@ tests:
             name: worker-1
             labels:
               kubernetes.io/os: linux
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  # `kubectl create secret tls` writes no ca.crt: the pods would hang in
+  # ContainerCreating with the reason only in their events. (The node check is
+  # off in these tests: the fake client cannot list a kind it has no object
+  # of.)
+  - it: refuses a TLS Secret without ca.crt and shows the command that makes one
+    set:
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          type: kubernetes.io/tls
+          metadata:
+            name: bk-tls
+            namespace: builds
+          data:
+            tls.crt: eA==
+            tls.key: eA==
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Secret builds/bk-tls \(tls.existingSecret\) has no ca.crt\..*kubectl create secret generic bk-tls -n builds --from-file=tls.crt --from-file=tls.key --from-file=ca.crt'
+
+  - it: lists every missing TLS key
+    set:
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata:
+            name: bk-tls
+            namespace: builds
+          data:
+            ca.crt: eA==
+    asserts:
+      - failedTemplate:
+          errorPattern: 'has no tls.crt, tls.key\.'
+
+  - it: accepts a TLS Secret with all three keys
+    set:
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata:
+            name: bk-tls
+            namespace: builds
+          data:
+            tls.crt: eA==
+            tls.key: eA==
+            ca.crt: eA==
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  # It may be created after the chart (GitOps, external secret operators);
+  # the pods wait for it.
+  - it: accepts a TLS Secret that does not exist yet
+    set:
+      preflight.buildNodes: false
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: does not look at Secrets in other namespaces
+    set:
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata:
+            name: bk-tls
+            namespace: elsewhere
+          data:
+            tls.crt: eA==
+    asserts:
+      - isKind:
+          of: DaemonSet
+
+  - it: can skip the TLS Secret check
+    set:
+      preflight.buildNodes: false
+      preflight.tlsSecret: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata:
+            name: bk-tls
+            namespace: builds
+          data:
+            tls.crt: eA==
     asserts:
       - isKind:
           of: DaemonSet

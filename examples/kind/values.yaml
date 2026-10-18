@@ -1,15 +1,16 @@
 # Values for the local kind cluster (examples/kind/kind-config.yaml).
 #
-#   kubectl --context kind-buildkit create namespace ci-accelerator
-#   kubectl --context kind-buildkit label namespace ci-accelerator \
-#     pod-security.kubernetes.io/enforce=privileged
-#   helm --kube-context kind-buildkit upgrade --install bk charts/buildkit \
-#     -n ci-accelerator -f examples/kind/values.yaml
+# Steps (with certificates) in examples/kind/README.md.
 #
 # Exposes the daemons as NodePort 31234. kind maps that port on the first
-# worker to 127.0.0.1:1234 on the host, so buildctl can run on the laptop:
+# worker to 127.0.0.1:1234 on the host, so buildctl can run on the laptop
+# with the client certificate:
 #
-#   buildctl --addr tcp://127.0.0.1:1234 debug workers
+#   buildctl --addr tcp://127.0.0.1:1234 --tlsdir kind-certs/client debug workers
+
+tls:
+  # Created from scripts/buildkit-certs.sh output (README).
+  existingSecret: bk-buildkit-tls
 
 service:
   type: NodePort

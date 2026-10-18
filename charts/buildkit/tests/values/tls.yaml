@@ -1,0 +1,3 @@
+# The chart refuses to render without a TLS Secret; every suite loads this.
+tls:
+  existingSecret: bk-tls

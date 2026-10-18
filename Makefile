@@ -5,6 +5,8 @@ HELM   ?= helm
 CHARTS := charts/buildkit
 # Extra values files every chart check also renders with.
 CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
+# Values the charts require and the files above leave to the installer.
+RENDER_SET := --set tls.existingSecret=lint-tls --set storage.hostPath.path=/var/lib/ci-accelerator-lint
 # Kubernetes versions the rendered manifests are validated against (the
 # chart's minimum and the newest tested).
 KUBE_VERSIONS := 1.34.0 1.37.0
@@ -93,15 +95,15 @@ lint: $(SHELLCHECK) ## helm lint --strict (default and example values), chart LI
 	@for c in $(CHARTS); do \
 		echo "==> lint $$c"; \
 		cmp -s LICENSE $$c/LICENSE || { echo "$$c/LICENSE differs from LICENSE (the packaged chart must carry the license text)"; exit 1; }; \
-		$(HELM) lint --strict $$c >/dev/null || { $(HELM) lint --strict $$c; exit 1; }; \
+		$(HELM) lint --strict $$c $(RENDER_SET) >/dev/null || { $(HELM) lint --strict $$c $(RENDER_SET); exit 1; }; \
 		for v in $(CHART_VALUES); do \
 			echo "==> lint $$c -f $$v"; \
-			$(HELM) lint --strict $$c -f $$v --set storage.hostPath.path=/var/lib/ci-accelerator-lint >/dev/null \
-				|| { $(HELM) lint --strict $$c -f $$v --set storage.hostPath.path=/var/lib/ci-accelerator-lint; exit 1; }; \
+			$(HELM) lint --strict $$c -f $$v $(RENDER_SET) >/dev/null \
+				|| { $(HELM) lint --strict $$c -f $$v $(RENDER_SET); exit 1; }; \
 		done; \
 	done
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) ## Run helm-unittest suites
@@ -116,17 +118,17 @@ validate: $(KUBECONFORM) ## Validate rendered manifests against Kubernetes schem
 		for k in $(KUBE_VERSIONS); do \
 			for v in "" $(CHART_VALUES); do \
 				echo "==> kubeconform $$c k8s $$k $${v:+-f $$v}"; \
-				$(HELM) template test $$c --kube-version $$k $${v:+-f $$v} --set storage.hostPath.path=/var/lib/ci-accelerator-lint \
+				$(HELM) template test $$c --kube-version $$k $${v:+-f $$v} $(RENDER_SET) \
 					| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
 			done; \
 		done; \
 	done
 
 .PHONY: template
-template: ## Render every chart with default values to stdout
+template: ## Render every chart with default values (plus the required ones) to stdout
 	@for c in $(CHARTS); do \
 		echo "# ==> $$c"; \
-		$(HELM) template test $$c || exit 1; \
+		$(HELM) template test $$c $(RENDER_SET) || exit 1; \
 	done
 
 .PHONY: kind-up

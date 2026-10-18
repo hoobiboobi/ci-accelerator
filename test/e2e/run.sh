@@ -13,8 +13,9 @@
 # Installs its own release ("e2e") in its own namespace, so a development
 # release in the same cluster is not touched, and runs CI-job-like clients
 # from a second namespace with Pod Security "baseline", the way runner job
-# pods will. The daemons run with hostPath state, small GC caps and a dead
-# OpenTelemetry backend for the whole run. Never run two e2e runs against the
+# pods will. The daemons run with hostPath state, small GC caps, a dead
+# OpenTelemetry backend and mutual TLS (a CA made by scripts/buildkit-certs.sh;
+# the clients mount a client certificate from a Secret, as job pods will). Never run two e2e runs against the
 # same namespace at the same time.
 #
 # Compatible with bash 3.2 (macOS). Refuses to run against anything that is
@@ -32,7 +33,13 @@ NS=${E2E_NAMESPACE:-ci-accelerator-e2e}
 JOBS_NS=$NS-jobs
 PSA_NS=$NS-psa
 REL=e2e
-ADDR=tcp://$REL-buildkit.$NS.svc:1234
+SVC_HOST=$REL-buildkit.$NS.svc
+ADDR=tcp://$SVC_HOST:1234
+TLS_SECRET=$REL-buildkit-tls
+CLIENT_SECRET=$REL-client
+# Every client call: the client certificate, and the Service name for the
+# server certificate check also when a call goes to a pod IP.
+TLS=(--tlsdir /certs --tlsservername "$SVC_HOST")
 # Per namespace, so runs in different namespaces never share a state dir.
 STATE_DIR=/var/lib/$NS
 HOST_PATH=$STATE_DIR/buildkit
@@ -40,7 +47,7 @@ E2E_LABEL=ci-accelerator.io/e2e
 KEEP=${KEEP:-0}
 SCENARIOS=${SCENARIOS:-all}
 MODE=${1:-run}
-ALL_SCENARIOS="preflight cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
+ALL_SCENARIOS="preflight tls cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
 
 refuse() { echo "refusing to run e2e: $*" >&2; exit 2; }
 
@@ -111,7 +118,7 @@ eventually() {
 
 INSTALL_ARGS=(-f "$VALUES")
 for extra in ${E2E_EXTRA_VALUES:-}; do INSTALL_ARGS+=(-f "$extra"); done
-INSTALL_ARGS+=(--set "storage.hostPath.path=$HOST_PATH")
+INSTALL_ARGS+=(--set "storage.hostPath.path=$HOST_PATH" --set "tls.existingSecret=$TLS_SECRET")
 
 # Ready, non-terminating daemon pod on a node.
 daemon_on() {
@@ -133,13 +140,13 @@ pod_uids() {
 # explicit address); empty if none answers.
 who() { who_at "$1" "$ADDR"; }
 who_at() {
-  kc -n "$JOBS_NS" exec "$1" -- buildctl --addr "$2" --timeout 5 debug workers -v 2>/dev/null \
+  kc -n "$JOBS_NS" exec "$1" -- buildctl --addr "$2" "${TLS[@]}" --timeout 5 debug workers -v 2>/dev/null \
     | awk '/worker.hostname/ {print $2; exit}'
 }
 # The request fails the way an unreachable daemon fails, not for another reason.
 no_answer() {
   local out
-  out=$(kc -n "$JOBS_NS" exec "$1" -- buildctl --addr "$ADDR" --timeout 5 debug workers -v 2>&1)
+  out=$(kc -n "$JOBS_NS" exec "$1" -- buildctl --addr "$ADDR" "${TLS[@]}" --timeout 5 debug workers -v 2>&1)
   ! printf '%s' "$out" | grep -q 'worker.hostname' \
     && printf '%s' "$out" | grep -qiE 'deadline exceeded|i/o timeout|connection refused|Unavailable'
 }
@@ -149,7 +156,7 @@ has_daemon() { [ -n "$(daemon_on "$1")" ]; }
 # build_at <client> <addr> <fixture> [buildctl build args...]
 build_at() {
   local client=$1 addr=$2 fixture=$3; shift 3
-  kc -n "$JOBS_NS" exec "$client" -- buildctl --addr "$addr" build \
+  kc -n "$JOBS_NS" exec "$client" -- buildctl --addr "$addr" "${TLS[@]}" build \
     --frontend dockerfile.v0 --local "context=/f/$fixture" --local "dockerfile=/f/$fixture" \
     --progress plain "$@"
 }
@@ -164,7 +171,7 @@ deps_cached() { grep -A1 'RUN sleep 3' "$1" | grep -q '^#[0-9]* CACHED$'; }
 
 # Unshared cache records of the daemon at an IP, in bytes (what GC caps see).
 cache_bytes() {
-  kc -n "$JOBS_NS" exec client-build -- buildctl --addr "tcp://$1:1234" du \
+  kc -n "$JOBS_NS" exec client-build -- buildctl --addr "tcp://$1:1234" "${TLS[@]}" du \
     --format '{{range .}}{{if not .Shared}}{{.Size}} {{end}}{{end}}' 2>/dev/null \
     | tr ' ' '\n' | awk '{s += $1} END {printf "%d", s}'
 }
@@ -189,6 +196,18 @@ ensure_ns() {
     kc create namespace "$ns" >/dev/null || die "create namespace $ns"
   fi
   kc label namespace "$ns" "$E2E_LABEL=true" "pod-security.kubernetes.io/enforce=$level" --overwrite >/dev/null
+}
+
+# certs <dir>: a fresh CA with server and client certificates for the release.
+certs() {
+  "$ROOT/scripts/buildkit-certs.sh" --name "$REL-buildkit" --namespace "$NS" --out "$1" >"$1.log" 2>&1 \
+    || { cat "$1.log"; die "create certificates in $1"; }
+}
+# put_secret <namespace> <name> <dir>: (re)create a Secret from a cert dir.
+put_secret() {
+  kc -n "$1" delete secret "$2" --ignore-not-found >/dev/null
+  kc -n "$1" create secret generic "$2" \
+    --from-file="$3/tls.crt" --from-file="$3/tls.key" --from-file="$3/ca.crt" >/dev/null || die "create Secret $1/$2"
 }
 
 node_names() { kind get nodes --name "$CLUSTER" 2>/dev/null; }
@@ -270,6 +289,12 @@ remove_state
 ensure_ns "$NS" privileged
 ensure_ns "$JOBS_NS" baseline
 create_state
+# The daemons' CA, and an unrelated one whose client certificate must be
+# refused.
+certs "$LOGS/tls"
+certs "$LOGS/rogue"
+put_secret "$NS" "$TLS_SECRET" "$LOGS/tls/server"
+put_secret "$JOBS_NS" "$CLIENT_SECRET" "$LOGS/tls/client"
 
 hc upgrade --install "$REL" "$CHART" -n "$NS" "${INSTALL_ARGS[@]}" \
   --wait --timeout 5m >"$LOGS/install.log" 2>&1 || { cat "$LOGS/install.log"; die "helm install"; }
@@ -278,20 +303,28 @@ info "release $REL installed (state in $HOST_PATH)"
 for spec in "client-build:$BUILD_NODE" "client-cp:$CP_NODE"; do
   name=${spec%%:*}; node=${spec#*:}
   kc -n "$JOBS_NS" delete pod "$name" --ignore-not-found --wait=true >/dev/null
+  # The client certificate is mounted from a Secret, as in a runner job pod.
   kc -n "$JOBS_NS" run "$name" --image="$IMAGE" --restart=Never \
-    --overrides="{\"spec\":{\"nodeName\":\"$node\",\"terminationGracePeriodSeconds\":0}}" \
-    --command -- sleep 86400 >/dev/null
+    --overrides="{\"spec\":{\"nodeName\":\"$node\",\"terminationGracePeriodSeconds\":0,
+      \"containers\":[{\"name\":\"$name\",\"image\":\"$IMAGE\",\"command\":[\"sleep\",\"86400\"],
+        \"volumeMounts\":[{\"name\":\"certs\",\"mountPath\":\"/certs\",\"readOnly\":true}]}],
+      \"volumes\":[{\"name\":\"certs\",\"secret\":{\"secretName\":\"$CLIENT_SECRET\"}}]}}" >/dev/null
 done
 kc -n "$JOBS_NS" wait --for=condition=Ready pod/client-build pod/client-cp --timeout=120s >/dev/null \
   || die "client pods not ready"
 for name in client-build client-cp; do
   kc -n "$JOBS_NS" cp "$FIXTURES" "$name:/f" || die "copy fixtures to $name"
 done
+kc -n "$JOBS_NS" cp "$LOGS/rogue/client" client-build:/rogue || die "copy the rogue client certificate"
 info "clients ready in namespace $JOBS_NS (PSA baseline)"
 # Fail fast when the cluster itself is broken (DNS, kube-proxy, CNI): every
 # scenario would otherwise time out one request at a time.
-eventually 30 has_answer client-build \
-  || die "a client cannot reach the daemons through the Service (check DNS and kube-proxy: kubectl -n kube-system get pods)"
+if ! eventually 30 has_answer client-build; then
+  if quiet kc -n "$JOBS_NS" exec client-build -- buildctl --addr "$ADDR" --timeout 5 debug workers; then
+    die "the daemons answer a plaintext client: they are not serving mutual TLS"
+  fi
+  die "a client cannot reach the daemons through the Service (check DNS and kube-proxy: kubectl -n kube-system get pods)"
+fi
 settle
 
 SIGKILLED_POD=""
@@ -302,7 +335,7 @@ VICTIM=""
 s_preflight() {
   step "preflight: installs that would end with zero daemons are refused"
   ensure_ns "$PSA_NS" baseline
-  if hc install "$REL-psa" "$CHART" -n "$PSA_NS" >"$LOGS/psa.log" 2>&1; then
+  if hc install "$REL-psa" "$CHART" -n "$PSA_NS" --set "tls.existingSecret=$TLS_SECRET" >"$LOGS/psa.log" 2>&1; then
     fail "install into a baseline namespace succeeded"
     hc uninstall "$REL-psa" -n "$PSA_NS" >/dev/null 2>&1
   elif grep -q 'enforces Pod Security level "baseline"' "$LOGS/psa.log"; then
@@ -327,8 +360,8 @@ s_preflight() {
   kc -n "$PSA_NS" create serviceaccount e2e-installer >/dev/null 2>&1
   kc -n "$PSA_NS" create rolebinding e2e-installer --clusterrole=admin \
     --serviceaccount="$PSA_NS:e2e-installer" >/dev/null 2>&1
-  local as=(--kube-as-user "system:serviceaccount:$PSA_NS:e2e-installer")
-  if hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${as[@]}" \
+  local ns_admin=(--kube-as-user "system:serviceaccount:$PSA_NS:e2e-installer" --set "tls.existingSecret=$TLS_SECRET")
+  if hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${ns_admin[@]}" \
       --set preflight.buildNodes=false >"$LOGS/ns-admin-psa.log" 2>&1; then
     fail "namespace admin: PSA check did not refuse the baseline namespace"
   elif grep -q 'enforces Pod Security level "baseline"' "$LOGS/ns-admin-psa.log"; then
@@ -336,7 +369,7 @@ s_preflight() {
   else
     fail "namespace admin: PSA check failed for another reason (see $LOGS/ns-admin-psa.log)"
   fi
-  if hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${as[@]}" \
+  if hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${ns_admin[@]}" \
       --set preflight.podSecurity=false >"$LOGS/ns-admin-nodes.log" 2>&1; then
     fail "namespace admin: listing nodes did not fail"
   elif grep -qi 'nodes is forbidden' "$LOGS/ns-admin-nodes.log"; then
@@ -345,9 +378,65 @@ s_preflight() {
     fail "namespace admin: node check failed for another reason (see $LOGS/ns-admin-nodes.log)"
   fi
   check "namespace admin: renders with both checks switched off" \
-    quiet hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${as[@]}" \
+    quiet hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${ns_admin[@]}" \
       --set preflight.podSecurity=false --set preflight.buildNodes=false
   kc delete namespace "$PSA_NS" --wait=false >/dev/null
+}
+
+# refused <desc> <log> <buildctl args...>: a call from client-build that the
+# TLS layer must turn away. A timeout or a refused connection would also
+# "fail", so the error has to be about TLS. With TLS 1.3 the server rejects a
+# missing client certificate after the client has finished its handshake, so
+# the client only sees the connection die on its first write (broken pipe,
+# reset); that case is paired with a control that differs only by the
+# certificate.
+refused() {
+  local desc=$1 log=$2; shift 2
+  kc -n "$JOBS_NS" exec client-build -- buildctl --addr "$ADDR" --timeout 5 "$@" debug workers -v >"$log" 2>&1
+  if grep -q 'worker.hostname' "$log"; then
+    fail "$desc: the daemon answered"
+  elif grep -qiE 'tls|x509|certificate|handshake|server preface|broken pipe|connection reset' "$log"; then
+    pass "$desc ($(grep -oiE 'tls: [a-z ]+|x509: [a-z ]+|server preface[a-z :]*|broken pipe|connection reset by peer' "$log" | head -1))"
+  else
+    fail "$desc: failed, but not in TLS (see $log)"
+  fi
+}
+
+s_tls() {
+  step "tls: only clients with a certificate from the daemons' CA get in"
+  # Positive control: without it the refusals below prove nothing.
+  check "a client with a certificate from the CA is served" has_answer client-build
+  refused "plaintext client refused" "$LOGS/tls-plain.log"
+  check "control: the same flags plus the client certificate are served" \
+    quiet kc -n "$JOBS_NS" exec client-build -- buildctl --addr "$ADDR" --timeout 5 \
+      --tlscacert /certs/ca.crt --tlscert /certs/tls.crt --tlskey /certs/tls.key --tlsservername "$SVC_HOST" debug workers
+  refused "client without a certificate refused" "$LOGS/tls-nocert.log" \
+    --tlscacert /certs/ca.crt --tlsservername "$SVC_HOST"
+  refused "client certificate from another CA refused" "$LOGS/tls-rogue.log" \
+    --tlscacert /certs/ca.crt --tlscert /rogue/tls.crt --tlskey /rogue/tls.key --tlsservername "$SVC_HOST"
+  # The client side checks the daemon too.
+  refused "a client trusting another CA rejects the daemon" "$LOGS/tls-distrust.log" \
+    --tlsdir /rogue --tlsservername "$SVC_HOST"
+  refused "a name the server certificate does not cover is rejected" "$LOGS/tls-name.log" \
+    --tlsdir /certs --tlsservername wrong.example
+  next_id
+  build client-build tls --opt "build-arg:BUST=$ID" --opt "build-arg:BUILDKIT_IMAGE=$IMAGE" >"$LOGS/tls-run.log" 2>&1
+  check "a RUN step on the daemon builds" test $? = 0
+  check "the RUN step reaches the daemon's port 1234" printed "$LOGS/tls-run.log" PORT_OPEN
+  check "the RUN step cannot drive its own daemon without a certificate" printed "$LOGS/tls-run.log" DAEMON_REFUSED
+  # `kubectl create secret tls` writes no ca.crt; the chart must say so
+  # instead of leaving pods in ContainerCreating.
+  kc -n "$NS" delete secret "$REL-noca" --ignore-not-found >/dev/null
+  kc -n "$NS" create secret tls "$REL-noca" --cert "$LOGS/tls/server/tls.crt" --key "$LOGS/tls/server/tls.key" >/dev/null
+  if hc install "$REL-noca" "$CHART" -n "$NS" --dry-run=server "${INSTALL_ARGS[@]}" \
+      --set "tls.existingSecret=$REL-noca" >"$LOGS/tls-noca.log" 2>&1; then
+    fail "install with a Secret from \`kubectl create secret tls\` succeeded"
+  elif grep -q "has no ca.crt" "$LOGS/tls-noca.log"; then
+    pass "install with a Secret without ca.crt refused with the fix in the message"
+  else
+    fail "Secret check failed for another reason (see $LOGS/tls-noca.log)"
+  fi
+  kc -n "$NS" delete secret "$REL-noca" >/dev/null
 }
 
 s_cache() {

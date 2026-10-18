@@ -2,6 +2,8 @@ suite: daemonset
 templates:
   - daemonset.yaml
   - configmap.yaml
+values:
+  - values/tls.yaml
 release:
   name: bk
   namespace: ci-accelerator
@@ -141,7 +143,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 032ad0b565aff17ecc4573f07c7522afe5f51d9cee18816ed7bc63d89f61fec2
+          value: 72912284c74b30ce4f28c38a32774a5a112f95557d3e90d593538bb4fc52f6dd
 
   - it: changes the config checksum when the config changes
     template: daemonset.yaml
@@ -150,7 +152,7 @@ tests:
     asserts:
       - notEqual:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 032ad0b565aff17ecc4573f07c7522afe5f51d9cee18816ed7bc63d89f61fec2
+          value: 72912284c74b30ce4f28c38a32774a5a112f95557d3e90d593538bb4fc52f6dd
 
   # Tracing variables in the container env made every probe wait 10-30 s for
   # a trace backend; with a dead one, every daemon was restarted at once.
@@ -272,7 +274,7 @@ tests:
               value: otlp
 
   # Mounting over /etc/buildkit hid the image's own files (cdi, cni.json).
-  - it: mounts the config outside /etc/buildkit and the state at /var/lib/buildkit
+  - it: mounts the config outside /etc/buildkit, the state at /var/lib/buildkit and the TLS Secret read-only
     template: daemonset.yaml
     asserts:
       - equal:
@@ -283,6 +285,9 @@ tests:
               readOnly: true
             - name: state
               mountPath: /var/lib/buildkit
+            - name: tls
+              mountPath: /etc/buildkitd-tls
+              readOnly: true
       - contains:
           path: spec.template.spec.volumes
           content:
@@ -479,3 +484,53 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].image
           value: moby/buildkit:v0.34.0
+
+  # Explicit items: a Secret without ca.crt (kubectl create secret tls) fails
+  # the mount with the key's name instead of starting a daemon without a CA,
+  # which would accept every client.
+  - it: mounts exactly the three TLS keys from tls.existingSecret, owner-read only
+    template: daemonset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls
+            secret:
+              secretName: bk-tls
+              defaultMode: 0400
+              items:
+                - key: tls.crt
+                  path: tls.crt
+                - key: tls.key
+                  path: tls.key
+                - key: ca.crt
+                  path: ca.crt
+
+  # buildkitd reads its certificates only at start.
+  - it: asks Stakater Reloader to roll the daemons when the TLS Secret changes
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["secret.reloader.stakater.com/reload"]
+          value: bk-tls
+      - notExists:
+          path: spec.template.metadata.annotations["secret.reloader.stakater.com/reload"]
+
+  # Reloader matches each name as an anchored regex: a dot would match any
+  # character and reload on other Secrets' changes too.
+  - it: escapes the Secret name for Reloader's regex match
+    template: daemonset.yaml
+    set:
+      tls.existingSecret: buildkit.tls
+    asserts:
+      - equal:
+          path: metadata.annotations["secret.reloader.stakater.com/reload"]
+          value: 'buildkit\.tls'
+
+  - it: can leave out the Reloader annotation
+    template: daemonset.yaml
+    set:
+      tls.reloader: false
+    asserts:
+      - notExists:
+          path: metadata.annotations

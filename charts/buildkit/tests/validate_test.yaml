@@ -1,6 +1,8 @@
 suite: render-time validation
 templates:
   - daemonset.yaml
+values:
+  - values/tls.yaml
 tests:
   - it: renders with the defaults
     asserts:
@@ -244,3 +246,26 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "missing property 'cdi'"
+
+  # No TLS means anything that reaches the port, RUN steps on the daemon
+  # included, controls it; there is no switch to turn it off.
+  - it: refuses to render without a TLS Secret and names the fix
+    set:
+      tls.existingSecret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'tls.existingSecret is required: .*scripts/buildkit-certs.sh --name RELEASE-NAME-buildkit --namespace NAMESPACE'
+
+  - it: rejects a TLS Secret name that is not a DNS subdomain
+    set:
+      tls.existingSecret: Bad_Name
+    asserts:
+      - failedTemplate:
+          errorPattern: 'existingSecret'
+
+  - it: rejects unknown tls keys (there is no insecure mode)
+    set:
+      tls.insecure: true
+    asserts:
+      - failedTemplate:
+          errorPattern: 'insecure'

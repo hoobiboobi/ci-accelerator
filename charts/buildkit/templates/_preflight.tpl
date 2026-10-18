@@ -38,4 +38,20 @@ installer may not read the objects (Forbidden): switch the check off then.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- /* TLS Secret: when it exists it must hold all three keys, or the pods
+       hang in ContainerCreating. `kubectl create secret tls` writes no
+       ca.crt. A missing Secret is fine: it may be created after the chart. */}}
+{{- if .Values.preflight.tlsSecret }}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace .Values.tls.existingSecret }}
+{{- if $secret }}
+{{- $missing := list }}
+{{- range list "tls.crt" "tls.key" "ca.crt" }}
+{{- if not (index (default (dict) $secret.data) .) }}{{ $missing = append $missing . }}{{ end }}
+{{- end }}
+{{- with $missing }}
+{{- fail (printf "Secret %s/%s (tls.existingSecret) has no %s. It needs tls.crt and tls.key (the daemon's certificate) and ca.crt (the CA that signs client certificates); `kubectl create secret tls` writes no ca.crt, use: kubectl create secret generic %s -n %s --from-file=tls.crt --from-file=tls.key --from-file=ca.crt (or set preflight.tlsSecret=false to skip this check)" $.Release.Namespace $.Values.tls.existingSecret (join ", " .) $.Values.tls.existingSecret $.Release.Namespace) }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}

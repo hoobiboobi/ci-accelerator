@@ -162,3 +162,11 @@ stay visible to buildkitd.
 {{- define "buildkit.configDir" -}}
 /etc/buildkitd
 {{- end }}
+
+{{/*
+Where the TLS Secret is mounted. Not under the config directory: that is a
+read-only ConfigMap volume.
+*/}}
+{{- define "buildkit.tlsDir" -}}
+/etc/buildkitd-tls
+{{- end }}

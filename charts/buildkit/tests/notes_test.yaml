@@ -1,6 +1,8 @@
 suite: NOTES
 templates:
   - NOTES.txt
+values:
+  - values/tls.yaml
 release:
   name: bk
   namespace: builds
@@ -11,6 +13,11 @@ kubernetesProvider:
         version: v1
         resource: namespaces
       namespaced: false
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
 tests:
   - it: prints the in-cluster address and a probe-safe check command
     asserts:
@@ -21,10 +28,65 @@ tests:
       - matchRegexRaw:
           pattern: 'DESIRED 0 means no node matches'
 
-  - it: always warns that TLS is not configured
+  - it: explains how clients connect with mutual TLS and how to restart after a renewal
     asserts:
       - matchRegexRaw:
-          pattern: 'WARNING: TLS is not configured yet\. Anything that can reach container port 1234,'
+          pattern: 'signed by the CA in Secret bk-tls:\n\n  buildctl --addr tcp://bk-buildkit\.builds\.svc:1234 --tlsdir <dir> debug workers'
+      - matchRegexRaw:
+          pattern: 'Any certificate from that CA can control the daemons: use a dedicated CA\.'
+      - matchRegexRaw:
+          pattern: 'Stakater Reloader \(if installed\) restarts the daemons; otherwise run:\n  kubectl rollout restart ds/bk-buildkit -n builds'
+      - notMatchRegexRaw:
+          pattern: 'TLS is not configured'
+      # Offline (helm template, GitOps) nothing can be known about the Secret.
+      - notMatchRegexRaw:
+          pattern: does not exist yet
+
+  - it: does not mention Reloader when its annotation is off
+    set:
+      tls.reloader: false
+    asserts:
+      - matchRegexRaw:
+          pattern: 'After the Secret is renewed,\nrestart the daemons:\n  kubectl rollout restart ds/bk-buildkit -n builds'
+      - notMatchRegexRaw:
+          pattern: Reloader
+
+  # On a live install (the namespace is visible) a missing Secret leaves the
+  # pods in ContainerCreating; say so instead of a silent hang.
+  - it: warns on a live install when the TLS Secret does not exist yet
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+            labels:
+              pod-security.kubernetes.io/enforce: privileged
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: Secret builds/bk-tls does not exist yet; the daemon pods\nwait in ContainerCreating until it does\.'
+
+  - it: does not warn about the Secret when it exists
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: builds
+            labels:
+              pod-security.kubernetes.io/enforce: privileged
+        - apiVersion: v1
+          kind: Secret
+          metadata:
+            name: bk-tls
+            namespace: builds
+          data:
+            tls.crt: eA==
+            tls.key: eA==
+            ca.crt: eA==
+    asserts:
+      - notMatchRegexRaw:
+          pattern: does not exist yet
 
   - it: names the node port in the warning for NodePort
     set:
@@ -34,7 +96,7 @@ tests:
       - matchRegexRaw:
           pattern: 'From outside the cluster: tcp://<any-node-ip>:31234'
       - matchRegexRaw:
-          pattern: 'container port 1234 or node port 31234 on every node,'
+          pattern: 'add --tlsservername bk-buildkit\.builds\.svc unless the server\n  certificate covers that address'
 
   - it: lists what is missing for production with the defaults
     asserts:

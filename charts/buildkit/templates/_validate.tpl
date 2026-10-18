@@ -40,6 +40,12 @@ the install/upgrade with the fix in the message.
 {{- $v := .Values }}
 {{- $gc := $v.config.gc }}
 
+{{- /* TLS is not optional: without client certificates anything that reaches
+       the port, including RUN steps on the daemon itself, controls it. */}}
+{{- if not $v.tls.existingSecret }}
+{{- fail (printf "tls.existingSecret is required: the name of a Secret in namespace %s with tls.crt, tls.key (the daemon's certificate) and ca.crt (the CA that signs client certificates). scripts/buildkit-certs.sh from %s creates a CA, this certificate and client certificates: scripts/buildkit-certs.sh --name %s --namespace %s" .Release.Namespace .Chart.Home (include "buildkit.fullname" .) .Release.Namespace) }}
+{{- end }}
+
 {{- /* GC: a capless policy without keepDuration deletes every unused record
        after each build. */}}
 {{- if not $v.config.gcPolicy }}

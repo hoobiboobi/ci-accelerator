@@ -28,12 +28,20 @@ labelled `ci-accelerator.io/node-role=build` and tainted with the same key
 fragile across kind versions). The chart's default node selector and
 tolerations match this label and taint. Node images are pinned by digest.
 
-Install a development release:
+Install a development release. The daemons only accept clients with a
+certificate from their CA, so create one first (`kind-certs/` is in
+`.gitignore`; the server certificate also covers `127.0.0.1` for the host
+port below):
 
 ```sh
 kubectl --context kind-buildkit create namespace ci-accelerator
 kubectl --context kind-buildkit label namespace ci-accelerator \
   pod-security.kubernetes.io/enforce=privileged
+scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
+  --out kind-certs --san IP:127.0.0.1
+kubectl --context kind-buildkit create secret generic bk-buildkit-tls -n ci-accelerator \
+  --from-file=kind-certs/server/tls.crt --from-file=kind-certs/server/tls.key \
+  --from-file=kind-certs/server/ca.crt
 helm --kube-context kind-buildkit upgrade --install bk charts/buildkit \
   -n ci-accelerator -f examples/kind/values.yaml
 ```
@@ -44,8 +52,12 @@ would otherwise create no pods (the chart refuses namespaces labelled with
 another level, but cannot see a cluster-wide default).
 
 The first worker maps host port `1234` to NodePort `31234` on `127.0.0.1`
-only, so the daemon on that node is reachable from the laptop as
-`tcp://127.0.0.1:1234` and not from the network: it has no TLS yet.
+only, so the daemon on that node is reachable from the laptop and not from
+the network:
+
+```sh
+buildctl --addr tcp://127.0.0.1:1234 --tlsdir kind-certs/client debug workers
+```
 
 Run the end-to-end checks (a separate release that cleans up after itself;
 `KEEP=1` leaves everything for debugging, `make e2e-clean` removes it):
