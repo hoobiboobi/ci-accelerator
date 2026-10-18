@@ -88,7 +88,7 @@ spec:
   secretTemplate:
     labels:
       {{- $secretLabels | nindent 6 }}
-{{- range .Values.tls.client.namespaces }}
+{{- range (include "buildkit.tlsClientNamespaces" . | fromJsonArray) }}
 ---
 # Client certificate for CI jobs in {{ . }} (buildctl --tlsdir).
 apiVersion: cert-manager.io/v1

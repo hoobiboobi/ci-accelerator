@@ -1,0 +1,134 @@
+# The box: buildkit daemons on the build nodes and a gitlab-runner whose CI
+# jobs use them. Set gitlab-runner.gitlabUrl and gitlab-runner.runners.secret;
+# everything else has working defaults. cert-manager must be installed (the
+# daemons and jobs authenticate each other with certificates it issues).
+
+# Shared with the subcharts.
+global:
+  # -- Dedicated build nodes: the daemons and the CI job pods run there, so a
+  # job reaches the daemon (and the cache) on its own node. Label and taint
+  # them before install.
+  buildNodes:
+    enabled: true
+    selector:
+      ci-accelerator.io/node-role: build
+    tolerations:
+      - key: ci-accelerator.io/node-role
+        operator: Equal
+        value: build
+        effect: NoSchedule
+  tls:
+    # -- cert-manager issuer for daemon and client certificates. Empty name:
+    # a CA dedicated to this release is created (see buildkit.tls).
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
+  jobs:
+    # -- Namespace of the CI job pods. They run untrusted code, so they get
+    # their own namespace, apart from the runner and the daemons. Keep
+    # gitlab-runner.runners.jobNamespace equal to it.
+    namespace: ci-accelerator-jobs
+    # -- CPU architecture of the build nodes (kubernetes.io/arch). The
+    # runner picks its helper image by it.
+    architecture: amd64
+
+# The jobs namespace, created by this release (and deleted with it, together
+# with everything in it).
+jobsNamespace:
+  # -- false: the namespace exists already (or GitOps creates it); it needs
+  # the client certificate (issued here) and Pod Security "baseline".
+  create: true
+  # -- Pod Security level enforced for the job pods.
+  podSecurity: baseline
+
+# The daemons: charts/buildkit, see its values for everything else.
+buildkit:
+  tls:
+    client:
+      # The client certificate goes into the jobs namespace.
+      namespaces:
+        - "{{ .Values.global.jobs.namespace }}"
+  # Clients only from the jobs namespace; builds never reach cloud
+  # metadata. List the cluster's pod and Service CIDRs in
+  # networkPolicy.egress.clusterCIDRs to keep builds out of the cluster.
+  networkPolicy:
+    enabled: true
+
+# The official gitlab-runner chart. Set enabled=false to keep your own
+# runner and use integrations/gitlab-runner/values.yaml with it instead.
+gitlab-runner:
+  enabled: true
+  # 19.4.0 (the chart's default) lists pod events on every poll and
+  # overloaded API servers; 19.4.1 fixes that.
+  image:
+    tag: alpine-v19.4.1
+  # -- Required: your GitLab, e.g. https://gitlab.example.com/
+  gitlabUrl: ""
+  runners:
+    # -- Required: a Secret in this release's namespace with the runner
+    # authentication token (runner-token: glrt-...) and an empty
+    # runner-registration-token key.
+    secret: ""
+    # -- Keep equal to global.jobs.namespace.
+    jobNamespace: ci-accelerator-jobs
+    # The same job settings as integrations/gitlab-runner/values.yaml, with
+    # the names filled in from this release (make validate compares them).
+    # Rendered by the runner chart with tpl, which sees this chart's helpers.
+    config: |
+      [[runners]]
+        environment = [
+          "BUILDKIT_REMOTE_ADDR=tcp://{{ include "ci-accelerator.buildkitName" . }}.{{ .Release.Namespace }}.svc:1234",
+          "BUILDKIT_TLS_DIR=/certs",
+        ]
+        [runners.kubernetes]
+          namespace = "{{ .Values.global.jobs.namespace }}"
+          image = "alpine:3.22"
+          pull_policy = "if-not-present"
+          cpu_request = "50m"
+          memory_request = "64Mi"
+          memory_limit = "512Mi"
+          helper_cpu_request = "10m"
+          helper_memory_request = "32Mi"
+          helper_memory_limit = "256Mi"
+          service_cpu_request = "10m"
+          service_memory_request = "32Mi"
+          automount_service_account_token = false
+          [runners.kubernetes.node_selector]
+          {{- if .Values.global.buildNodes.enabled }}
+          {{- range $k, $v := .Values.global.buildNodes.selector }}
+            {{ $k | quote }} = {{ $v | quote }}
+          {{- end }}
+          {{- end }}
+            "kubernetes.io/arch" = {{ .Values.global.jobs.architecture | quote }}
+          [runners.kubernetes.node_tolerations]
+          {{- if .Values.global.buildNodes.enabled }}
+          {{- range .Values.global.buildNodes.tolerations }}
+            {{ if eq (default "Equal" .operator) "Exists" }}{{ .key | quote }}{{ else }}{{ printf "%s=%s" .key .value | quote }}{{ end }} = {{ default "" .effect | quote }}
+          {{- end }}
+          {{- end }}
+          [runners.kubernetes.pod_labels]
+            "ci-accelerator.io/component" = "ci-job"
+          [[runners.kubernetes.volumes.secret]]
+            name = "{{ include "ci-accelerator.buildkitName" . }}-client"
+            mount_path = "/certs"
+            read_only = true
+  # The permissions the Kubernetes executor needs in the jobs namespace,
+  # instead of the chart's default `*` on core resources.
+  rbac:
+    create: true
+    rules:
+      - resources: ["pods"]
+        verbs: ["create", "delete", "get", "list", "watch"]
+      - resources: ["pods/attach", "pods/exec"]
+        verbs: ["create", "delete", "get", "patch"]
+      - resources: ["pods/log"]
+        verbs: ["get", "list"]
+      - resources: ["secrets"]
+        verbs: ["create", "delete", "get", "update"]
+      - resources: ["serviceaccounts"]
+        verbs: ["get"]
+      - resources: ["services"]
+        verbs: ["create", "get"]
+      - resources: ["events"]
+        verbs: ["list"]

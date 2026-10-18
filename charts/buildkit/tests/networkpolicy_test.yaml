@@ -167,3 +167,16 @@ tests:
       - equal:
           path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
           value: [ci-jobs]
+
+  - it: admits a templated client namespace by its rendered name
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      tls.source: certManager
+      tls.client.namespaces: ["{{ .Release.Namespace }}-jobs"]
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [builds-jobs]

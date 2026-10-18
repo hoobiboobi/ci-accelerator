@@ -197,7 +197,20 @@ Namespaces whose pods may reach the daemons: the client certificate
 namespaces plus networkPolicy.ingress.namespaces. As a JSON list.
 */}}
 {{- define "buildkit.clientNamespaces" -}}
-{{- toJson (uniq (concat (default (list) .Values.tls.client.namespaces) .Values.networkPolicy.ingress.namespaces)) }}
+{{- toJson (uniq (concat (include "buildkit.tlsClientNamespaces" . | fromJsonArray) .Values.networkPolicy.ingress.namespaces)) }}
+{{- end }}
+
+{{/*
+tls.client.namespaces with each entry rendered through tpl, so a parent
+chart can pass a name from its own values (e.g. "{{ .Values.global.x }}").
+As a JSON list.
+*/}}
+{{- define "buildkit.tlsClientNamespaces" -}}
+{{- $out := list }}
+{{- range (default (list) .Values.tls.client.namespaces) }}
+{{- $out = append $out (tpl . $) }}
+{{- end }}
+{{- toJson $out }}
 {{- end }}
 
 {{/*

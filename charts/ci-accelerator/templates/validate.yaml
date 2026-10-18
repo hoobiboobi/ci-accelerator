@@ -1,0 +1,2 @@
+{{- /* Renders nothing; fails the install on inconsistent values. */}}
+{{- include "ci-accelerator.validate" . }}

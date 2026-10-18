@@ -1,0 +1,15 @@
+# For helm lint, which cannot fake the cert-manager API: a provided TLS
+# Secret instead of cert-manager (and so no client certificates to issue).
+gitlab-runner:
+  gitlabUrl: https://gitlab.example.com/
+  runners:
+    secret: gitlab-runner-token
+buildkit:
+  tls:
+    source: existingSecret
+    existingSecret: lint-tls
+    client:
+      namespaces: []
+  networkPolicy:
+    ingress:
+      namespaces: [ci-accelerator-jobs]

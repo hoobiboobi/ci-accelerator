@@ -1,0 +1,13 @@
+{{- if .Values.jobsNamespace.create }}
+# CI job pods run here: untrusted code, kept apart from the runner and the
+# daemons. Deleted with the release, together with everything in it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.global.jobs.namespace }}
+  labels:
+    {{- include "ci-accelerator.labels" . | nindent 4 }}
+    pod-security.kubernetes.io/enforce: {{ .Values.jobsNamespace.podSecurity }}
+    pod-security.kubernetes.io/warn: {{ .Values.jobsNamespace.podSecurity }}
+    pod-security.kubernetes.io/audit: {{ .Values.jobsNamespace.podSecurity }}
+{{- end }}

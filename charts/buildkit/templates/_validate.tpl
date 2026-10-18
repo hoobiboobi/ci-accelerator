@@ -40,13 +40,21 @@ the install/upgrade with the fix in the message.
 {{- $v := .Values }}
 {{- $gc := $v.config.gc }}
 
+{{- /* Client namespaces may be templates: check what they render to. */}}
+{{- $clientNamespaces := include "buildkit.tlsClientNamespaces" . | fromJsonArray }}
+{{- range $clientNamespaces }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" .) }}
+{{- fail (printf "tls.client.namespaces: %q is not a namespace name (DNS label)." .) }}
+{{- end }}
+{{- end }}
+
 {{- /* TLS is not optional: without client certificates anything that reaches
        the port, including RUN steps on the daemon itself, controls it. */}}
 {{- if eq $v.tls.source "existingSecret" }}
 {{- if not $v.tls.existingSecret }}
 {{- fail (printf "tls.existingSecret is required with tls.source=existingSecret: the name of a Secret in namespace %s with tls.crt, tls.key (the daemon's certificate) and ca.crt (the CA that signs client certificates). scripts/buildkit-certs.sh from %s creates a CA, this certificate and client certificates: scripts/buildkit-certs.sh --name %s --namespace %s" .Release.Namespace .Chart.Home (include "buildkit.fullname" .) .Release.Namespace) }}
 {{- end }}
-{{- if $v.tls.client.namespaces }}
+{{- if $clientNamespaces }}
 {{- fail "tls.client.namespaces needs tls.source=certManager. With existingSecret, make client certificates from the same CA (scripts/buildkit-certs.sh --no-server --client <name>) and create their Secrets yourself." }}
 {{- end }}
 {{- else }}
@@ -56,7 +64,7 @@ the install/upgrade with the fix in the message.
 {{- end }}
 {{- $ref := $v.global.tls.issuerRef }}
 {{- if and $ref.name (eq $ref.kind "Issuer") }}
-{{- range $v.tls.client.namespaces }}
+{{- range $clientNamespaces }}
 {{- if ne . $.Release.Namespace }}
 {{- fail (printf "tls.client.namespaces: %s is not the release namespace, but global.tls.issuerRef is a namespaced Issuer, which cannot issue certificates into other namespaces. Use a ClusterIssuer (dedicated to these daemons)." .) }}
 {{- end }}

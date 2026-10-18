@@ -1,0 +1,5 @@
+# The two values the box requires.
+gitlab-runner:
+  gitlabUrl: https://gitlab.example.com/
+  runners:
+    secret: gitlab-runner-token

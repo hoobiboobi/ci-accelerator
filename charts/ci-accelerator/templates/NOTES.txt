@@ -1,0 +1,27 @@
+{{- $bk := include "ci-accelerator.buildkitName" . -}}
+{{- $runner := index .Values "gitlab-runner" -}}
+ci-accelerator {{ .Chart.Version }} in namespace {{ .Release.Namespace }}.
+
+BuildKit daemons on the build nodes: DaemonSet {{ $bk }}
+  kubectl -n {{ .Release.Namespace }} get ds {{ $bk }}
+
+CI jobs run in namespace {{ .Values.global.jobs.namespace }}{{ if .Values.jobsNamespace.create }} (created by this release, Pod Security {{ .Values.jobsNamespace.podSecurity }}; deleted with it){{ end }}.
+{{- if $runner.enabled }}
+The runner takes jobs from {{ $runner.gitlabUrl }}; check that it registered:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ .Release.Name }}-gitlab-runner | grep -i -E 'registered|error'
+{{- else }}
+No runner is installed: configure yours with integrations/gitlab-runner/values.yaml
+(BUILDKIT_REMOTE_ADDR=tcp://{{ $bk }}.{{ .Release.Namespace }}.svc:1234).
+{{- end }}
+
+Build in a CI job (the job gets BUILDKIT_REMOTE_ADDR and the client
+certificate in BUILDKIT_TLS_DIR):
+
+  build:
+    image: moby/buildkit:{{ .Chart.AppVersion }}
+    script:
+      - buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR"
+          build --frontend dockerfile.v0 --local context=. --local dockerfile=.
+
+Builds share the daemons' cache: a build's RUN steps can read and write what
+other builds left there. Use one installation per trust domain.

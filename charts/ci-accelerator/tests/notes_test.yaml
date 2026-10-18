@@ -1,0 +1,24 @@
+suite: NOTES
+templates:
+  - NOTES.txt
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+tests:
+  - it: names the daemons, the jobs namespace and how to build
+    asserts:
+      - matchRegexRaw:
+          pattern: 'DaemonSet box-buildkit'
+      - matchRegexRaw:
+          pattern: 'CI jobs run in namespace ci-accelerator-jobs \(created by this release, Pod Security baseline; deleted with it\)'
+      - matchRegexRaw:
+          pattern: 'buildctl --addr "\$BUILDKIT_REMOTE_ADDR" --tlsdir "\$BUILDKIT_TLS_DIR"'
+
+  - it: points to the fragment without its own runner
+    set:
+      gitlab-runner.enabled: false
+    asserts:
+      - matchRegexRaw:
+          pattern: 'No runner is installed: configure yours with integrations/gitlab-runner/values.yaml\n\(BUILDKIT_REMOTE_ADDR=tcp://box-buildkit.ci-accelerator.svc:1234\)'

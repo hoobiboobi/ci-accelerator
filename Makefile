@@ -105,8 +105,18 @@ $(SHELLCHECK):
 	$(call fetch,https://github.com/koalaman/shellcheck/releases/download/v$(SHELLCHECK_VERSION)/shellcheck-v$(SHELLCHECK_VERSION).$(OS).$(SC_ARCH).tar.gz,$(TOOLS)/dl/shellcheck-$(SHELLCHECK_VERSION).tgz,$(SHELLCHECK_SHA256_$(OS)_$(ARCH)))
 	@tar -xzf $(TOOLS)/dl/shellcheck-$(SHELLCHECK_VERSION).tgz -C $(TOOLS)
 
+# The umbrella chart vendors its dependencies: buildkit packaged from this
+# repository, gitlab-runner from the checksum-verified archive.
+UMBRELLA := charts/ci-accelerator
+
+.PHONY: deps
+deps: $(RUNNER_CHART) ## Vendor the umbrella chart's dependencies into charts/ci-accelerator/charts/
+	@mkdir -p $(UMBRELLA)/charts && rm -f $(UMBRELLA)/charts/*.tgz
+	@$(HELM) package charts/buildkit -d $(UMBRELLA)/charts >/dev/null
+	@cp $(RUNNER_CHART) $(UMBRELLA)/charts/
+
 .PHONY: lint
-lint: $(SHELLCHECK) ## helm lint --strict (default and example values), chart LICENSE copies, shellcheck
+lint: $(SHELLCHECK) deps ## helm lint --strict (default and example values), chart LICENSE copies, shellcheck
 	@for c in $(CHARTS); do \
 		echo "==> lint $$c"; \
 		cmp -s LICENSE $$c/LICENSE || { echo "$$c/LICENSE differs from LICENSE (the packaged chart must carry the license text)"; exit 1; }; \
@@ -117,18 +127,22 @@ lint: $(SHELLCHECK) ## helm lint --strict (default and example values), chart LI
 				|| { $(HELM) lint --strict $$c -f $$v $(RENDER_SET); exit 1; }; \
 		done; \
 	done
+	@echo "==> lint $(UMBRELLA)"
+	@cmp -s LICENSE $(UMBRELLA)/LICENSE || { echo "$(UMBRELLA)/LICENSE differs from LICENSE"; exit 1; }
+	@$(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml >/dev/null \
+		|| { $(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml; exit 1; }
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh test/runner-config-parity.sh
 
 .PHONY: unittest
-unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) ## Run helm-unittest suites
-	@for c in $(CHARTS); do \
+unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
+	@for c in $(CHARTS) $(UMBRELLA); do \
 		echo "==> unittest $$c"; \
 		$(HELM) unittest --strict $$c || exit 1; \
 	done
 
 .PHONY: validate
-validate: $(KUBECONFORM) $(RUNNER_CHART) ## Validate rendered manifests (our charts, gitlab-runner + fragment) against Kubernetes schemas
+validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (our charts, gitlab-runner + fragment) against Kubernetes schemas
 	@for c in $(CHARTS); do \
 		for k in $(KUBE_VERSIONS); do \
 			for v in "" $(CHART_VALUES); do \
@@ -146,7 +160,12 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) ## Validate rendered manifests (our cha
 		$(HELM) template gitlab-runner $(RUNNER_CHART) --kube-version $$k -n ci-accelerator \
 			-f integrations/gitlab-runner/values.yaml \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
+		echo "==> kubeconform $(UMBRELLA) k8s $$k"; \
+		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
+			-f $(UMBRELLA)/tests/values/required.yaml \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 	done
+	@test/runner-config-parity.sh $(HELM) $(RUNNER_CHART)
 
 .PHONY: template
 template: ## Render every chart with default values (plus the required ones) to stdout

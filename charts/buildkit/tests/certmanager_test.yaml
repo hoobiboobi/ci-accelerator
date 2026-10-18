@@ -324,3 +324,25 @@ tests:
     asserts:
       - isKind:
           of: DaemonSet
+
+  # A parent chart passes the jobs namespace from its own values.
+  - it: renders client namespaces through tpl
+    template: certificates.yaml
+    set:
+      global.jobs: ci-jobs
+      tls.client.namespaces: ["{{ .Values.global.jobs }}"]
+    asserts:
+      - containsDocument:
+          any: true
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          name: bk-buildkit-client
+          namespace: ci-jobs
+
+  - it: checks the rendered namespace name
+    template: daemonset.yaml
+    set:
+      tls.client.namespaces: ["Bad_{{ .Release.Name }}"]
+    asserts:
+      - failedTemplate:
+          errorPattern: 'tls.client.namespaces: "Bad_bk" is not a namespace name'

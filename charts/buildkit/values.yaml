@@ -88,6 +88,8 @@ tls:
     # -- Namespaces that get a client certificate in Secret
     # <fullname>-client (tls.crt, tls.key, ca.crt), e.g. the namespace of
     # the CI job pods. They must exist. With source=certManager only.
+    # Entries are rendered with tpl, so a parent chart may write
+    # "{{ .Values.global.<key> }}".
     namespaces: []
   # -- Annotate the DaemonSet for Stakater Reloader. buildkitd reads its
   # certificates only at start, so a renewed Secret takes effect after a

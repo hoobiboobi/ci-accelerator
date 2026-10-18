@@ -8,7 +8,8 @@
 #
 # For checking the checks: E2E_CHART=<chart dir> runs against another copy of
 # the chart, E2E_EXTRA_VALUES="<file> ..." adds values files after the e2e
-# ones, E2E_RUNNER_FRAGMENT=<file> replaces integrations/gitlab-runner/values.yaml. A deliberately broken chart or value must turn scenarios red.
+# ones, E2E_RUNNER_FRAGMENT=<file> replaces integrations/gitlab-runner/values.yaml,
+# E2E_BOX_EXTRA_VALUES="<file> ..." adds values files to the umbrella install. A deliberately broken chart or value must turn scenarios red.
 #
 # Installs its own release ("e2e") in its own namespace, so a development
 # release in the same cluster is not touched, and runs CI-job-like clients
@@ -23,7 +24,8 @@
 # pushes metrics and traces to a throwaway VictoriaMetrics/VictoriaTraces.
 # A real gitlab-runner (official chart + integrations/gitlab-runner) takes
 # jobs from a stand-in GitLab API (test/e2e/fake-gitlab) and runs buildctl
-# in job pods it creates. Never run two e2e runs against the
+# in job pods it creates; so does the umbrella chart (charts/ci-accelerator),
+# installed as a whole into its own namespaces. Never run two e2e runs against the
 # same namespace at the same time.
 #
 # Compatible with bash 3.2 (macOS). Refuses to run against anything that is
@@ -42,8 +44,11 @@ JOBS_NS=$NS-jobs
 PSA_NS=$NS-psa
 OTHER_NS=$NS-other
 OBS_NS=$NS-obs
+BOX_NS=$NS-box
+BOX_JOBS_NS=$NS-box-jobs
 REL=e2e
 OTEL_REL=$REL-otel
+BOX_REL=box
 SVC_HOST=$REL-buildkit.$NS.svc
 ADDR=tcp://$SVC_HOST:1234
 CLIENT_SECRET=$REL-buildkit-client
@@ -75,7 +80,7 @@ E2E_LABEL=ci-accelerator.io/e2e
 KEEP=${KEEP:-0}
 SCENARIOS=${SCENARIOS:-all}
 MODE=${1:-run}
-ALL_SCENARIOS="preflight tls certmanager existing netpol otel runner cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
+ALL_SCENARIOS="preflight tls certmanager existing netpol otel runner box cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
 
 refuse() { echo "refusing to run e2e: $*" >&2; exit 2; }
 
@@ -258,6 +263,15 @@ remove_release() {
   if hc status gitlab-runner -n "$NS" >/dev/null 2>&1; then
     hc uninstall gitlab-runner -n "$NS" --wait --timeout 3m >/dev/null 2>&1 || true
   fi
+  if hc status "$BOX_REL" -n "$BOX_NS" >/dev/null 2>&1; then
+    hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || true
+  fi
+  # The box's jobs namespace belongs to its release; remove a leftover one.
+  if [ "$(kc get namespace "$BOX_JOBS_NS" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/instance}' 2>/dev/null)" = "$BOX_REL" ]; then
+    kc delete namespace "$BOX_JOBS_NS" --wait=true --timeout=180s >/dev/null 2>&1 || true
+  fi
+  kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" \
+    --ignore-not-found >/dev/null 2>&1 || true
   for r in "$REL" "$OTEL_REL"; do
     if hc status "$r" -n "$NS" >/dev/null 2>&1; then
       hc uninstall "$r" -n "$NS" --wait --timeout 5m >/dev/null 2>&1 || true
@@ -321,7 +335,7 @@ cleanup() {
   remove_release
   echo "   release removed at $(elapsed)"
   local ns
-  for ns in "$NS" "$JOBS_NS" "$PSA_NS" "$OTHER_NS" "$OBS_NS"; do
+  for ns in "$NS" "$JOBS_NS" "$PSA_NS" "$OTHER_NS" "$OBS_NS" "$BOX_NS"; do
     if [ "$(kc get namespace "$ns" -o jsonpath="{.metadata.labels.ci-accelerator\.io/e2e}" 2>/dev/null)" = true ]; then
       kc delete namespace "$ns" --wait=true --timeout=180s >/dev/null 2>&1 || true
     fi
@@ -712,15 +726,15 @@ fake_gitlab() {
   fi
 }
 
-# run_job <name>: queue the e2e CI job, wait for it, keep its pod spec and
-# trace in $LOGS/job-<name>.{pod.json,trace,state}.
+# run_job <name> [jobs namespace]: queue the e2e CI job, wait for it, keep its
+# pod spec and trace in $LOGS/job-<name>.{pod.json,trace,state}.
 run_job() {
-  local name=$1 id state i pod_seen=0
+  local name=$1 jobs_ns=${2:-$JOBS_NS} id state i pod_seen=0
   id=$(fake_gitlab POST /e2e/jobs "$JOB_SPEC" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') \
     || { fail "queue job $name"; return 1; }
   for i in $(seq 1 120); do
     if [ "$pod_seen" = 0 ]; then
-      kc -n "$JOBS_NS" get pods -l ci-accelerator.io/component=ci-job -o json >"$LOGS/job-$name.pod.json" 2>/dev/null
+      kc -n "$jobs_ns" get pods -l ci-accelerator.io/component=ci-job -o json >"$LOGS/job-$name.pod.json" 2>/dev/null
       grep -q '"nodeName"' "$LOGS/job-$name.pod.json" && pod_seen=1
     fi
     fake_gitlab GET "/e2e/jobs/$id" >"$LOGS/job-$name.json" 2>/dev/null
@@ -741,10 +755,9 @@ print("\n".join(re.sub(r"^\d{4}-\d\d-\d\dT[0-9:.]+Z [0-9]+[OE]\+? ?", "", l) for
 # echoes every script line, so a plain grep would match the command itself.
 job_printed() { grep -qE "^$2\$" "$LOGS/job-$1.trace"; }
 
-s_runner() {
-  step "runner: a real gitlab-runner with integrations/gitlab-runner sends CI jobs to the daemons"
-  local chart frag pod node daemon_node arch
-  # The stand-in GitLab API.
+# ensure_fake_gitlab <runner namespace>: the stand-in GitLab API in $NS and a
+# runner token Secret in the runner's namespace.
+ensure_fake_gitlab() {
   kc -n "$NS" create configmap fake-gitlab --from-file="$ROOT/test/e2e/fake-gitlab/server.py" \
     --dry-run=client -o yaml | kc apply -f - >/dev/null
   kc -n "$NS" apply -f - >/dev/null <<EOF_FAKE
@@ -769,9 +782,31 @@ spec:
   selector: {app: fake-gitlab}
   ports: [{port: 80, targetPort: 8080}]
 EOF_FAKE
-  kc -n "$NS" wait --for=condition=Ready pod/fake-gitlab --timeout=120s >/dev/null || { fail "fake GitLab not ready"; return; }
-  kc -n "$NS" create secret generic gitlab-runner-token --from-literal=runner-token=glrt-e2e-not-a-real-token \
+  kc -n "$NS" wait --for=condition=Ready pod/fake-gitlab --timeout=120s >/dev/null || { fail "fake GitLab not ready"; return 1; }
+  kc -n "$1" create secret generic gitlab-runner-token --from-literal=runner-token=glrt-e2e-not-a-real-token \
     --from-literal=runner-registration-token= --dry-run=client -o yaml | kc apply -f - >/dev/null
+}
+
+# The e2e CI job: what the CI component will do, plus evidence for the checks.
+job_spec() {
+  python3 - "$IMAGE" <<'PY'
+import json, sys
+print(json.dumps({"image": sys.argv[1], "script": [
+    'env | grep "^BUILDKIT_" | sort',
+    'ls "$BUILDKIT_TLS_DIR"',
+    'if [ -e /var/run/secrets/kubernetes.io/serviceaccount/token ]; then echo SA_TOKEN_PRESENT; else echo NO_SA_TOKEN; fi',
+    'mkdir -p ctx && echo "FROM alpine:3.22" > ctx/Dockerfile && echo "RUN sleep 2 && echo deps > /deps" >> ctx/Dockerfile',
+    'echo "ARG BUST" >> ctx/Dockerfile && echo "RUN echo bust=\\$BUST" >> ctx/Dockerfile',
+    'buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" debug workers -v | grep worker.hostname',
+    'buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build --frontend dockerfile.v0 --local context=ctx --local dockerfile=ctx --opt build-arg:BUST=$CI_JOB_ID --progress plain',
+]}))
+PY
+}
+
+s_runner() {
+  step "runner: a real gitlab-runner with integrations/gitlab-runner sends CI jobs to the daemons"
+  local chart frag pod node daemon_node arch
+  ensure_fake_gitlab "$NS" || return
   # The fragment as a user would adapt it: the names marked ADJUST.
   frag=$LOGS/runner-fragment.yaml
   # e2e only: every job on one build node, so the second job meets the
@@ -794,20 +829,7 @@ EOF_FAKE
   pass "the official chart with the fragment registers and gets ready"
   check "gitlab-runner lint accepts the generated config.toml" \
     quiet kc -n "$NS" exec deploy/gitlab-runner -- gitlab-runner lint -c /home/gitlab-runner/.gitlab-runner/config.toml
-  # The CI job: what the CI component will do, plus evidence for the checks.
-  JOB_SPEC=$(python3 - "$IMAGE" <<'PY'
-import json, sys
-print(json.dumps({"image": sys.argv[1], "script": [
-    'env | grep "^BUILDKIT_" | sort',
-    'ls "$BUILDKIT_TLS_DIR"',
-    'if [ -e /var/run/secrets/kubernetes.io/serviceaccount/token ]; then echo SA_TOKEN_PRESENT; else echo NO_SA_TOKEN; fi',
-    'mkdir -p ctx && echo "FROM alpine:3.22" > ctx/Dockerfile && echo "RUN sleep 2 && echo deps > /deps" >> ctx/Dockerfile',
-    'echo "ARG BUST" >> ctx/Dockerfile && echo "RUN echo bust=\$BUST" >> ctx/Dockerfile',
-    'buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" debug workers -v | grep worker.hostname',
-    'buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build --frontend dockerfile.v0 --local context=ctx --local dockerfile=ctx --opt build-arg:BUST=$CI_JOB_ID --progress plain',
-]}))
-PY
-)
+  JOB_SPEC=$(job_spec)
   run_job first
   check "the first job succeeds" test "$(cat "$LOGS/job-first.state")" = success
   pod=$LOGS/job-first.pod.json
@@ -831,8 +853,41 @@ PY
   check "the second job succeeds" test "$(cat "$LOGS/job-second.state")" = success
   check "the second job's dependency step is CACHED" \
     eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-second.trace" | grep -q "^#[0-9]* CACHED$"'
+  # The stand-in GitLab stays for the box scenario; cleanup removes it.
   hc uninstall gitlab-runner -n "$NS" --wait --timeout 3m >/dev/null 2>&1 || true
-  kc -n "$NS" delete pod fake-gitlab --wait=false >/dev/null 2>&1
+}
+
+s_box() {
+  step "box: charts/ci-accelerator installs daemons, runner and jobs namespace that work together"
+  local node arch
+  ensure_ns "$BOX_NS" privileged
+  ensure_fake_gitlab "$BOX_NS" || return
+  make -C "$ROOT" deps >"$LOGS/box-deps.log" 2>&1 || { fail "make deps (see $LOGS/box-deps.log)"; return; }
+  arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
+  local extra=()
+  for f in ${E2E_BOX_EXTRA_VALUES:-}; do extra+=(-f "$f"); done
+  hc upgrade --install "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" -f "$ROOT/test/e2e/box-values.yaml" ${extra[@]+"${extra[@]}"} \
+    --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token \
+    --set "global.jobs.namespace=$BOX_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$BOX_JOBS_NS" \
+    --set "global.jobs.architecture=$arch" --wait --timeout 8m >"$LOGS/box-install.log" 2>&1 \
+    || { fail "install the box (see $LOGS/box-install.log)"; return; }
+  pass "the box installs with two required values and gets ready"
+  check "the jobs namespace enforces Pod Security baseline" \
+    test "$(kc get namespace "$BOX_JOBS_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')" = baseline
+  check "the client certificate is issued into the jobs namespace" \
+    eventually 30 quiet kc -n "$BOX_JOBS_NS" get secret "$BOX_REL-buildkit-client"
+  JOB_SPEC=$(job_spec)
+  run_job box "$BOX_JOBS_NS"
+  check "a CI job through the box's runner succeeds" test "$(cat "$LOGS/job-box.state")" = success
+  check "the job talks to the box's daemons" job_printed box "BUILDKIT_REMOTE_ADDR=tcp://$BOX_REL-buildkit.$BOX_NS.svc:1234"
+  check "no Kubernetes API token in the box's job pod" job_printed box NO_SA_TOKEN
+  node=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["items"][0]["spec"]["nodeName"])' "$LOGS/job-box.pod.json" 2>/dev/null)
+  check "the box's job pod landed on a build node (${node:-none})" \
+    eval 'case " $BUILD_NODES " in *" $node "*) true ;; *) false ;; esac'
+  hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the box"
+  check "uninstall removes the jobs namespace" \
+    eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'
+  kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
 }
 
 s_cache() {

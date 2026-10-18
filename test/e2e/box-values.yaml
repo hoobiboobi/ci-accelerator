@@ -1,0 +1,9 @@
+# e2e-only values for charts/ci-accelerator. gitlabUrl, the token Secret, the
+# jobs namespace and the build nodes' architecture come from run.sh.
+gitlab-runner:
+  # Every kind worker is a tainted build node: the manager runs on the
+  # control-plane node.
+  tolerations:
+    - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+  checkInterval: 1
+  concurrent: 2

@@ -1,0 +1,164 @@
+suite: box
+templates:
+  - jobs-namespace.yaml
+  - validate.yaml
+  - charts/gitlab-runner/templates/configmap.yaml
+  - charts/buildkit/templates/certificates.yaml
+  - charts/buildkit/templates/networkpolicy.yaml
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  # Job pods run untrusted code: their own namespace, Pod Security baseline.
+  - it: creates the jobs namespace with Pod Security baseline
+    template: jobs-namespace.yaml
+    asserts:
+      - isKind:
+          of: Namespace
+      - equal:
+          path: metadata.name
+          value: ci-accelerator-jobs
+      - equal:
+          path: metadata.labels["pod-security.kubernetes.io/enforce"]
+          value: baseline
+
+  - it: can leave the jobs namespace to someone else
+    template: jobs-namespace.yaml
+    set:
+      jobsNamespace.create: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # The contract with the CI component, filled in from this release.
+  - it: points the runner's jobs at this release's daemons and client certificate
+    template: charts/gitlab-runner/templates/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"BUILDKIT_REMOTE_ADDR=tcp://box-buildkit\.ci-accelerator\.svc:1234"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'namespace = "ci-accelerator-jobs"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'name = "box-buildkit-client"\n\s+mount_path = "/certs"\n\s+read_only = true'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'automount_service_account_token = false'
+
+  # buildkit's own name rule: a release name containing "buildkit" is used as is.
+  - it: follows buildkit's naming when the release name contains buildkit
+    template: charts/gitlab-runner/templates/configmap.yaml
+    release:
+      name: my-buildkit
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'tcp://my-buildkit\.ci-accelerator\.svc:1234'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'name = "my-buildkit-client"'
+
+  # Helm merges maps: the selector extends the default, as for the daemons.
+  - it: places jobs where global.buildNodes puts the daemons, with the helper image's architecture
+    template: charts/gitlab-runner/templates/configmap.yaml
+    set:
+      global.buildNodes.selector: {pool: ci}
+      global.buildNodes.tolerations:
+        - {key: dedicated, operator: Exists, effect: NoSchedule}
+        - {key: pool, operator: Equal, value: ci, effect: NoExecute}
+      global.jobs.architecture: arm64
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '\[runners.kubernetes.node_selector\]\n\s+"ci-accelerator.io/node-role" = "build"\n\s+"pool" = "ci"\n\s+"kubernetes.io/arch" = "arm64"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '\[runners.kubernetes.node_tolerations\]\n\s+"dedicated" = "NoSchedule"\n\s+"pool=ci" = "NoExecute"'
+
+  - it: drops the build-node placement with build nodes switched off
+    template: charts/gitlab-runner/templates/configmap.yaml
+    set:
+      global.buildNodes.enabled: false
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '\[runners.kubernetes.node_selector\]\n\s+"kubernetes.io/arch" = "amd64"\n\s+\[runners.kubernetes.node_tolerations\]\n\s+\[runners.kubernetes.pod_labels\]'
+
+  - it: issues the client certificate into the jobs namespace
+    template: charts/buildkit/templates/certificates.yaml
+    set:
+      global.jobs.namespace: team-jobs
+      gitlab-runner.runners.jobNamespace: team-jobs
+    asserts:
+      - containsDocument:
+          any: true
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          name: box-buildkit-client
+          namespace: team-jobs
+
+  - it: admits only the jobs namespace to the daemons
+    template: charts/buildkit/templates/networkpolicy.yaml
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator-jobs]
+
+  - it: requires the GitLab URL
+    template: validate.yaml
+    set:
+      gitlab-runner.gitlabUrl: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'gitlab-runner.gitlabUrl is required'
+
+  - it: requires the runner token Secret and shows how to make it
+    template: validate.yaml
+    set:
+      gitlab-runner.runners.secret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'gitlab-runner.runners.secret is required: .*kubectl -n ci-accelerator create secret generic gitlab-runner-token --from-literal=runner-token=glrt-'
+
+  - it: needs neither without its own runner
+    template: validate.yaml
+    set:
+      gitlab-runner.enabled: false
+      gitlab-runner.gitlabUrl: ""
+      gitlab-runner.runners.secret: ""
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # The runner chart creates its Role in runners.jobNamespace.
+  - it: refuses a runner job namespace other than global.jobs.namespace
+    template: validate.yaml
+    set:
+      global.jobs.namespace: team-jobs
+    asserts:
+      - failedTemplate:
+          errorPattern: 'gitlab-runner.runners.jobNamespace \(ci-accelerator-jobs\) must equal global.jobs.namespace \(team-jobs\)'
+
+  - it: refuses running jobs in the release namespace
+    template: validate.yaml
+    set:
+      global.jobs.namespace: ci-accelerator
+      gitlab-runner.runners.jobNamespace: ci-accelerator
+    asserts:
+      - failedTemplate:
+          errorPattern: 'global.jobs.namespace is the release namespace'
+
+  - it: refuses buildkit name overrides the runner address cannot follow
+    template: validate.yaml
+    set:
+      buildkit.fullnameOverride: other
+    asserts:
+      - failedTemplate:
+          errorPattern: 'buildkit.fullnameOverride and buildkit.nameOverride are not supported'

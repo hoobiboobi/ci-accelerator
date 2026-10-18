@@ -20,7 +20,7 @@ From outside the cluster: tcp://<any-node-ip>:{{ .Values.service.nodePort | defa
 
 Clients need mutual TLS: a directory with ca.crt and a client certificate
 (tls.crt, tls.key) from {{ $issuer.kind }} {{ $issuer.name }}.
-{{- with .Values.tls.client.namespaces }}
+{{- with (include "buildkit.tlsClientNamespaces" . | fromJsonArray) }}
 cert-manager puts one into Secret {{ $fullname }}-client in: {{ join ", " . }}.
 {{- else }}
 List the CI job namespaces in tls.client.namespaces to get one there.
