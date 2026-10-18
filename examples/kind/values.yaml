@@ -1,7 +1,10 @@
 # Values for the local kind cluster (examples/kind/kind-config.yaml).
 #
-#   helm upgrade --install bk charts/buildkit -n ci-accelerator \
-#     -f examples/kind/values.yaml
+#   kubectl --context kind-buildkit create namespace ci-accelerator
+#   kubectl --context kind-buildkit label namespace ci-accelerator \
+#     pod-security.kubernetes.io/enforce=privileged
+#   helm --kube-context kind-buildkit upgrade --install bk charts/buildkit \
+#     -n ci-accelerator -f examples/kind/values.yaml
 #
 # Exposes the daemons as NodePort 31234. kind maps that port on the first
 # worker to 127.0.0.1:1234 on the host, so buildctl can run on the laptop:
@@ -23,4 +26,9 @@ storage:
 
 config:
   gc:
+    # Absolute, below 80% of the sizeLimit (buildkit units: 15GB = 15 GiB).
     maxUsedSpace: "15GB"
+    reservedSpace: "2GB"
+    # The Docker VM disk is shared with images and every kind node; 30% free
+    # is often not available at all, which would make GC prune constantly.
+    minFreeSpace: "5%"
