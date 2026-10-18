@@ -48,7 +48,9 @@ BOX_NS=$NS-box
 BOX_JOBS_NS=$NS-box-jobs
 REL=e2e
 OTEL_REL=$REL-otel
-BOX_REL=box
+# Not "box": a manual install of that name may share the cluster, and
+# cleanup deletes CA Secrets by release label.
+BOX_REL=e2e-box
 SVC_HOST=$REL-buildkit.$NS.svc
 ADDR=tcp://$SVC_HOST:1234
 CLIENT_SECRET=$REL-buildkit-client
@@ -289,9 +291,10 @@ sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else sh
 # cert-manager is a prerequisite of the chart, never part of it. Install the
 # pinned version when the cluster has none; an existing one is used as is.
 ensure_cert_manager() {
-  # A release of this script is (re)applied, so a failed earlier install is
-  # repaired; someone else's cert-manager is left alone.
-  if ! hc status cert-manager -n "$CM_NS" >/dev/null 2>&1 && kc get crd certificates.cert-manager.io >/dev/null 2>&1; then
+  # A working cert-manager is used as it is, whoever installed it. Only a
+  # missing one is installed, or a release left broken by an earlier run is
+  # repaired.
+  if kc -n "$CM_NS" rollout status deploy/cert-manager-webhook --timeout=5s >/dev/null 2>&1; then
     info "cert-manager present: $(kc -n "$CM_NS" get deploy cert-manager -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)"
   else
     local tgz=$LOGS/cert-manager-$CERT_MANAGER_VERSION.tgz

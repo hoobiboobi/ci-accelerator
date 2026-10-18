@@ -31,13 +31,8 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build ...
 1. Install the buildkit chart with the jobs namespace in
    `tls.client.namespaces`, so that the client certificate Secret exists there.
 2. Create a runner in GitLab and put its authentication token in a Secret in
-   the runner's namespace. The chart mounts both keys, so the empty one must
-   exist too:
-
-   ```sh
-   kubectl -n ci-accelerator create secret generic gitlab-runner-token \
-     --from-literal=runner-token=glrt-... --from-literal=runner-registration-token=
-   ```
+   the runner's namespace, as described in
+   [The runner token Secret](#the-runner-token-secret).
 
 3. Change the lines marked `ADJUST` in `values.yaml`:
    - the GitLab URL;
@@ -53,6 +48,37 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build ...
      --repo https://charts.gitlab.io --version 0.93.0 \
      -n ci-accelerator -f integrations/gitlab-runner/values.yaml
    ```
+
+## The runner token Secret
+
+The chart mounts both keys of `runners.secret`, so the Secret needs two:
+
+| Key | Value |
+|---|---|
+| `runner-token` | the runner authentication token from GitLab (`glrt-...`) |
+| `runner-registration-token` | empty, but it must exist |
+
+Create it with the real token (not a placeholder):
+
+```sh
+kubectl -n <runner namespace> create secret generic gitlab-runner-token \
+  --from-literal=runner-token=glrt-... --from-literal=runner-registration-token=
+```
+
+Check both keys are there without printing the token:
+
+```sh
+kubectl -n <runner namespace> get secret gitlab-runner-token \
+  -o go-template='{{range $k, $v := .data}}{{$k}} len={{len $v}}{{"\n"}}{{end}}'
+```
+
+A working runner logs `Verifying runner... is valid` and `Runner registered
+successfully`.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Runner pod stuck in `ContainerCreating`, event `FailedMount ... non-existent secret key: runner-registration-token` | The empty key is missing | `kubectl -n <ns> patch secret gitlab-runner-token --type merge -p '{"data":{"runner-registration-token":""}}'` (kubelet retries the mount by itself) |
+| Runner log `Verifying runner... is not valid` | Wrong or placeholder token, or the runner was deleted in GitLab | Re-create the Secret with the right token, then `kubectl -n <ns> rollout restart deploy/<release>-gitlab-runner` (the token is read only at start) |
 
 ## Things to know
 
