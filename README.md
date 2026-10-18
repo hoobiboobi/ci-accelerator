@@ -173,8 +173,13 @@ kubectl -n ci-accelerator port-forward svc/ci-accelerator-vt-single-server 10428
 ```
 
 The metric counters arrive as deltas: aggregate them with `sum_over_time`,
-not `rate`. To place a build in its pipeline's trace, set `TRACEPARENT` in
-the job.
+not `rate`.
+
+Every job on the runner gets a trace context without changes to
+`.gitlab-ci.yml`. The runner sets `TRACEPARENT` before the job's script, so
+all builds of one pipeline land in one trace. Its id is derived from the
+pipeline id, and the install notes print the command that opens a
+pipeline's trace.
 
 ## Limitations
 

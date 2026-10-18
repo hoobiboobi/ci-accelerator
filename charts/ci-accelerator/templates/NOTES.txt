@@ -36,7 +36,11 @@ Metrics and traces of the daemons (OTLP push):
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ci-accelerator.vtName" . }}-server 10428
     then http://localhost:10428/select/vmui
 {{- end }}
-CI jobs join a build to their pipeline's trace by setting TRACEPARENT.
+{{- if and $vt.enabled $runner.enabled }}
+The runner puts every job's builds into its pipeline's trace. The trace of
+pipeline <id>, with the port-forward above:
+  curl -s http://localhost:10428/select/jaeger/api/traces/{{ $runner.gitlabUrl | sha256sum | trunc 16 }}$(printf '%016x' <id>)
+{{- end }}
 Builds can reach this storage: they can read other projects' traces (the
 buildctl command line is recorded, so never pass secrets as build args) and
 change or delete data. Do not expose it outside the cluster.

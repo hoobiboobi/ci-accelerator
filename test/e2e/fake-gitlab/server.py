@@ -10,7 +10,7 @@ Runner side (gitlab-runner 19.4, network/gitlab.go):
   DELETE /api/v4/runners...          unregister on shutdown (204)
 
 Test side:
-  POST   /e2e/jobs                   {"image": ..., "script": [...]} -> {"id": n}
+  POST   /e2e/jobs                   {"image": ..., "script": [...], "pipeline_id": n} -> {"id": n}
   GET    /e2e/jobs/<id>              {"state": ..., "trace": ...}
 
 Not GitLab: no git, artifacts, cache or services. Python stdlib only.
@@ -36,9 +36,13 @@ def job_payload(job_id, spec):
         "git_info": {"repo_url": "", "ref": "main", "sha": "0" * 40, "before_sha": "0" * 40, "ref_type": "branch"},
         "runner_info": {"timeout": timeout},
         # No checkout: the job builds a context it writes itself.
+        # A few of the predefined variables GitLab sends; the runner adds the
+        # ones it derives itself.
         "variables": [
             {"key": "GIT_STRATEGY", "value": "none", "public": True},
             {"key": "CI_JOB_ID", "value": str(job_id), "public": True},
+            {"key": "CI_PIPELINE_ID", "value": str(spec.get("pipeline_id", 1000)), "public": True},
+            {"key": "CI_PROJECT_PATH", "value": "e2e/project", "public": True},
         ],
         "steps": [{"name": "script", "script": spec["script"], "timeout": timeout, "when": "on_success", "allow_failure": False}],
         "image": {"name": spec["image"]},
@@ -117,6 +121,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 job = dict(JOBS[int(m.group(1))])
             job.pop("spec", None)
+            job["id"] = int(m.group(1))
             return self._send(200, job)
         if self.path == "/healthz":
             return self._send(200, {"ok": True})

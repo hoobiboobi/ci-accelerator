@@ -52,6 +52,32 @@ tests:
           path: data["config.template.toml"]
           pattern: 'automount_service_account_token = false'
 
+  # Every job joins its pipeline's trace without changes to .gitlab-ci.yml.
+  - it: makes the runner put each job's builds into its pipeline's trace
+    template: charts/gitlab-runner/templates/configmap.yaml
+    set:
+      gitlab-runner.gitlabUrl: https://gitlab.example.com/
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'export TRACEPARENT="00-[0-9a-f]{16}\$\(printf ''%016x'' "\$CI_PIPELINE_ID"\)-\$\(printf ''%016x'' "\$CI_JOB_ID"\)-01"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'if \[ -z "\$\{TRACEPARENT:-\}" \]'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/pipeline-id" = "\$CI_PIPELINE_ID"'
+
+  # The prefix identifies the GitLab instance: pipeline ids repeat across them.
+  - it: derives the trace-id prefix from the GitLab URL
+    template: charts/gitlab-runner/templates/configmap.yaml
+    set:
+      gitlab-runner.gitlabUrl: https://gitlab.example.com/
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'TRACEPARENT="00-051b90d8237d468d'
+
   # buildkit's own name rule: a release name containing "buildkit" is used as is.
   - it: follows buildkit's naming when the release name contains buildkit
     template: charts/gitlab-runner/templates/configmap.yaml

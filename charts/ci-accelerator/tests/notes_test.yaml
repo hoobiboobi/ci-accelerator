@@ -31,6 +31,8 @@ tests:
           pattern: 'port-forward svc/box-vt-single-server 10428'
       - matchRegexRaw:
           pattern: 'Builds can reach this storage: they can read other projects'' traces'
+      - matchRegexRaw:
+          pattern: 'traces/051b90d8237d468d\$\(printf ''%016x'' <id>\)'
 
   - it: says nothing about storage that is switched off
     set:

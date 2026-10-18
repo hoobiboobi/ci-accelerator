@@ -760,6 +760,14 @@ print("\n".join(re.sub(r"^\d{4}-\d\d-\d\dT[0-9:.]+Z [0-9]+[OE]\+? ?", "", l) for
   echo "${state:-unknown}" >"$LOGS/job-$name.state"
 }
 
+# expected_traceparent <gitlab url> <pipeline id> <job id>: what the runner's
+# pre_build_script exports (a prefix from the GitLab URL, the ids in hex).
+expected_traceparent() {
+  printf '00-%s%016x-%016x-01' "$(printf '%s' "$1" | sha256 | cut -c1-16)" "$2" "$3"
+}
+# job_id <name>: the GitLab job id of a run_job result.
+job_id() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$LOGS/job-$1.json" 2>/dev/null; }
+
 # job_printed <name> <regex>: a whole output line of the job. The runner also
 # echoes every script line, so a plain grep would match the command itself.
 job_printed() { grep -qE "^$2\$" "$LOGS/job-$1.trace"; }
@@ -798,10 +806,11 @@ EOF_FAKE
 
 # The e2e CI job: what the CI component will do, plus evidence for the checks.
 job_spec() {
-  python3 - "$IMAGE" <<'PY'
+  python3 - "$IMAGE" "${1:-1000}" <<'PY'
 import json, sys
-print(json.dumps({"image": sys.argv[1], "script": [
+print(json.dumps({"image": sys.argv[1], "pipeline_id": int(sys.argv[2]), "script": [
     'env | grep "^BUILDKIT_" | sort',
+    'echo "TRACEPARENT=${TRACEPARENT:-unset}"',
     'ls "$BUILDKIT_TLS_DIR"',
     'if [ -e /var/run/secrets/kubernetes.io/serviceaccount/token ]; then echo SA_TOKEN_PRESENT; else echo NO_SA_TOKEN; fi',
     'mkdir -p ctx && echo "FROM alpine:3.22" > ctx/Dockerfile && echo "RUN sleep 2 && echo deps > /deps" >> ctx/Dockerfile',
@@ -814,7 +823,7 @@ PY
 
 s_runner() {
   step "runner: a real gitlab-runner with integrations/gitlab-runner sends CI jobs to the daemons"
-  local chart frag pod node daemon_node arch
+  local chart frag pod node daemon_node arch tp
   ensure_fake_gitlab "$NS" || return
   # The fragment as a user would adapt it: the names marked ADJUST.
   frag=$LOGS/runner-fragment.yaml
@@ -838,7 +847,8 @@ s_runner() {
   pass "the official chart with the fragment registers and gets ready"
   check "gitlab-runner lint accepts the generated config.toml" \
     quiet kc -n "$NS" exec deploy/gitlab-runner -- gitlab-runner lint -c /home/gitlab-runner/.gitlab-runner/config.toml
-  JOB_SPEC=$(job_spec)
+  # Both jobs belong to pipeline 777; neither sets anything about tracing.
+  JOB_SPEC=$(job_spec 777)
   run_job first
   check "the first job succeeds" test "$(cat "$LOGS/job-first.state")" = success
   pod=$LOGS/job-first.pod.json
@@ -851,6 +861,10 @@ s_runner() {
   check "the client certificate is mounted at BUILDKIT_TLS_DIR" \
     eval 'job_printed first ca.crt && job_printed first tls.crt && job_printed first tls.key'
   check "no Kubernetes API token in the job pod" job_printed first NO_SA_TOKEN
+  # The runner's pre_build_script puts every job into its pipeline's trace.
+  tp=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 777 "$(job_id first)")
+  check "the runner sets TRACEPARENT from the pipeline and job ids ($tp)" job_printed first "TRACEPARENT=$tp"
+  check "the job pod carries its pipeline id" grep -q '"ci-accelerator.io/pipeline-id": "777"' "$pod"
   check "the build container asks for the small tier (50m CPU)" \
     eval 'python3 -c "import json,sys; c=[x for x in json.load(open(sys.argv[1]))[\"items\"][0][\"spec\"][\"containers\"] if x[\"name\"]==\"build\"][0]; sys.exit(0 if c[\"resources\"][\"requests\"][\"cpu\"]==\"50m\" else 1)" "$pod"'
   daemon_node=$(kc -n "$NS" get pod "$(grep -o 'worker.hostname: *[^ ]*' "$LOGS/job-first.trace" | head -1 | awk '{print $2}')" \
@@ -868,7 +882,7 @@ s_runner() {
 
 s_box() {
   step "box: charts/ci-accelerator installs daemons, runner, jobs namespace and storage that work together"
-  local node arch
+  local node arch box_tid
   ensure_ns "$BOX_NS" privileged
   ensure_fake_gitlab "$BOX_NS" || return
   make -C "$ROOT" deps >"$LOGS/box-deps.log" 2>&1 || { fail "make deps (see $LOGS/box-deps.log)"; return; }
@@ -899,7 +913,7 @@ s_box() {
     test "$(kc get namespace "$BOX_JOBS_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')" = baseline
   check "the client certificate is issued into the jobs namespace" \
     eventually 30 quiet kc -n "$BOX_JOBS_NS" get secret "$BOX_REL-buildkit-client"
-  JOB_SPEC=$(job_spec)
+  JOB_SPEC=$(job_spec 778)
   run_job box "$BOX_JOBS_NS"
   check "a CI job through the box's runner succeeds" test "$(cat "$LOGS/job-box.state")" = success
   check "the job talks to the box's daemons" job_printed box "BUILDKIT_REMOTE_ADDR=tcp://$BOX_REL-buildkit.$BOX_NS.svc:1234"
@@ -919,6 +933,14 @@ s_box() {
       "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/jaeger/api/services" 2>/dev/null | grep -q '"buildkitd"'
   }
   check "the box's VictoriaTraces receives the daemons' spans" eventually 30 box_traces
+  # Found from the pipeline id alone: the runner derives the trace id from it.
+  box_tid=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 778 "$(job_id box)" | cut -d- -f2)
+  box_pipeline_trace() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
+      "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/jaeger/api/traces/$box_tid" 2>/dev/null >"$LOGS/box-trace.json"
+    grep -q '"serviceName":"buildctl"' "$LOGS/box-trace.json" && grep -q '"serviceName":"buildkitd"' "$LOGS/box-trace.json"
+  }
+  check "the pipeline's trace ($box_tid) holds the job's buildctl and daemon spans" eventually 30 box_pipeline_trace
   hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the box"
   check "uninstall removes the jobs namespace" \
     eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'

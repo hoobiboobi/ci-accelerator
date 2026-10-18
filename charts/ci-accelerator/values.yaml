@@ -114,6 +114,18 @@ gitlab-runner:
           "BUILDKIT_REMOTE_ADDR=tcp://{{ include "ci-accelerator.buildkitName" . }}.{{ .Release.Namespace }}.svc:1234",
           "BUILDKIT_TLS_DIR=/certs",
         ]
+        # Every job's builds join its pipeline's trace, without changes to
+        # .gitlab-ci.yml: buildctl reads TRACEPARENT. trace-id = a prefix for
+        # this GitLab (from gitlabUrl) + the pipeline id in hex, span-id = the
+        # job id in hex, so a pipeline's trace is found from its id. A job's own
+        # TRACEPARENT is kept.
+        pre_build_script = '''
+        # ci-accelerator: join this job's builds to its pipeline's trace
+        if [ -z "${TRACEPARENT:-}" ] && [ -n "${CI_PIPELINE_ID:-}" ] && [ -n "${CI_JOB_ID:-}" ]; then
+          export TRACEPARENT="00-{{ .Values.gitlabUrl | sha256sum | trunc 16 }}$(printf '%016x' "$CI_PIPELINE_ID")-$(printf '%016x' "$CI_JOB_ID")-01"
+        fi
+        export OTEL_RESOURCE_ATTRIBUTES="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}ci.pipeline.id=${CI_PIPELINE_ID:-},ci.job.id=${CI_JOB_ID:-},ci.project.path=${CI_PROJECT_PATH:-}"
+        '''
         [runners.kubernetes]
           namespace = "{{ .Values.global.jobs.namespace }}"
           image = "alpine:3.22"
@@ -142,6 +154,10 @@ gitlab-runner:
           {{- end }}
           [runners.kubernetes.pod_labels]
             "ci-accelerator.io/component" = "ci-job"
+          # The pipeline id on the job pod (the runner adds job and project ids
+          # itself), for tools that build pipeline and job spans from the pods.
+          [runners.kubernetes.pod_annotations]
+            "ci-accelerator.io/pipeline-id" = "$CI_PIPELINE_ID"
           [[runners.kubernetes.volumes.secret]]
             name = "{{ include "ci-accelerator.buildkitName" . }}-client"
             mount_path = "/certs"

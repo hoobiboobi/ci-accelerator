@@ -134,9 +134,23 @@ Each daemon names itself in two ways:
   The counters are deltas per push interval, so query them with
   `sum_over_time`, not `rate`. Cache size and GC activity are not exported
   by BuildKit yet.
-- **Traces.** A job joins its builds to its pipeline's trace by setting
-  `TRACEPARENT` for `buildctl`. `buildctl` then forwards its own spans
-  through the daemon, so the job needs no trace exporter.
+- **Traces.** The runner configuration has a `pre_build_script` that runs in
+  every job right before its script and exports:
+  - `TRACEPARENT`:
+    - trace-id = 16 hex characters derived from the GitLab URL, then the
+      pipeline id in hex;
+    - parent span-id = the job id in hex.
+
+    A `TRACEPARENT` the job sets itself is kept.
+  - `OTEL_RESOURCE_ATTRIBUTES` with the pipeline id, job id and project path.
+
+  `buildctl` reads them and forwards its spans through the daemon, so every
+  build of a pipeline lands in one trace with no exporter in the job and no
+  change to `.gitlab-ci.yml`. A pipeline's trace is found from its id alone.
+  The job itself is not a span yet: in the trace UI the builds hang under a
+  missing parent. Job pods also carry the annotation
+  `ci-accelerator.io/pipeline-id` (the runner adds job and project ids), from
+  which pipeline and job spans can be built.
 
 ## Rollouts and restarts
 
