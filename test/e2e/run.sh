@@ -14,8 +14,11 @@
 # release in the same cluster is not touched, and runs CI-job-like clients
 # from a second namespace with Pod Security "baseline", the way runner job
 # pods will. The daemons run with hostPath state, small GC caps, a dead
-# OpenTelemetry backend and mutual TLS (a CA made by scripts/buildkit-certs.sh;
-# the clients mount a client certificate from a Secret, as job pods will). Never run two e2e runs against the
+# OpenTelemetry backend and mutual TLS from the chart's default source:
+# cert-manager (installed into the cluster when missing, and left there as
+# the prerequisite it is) issues a dedicated CA, the daemon certificate and a
+# client certificate that the clients mount, as job pods will. The
+# existingSecret source is exercised by switching to it and back. Never run two e2e runs against the
 # same namespace at the same time.
 #
 # Compatible with bash 3.2 (macOS). Refuses to run against anything that is
@@ -35,8 +38,13 @@ PSA_NS=$NS-psa
 REL=e2e
 SVC_HOST=$REL-buildkit.$NS.svc
 ADDR=tcp://$SVC_HOST:1234
-TLS_SECRET=$REL-buildkit-tls
-CLIENT_SECRET=$REL-client
+CLIENT_SECRET=$REL-buildkit-client
+OWN_SECRET=$REL-own-tls
+CM_NS=cert-manager
+CA_NAME=$NS-$REL-buildkit-ca
+CERT_MANAGER_VERSION=v1.21.2
+# sha256 of the chart archive pulled from oci://quay.io/jetstack/charts.
+CERT_MANAGER_SHA256=73a56e1728edd6c99f1f31082618c3259d279a76b7ebd3d4bdc5475c2442d34a
 # Every client call: the client certificate, and the Service name for the
 # server certificate check also when a call goes to a pod IP.
 TLS=(--tlsdir /certs --tlsservername "$SVC_HOST")
@@ -47,7 +55,7 @@ E2E_LABEL=ci-accelerator.io/e2e
 KEEP=${KEEP:-0}
 SCENARIOS=${SCENARIOS:-all}
 MODE=${1:-run}
-ALL_SCENARIOS="preflight tls cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
+ALL_SCENARIOS="preflight tls certmanager existing cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
 
 refuse() { echo "refusing to run e2e: $*" >&2; exit 2; }
 
@@ -116,9 +124,12 @@ eventually() {
 
 # --- cluster helpers ---------------------------------------------------------
 
-INSTALL_ARGS=(-f "$VALUES")
-for extra in ${E2E_EXTRA_VALUES:-}; do INSTALL_ARGS+=(-f "$extra"); done
-INSTALL_ARGS+=(--set "storage.hostPath.path=$HOST_PATH" --set "tls.existingSecret=$TLS_SECRET")
+BASE_ARGS=(-f "$VALUES")
+for extra in ${E2E_EXTRA_VALUES:-}; do BASE_ARGS+=(-f "$extra"); done
+BASE_ARGS+=(--set "storage.hostPath.path=$HOST_PATH")
+# Helm applies --set after --set-json whatever the order, so the client
+# namespaces stay out of BASE_ARGS for installs that must clear them.
+INSTALL_ARGS=("${BASE_ARGS[@]}" --set "tls.client.namespaces={$JOBS_NS}")
 
 # Ready, non-terminating daemon pod on a node.
 daemon_on() {
@@ -227,6 +238,32 @@ remove_release() {
     hc uninstall "$REL" -n "$NS" --wait --timeout 5m >/dev/null 2>&1 || true
   fi
   kc -n "$NS" wait --for=delete pod -l "app.kubernetes.io/instance=$REL" --timeout=300s >/dev/null 2>&1 || true
+  # The CA key Secret outlives its Certificate (cert-manager does not delete
+  # Secrets), in cert-manager's namespace.
+  kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$REL,ci-accelerator.io/component=buildkit" \
+    --ignore-not-found >/dev/null 2>&1 || true
+}
+
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+
+# cert-manager is a prerequisite of the chart, never part of it. Install the
+# pinned version when the cluster has none; an existing one is used as is.
+ensure_cert_manager() {
+  # A release of this script is (re)applied, so a failed earlier install is
+  # repaired; someone else's cert-manager is left alone.
+  if ! hc status cert-manager -n "$CM_NS" >/dev/null 2>&1 && kc get crd certificates.cert-manager.io >/dev/null 2>&1; then
+    info "cert-manager present: $(kc -n "$CM_NS" get deploy cert-manager -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)"
+  else
+    local tgz=$LOGS/cert-manager-$CERT_MANAGER_VERSION.tgz
+    helm pull oci://quay.io/jetstack/charts/cert-manager --version "$CERT_MANAGER_VERSION" -d "$LOGS" >/dev/null 2>&1 \
+      || die "pull the cert-manager chart"
+    echo "$CERT_MANAGER_SHA256  $tgz" | sha256 -c - >/dev/null 2>&1 || die "cert-manager chart checksum mismatch"
+    hc upgrade --install cert-manager "$tgz" -n "$CM_NS" --create-namespace \
+      -f "$ROOT/test/e2e/cert-manager-values.yaml" --wait --timeout 5m >"$LOGS/cert-manager.log" 2>&1 \
+      || { cat "$LOGS/cert-manager.log"; die "install cert-manager"; }
+    info "installed cert-manager $CERT_MANAGER_VERSION into $CM_NS (left there: a cluster-wide prerequisite)"
+  fi
+  kc -n "$CM_NS" rollout status deploy/cert-manager-webhook --timeout=180s >/dev/null || die "cert-manager webhook not ready"
 }
 
 collect_diagnostics() {
@@ -236,6 +273,8 @@ collect_diagnostics() {
     echo "### events"; kc -n "$NS" get events --sort-by=.lastTimestamp | tail -60
     echo "### logs"; kc -n "$NS" logs -l "app.kubernetes.io/instance=$REL" --tail=80 --prefix --all-containers
     echo "### clients"; kc -n "$JOBS_NS" get pods -o wide
+    echo "### certificates"; kc get certificates,certificaterequests -A -l "app.kubernetes.io/instance=$REL" -o wide
+    kc describe certificates -A -l "app.kubernetes.io/instance=$REL" | grep -A8 '^Events' 
   } >"$LOGS/diagnostics.txt" 2>&1
 }
 
@@ -289,16 +328,16 @@ remove_state
 ensure_ns "$NS" privileged
 ensure_ns "$JOBS_NS" baseline
 create_state
-# The daemons' CA, and an unrelated one whose client certificate must be
-# refused.
+ensure_cert_manager
+# A CA for the existingSecret source, and an unrelated one whose client
+# certificate must be refused.
 certs "$LOGS/tls"
 certs "$LOGS/rogue"
-put_secret "$NS" "$TLS_SECRET" "$LOGS/tls/server"
-put_secret "$JOBS_NS" "$CLIENT_SECRET" "$LOGS/tls/client"
 
 hc upgrade --install "$REL" "$CHART" -n "$NS" "${INSTALL_ARGS[@]}" \
   --wait --timeout 5m >"$LOGS/install.log" 2>&1 || { cat "$LOGS/install.log"; die "helm install"; }
 info "release $REL installed (state in $HOST_PATH)"
+eventually 30 quiet kc -n "$JOBS_NS" get secret "$CLIENT_SECRET" || die "cert-manager issued no client certificate into $JOBS_NS"
 
 for spec in "client-build:$BUILD_NODE" "client-cp:$CP_NODE"; do
   name=${spec%%:*}; node=${spec#*:}
@@ -316,6 +355,7 @@ for name in client-build client-cp; do
   kc -n "$JOBS_NS" cp "$FIXTURES" "$name:/f" || die "copy fixtures to $name"
 done
 kc -n "$JOBS_NS" cp "$LOGS/rogue/client" client-build:/rogue || die "copy the rogue client certificate"
+kc -n "$JOBS_NS" cp "$LOGS/tls/client" client-build:/own || die "copy the existingSecret client certificate"
 info "clients ready in namespace $JOBS_NS (PSA baseline)"
 # Fail fast when the cluster itself is broken (DNS, kube-proxy, CNI): every
 # scenario would otherwise time out one request at a time.
@@ -323,19 +363,25 @@ if ! eventually 30 has_answer client-build; then
   if quiet kc -n "$JOBS_NS" exec client-build -- buildctl --addr "$ADDR" --timeout 5 debug workers; then
     die "the daemons answer a plaintext client: they are not serving mutual TLS"
   fi
-  die "a client cannot reach the daemons through the Service (check DNS and kube-proxy: kubectl -n kube-system get pods)"
+  last=$(kc -n "$JOBS_NS" exec client-build -- buildctl --addr "$ADDR" "${TLS[@]}" --timeout 5 debug workers 2>&1 | grep -v "command terminated" | tail -1)
+  die "a client cannot reach the daemons through the Service: $last (a TLS error or a reset connection points at the certificates; a timeout at DNS or kube-proxy: kubectl -n kube-system get pods)"
 fi
 settle
 
 SIGKILLED_POD=""
-VICTIM=""
 
 # --- scenarios ---------------------------------------------------------------
+
+# For installs that test something other than TLS: a provided Secret, so no
+# cert-manager objects are created (a namespace admin may not create them in
+# cert-manager's namespace).
+# (--set x={} would set [""]; combine with BASE_ARGS, not INSTALL_ARGS.)
+NO_CM=(--set tls.source=existingSecret --set "tls.existingSecret=$OWN_SECRET" --set-json 'tls.client.namespaces=[]')
 
 s_preflight() {
   step "preflight: installs that would end with zero daemons are refused"
   ensure_ns "$PSA_NS" baseline
-  if hc install "$REL-psa" "$CHART" -n "$PSA_NS" --set "tls.existingSecret=$TLS_SECRET" >"$LOGS/psa.log" 2>&1; then
+  if hc install "$REL-psa" "$CHART" -n "$PSA_NS" "${NO_CM[@]}" >"$LOGS/psa.log" 2>&1; then
     fail "install into a baseline namespace succeeded"
     hc uninstall "$REL-psa" -n "$PSA_NS" >/dev/null 2>&1
   elif grep -q 'enforces Pod Security level "baseline"' "$LOGS/psa.log"; then
@@ -360,7 +406,7 @@ s_preflight() {
   kc -n "$PSA_NS" create serviceaccount e2e-installer >/dev/null 2>&1
   kc -n "$PSA_NS" create rolebinding e2e-installer --clusterrole=admin \
     --serviceaccount="$PSA_NS:e2e-installer" >/dev/null 2>&1
-  local ns_admin=(--kube-as-user "system:serviceaccount:$PSA_NS:e2e-installer" --set "tls.existingSecret=$TLS_SECRET")
+  local ns_admin=(--kube-as-user "system:serviceaccount:$PSA_NS:e2e-installer" "${NO_CM[@]}")
   if hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${ns_admin[@]}" \
       --set preflight.buildNodes=false >"$LOGS/ns-admin-psa.log" 2>&1; then
     fail "namespace admin: PSA check did not refuse the baseline namespace"
@@ -428,7 +474,7 @@ s_tls() {
   # instead of leaving pods in ContainerCreating.
   kc -n "$NS" delete secret "$REL-noca" --ignore-not-found >/dev/null
   kc -n "$NS" create secret tls "$REL-noca" --cert "$LOGS/tls/server/tls.crt" --key "$LOGS/tls/server/tls.key" >/dev/null
-  if hc install "$REL-noca" "$CHART" -n "$NS" --dry-run=server "${INSTALL_ARGS[@]}" \
+  if hc install "$REL-noca" "$CHART" -n "$NS" --dry-run=server "${BASE_ARGS[@]}" "${NO_CM[@]}" \
       --set "tls.existingSecret=$REL-noca" >"$LOGS/tls-noca.log" 2>&1; then
     fail "install with a Secret from \`kubectl create secret tls\` succeeded"
   elif grep -q "has no ca.crt" "$LOGS/tls-noca.log"; then
@@ -437,6 +483,81 @@ s_tls() {
     fail "Secret check failed for another reason (see $LOGS/tls-noca.log)"
   fi
   kc -n "$NS" delete secret "$REL-noca" >/dev/null
+}
+
+# pem <namespace> <secret> <key>: one PEM value of a Secret.
+pem() { kc -n "$1" get secret "$2" -o jsonpath="{.data.${3//./\\.}}" | base64 -d; }
+# lifetime_days <pem file> <days>: valid for (days - 1) more days, not days + 1.
+lifetime_days() {
+  openssl x509 -in "$1" -noout -checkend $(( ($2 - 1) * 86400 )) >/dev/null \
+    && ! openssl x509 -in "$1" -noout -checkend $(( ($2 + 1) * 86400 )) >/dev/null
+}
+
+s_certmanager() {
+  step "cert-manager: a dedicated CA, daemon and client certificates as specified"
+  local spec ready d=$LOGS/issued
+  for spec in "$CM_NS/$CA_NAME" "$NS/$REL-buildkit-tls" "$JOBS_NS/$CLIENT_SECRET"; do
+    ready=$(kc -n "${spec%%/*}" get certificate "${spec#*/}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+    check "Certificate $spec is Ready" test "$ready" = True
+  done
+  # The API server prunes fields a CRD does not know: check they arrived.
+  check "the daemon certificate keeps renewBeforePercentage 33" \
+    test "$(kc -n "$NS" get certificate "$REL-buildkit-tls" -o jsonpath='{.spec.renewBeforePercentage}')" = 33
+  check "the CA keeps its key on renewal (rotationPolicy Never)" \
+    test "$(kc -n "$CM_NS" get certificate "$CA_NAME" -o jsonpath='{.spec.privateKey.rotationPolicy}')" = Never
+  # What was actually issued.
+  mkdir -p "$d"
+  pem "$CM_NS" "$CA_NAME" tls.crt >"$d/ca.crt"
+  pem "$NS" "$REL-buildkit-tls" tls.crt >"$d/server.crt"
+  pem "$NS" "$REL-buildkit-tls" ca.crt >"$d/server-ca.crt"
+  pem "$JOBS_NS" "$CLIENT_SECRET" tls.crt >"$d/client.crt"
+  pem "$JOBS_NS" "$CLIENT_SECRET" ca.crt >"$d/client-ca.crt"
+  check "daemon and client Secrets carry the release's own CA" \
+    eval 'cmp -s "$d/ca.crt" "$d/server-ca.crt" && cmp -s "$d/ca.crt" "$d/client-ca.crt"'
+  check "the CA is a CA, valid ~10 years" \
+    eval 'openssl x509 -in "$d/ca.crt" -noout -text | grep -q "CA:TRUE" && lifetime_days "$d/ca.crt" 3650'
+  openssl x509 -in "$d/server.crt" -noout -text >"$d/server.txt"
+  openssl x509 -in "$d/client.crt" -noout -text >"$d/client.txt"
+  check "daemon certificate: server auth only, ECDSA, covers $SVC_HOST" \
+    eval 'grep -q "TLS Web Server Authentication" "$d/server.txt" && ! grep -q "Client Authentication" "$d/server.txt" \
+      && grep -q "id-ecPublicKey" "$d/server.txt" && grep -q "DNS:$SVC_HOST," "$d/server.txt"'
+  check "client certificate: client auth only" \
+    eval 'grep -q "TLS Web Client Authentication" "$d/client.txt" && ! grep -q "Server Authentication" "$d/client.txt"'
+  check "both valid ~1 year" eval 'lifetime_days "$d/server.crt" 365 && lifetime_days "$d/client.crt" 365'
+  check "both chain to the CA" quiet openssl verify -CAfile "$d/ca.crt" "$d/server.crt" "$d/client.crt"
+  # cert-manager is a prerequisite: rendering without its API must say how
+  # to get it, also offline.
+  if helm template "$REL" "$CHART" -n "$NS" >"$LOGS/no-cm.log" 2>&1; then
+    fail "rendered without the cert-manager API"
+  elif grep -q 'helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version' "$LOGS/no-cm.log"; then
+    pass "rendering without the cert-manager API is refused with the install command"
+  else
+    fail "rendering without the cert-manager API failed for another reason (see $LOGS/no-cm.log)"
+  fi
+  check "offline rendering works with --api-versions cert-manager.io/v1" \
+    quiet helm template "$REL" "$CHART" -n "$NS" --api-versions cert-manager.io/v1
+}
+
+s_existing() {
+  step "existingSecret: the daemons switch to a provided Secret and its CA, and back"
+  put_secret "$NS" "$OWN_SECRET" "$LOGS/tls/server"
+  hc upgrade "$REL" "$CHART" -n "$NS" "${BASE_ARGS[@]}" "${NO_CM[@]}" \
+    --wait --timeout 5m >"$LOGS/existing-up.log" 2>&1 || fail "upgrade to tls.source=existingSecret"
+  kc -n "$NS" rollout status "ds/$REL-buildkit" --timeout=300s >/dev/null || fail "rollout to the provided Secret"
+  own_served() {
+    kc -n "$JOBS_NS" exec client-build -- buildctl --addr "$ADDR" --tlsdir /own --tlsservername "$SVC_HOST" \
+      --timeout 5 debug workers -v 2>/dev/null | grep -q worker.hostname
+  }
+  check "a client of the provided CA is served" eventually 15 own_served
+  # The cert-manager client certificate, trusting the new server: the daemon
+  # itself must turn it away.
+  refused "the cert-manager client certificate is refused after the switch" "$LOGS/existing-cm-client.log" \
+    --tlscacert /own/ca.crt --tlscert /certs/tls.crt --tlskey /certs/tls.key --tlsservername "$SVC_HOST"
+  hc upgrade "$REL" "$CHART" -n "$NS" "${INSTALL_ARGS[@]}" \
+    --wait --timeout 5m >"$LOGS/existing-back.log" 2>&1 || fail "upgrade back to cert-manager"
+  kc -n "$NS" rollout status "ds/$REL-buildkit" --timeout=300s >/dev/null || fail "rollout back to cert-manager"
+  check "back on cert-manager, its client is served again" eventually 15 has_answer client-build
+  settle
 }
 
 s_cache() {
@@ -541,7 +662,6 @@ s_graceful() {
   local victim victim_ip plong elong t_del fails other out finished_after
   victim=$(daemon_on "$BUILD_NODE")
   victim_ip=$(pod_ip "$victim")
-  VICTIM=$victim
   next_id
   SECONDS=0
   # Straight to the victim: the established stream survives the listener close.
@@ -694,18 +814,22 @@ s_debug() {
 
 s_probes() {
   step "probes: healthy for the whole run with a dead OTLP backend"
-  local restarts unhealthy probe_pod out rc probe_s plain_s
+  local restarts unhealthy alive probe_pod out rc probe_s plain_s
   check "the hostile OTEL env is deployed" \
     test -n "$(kc -n "$NS" get ds "$REL-buildkit" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="OTEL_TRACES_EXPORTER")].value}')"
   restarts=$(kc -n "$NS" get pods -l "app.kubernetes.io/instance=$REL" \
     -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].restartCount}{"\n"}{end}' \
     | awk -v k="$SIGKILLED_POD" '$1 != k {s += $2} END {print s + 0}')
   check "0 unexpected daemon restarts" test "$restarts" = 0
-  # Readiness or liveness failures of this run's daemons; a draining or
-  # SIGKILLed daemon legitimately fails readiness for a moment.
+  # Probe failures of the daemons running now. Pods replaced on purpose
+  # (rollouts, deletions) legitimately fail readiness while they drain: the
+  # socket is gone after SIGTERM. The SIGKILLed daemon fails it while it
+  # restarts.
+  alive=" $(kc -n "$NS" get pods -l "app.kubernetes.io/instance=$REL" -o jsonpath='{.items[*].metadata.name}') "
   unhealthy=$(kc -n "$NS" get events --field-selector reason=Unhealthy \
     -o jsonpath='{range .items[*]}{.involvedObject.name}{"\t"}{.message}{"\n"}{end}' \
-    | awk -F'\t' -v a="$VICTIM" -v b="$SIGKILLED_POD" '$1 != a && $1 != b && $2 ~ /^(Readiness|Liveness|Startup) probe/' | wc -l | tr -d ' ')
+    | awk -F'\t' -v alive="$alive" -v k="$SIGKILLED_POD" \
+        'index(alive, " " $1 " ") && $1 != k && $2 ~ /^(Readiness|Liveness|Startup) probe/' | wc -l | tr -d ' ')
   check "no probe failures ($unhealthy)" test "$unhealthy" = 0
   probe_pod=$(daemon_on "$BUILD_NODE")
   # Run the liveness command exactly as deployed, not a copy of it.

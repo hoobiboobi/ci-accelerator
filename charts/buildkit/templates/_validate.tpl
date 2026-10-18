@@ -42,8 +42,26 @@ the install/upgrade with the fix in the message.
 
 {{- /* TLS is not optional: without client certificates anything that reaches
        the port, including RUN steps on the daemon itself, controls it. */}}
+{{- if eq $v.tls.source "existingSecret" }}
 {{- if not $v.tls.existingSecret }}
-{{- fail (printf "tls.existingSecret is required: the name of a Secret in namespace %s with tls.crt, tls.key (the daemon's certificate) and ca.crt (the CA that signs client certificates). scripts/buildkit-certs.sh from %s creates a CA, this certificate and client certificates: scripts/buildkit-certs.sh --name %s --namespace %s" .Release.Namespace .Chart.Home (include "buildkit.fullname" .) .Release.Namespace) }}
+{{- fail (printf "tls.existingSecret is required with tls.source=existingSecret: the name of a Secret in namespace %s with tls.crt, tls.key (the daemon's certificate) and ca.crt (the CA that signs client certificates). scripts/buildkit-certs.sh from %s creates a CA, this certificate and client certificates: scripts/buildkit-certs.sh --name %s --namespace %s" .Release.Namespace .Chart.Home (include "buildkit.fullname" .) .Release.Namespace) }}
+{{- end }}
+{{- if $v.tls.client.namespaces }}
+{{- fail "tls.client.namespaces needs tls.source=certManager. With existingSecret, make client certificates from the same CA (scripts/buildkit-certs.sh --no-server --client <name>) and create their Secrets yourself." }}
+{{- end }}
+{{- else }}
+{{- /* cert-manager is a prerequisite, never installed by this chart. */}}
+{{- if not (.Capabilities.APIVersions.Has "cert-manager.io/v1") }}
+{{- fail "tls.source=certManager, but the cluster has no cert-manager (API cert-manager.io/v1). Install it first: helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.2 --namespace cert-manager --create-namespace --set crds.enabled=true -- or use tls.source=existingSecret (scripts/buildkit-certs.sh makes the certificates). Rendering offline (helm template)? Pass --api-versions cert-manager.io/v1." }}
+{{- end }}
+{{- $ref := $v.global.tls.issuerRef }}
+{{- if and $ref.name (eq $ref.kind "Issuer") }}
+{{- range $v.tls.client.namespaces }}
+{{- if ne . $.Release.Namespace }}
+{{- fail (printf "tls.client.namespaces: %s is not the release namespace, but global.tls.issuerRef is a namespaced Issuer, which cannot issue certificates into other namespaces. Use a ClusterIssuer (dedicated to these daemons)." .) }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{- /* GC: a capless policy without keepDuration deletes every unused record

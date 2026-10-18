@@ -11,7 +11,7 @@ metadata:
   annotations:
     # Stakater Reloader rolls the daemons when the Secret changes: buildkitd
     # reads its certificates only at start. The value is an anchored regex.
-    secret.reloader.stakater.com/reload: {{ regexQuoteMeta .Values.tls.existingSecret | quote }}
+    secret.reloader.stakater.com/reload: {{ regexQuoteMeta (include "buildkit.tlsSecretName" .) | quote }}
   {{- end }}
 spec:
   selector:
@@ -115,7 +115,7 @@ spec:
         # with the key's name in the pod events, before buildkitd starts.
         - name: tls
           secret:
-            secretName: {{ .Values.tls.existingSecret | quote }}
+            secretName: {{ include "buildkit.tlsSecretName" . | quote }}
             defaultMode: 0400
             items:
               - key: tls.crt

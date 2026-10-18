@@ -9,7 +9,9 @@
 #   buildctl --addr tcp://127.0.0.1:1234 --tlsdir kind-certs/client debug workers
 
 tls:
-  # Created from scripts/buildkit-certs.sh output (README).
+  # Certificates from scripts/buildkit-certs.sh (README), so the example needs
+  # no cert-manager; the chart's default is tls.source=certManager.
+  source: existingSecret
   existingSecret: bk-buildkit-tls
 
 service:

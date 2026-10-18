@@ -79,7 +79,14 @@
     "intOrPercent": {
       "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string", "pattern": "^[0-9]{1,3}%$" }]
     },
-    "dnsLabelOrEmpty": { "type": "string", "maxLength": 63, "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$" }
+    "dnsLabelOrEmpty": { "type": "string", "maxLength": 63, "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$" },
+    "dnsLabel": { "type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+    "dnsSubdomainOrEmpty": { "type": "string", "maxLength": 253, "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$" },
+    "certDuration": {
+      "description": "Go duration in hours, minutes or seconds (8760h). cert-manager requires at least 1h.",
+      "type": "string",
+      "pattern": "^([0-9]{1,6}(h|m|s))+$"
+    }
   },
   "properties": {
     "nameOverride": { "$ref": "#/definitions/dnsLabelOrEmpty" },
@@ -117,13 +124,33 @@
     "tls": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["existingSecret", "reloader"],
+      "required": ["source", "existingSecret", "certManager", "client", "reloader"],
       "properties": {
+        "source": { "type": "string", "enum": ["certManager", "existingSecret"] },
         "existingSecret": {
-          "description": "Secret name (DNS subdomain) in the release namespace with tls.crt, tls.key and ca.crt. Required: the chart refuses to render without it.",
-          "type": "string",
-          "maxLength": 253,
-          "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)?$"
+          "description": "Secret name in the release namespace with tls.crt, tls.key and ca.crt. Required with source=existingSecret.",
+          "$ref": "#/definitions/dnsSubdomainOrEmpty"
+        },
+        "certManager": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["clusterResourceNamespace", "duration", "caDuration", "clusterDomain", "extraDnsNames", "ipAddresses"],
+          "properties": {
+            "clusterResourceNamespace": { "$ref": "#/definitions/dnsLabel" },
+            "duration": { "$ref": "#/definitions/certDuration" },
+            "caDuration": { "$ref": "#/definitions/certDuration" },
+            "clusterDomain": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" },
+            "extraDnsNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "ipAddresses": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "client": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespaces"],
+          "properties": {
+            "namespaces": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/dnsLabel" } }
+          }
         },
         "reloader": { "type": "boolean" }
       }
@@ -131,8 +158,24 @@
     "global": {
       "description": "Shared with other ci-accelerator charts; unknown keys belong to them.",
       "type": "object",
-      "required": ["buildNodes"],
+      "required": ["buildNodes", "tls"],
       "properties": {
+        "tls": {
+          "type": "object",
+          "required": ["issuerRef"],
+          "properties": {
+            "issuerRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "kind", "group"],
+              "properties": {
+                "name": { "$ref": "#/definitions/dnsSubdomainOrEmpty" },
+                "kind": { "type": "string", "enum": ["ClusterIssuer", "Issuer"] },
+                "group": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        },
         "buildNodes": {
           "type": "object",
           "additionalProperties": false,

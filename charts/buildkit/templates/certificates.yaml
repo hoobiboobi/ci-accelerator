@@ -1,0 +1,119 @@
+{{- if eq .Values.tls.source "certManager" }}
+{{- $fullname := include "buildkit.fullname" . }}
+{{- $cm := .Values.tls.certManager }}
+{{- $caName := include "buildkit.caName" . }}
+{{- $labels := include "buildkit.labels" . }}
+{{- /* Secrets get only labels that never change between chart releases. */}}
+{{- $secretLabels := merge (include "buildkit.selectorLabels" . | fromYaml) (include "buildkit.componentLabels" . | fromYaml) | toYaml }}
+{{- $issuerRef := include "buildkit.issuerRef" . }}
+{{- if not .Values.global.tls.issuerRef.name }}
+# A CA for these daemons only: any certificate it signs can control them.
+# cert-manager's bootstrap pattern: a self-signed Issuer signs the CA, a CA
+# ClusterIssuer (it reads its Secret from cert-manager's cluster resource
+# namespace) signs the daemon and client certificates in any namespace.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $caName }}-selfsigned
+  namespace: {{ $cm.clusterResourceNamespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $caName }}
+  namespace: {{ $cm.clusterResourceNamespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  isCA: true
+  commonName: {{ printf "%s buildkit CA" $fullname | trunc 64 | quote }}
+  secretName: {{ $caName }}
+  duration: {{ $cm.caDuration }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    # Renewal keeps the key, so certificates signed before stay valid.
+    rotationPolicy: Never
+  issuerRef:
+    name: {{ $caName }}-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+  secretTemplate:
+    labels:
+      {{- $secretLabels | nindent 6 }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ $caName }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ $caName }}
+---
+{{- end }}
+# The daemon certificate, for every Service name clients use. ca.crt in its
+# Secret is the CA that buildkitd requires client certificates to chain to.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  secretName: {{ include "buildkit.tlsSecretName" . }}
+  dnsNames:
+    {{- include "buildkit.serverDnsNames" . | fromJsonArray | toYaml | nindent 4 }}
+  {{- with $cm.ipAddresses }}
+  ipAddresses:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  usages:
+    - server auth
+    - digital signature
+  duration: {{ $cm.duration }}
+  renewBeforePercentage: 33
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    {{- $issuerRef | nindent 4 }}
+  secretTemplate:
+    labels:
+      {{- $secretLabels | nindent 6 }}
+{{- range .Values.tls.client.namespaces }}
+---
+# Client certificate for CI jobs in {{ . }} (buildctl --tlsdir).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-client
+  namespace: {{ . }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  secretName: {{ $fullname }}-client
+  commonName: {{ printf "%s-client" $fullname | trunc 64 | quote }}
+  usages:
+    - client auth
+    - digital signature
+  duration: {{ $cm.duration }}
+  renewBeforePercentage: 33
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    {{- $issuerRef | nindent 4 }}
+  secretTemplate:
+    labels:
+      {{- $secretLabels | nindent 6 }}
+{{- end }}
+{{- end }}

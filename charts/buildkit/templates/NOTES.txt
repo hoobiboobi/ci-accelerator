@@ -14,12 +14,33 @@ From outside the cluster: tcp://<any-node-ip>:{{ .Values.service.nodePort | defa
   certificate covers that address)
 {{- end }}
 
+{{- $tlsSecret := include "buildkit.tlsSecretName" . }}
+{{- if eq .Values.tls.source "certManager" }}
+{{- $issuer := include "buildkit.issuerRef" . | fromYaml }}
+
 Clients need mutual TLS: a directory with ca.crt and a client certificate
-(tls.crt, tls.key) signed by the CA in Secret {{ .Values.tls.existingSecret }}:
+(tls.crt, tls.key) from {{ $issuer.kind }} {{ $issuer.name }}.
+{{- with .Values.tls.client.namespaces }}
+cert-manager puts one into Secret {{ $fullname }}-client in: {{ join ", " . }}.
+{{- else }}
+List the CI job namespaces in tls.client.namespaces to get one there.
+{{- end }}
+
+  buildctl --addr tcp://{{ $fullname }}.{{ $ns }}.svc:{{ .Values.service.port }} --tlsdir <dir> debug workers
+
+Any certificate from that issuer can control the daemons. By default
+cert-manager lets everyone who may edit a namespace request certificates from
+any ClusterIssuer: on a shared cluster restrict that (cert-manager
+approver-policy).
+{{- else }}
+
+Clients need mutual TLS: a directory with ca.crt and a client certificate
+(tls.crt, tls.key) signed by the CA in Secret {{ $tlsSecret }}:
 
   buildctl --addr tcp://{{ $fullname }}.{{ $ns }}.svc:{{ .Values.service.port }} --tlsdir <dir> debug workers
 
 Any certificate from that CA can control the daemons: use a dedicated CA.
+{{- end }}
 buildkitd reads its certificate only at start. After the Secret is renewed,
 {{- if .Values.tls.reloader }}
 Stakater Reloader (if installed) restarts the daemons; otherwise run:
@@ -27,11 +48,13 @@ Stakater Reloader (if installed) restarts the daemons; otherwise run:
 restart the daemons:
 {{- end }}
   kubectl rollout restart ds/{{ $fullname }} -n {{ $ns }}
-{{- $secret := lookup "v1" "Secret" $ns .Values.tls.existingSecret }}
+{{- if eq .Values.tls.source "existingSecret" }}
+{{- $secret := lookup "v1" "Secret" $ns $tlsSecret }}
 {{- if and .Values.preflight.tlsSecret (not $secret) (lookup "v1" "Namespace" "" $ns) }}
 
 WARNING: Secret {{ $ns }}/{{ .Values.tls.existingSecret }} does not exist yet; the daemon pods
 wait in ContainerCreating until it does.
+{{- end }}
 {{- end }}
 
 Check the daemons (DESIRED 0 means no node matches the build-node selector):

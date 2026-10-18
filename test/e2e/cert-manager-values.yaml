@@ -1,0 +1,27 @@
+# cert-manager for the e2e cluster (a prerequisite of the chart, installed by
+# run.sh when missing). Images pinned to the v1.21.2 index digests on
+# quay.io (2026-10-18); bump together with CERT_MANAGER_VERSION and the chart
+# checksum in run.sh.
+#
+# Every worker of the e2e cluster is a tainted build node, so cert-manager
+# runs on the control-plane node (kind only; real clusters have other nodes).
+crds:
+  enabled: true
+image:
+  digest: sha256:70f532fd9cfde0b09d55687200942399d89838bc2d5d5b45152eb799a15912b8
+tolerations: &cp
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+webhook:
+  tolerations: *cp
+  image:
+    digest: sha256:a60e2dac46dbb8a7f3df95c54ce941012f54c2fe022f0ee55aaa1ab40ed957ae
+cainjector:
+  tolerations: *cp
+  image:
+    digest: sha256:c85268c64f2e0e76684bf5fe8906caff34b82523561c6affe0fae3546bd87562
+startupapicheck:
+  tolerations: *cp
+  image:
+    digest: sha256:46e75b6866359ffb5d82624f41e3ed1c70b2994982702ced547ce5edb418a8f5

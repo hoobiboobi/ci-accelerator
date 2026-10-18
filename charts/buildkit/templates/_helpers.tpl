@@ -170,3 +170,51 @@ read-only ConfigMap volume.
 {{- define "buildkit.tlsDir" -}}
 /etc/buildkitd-tls
 {{- end }}
+
+{{/*
+Secret with the daemon's certificate and the client CA (tls.crt, tls.key,
+ca.crt): the user's with tls.source=existingSecret, else the one
+cert-manager fills.
+*/}}
+{{- define "buildkit.tlsSecretName" -}}
+{{- if eq .Values.tls.source "existingSecret" }}
+{{- .Values.tls.existingSecret }}
+{{- else }}
+{{- printf "%s-tls" (include "buildkit.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Name of the CA the chart creates with cert-manager: its ClusterIssuer is
+cluster-scoped and its objects live in cert-manager's namespace, so the name
+carries the release namespace to stay unique across installs.
+*/}}
+{{- define "buildkit.caName" -}}
+{{- printf "%s-%s-ca" .Release.Namespace (include "buildkit.fullname" .) | trunc 240 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Issuer for the daemon and client certificates: global.tls.issuerRef, or the
+chart's own CA when its name is empty. As YAML.
+*/}}
+{{- define "buildkit.issuerRef" -}}
+{{- $ref := .Values.global.tls.issuerRef }}
+{{- if $ref.name }}
+{{- toYaml (dict "name" $ref.name "kind" $ref.kind "group" $ref.group) }}
+{{- else }}
+{{- toYaml (dict "name" (include "buildkit.caName" .) "kind" "ClusterIssuer" "group" "cert-manager.io") }}
+{{- end }}
+{{- end }}
+
+{{/*
+DNS names clients use for the daemons: both Services, short to fully
+qualified. As a JSON list.
+*/}}
+{{- define "buildkit.serverDnsNames" -}}
+{{- $ns := .Release.Namespace }}
+{{- $names := list }}
+{{- range list (include "buildkit.fullname" .) (include "buildkit.headlessName" .) }}
+{{- $names = concat $names (list . (printf "%s.%s" . $ns) (printf "%s.%s.svc" . $ns) (printf "%s.%s.svc.%s" . $ns $.Values.tls.certManager.clusterDomain)) }}
+{{- end }}
+{{- toJson (concat $names .Values.tls.certManager.extraDnsNames) }}
+{{- end }}

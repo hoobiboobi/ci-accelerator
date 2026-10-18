@@ -6,7 +6,13 @@ CHARTS := charts/buildkit
 # Extra values files every chart check also renders with.
 CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
 # Values the charts require and the files above leave to the installer.
-RENDER_SET := --set tls.existingSecret=lint-tls --set storage.hostPath.path=/var/lib/ci-accelerator-lint
+# helm lint cannot fake the cert-manager API, so checks render the
+# existingSecret mode; validate renders the cert-manager mode as well.
+RENDER_SET := --set tls.source=existingSecret --set tls.existingSecret=lint-tls --set storage.hostPath.path=/var/lib/ci-accelerator-lint
+CERT_MANAGER_SET := --api-versions cert-manager.io/v1 --set storage.hostPath.path=/var/lib/ci-accelerator-lint --set tls.client.namespaces={ci-jobs}
+# kubeconform has no schemas for cert-manager's kinds; the e2e checks them
+# against the real CRDs.
+CERT_MANAGER_KINDS := Certificate,Issuer,ClusterIssuer
 # Kubernetes versions the rendered manifests are validated against (the
 # chart's minimum and the newest tested).
 KUBE_VERSIONS := 1.34.0 1.37.0
@@ -121,6 +127,9 @@ validate: $(KUBECONFORM) ## Validate rendered manifests against Kubernetes schem
 				$(HELM) template test $$c --kube-version $$k $${v:+-f $$v} $(RENDER_SET) \
 					| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
 			done; \
+			echo "==> kubeconform $$c k8s $$k tls.source=certManager"; \
+			$(HELM) template test $$c --kube-version $$k $(CERT_MANAGER_SET) \
+				| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 		done; \
 	done
 

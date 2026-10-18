@@ -42,10 +42,10 @@ preflight:
   # cluster-wide list access to Nodes (an installer that is only a namespace
   # admin gets Forbidden); set false then, or for node pools scaled to zero.
   buildNodes: true
-  # -- Fail if the TLS Secret exists but lacks tls.crt, tls.key or ca.crt
-  # (`kubectl create secret tls` writes no ca.crt). A Secret that does not
-  # exist yet is not an error: the daemons wait for it. Needs read access to
-  # Secrets in the release namespace.
+  # -- With tls.source=existingSecret: fail if the Secret exists but lacks
+  # tls.crt, tls.key or ca.crt (`kubectl create secret tls` writes no
+  # ca.crt). A Secret that does not exist yet is not an error: the daemons
+  # wait for it. Needs read access to Secrets in the release namespace.
   tlsSecret: true
 
 # Mutual TLS on the daemons' TCP port. Always on: buildkitd runs whatever a
@@ -54,12 +54,41 @@ preflight:
 # daemon. Clients need a certificate signed by the CA in ca.crt; any such
 # certificate is accepted, so use a CA dedicated to these daemons.
 tls:
-  # -- Name of a Secret in the release namespace with the daemon's
-  # certificate (tls.crt, tls.key) and the CA that signs client certificates
-  # (ca.crt). The server certificate must cover the Service names clients
-  # use (<fullname>.<namespace>.svc). scripts/buildkit-certs.sh creates a
-  # matching CA, server and client certificate.
+  # -- certManager: cert-manager (installed beforehand) issues the daemon
+  # certificate (Secret <fullname>-tls) and client certificates.
+  # existingSecret: you provide the daemon Secret and the client
+  # certificates (scripts/buildkit-certs.sh makes both).
+  source: certManager
+  # -- With source=existingSecret: name of a Secret in the release namespace
+  # with the daemon's certificate (tls.crt, tls.key) and the CA that signs
+  # client certificates (ca.crt). The server certificate must cover the
+  # Service names clients use (<fullname>.<namespace>.svc).
   existingSecret: ""
+  certManager:
+    # -- Namespace where cert-manager's ClusterIssuers read their Secrets
+    # (its --cluster-resource-namespace; by default its own namespace). With
+    # an empty global.tls.issuerRef the chart puts its CA there: a
+    # self-signed Issuer, the CA Certificate and its Secret. That Secret
+    # (the CA key) stays after `helm uninstall`.
+    clusterResourceNamespace: cert-manager
+    # -- Lifetime of the daemon and client certificates. cert-manager renews
+    # them after two thirds; the daemons pick up a renewed certificate only
+    # when they restart (see reloader), within the remaining third.
+    duration: 8760h
+    # -- Lifetime of the CA the chart creates. It is renewed with the same
+    # key, so certificates it signed stay valid.
+    caDuration: 87600h
+    # -- Cluster DNS domain, for the fully qualified Service names.
+    clusterDomain: cluster.local
+    # -- More names and addresses for the daemon certificate (e.g. a node
+    # address for NodePort clients).
+    extraDnsNames: []
+    ipAddresses: []
+  client:
+    # -- Namespaces that get a client certificate in Secret
+    # <fullname>-client (tls.crt, tls.key, ca.crt), e.g. the namespace of
+    # the CI job pods. They must exist. With source=certManager only.
+    namespaces: []
   # -- Annotate the DaemonSet for Stakater Reloader. buildkitd reads its
   # certificates only at start, so a renewed Secret takes effect after a
   # restart; with Reloader in the cluster that is a rolling restart (per
@@ -71,6 +100,17 @@ tls:
 
 # Shared with other ci-accelerator charts when installed via the umbrella.
 global:
+  tls:
+    # -- cert-manager issuer for the daemons' and the clients' certificates
+    # (tls.source=certManager). Empty name: the chart creates a CA dedicated
+    # to this release (see tls.certManager). Your own issuer must be dedicated
+    # to these daemons too (any certificate it signs gets in) and must put
+    # ca.crt into the Secrets it fills (CA or Vault issuers do, ACME does
+    # not). Client certificates in other namespaces need a ClusterIssuer.
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io
   # Dedicated build nodes: label and taint them before install.
   buildNodes:
     # -- false: ignore selector/tolerations below and run on any Linux node.

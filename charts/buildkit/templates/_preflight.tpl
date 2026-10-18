@@ -42,7 +42,7 @@ installer may not read the objects (Forbidden): switch the check off then.
 {{- /* TLS Secret: when it exists it must hold all three keys, or the pods
        hang in ContainerCreating. `kubectl create secret tls` writes no
        ca.crt. A missing Secret is fine: it may be created after the chart. */}}
-{{- if .Values.preflight.tlsSecret }}
+{{- if and .Values.preflight.tlsSecret (eq .Values.tls.source "existingSecret") }}
 {{- $secret := lookup "v1" "Secret" .Release.Namespace .Values.tls.existingSecret }}
 {{- if $secret }}
 {{- $missing := list }}

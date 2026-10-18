@@ -1,0 +1,326 @@
+suite: cert-manager mode
+templates:
+  - certificates.yaml
+  - daemonset.yaml
+  - NOTES.txt
+release:
+  name: bk
+  namespace: builds
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+tests:
+  - it: is the default source and mounts the Secret cert-manager fills
+    template: daemonset.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tls
+            secret:
+              secretName: bk-buildkit-tls
+              defaultMode: 0400
+              items:
+                - key: tls.crt
+                  path: tls.crt
+                - key: tls.key
+                  path: tls.key
+                - key: ca.crt
+                  path: ca.crt
+      - equal:
+          path: metadata.annotations["secret.reloader.stakater.com/reload"]
+          value: bk-buildkit-tls
+
+  # Without an issuer of their own, the release gets a CA nobody else uses:
+  # any certificate it signs can control the daemons.
+  - it: bootstraps a dedicated CA in cert-manager's namespace
+    template: certificates.yaml
+    asserts:
+      - hasDocuments:
+          count: 4
+      - containsDocument:
+          any: true
+          apiVersion: cert-manager.io/v1
+          kind: Issuer
+          name: builds-bk-buildkit-ca-selfsigned
+          namespace: cert-manager
+      - equal:
+          path: spec
+          value:
+            selfSigned: {}
+        documentSelector:
+          path: kind
+          value: Issuer
+      - equal:
+          path: spec
+          value:
+            ca:
+              secretName: builds-bk-buildkit-ca
+        documentSelector:
+          path: kind
+          value: ClusterIssuer
+
+  - it: keeps the CA key on renewal and makes it long-lived
+    template: certificates.yaml
+    documentSelector:
+      path: spec.isCA
+      value: true
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: cert-manager
+      - equal:
+          path: spec.isCA
+          value: true
+      - equal:
+          path: spec.secretName
+          value: builds-bk-buildkit-ca
+      - equal:
+          path: spec.duration
+          value: 87600h
+      - equal:
+          path: spec.privateKey
+          value:
+            algorithm: ECDSA
+            size: 256
+            rotationPolicy: Never
+      - equal:
+          path: spec.issuerRef
+          value:
+            name: builds-bk-buildkit-ca-selfsigned
+            kind: Issuer
+            group: cert-manager.io
+
+  - it: puts the CA where a custom cluster resource namespace says
+    template: certificates.yaml
+    set:
+      tls.certManager.clusterResourceNamespace: pki
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: pki
+        documentSelector:
+          path: spec.isCA
+          value: true
+
+  # buildctl checks the host of --addr against the server certificate.
+  - it: issues the daemon certificate for every Service name, server auth only
+    template: certificates.yaml
+    documentSelector:
+      path: metadata.name
+      value: bk-buildkit-tls
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: builds
+      - equal:
+          path: spec.secretName
+          value: bk-buildkit-tls
+      - equal:
+          path: spec.dnsNames
+          value:
+            - bk-buildkit
+            - bk-buildkit.builds
+            - bk-buildkit.builds.svc
+            - bk-buildkit.builds.svc.cluster.local
+            - bk-buildkit-headless
+            - bk-buildkit-headless.builds
+            - bk-buildkit-headless.builds.svc
+            - bk-buildkit-headless.builds.svc.cluster.local
+      - equal:
+          path: spec.usages
+          value: [server auth, digital signature]
+      - notExists:
+          path: spec.commonName
+      - equal:
+          path: spec.issuerRef
+          value:
+            name: builds-bk-buildkit-ca
+            kind: ClusterIssuer
+            group: cert-manager.io
+
+  # The daemons see a renewed certificate only after a restart: renew early
+  # enough to leave a third of the lifetime for that.
+  - it: renews a one-year certificate after two thirds with a new key
+    template: certificates.yaml
+    documentSelector:
+      path: metadata.name
+      value: bk-buildkit-tls
+    asserts:
+      - equal:
+          path: spec.duration
+          value: 8760h
+      - equal:
+          path: spec.renewBeforePercentage
+          value: 33
+      - equal:
+          path: spec.privateKey
+          value:
+            algorithm: ECDSA
+            size: 256
+            rotationPolicy: Always
+
+  - it: adds extra names, addresses and the cluster domain
+    template: certificates.yaml
+    documentSelector:
+      path: metadata.name
+      value: bk-buildkit-tls
+    set:
+      tls.certManager.clusterDomain: corp.internal
+      tls.certManager.extraDnsNames: [buildkit.example.com]
+      tls.certManager.ipAddresses: [10.0.0.5]
+    asserts:
+      - contains:
+          path: spec.dnsNames
+          content: bk-buildkit.builds.svc.corp.internal
+      - contains:
+          path: spec.dnsNames
+          content: buildkit.example.com
+      - equal:
+          path: spec.ipAddresses
+          value: [10.0.0.5]
+
+  - it: issues a client certificate into every listed namespace
+    template: certificates.yaml
+    set:
+      tls.client.namespaces: [ci-jobs, other-jobs]
+    asserts:
+      - hasDocuments:
+          count: 6
+      - containsDocument:
+          any: true
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          name: bk-buildkit-client
+          namespace: other-jobs
+      - equal:
+          path: spec
+          value:
+            secretName: bk-buildkit-client
+            commonName: bk-buildkit-client
+            usages: [client auth, digital signature]
+            duration: 8760h
+            renewBeforePercentage: 33
+            privateKey:
+              algorithm: ECDSA
+              size: 256
+              rotationPolicy: Always
+            issuerRef:
+              name: builds-bk-buildkit-ca
+              kind: ClusterIssuer
+              group: cert-manager.io
+            secretTemplate:
+              labels:
+                app.kubernetes.io/instance: bk
+                app.kubernetes.io/name: buildkit
+                app.kubernetes.io/part-of: ci-accelerator
+                ci-accelerator.io/component: buildkit
+        documentSelector:
+          path: metadata.namespace
+          value: ci-jobs
+
+  - it: uses the user's issuer and creates no CA then
+    template: certificates.yaml
+    set:
+      global.tls.issuerRef.name: build-ca
+      tls.client.namespaces: [ci-jobs]
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: spec.issuerRef
+          value:
+            name: build-ca
+            kind: ClusterIssuer
+            group: cert-manager.io
+
+  - it: accepts a namespaced Issuer for the release namespace only
+    template: certificates.yaml
+    set:
+      global.tls.issuerRef: {name: build-ca, kind: Issuer, group: cert-manager.io}
+      tls.client.namespaces: [builds]
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: refuses a namespaced Issuer for clients in other namespaces
+    template: daemonset.yaml
+    set:
+      global.tls.issuerRef: {name: build-ca, kind: Issuer, group: cert-manager.io}
+      tls.client.namespaces: [ci-jobs]
+    asserts:
+      - failedTemplate:
+          errorPattern: 'tls.client.namespaces: ci-jobs is not the release namespace, but global.tls.issuerRef is a namespaced Issuer'
+
+  # The CA's ClusterIssuer is cluster-wide: release name alone would collide
+  # between namespaces.
+  - it: makes the CA name unique per namespace and keeps it a valid name
+    template: certificates.yaml
+    release:
+      namespace: a-very-long-namespace-name-for-builds-that-goes-on-and-on-12345
+    set:
+      fullnameOverride: a-very-long-fullname-for-the-buildkit-daemons-that-goes-on-123
+    asserts:
+      - matchRegex:
+          path: metadata.name
+          pattern: '^a-very-long-namespace-name-for-builds-that-goes-on-and-on-12345-a-very-long-fullname-for-the-buildkit-daemons-that-goes-on-123-ca$'
+        documentSelector:
+          path: kind
+          value: ClusterIssuer
+      - matchRegex:
+          path: spec.commonName
+          pattern: '^.{1,64}$'
+        documentSelector:
+          path: spec.isCA
+          value: true
+
+  - it: renders nothing for cert-manager with a provided Secret
+    template: certificates.yaml
+    set:
+      tls.source: existingSecret
+      tls.existingSecret: own
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: tells clients where their certificate is and warns about shared issuers
+    template: NOTES.txt
+    set:
+      tls.client.namespaces: [ci-jobs]
+    asserts:
+      - matchRegexRaw:
+          pattern: 'from ClusterIssuer builds-bk-buildkit-ca\.\ncert-manager puts one into Secret bk-buildkit-client in: ci-jobs\.'
+      - matchRegexRaw:
+          pattern: 'approver-policy'
+
+  - it: points to tls.client.namespaces when none is set
+    template: NOTES.txt
+    asserts:
+      - matchRegexRaw:
+          pattern: 'List the CI job namespaces in tls.client.namespaces'
+
+  # The Secret check is for provided Secrets. Here tls.existingSecret is empty,
+  # and a lookup by an empty name lists every Secret of the namespace.
+  - it: does not run the provided-Secret check
+    template: daemonset.yaml
+    set:
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata:
+            name: unrelated
+            namespace: builds
+          data:
+            token: eA==
+    asserts:
+      - isKind:
+          of: DaemonSet

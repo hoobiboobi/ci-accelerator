@@ -254,7 +254,7 @@ tests:
       tls.existingSecret: ""
     asserts:
       - failedTemplate:
-          errorPattern: 'tls.existingSecret is required: .*scripts/buildkit-certs.sh --name RELEASE-NAME-buildkit --namespace NAMESPACE'
+          errorPattern: 'tls.existingSecret is required with tls.source=existingSecret: .*scripts/buildkit-certs.sh --name RELEASE-NAME-buildkit --namespace NAMESPACE'
 
   - it: rejects a TLS Secret name that is not a DNS subdomain
     set:
@@ -269,3 +269,19 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: 'insecure'
+
+  - it: refuses client namespaces in existingSecret mode, where the chart issues nothing
+    set:
+      tls.client.namespaces: [ci-jobs]
+    asserts:
+      - failedTemplate:
+          errorPattern: 'tls.client.namespaces needs tls.source=certManager.*--no-server --client'
+
+  # cert-manager is a prerequisite: without its API the install must stop
+  # with the command that installs it, not fail on an unknown kind.
+  - it: refuses to render without cert-manager and names the install command
+    set:
+      tls.source: certManager
+    asserts:
+      - failedTemplate:
+          errorPattern: 'tls.source=certManager, but the cluster has no cert-manager.*helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.2 --namespace cert-manager --create-namespace --set crds.enabled=true.*tls.source=existingSecret.*--api-versions cert-manager.io/v1'
