@@ -9,6 +9,7 @@
 # For checking the checks: E2E_CHART=<chart dir> runs against another copy of
 # the chart, E2E_EXTRA_VALUES="<file> ..." adds values files after the e2e
 # ones, E2E_RUNNER_FRAGMENT=<file> replaces integrations/gitlab-runner/values.yaml,
+# E2E_LOGS=<dir> writes the logs there instead of a temporary directory,
 # E2E_BOX_EXTRA_VALUES="<file> ..." adds values files to the umbrella install. A deliberately broken chart or value must turn scenarios red.
 #
 # Installs its own release ("e2e") in its own namespace, so a development
@@ -111,7 +112,12 @@ WAKE_AT_START=$(sysctl -n kern.waketime 2>/dev/null || true)
 
 APP_VERSION=$(awk -F'"' '/^appVersion:/ {print $2}' "$CHART/Chart.yaml")
 IMAGE=moby/buildkit:$APP_VERSION
-LOGS=$(mktemp -d "${TMPDIR:-/tmp}/ci-accelerator-e2e.XXXXXX")
+# E2E_LOGS=<dir> keeps the logs in a known place (CI uploads it on failure).
+if [ -n "${E2E_LOGS:-}" ]; then
+  LOGS=$E2E_LOGS; mkdir -p "$LOGS"
+else
+  LOGS=$(mktemp -d "${TMPDIR:-/tmp}/ci-accelerator-e2e.XXXXXX")
+fi
 
 kc() { kubectl --context "$CTX" "$@"; }
 hc() { helm --kube-context "$CTX" "$@"; }

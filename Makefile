@@ -45,6 +45,21 @@ VM_CHART_SHA256  := 51d26125182388a734f5d9dc65086811436a67d5aede08fde5f2a4247b53
 VT_CHART_VERSION := 0.1.11
 VT_CHART_SHA256  := 59471db9c6e053fc740b1ad0eb6365dc872bba3f0c9e06f5780ddde9655c9e88
 
+# Helm, kind and kubectl for CI runners (Linux), where nothing is installed:
+# `make ci-tools CI_HELM_VERSION=v3.22.0` puts them into .tools/bin.
+# Locally, the installed helm/kind/kubectl are used.
+CI_HELM_VERSION ?= v4.3.0
+HELM_SHA256_v3.22.0_linux_amd64 := 1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb
+HELM_SHA256_v3.22.0_linux_arm64 := f14e804dfee240f55525b667488fe9adca349e63e00c9af634c0beb1421ac310
+HELM_SHA256_v4.3.0_linux_amd64  := 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+HELM_SHA256_v4.3.0_linux_arm64  := 31c5794dd55c66a51e6b7d2e2ac7a114ae8b1de41ff1d9ba51748ac973b06a08
+KIND_VERSION := v0.33.0
+KIND_SHA256_linux_amd64 := aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+KIND_SHA256_linux_arm64 := 20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2
+KUBECTL_VERSION := v1.37.1
+KUBECTL_SHA256_linux_amd64 := 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
+KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7
+
 OS   := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 SC_ARCH := $(if $(filter amd64,$(ARCH)),x86_64,aarch64)
@@ -63,6 +78,10 @@ RUNNER_CHART := $(TOOLS)/charts/gitlab-runner-$(RUNNER_CHART_VERSION).tgz
 VM_CHART     := $(TOOLS)/charts/victoria-metrics-single-$(VM_CHART_VERSION).tgz
 VT_CHART     := $(TOOLS)/charts/victoria-traces-single-$(VT_CHART_VERSION).tgz
 VICTORIA_RELEASES := https://github.com/VictoriaMetrics/helm-charts/releases/download
+CI_BIN      := $(TOOLS)/bin
+CI_HELM     := $(TOOLS)/helm-$(CI_HELM_VERSION)/helm
+CI_KIND     := $(TOOLS)/kind-$(KIND_VERSION)/kind
+CI_KUBECTL  := $(TOOLS)/kubectl-$(KUBECTL_VERSION)/kubectl
 
 # kind cluster for e2e. The context is derived from the cluster name and never
 # taken from the environment, so `make` cannot be pointed at another cluster.
@@ -114,6 +133,27 @@ $(VM_CHART):
 
 $(VT_CHART):
 	$(call fetch,$(VICTORIA_RELEASES)/victoria-traces-single-$(VT_CHART_VERSION)/victoria-traces-single-$(VT_CHART_VERSION).tgz,$@,$(VT_CHART_SHA256))
+
+.PHONY: ci-tools
+ci-tools: $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) ## CI only (Linux): pinned helm (CI_HELM_VERSION), kind and kubectl into .tools/bin
+	@mkdir -p $(CI_BIN)
+	@cp $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) $(CI_BIN)/
+	@echo "==> .tools/bin: $$($(CI_BIN)/helm version --short), kind $(KIND_VERSION), kubectl $(KUBECTL_VERSION)"
+
+$(CI_HELM):
+	@test "$(OS)" = linux || { echo "ci-tools is for Linux CI runners; install helm locally" >&2; exit 1; }
+	$(call fetch,https://get.helm.sh/helm-$(CI_HELM_VERSION)-linux-$(ARCH).tar.gz,$(TOOLS)/dl/helm-$(CI_HELM_VERSION).tgz,$(HELM_SHA256_$(CI_HELM_VERSION)_linux_$(ARCH)))
+	@mkdir -p $(dir $@) && tar -xzf $(TOOLS)/dl/helm-$(CI_HELM_VERSION).tgz -C $(dir $@) --strip-components=1 linux-$(ARCH)/helm
+
+$(CI_KIND):
+	@test "$(OS)" = linux || { echo "ci-tools is for Linux CI runners; install kind locally" >&2; exit 1; }
+	$(call fetch,https://github.com/kubernetes-sigs/kind/releases/download/$(KIND_VERSION)/kind-linux-$(ARCH),$@,$(KIND_SHA256_linux_$(ARCH)))
+	@chmod +x $@
+
+$(CI_KUBECTL):
+	@test "$(OS)" = linux || { echo "ci-tools is for Linux CI runners; install kubectl locally" >&2; exit 1; }
+	$(call fetch,https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/linux/$(ARCH)/kubectl,$@,$(KUBECTL_SHA256_linux_$(ARCH)))
+	@chmod +x $@
 
 $(SHELLCHECK):
 	$(call fetch,https://github.com/koalaman/shellcheck/releases/download/v$(SHELLCHECK_VERSION)/shellcheck-v$(SHELLCHECK_VERSION).$(OS).$(SC_ARCH).tar.gz,$(TOOLS)/dl/shellcheck-$(SHELLCHECK_VERSION).tgz,$(SHELLCHECK_SHA256_$(OS)_$(ARCH)))
