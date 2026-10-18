@@ -59,7 +59,9 @@ jobs:
           mkdir -p dist
           helm package charts/buildkit charts/ci-accelerator -d dist
           touch -d "@$SOURCE_DATE_EPOCH" dist/*.tgz
-          sha256sum dist/*.tgz | tee dist/SHA256SUMS
+          # Names without the dist/ prefix, so `sha256sum -c SHA256SUMS` works
+          # next to the downloaded release assets.
+          (cd dist && sha256sum ./*.tgz | sed 's| \./| |' | tee SHA256SUMS)
 
       - name: Push to ghcr.io
         env:

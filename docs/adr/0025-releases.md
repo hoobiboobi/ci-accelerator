@@ -17,3 +17,4 @@ Installing from a clone needs `make deps`. Users, and GitOps tools in particular
 - Users install with `helm install ... oci://ghcr.io/<owner>/charts/ci-accelerator --version <v>`, without cloning; the umbrella package contains its dependencies.
 - Packages from a private repository are private; they are made public by hand after the repository is.
 - A release can be rehearsed with an `-rc` tag before the real one.
+- Anyone can rebuild a release byte for byte from its tag with the same Helm version (4.3.0 for now): `make deps`, then `helm package` with `SOURCE_DATE_EPOCH` set to the tag's commit time. Other Helm versions may order the vendored subcharts differently and produce a different archive (seen with 4.3.1).
