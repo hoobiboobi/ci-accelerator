@@ -30,4 +30,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0024](0024-github-actions-ci.md) | CI on GitHub Actions with the same make targets |
 | [0025](0025-releases.md) | Releases as OCI charts on ghcr.io |
 | [0026](0026-job-trace-context.md) | The runner sets every job's trace context |
-| [0027](0027-upgrades-and-branches.md) | In-place upgrades between releases; short-lived branches |
+| [0027](0027-upgrades-and-branches.md) | In-place upgrades, short-lived branches, releases when they matter |

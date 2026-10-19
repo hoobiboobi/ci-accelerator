@@ -1,4 +1,4 @@
-# 0027. In-place upgrades between releases; short-lived branches
+# 0027. In-place upgrades, short-lived branches, releases when they matter
 
 Date: 2026-10-19
 
@@ -25,8 +25,20 @@ Users install the box once and upgrade it in place, often through Argo CD or Flu
 - Unfinished features are merged behind a switch that is off by default, not kept on a long-lived branch.
 - A `release-0.N` branch is created only when a patch release for an older minor is needed. The fix lands in `main` first and is cherry-picked. Release tags `v*` cannot be moved or deleted.
 
+**Releases.** Merging and releasing are separate. `main` gets small changes often; a release is cut from `main` when users gain something from it:
+
+- **Patch** (`0.1.1`): fixes only, no new features and no behaviour changes. Typical reasons: a bug, a security fix, a dependency bump that fixes one.
+- **Minor** (`0.2.0`): a meaningful new capability, ready and on by default. It still upgrades in place from the previous minor.
+- **Pre-release** (`0.2.0-rc.1`): a rehearsal of a minor, published as a GitHub pre-release.
+- Every change adds its line to the **Unreleased** section of `CHANGELOG.md`, including its upgrade notes. At release time the section is renamed to the version, so a release holds no surprises.
+- A patch is released from `main` as long as unfinished work there is switched off. Only when `main` has changed what users would get does the patch come from a `release-0.N` branch.
+- Users install releases from the registry, never `main`.
+
+The steps are in [docs/releasing.md](../releasing.md).
+
 ## Consequences
 
 - Breaking changes cost a deprecation cycle. Renames should be rare.
 - Every pull request runs one more e2e scenario (a few minutes) and depends on the published chart in ghcr.io.
 - The changelog is written with the change, not at release time.
+- A large feature reaches `main` in several pull requests behind a switch; enabling it by default is a change of its own.
