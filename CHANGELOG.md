@@ -31,6 +31,7 @@ workflow copies them into the GitHub release.
   to the tree under test and rolled back.
 - `CONTRIBUTING.md`, `docs/releasing.md` and ADR-0027: how changes reach
   `main`, when and how releases are cut, what an upgrade must keep.
+- `docs/design/console.md`: design draft of the v0.2 console.
 
 ## 0.1.0 - 2026-10-19
 
