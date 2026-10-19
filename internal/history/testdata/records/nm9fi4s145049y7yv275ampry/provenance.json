@@ -1,0 +1,666 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md",
+    "resolvedDependencies": [
+      {
+        "uri": "pkg:docker/alpine@3.22?platform=linux%2Farm64",
+        "digest": {
+          "sha256": "5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+        }
+      }
+    ],
+    "externalParameters": {
+      "configSource": {},
+      "request": {
+        "frontend": "dockerfile.v0",
+        "args": {
+          "target": "api"
+        },
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ],
+        "root": {
+          "configSource": {},
+          "request": {
+            "args": {
+              "target": "api"
+            }
+          }
+        },
+        "compatibilityVersion": 30
+      }
+    },
+    "internalParameters": {
+      "buildConfig": {
+        "digestMapping": {
+          "sha256:108daefa88de918c65690a9cc99aa530efee9f5337989415c6c5dc4390aeb269": "step5",
+          "sha256:18148aab82cb4b02491d24f2c513ef265f2ace10efff1a8d8287eb3d65755718": "step6",
+          "sha256:43e8deec15d967f0fd24874d509589b715101840dccf4f1a0f0c5fffeb681450": "step2",
+          "sha256:4cce5248f28fedcc043005f3d5144e9092385762d0c5baf5b789cb1babee60f3": "step3",
+          "sha256:7cb524fdd34f394b848f90dc18cd8e1a5ca5b57886e538459fe47dd2a1a56b16": "step4",
+          "sha256:84758dc05d553025b86bae6efc6ff8d6f14c69a2e8155de8a9cbc1492d6a25b6": "step0",
+          "sha256:a82097e02b20420d14df6683845a4537de58acf25aedd3b0d43693ac1ed2d2db": "step7",
+          "sha256:e6ee35d844afe4b72e78af24560c02ec0d15f947227ecd83a15378978406c66a": "step1"
+        },
+        "llbDefinition": [
+          {
+            "id": "step0",
+            "op": {
+              "Op": {
+                "source": {
+                  "identifier": "docker-image://docker.io/library/alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "arm64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step1",
+            "inputs": [
+              "step0:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "mkdir": {
+                          "makeParents": true,
+                          "mode": 493,
+                          "path": "/app",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step2",
+            "op": {
+              "Op": {
+                "source": {
+                  "attrs": {
+                    "local.excludepatterns": "[\".git\"]",
+                    "local.followpaths": "[\"api\",\"deps.txt\"]",
+                    "local.sharedkeyhint": "context"
+                  },
+                  "identifier": "local://context"
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step3",
+            "inputs": [
+              "step1:0",
+              "step2:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/app/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/deps.txt",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step4",
+            "inputs": [
+              "step3:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "sleep 3 \u0026\u0026 cp deps.txt /cache/ \u0026\u0026 echo deps installed"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "//cache"
+                      },
+                      "dest": "/cache",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "arm64",
+                "OS": "linux"
+              }
+            },
+            "resourceUsage": {
+              "samples": [
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 15751000,
+                    "throttledNanos": 0,
+                    "usageNanos": 25878000,
+                    "userNanos": 10126000
+                  },
+                  "ioStat": {},
+                  "memoryStat": {
+                    "anon": 110592,
+                    "file": 0,
+                    "fileDirty": 0,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 32768,
+                    "pageTables": 61440,
+                    "pgfault": 1398,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 122144,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 2
+                  },
+                  "timestamp": "2026-10-19T20:03:15.659146677Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 28007000,
+                    "throttledNanos": 0,
+                    "usageNanos": 40738000,
+                    "userNanos": 12730000
+                  },
+                  "ioStat": {},
+                  "memoryStat": {
+                    "anon": 0,
+                    "file": 4096,
+                    "fileDirty": 4096,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 0,
+                    "pageTables": 0,
+                    "pgfault": 1472,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 57056,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 0
+                  },
+                  "timestamp": "2026-10-19T20:03:16.720561678Z"
+                }
+              ],
+              "sysCPUStat": {
+                "guest": 0,
+                "guestNice": 0,
+                "idle": 13.26,
+                "iowait": 0,
+                "irq": 0,
+                "nice": 0,
+                "softirq": 0.05,
+                "steal": 0,
+                "system": 0.65,
+                "user": 0.91
+              }
+            }
+          },
+          {
+            "id": "step5",
+            "inputs": [
+              "step4:0",
+              "step2:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/app/api",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/api",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step6",
+            "inputs": [
+              "step5:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "echo \"api $VERSION\" \u003e /version"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "VERSION=dev"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "arm64",
+                "OS": "linux"
+              }
+            },
+            "resourceUsage": {
+              "samples": [
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 16770000,
+                    "throttledNanos": 0,
+                    "usageNanos": 25156000,
+                    "userNanos": 8385000
+                  },
+                  "ioStat": {},
+                  "memoryStat": {
+                    "anon": 0,
+                    "file": 4096,
+                    "fileDirty": 4096,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 0,
+                    "pageTables": 0,
+                    "pgfault": 1202,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 163040,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 0
+                  },
+                  "timestamp": "2026-10-19T20:03:16.830623511Z"
+                }
+              ],
+              "sysCPUStat": {
+                "guest": 0,
+                "guestNice": 0,
+                "idle": 0.16,
+                "iowait": 0,
+                "irq": 0,
+                "nice": 0,
+                "softirq": 0,
+                "steal": 0,
+                "system": 0.03,
+                "user": 0.03
+              }
+            }
+          },
+          {
+            "id": "step7",
+            "inputs": [
+              "step6:0"
+            ],
+            "op": {
+              "Op": {}
+            }
+          }
+        ]
+      },
+      "builderPlatform": "linux/arm64",
+      "dockerfileVersion": "1.27.0"
+    }
+  },
+  "runDetails": {
+    "builder": {
+      "id": ""
+    },
+    "metadata": {
+      "invocationId": "kj7gqlw5499d2kmup3w38azmj",
+      "startedOn": "2026-10-19T20:03:11.032124925Z",
+      "finishedOn": "2026-10-19T20:03:16.83895347Z",
+      "buildkit_metadata": {
+        "source": {
+          "locations": {
+            "step0": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 2
+                      },
+                      "end": {
+                        "line": 2
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step1": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 3
+                      },
+                      "end": {
+                        "line": 3
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step2": {},
+            "step3": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 4
+                      },
+                      "end": {
+                        "line": 4
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step4": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 5
+                      },
+                      "end": {
+                        "line": 5
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step5": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 8
+                      },
+                      "end": {
+                        "line": 8
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step6": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 10
+                      },
+                      "end": {
+                        "line": 10
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "infos": [
+            {
+              "filename": "Dockerfile",
+              "language": "Dockerfile",
+              "data": "QVJHIEFMUElORT0zLjIyCkZST00gYWxwaW5lOiR7QUxQSU5FfSBBUyBkZXBzCldPUktESVIgL2FwcApDT1BZIGRlcHMudHh0IC4KUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L2NhY2hlIHNsZWVwIDMgJiYgY3AgZGVwcy50eHQgL2NhY2hlLyAmJiBlY2hvIGRlcHMgaW5zdGFsbGVkCgpGUk9NIGRlcHMgQVMgYXBpCkNPUFkgYXBpLyAuL2FwaQpBUkcgVkVSU0lPTj1kZXYKUlVOIGVjaG8gImFwaSAkVkVSU0lPTiIgPiAvdmVyc2lvbgoKRlJPTSBkZXBzIEFTIHdvcmtlcgpDT1BZIHdvcmtlci8gLi93b3JrZXIKUlVOIGVjaG8gd29ya2VyID4gL3ZlcnNpb24KCkZST00gZGVwcyBBUyB0ZXN0CkNPUFkgLiAuClJVTiBjYXQgYXBpL21haW4udHh0IHdvcmtlci9tYWluLnR4dCA+IC90ZXN0ZWQKCkZST00gZGVwcyBBUyBicm9rZW4KUlVOIGVjaG8gZmFpbGluZyBzdGVwICYmIGV4aXQgMwo=",
+              "llbDefinition": [
+                {
+                  "id": "step0",
+                  "op": {
+                    "Op": {
+                      "source": {
+                        "identifier": "local://dockerfile",
+                        "attrs": {
+                          "local.differ": "none",
+                          "local.followpaths": "[\"Dockerfile\",\"Dockerfile.dockerignore\",\"dockerfile\"]",
+                          "local.sharedkeyhint": "dockerfile"
+                        }
+                      }
+                    },
+                    "constraints": {}
+                  }
+                },
+                {
+                  "id": "step1",
+                  "op": {
+                    "Op": {}
+                  },
+                  "inputs": [
+                    "step0:0"
+                  ]
+                }
+              ],
+              "digestMapping": {
+                "sha256:42c48ae0e8aaf9552eda0e2fa8e2be228a34a7ce1a40d09d23c3d6a41d95d828": "step0",
+                "sha256:baac59a44a1ea9942f3b8bbe264c54343780bd800b375b138905c59db8a62d12": "step1"
+              }
+            }
+          ]
+        },
+        "layers": {
+          "step0:0": [
+            [
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:16fc4f52163f03cd2189c3d6a4b3f28a605cfb7919af64b3da4562cca69d2306",
+                "size": 4123084
+              }
+            ]
+          ]
+        },
+        "sysUsage": [
+          {
+            "timestamp": "2026-10-19T20:03:13.033034134Z",
+            "cpuStat": {
+              "user": 44388.36,
+              "nice": 0,
+              "system": 33847.93,
+              "idle": 727828.21,
+              "iowait": 599.92,
+              "irq": 0,
+              "softirq": 1898.52,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 1963884434,
+              "processCreated": 3071967,
+              "processesRunning": 2
+            },
+            "memoryStat": {
+              "total": 8039936,
+              "free": 1099580,
+              "available": 5009776,
+              "buffers": 415828,
+              "cached": 3681244,
+              "active": 2449768,
+              "inactive": 3721864,
+              "swap": 1048572,
+              "dirty": 976,
+              "writeback": 12,
+              "slab": 610668
+            }
+          },
+          {
+            "timestamp": "2026-10-19T20:03:15.03367951Z",
+            "cpuStat": {
+              "user": 44389.09,
+              "nice": 0,
+              "system": 33848.56,
+              "idle": 727836.47,
+              "iowait": 599.95,
+              "irq": 0,
+              "softirq": 1898.58,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 1963932334,
+              "processCreated": 3072031,
+              "processesRunning": 1
+            },
+            "memoryStat": {
+              "total": 8039936,
+              "free": 1076352,
+              "available": 5000328,
+              "buffers": 416012,
+              "cached": 3694084,
+              "active": 2450012,
+              "inactive": 3742764,
+              "swap": 1048572,
+              "dirty": 212,
+              "writeback": 0,
+              "slab": 611976
+            }
+          },
+          {
+            "timestamp": "2026-10-19T20:03:16.849678761Z",
+            "cpuStat": {
+              "user": 44389.67,
+              "nice": 0,
+              "system": 33849.04,
+              "idle": 727844.15,
+              "iowait": 599.96,
+              "irq": 0,
+              "softirq": 1898.62,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 1963960808,
+              "processCreated": 3072068,
+              "processesRunning": 2
+            },
+            "memoryStat": {
+              "total": 8039936,
+              "free": 1071900,
+              "available": 4995968,
+              "buffers": 416020,
+              "cached": 3694116,
+              "active": 2451064,
+              "inactive": 3740900,
+              "swap": 1048572,
+              "dirty": 140,
+              "writeback": 0,
+              "slab": 611804
+            }
+          }
+        ]
+      },
+      "buildkit_completeness": {
+        "request": true,
+        "resolvedDependencies": false
+      }
+    }
+  }
+}

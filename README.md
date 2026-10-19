@@ -310,6 +310,7 @@ make e2e                      # ~13 min end-to-end on kind
 | `charts/ci-accelerator` | The box (umbrella chart) |
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
+| `internal/history` | Go: BuildKit build history to builds, steps and reasons (groundwork for the console, not shipped yet) |
 | `scripts/buildkit-certs.sh` | CA and certificates for `charts/buildkit` without cert-manager (`tls.source=existingSecret`) |
 | `docs/architecture.md` | How the parts fit together: build path, cache, certificates, telemetry, rollouts |
 | `docs/troubleshooting.md` | Symptoms and fixes, runbooks |

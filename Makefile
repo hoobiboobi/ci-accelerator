@@ -59,6 +59,12 @@ KIND_SHA256_linux_arm64 := 20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7f
 KUBECTL_VERSION := v1.37.1
 KUBECTL_SHA256_linux_amd64 := 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
 KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7
+# Go for the console (internal/, cmd/). Locally any Go >= 1.21 fetches this
+# toolchain itself (GOTOOLCHAIN, verified against the Go checksum database);
+# CI downloads the archive below. Checksums from https://go.dev/dl/?mode=json.
+GO_VERSION := 1.27.1
+GO_SHA256_linux_amd64 := 63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+GO_SHA256_linux_arm64 := 3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec
 
 OS   := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
@@ -82,6 +88,9 @@ CI_BIN      := $(TOOLS)/bin
 CI_HELM     := $(TOOLS)/helm-$(CI_HELM_VERSION)/helm
 CI_KIND     := $(TOOLS)/kind-$(KIND_VERSION)/kind
 CI_KUBECTL  := $(TOOLS)/kubectl-$(KUBECTL_VERSION)/kubectl
+CI_GO       := $(TOOLS)/go-$(GO_VERSION)/bin/go
+GO          ?= go
+GO_RUN      := GOTOOLCHAIN=go$(GO_VERSION) $(GO)
 
 # kind cluster for e2e. The context is derived from the cluster name and never
 # taken from the environment, so `make` cannot be pointed at another cluster.
@@ -135,10 +144,19 @@ $(VT_CHART):
 	$(call fetch,$(VICTORIA_RELEASES)/victoria-traces-single-$(VT_CHART_VERSION)/victoria-traces-single-$(VT_CHART_VERSION).tgz,$@,$(VT_CHART_SHA256))
 
 .PHONY: ci-tools
-ci-tools: $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) ## CI only (Linux): pinned helm (CI_HELM_VERSION), kind and kubectl into .tools/bin
+ci-tools: $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) $(CI_GO) ## CI only (Linux): pinned helm (CI_HELM_VERSION), kind, kubectl and Go into .tools/bin
 	@mkdir -p $(CI_BIN)
 	@cp $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) $(CI_BIN)/
-	@echo "==> .tools/bin: $$($(CI_BIN)/helm version --short), kind $(KIND_VERSION), kubectl $(KUBECTL_VERSION)"
+	@ln -sf $(CI_GO) $(CI_BIN)/go
+	@echo "==> .tools/bin: $$($(CI_BIN)/helm version --short), kind $(KIND_VERSION), kubectl $(KUBECTL_VERSION), $$($(CI_GO) version)"
+
+.PHONY: go-tools
+go-tools: $(CI_GO) ## CI only (Linux): pinned Go into .tools/go-<version>
+
+$(CI_GO):
+	@test "$(OS)" = linux || { echo "ci-tools is for Linux CI runners; any local Go >= 1.21 fetches go$(GO_VERSION) itself" >&2; exit 1; }
+	$(call fetch,https://go.dev/dl/go$(GO_VERSION).linux-$(ARCH).tar.gz,$(TOOLS)/dl/go-$(GO_VERSION).tgz,$(GO_SHA256_linux_$(ARCH)))
+	@mkdir -p $(TOOLS)/go-$(GO_VERSION) && tar -xzf $(TOOLS)/dl/go-$(GO_VERSION).tgz -C $(TOOLS)/go-$(GO_VERSION) --strip-components=1
 
 $(CI_HELM):
 	@test "$(OS)" = linux || { echo "ci-tools is for Linux CI runners; install helm locally" >&2; exit 1; }
@@ -194,6 +212,13 @@ unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-un
 		echo "==> unittest $$c"; \
 		$(HELM) unittest --strict $$c || exit 1; \
 	done
+
+.PHONY: go-test
+go-test: ## Go: gofmt, go vet and the tests of internal/ (history model fixtures included)
+	@out=$$("$$($(GO_RUN) env GOROOT)/bin/gofmt" -l internal); \
+		if [ -n "$$out" ]; then echo "not gofmt-formatted: $$out" >&2; exit 1; fi
+	@$(GO_RUN) vet ./...
+	@$(GO_RUN) test -count=1 ./...
 
 .PHONY: validate
 validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (our charts, gitlab-runner + fragment) against Kubernetes schemas

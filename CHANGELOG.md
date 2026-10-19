@@ -27,6 +27,13 @@ workflow copies them into the GitHub release.
 
 ### Added
 
+- Groundwork for the console, not shipped in the charts yet:
+  `internal/history` turns BuildKit build-history records into builds
+  attributed to CI jobs, with each step cached, built or received from
+  another job, and the reason for the first rebuilt step. It is tested on
+  recorded builds (`test/history/generate.sh`) and runs in CI as
+  `make go-test`.
+
 - The e2e scenario `upgrade`: the last published release, upgraded in place
   to the tree under test and rolled back.
 - `CONTRIBUTING.md`, `docs/releasing.md` and ADR-0027: how changes reach
