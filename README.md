@@ -304,6 +304,8 @@ make e2e                      # ~13 min end-to-end on kind
 | Path | What |
 |---|---|
 | `CHANGELOG.md` | Changes and upgrade notes of every release |
+| `CONTRIBUTING.md` | How to report issues and propose changes |
+| `docs/releasing.md` | How a release is cut and verified |
 | `charts/ci-accelerator` | The box (umbrella chart) |
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |

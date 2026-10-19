@@ -15,6 +15,8 @@ None.
 
 - The e2e scenario `upgrade`: the last published release, upgraded in place
   to the tree under test and rolled back.
+- `CONTRIBUTING.md`, `docs/releasing.md` and ADR-0027: how changes reach
+  `main`, when and how releases are cut, what an upgrade must keep.
 
 ## 0.1.0 - 2026-10-19
 
