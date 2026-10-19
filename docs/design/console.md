@@ -1,8 +1,8 @@
 # Console (v0.2): design draft
 
 Status: **draft for review**. Nothing here is implemented. Decisions are
-proposals until this document is merged; open questions are listed at the
-end.
+proposals until this document is merged; the answers from the review are
+listed at the end.
 
 ## Goal
 
@@ -206,7 +206,9 @@ fixture in the collector's tests.
   pods change.
 - **No raw blobs kept.** Derived records are kept: builds, steps, edges
   "received from". The trace blob, the largest part, is read only for its
-  trace id.
+  trace id. Failed builds also keep an excerpt of the failing step's log.
+- **Retention:** derived data 90 days by default, failed-build log
+  excerpts 7 days (both configurable).
 - **The history must outlive collector downtime.** With the console
   enabled, the chart raises the daemons' `[history]` limits (proposal:
   2000 records / 7 days). This changes `buildkitd.toml` and restarts the
@@ -221,6 +223,7 @@ fixture in the collector's tests.
 
 | Table | Key | Main fields |
 |---|---|---|
+| `instances` | trace-id prefix | GitLab URL when known, display name |
 | `projects` | GitLab instance + project id | name, namespace |
 | `pipelines` | instance + pipeline id | project, ref, sha, first and last job times |
 | `jobs` | instance + job id | pipeline, name, ref, sha, url, start, end, status |
@@ -261,20 +264,27 @@ newer schema refuses to start (ADR-0027).
 - Jobs on other runners. The GitLab API stays optional, later.
 - Which files of the context changed (needs the CI component).
 - Users, roles, per-project access control.
+- Translations: the UI is in English.
 - GitHub Actions (ARC): the data model keeps a job source field.
 - Moving builds to the daemon that holds their cache (routing work, v0.4).
 
-## Open questions
+## Decisions from the review
 
-1. **Retention:** how long should the console keep derived data? Proposal:
-   90 days, configurable.
-2. **History limits:** is raising them acceptable given BuildKit's
-   metadata growth (moby/buildkit#7263)? Measure before deciding.
-3. **Failed and cancelled builds:** should the console also keep a short
-   log excerpt for them? The record holds the error and the step's logs.
-4. **Several GitLab instances** behind one installation: the trace id
-   carries an instance prefix, but project names could collide in the UI.
-5. **Language of the UI:** English only, or translations from the start?
+1. **Retention:** derived data is kept 90 days by default (configurable).
+   Log excerpts of failed builds are kept 7 days.
+2. **History limits:** raising the daemons' `[history]` limits when the
+   console is enabled is accepted (proposal: 2000 records / 7 days). The
+   metadata growth (moby/buildkit#7263) is measured before the default is
+   fixed.
+3. **Failed builds:** the console keeps the error, the failing step and an
+   excerpt of its log lines, for 7 days.
+4. **Several GitLab instances** behind one installation (for example the
+   umbrella's runner on gitlab.com and an existing runner of a self-managed
+   GitLab attached to the same daemons): every key carries the GitLab
+   instance, taken from the trace id's prefix, so equal project, pipeline
+   or job numbers of two instances never merge. The UI names the instance
+   only when there is more than one.
+5. **Language:** the UI is in English only.
 
 ## Evidence
 
