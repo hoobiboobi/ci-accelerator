@@ -85,8 +85,8 @@ buildkit:
   # and VictoriaTraces. With either switched off, point the endpoint at your
   # own OTLP backend or set it to "".
   otel:
-    metricsEndpoint: 'http://{{ include "ci-accelerator.vmName" . }}-server.{{ .Release.Namespace }}.svc:8428/opentelemetry/v1/metrics'
-    tracesEndpoint: 'http://{{ include "ci-accelerator.vtName" . }}-server.{{ .Release.Namespace }}.svc:10428/insert/opentelemetry/v1/traces'
+    metricsEndpoint: 'http://{{ include "ci-accelerator.vmService" . }}.{{ .Release.Namespace }}.svc:8428/opentelemetry/v1/metrics'
+    tracesEndpoint: 'http://{{ include "ci-accelerator.vtService" . }}.{{ .Release.Namespace }}.svc:10428/insert/opentelemetry/v1/traces'
 
 # The official gitlab-runner chart. Set enabled=false to keep your own
 # runner and use integrations/gitlab-runner/values.yaml with it instead.
@@ -140,18 +140,9 @@ gitlab-runner:
           service_memory_request = "32Mi"
           automount_service_account_token = false
           [runners.kubernetes.node_selector]
-          {{- if .Values.global.buildNodes.enabled }}
-          {{- range $k, $v := .Values.global.buildNodes.selector }}
-            {{ $k | quote }} = {{ $v | quote }}
-          {{- end }}
-          {{- end }}
-            "kubernetes.io/arch" = {{ .Values.global.jobs.architecture | quote }}
+          {{- with include "ci-accelerator.runnerNodeSelector" . | trim }}{{ . | nindent 6 }}{{ end }}
           [runners.kubernetes.node_tolerations]
-          {{- if .Values.global.buildNodes.enabled }}
-          {{- range .Values.global.buildNodes.tolerations }}
-            {{ if eq (default "Equal" .operator) "Exists" }}{{ .key | quote }}{{ else }}{{ printf "%s=%s" .key .value | quote }}{{ end }} = {{ default "" .effect | quote }}
-          {{- end }}
-          {{- end }}
+          {{- with include "ci-accelerator.runnerTolerations" . | trim }}{{ . | nindent 6 }}{{ end }}
           [runners.kubernetes.pod_labels]
             "ci-accelerator.io/component" = "ci-job"
           # The pipeline id on the job pod (the runner adds job and project ids

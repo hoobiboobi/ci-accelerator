@@ -103,10 +103,55 @@ tests:
     asserts:
       - matchRegex:
           path: data["config.template.toml"]
-          pattern: '\[runners.kubernetes.node_selector\]\n\s+"ci-accelerator.io/node-role" = "build"\n\s+"pool" = "ci"\n\s+"kubernetes.io/arch" = "arm64"'
+          pattern: '\[runners.kubernetes.node_selector\]\n\s+"ci-accelerator.io/node-role" = "build"\n\s+"kubernetes.io/arch" = "arm64"\n\s+"pool" = "ci"\n'
       - matchRegex:
           path: data["config.template.toml"]
           pattern: '\[runners.kubernetes.node_tolerations\]\n\s+"dedicated" = "NoSchedule"\n\s+"pool=ci" = "NoExecute"'
+
+  # TOML refuses a key defined twice: the runner would start with no
+  # [[runners]] and take no jobs, with the reason only in its log.
+  - it: writes kubernetes.io/arch once when the build-node selector has it too
+    template: charts/gitlab-runner/templates/configmap.yaml
+    set:
+      global.buildNodes.selector: {ci-accelerator.io/node-role: build, kubernetes.io/arch: arm64}
+      global.jobs.architecture: arm64
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '\[runners.kubernetes.node_selector\]\n\s+"ci-accelerator.io/node-role" = "build"\n\s+"kubernetes.io/arch" = "arm64"\n\s+\[runners.kubernetes.node_tolerations\]'
+
+  - it: refuses a build-node architecture that differs from the jobs' architecture
+    template: validate.yaml
+    set:
+      global.buildNodes.selector: {kubernetes.io/arch: arm64}
+    asserts:
+      - failedTemplate:
+          errorPattern: 'global.buildNodes.selector has kubernetes.io/arch=arm64 but global.jobs.architecture is amd64'
+
+  - it: merges tolerations that map to the same runner key
+    template: charts/gitlab-runner/templates/configmap.yaml
+    set:
+      global.buildNodes.tolerations:
+        - {key: ci-accelerator.io/node-role, operator: Equal, value: build, effect: NoSchedule}
+        - {key: ci-accelerator.io/node-role, operator: Equal, value: build, effect: NoExecute}
+        - {key: dedicated, operator: Exists, effect: NoSchedule}
+        - {key: dedicated, operator: Exists, effect: NoSchedule}
+        - {operator: Exists}
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '\[runners.kubernetes.node_tolerations\]\n\s+"" = ""\n\s+"ci-accelerator.io/node-role=build" = ""\n\s+"dedicated" = "NoSchedule"\n\s+\[runners.kubernetes.pod_labels\]'
+
+  - it: refuses a runner configuration that is not valid TOML
+    template: validate.yaml
+    set:
+      gitlab-runner.runners.config: |
+        [[runners]]
+          name = "a"
+          name = "b"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'gitlab-runner.runners.config does not render to valid TOML: .*already been defined'
 
   - it: drops the build-node placement with build nodes switched off
     template: charts/gitlab-runner/templates/configmap.yaml

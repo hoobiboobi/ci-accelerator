@@ -5,6 +5,7 @@ templates:
   - charts/buildkit/templates/networkpolicy.yaml
   - charts/victoria-metrics-single/templates/server.yaml
   - charts/victoria-traces-single/templates/server.yaml
+  - charts/victoria-metrics-single/templates/service.yaml
 values:
   - values/required.yaml
 release:
@@ -36,6 +37,25 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, value: "http://vt-single-victoria-metrics-single-server.ci-accelerator.svc:10428/insert/opentelemetry/v1/traces"}
+
+  # The Victoria charts cut "<full name>-server" to 63 characters.
+  - it: follows the Victoria name rule for long release names
+    template: charts/buildkit/templates/daemonset.yaml
+    release:
+      name: a-very-long-release-name-for-testing-x
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://a-very-long-release-name-for-testing-x-victoria-metrics-single.ci-accelerator.svc:8428/opentelemetry/v1/metrics"}
+
+  - it: names the VictoriaMetrics Service the endpoint points at, for long release names
+    template: charts/victoria-metrics-single/templates/service.yaml
+    release:
+      name: a-very-long-release-name-for-testing-x
+    asserts:
+      - equal:
+          path: metadata.name
+          value: a-very-long-release-name-for-testing-x-victoria-metrics-single
 
   - it: keeps the storage reachable from the daemons when cluster CIDRs are blocked
     template: charts/buildkit/templates/networkpolicy.yaml

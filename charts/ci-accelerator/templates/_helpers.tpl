@@ -19,16 +19,61 @@ are refused below).
 {{- end }}
 
 {{/*
-Names of the VictoriaMetrics and VictoriaTraces subcharts (their common
-chart's rule: <release>-<name>, or the release name when it contains the
-name; name overrides are refused below). The Services add "-server".
+Service names of the VictoriaMetrics and VictoriaTraces subcharts, by their
+common chart's rule: the full name is <release>-<name> (or the release name
+when it contains the name), and the Service is "<full name>-server" cut to
+63 characters (name overrides are refused below).
 */}}
-{{- define "ci-accelerator.vmName" -}}
-{{- if contains "victoria-metrics-single" .Release.Name }}{{ .Release.Name | trunc 63 | trimSuffix "-" }}{{ else }}{{ printf "%s-victoria-metrics-single" .Release.Name | trunc 63 | trimSuffix "-" }}{{ end }}
+{{- define "ci-accelerator.vmService" -}}
+{{- $full := ternary .Release.Name (printf "%s-victoria-metrics-single" .Release.Name) (contains "victoria-metrics-single" .Release.Name) | trunc 63 | trimSuffix "-" }}
+{{- printf "%s-server" $full | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "ci-accelerator.vtName" -}}
-{{- if contains "vt-single" .Release.Name }}{{ .Release.Name | trunc 63 | trimSuffix "-" }}{{ else }}{{ printf "%s-vt-single" .Release.Name | trunc 63 | trimSuffix "-" }}{{ end }}
+{{- define "ci-accelerator.vtService" -}}
+{{- $full := ternary .Release.Name (printf "%s-vt-single" .Release.Name) (contains "vt-single" .Release.Name) | trunc 63 | trimSuffix "-" }}
+{{- printf "%s-server" $full | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+The job pods' node selector and tolerations in the runner's TOML, called
+from runners.config (rendered by the runner chart, so .Values are the
+runner's values, with the globals). TOML refuses a key defined twice, so
+both are built as dicts: kubernetes.io/arch appears once (the executor
+picks the helper image's architecture from it), and tolerations that
+render to the same runner key are merged. The runner's format is a map of
+"key=value" (Equal) or "key" (Exists) to one effect; a key listed with
+different effects becomes "" (all effects). tolerationSeconds has no place
+in that format and is dropped.
+*/}}
+{{- define "ci-accelerator.runnerNodeSelector" -}}
+{{- $selector := dict }}
+{{- if .Values.global.buildNodes.enabled }}
+{{- $selector = deepCopy (default (dict) .Values.global.buildNodes.selector) }}
+{{- end }}
+{{- $_ := set $selector "kubernetes.io/arch" .Values.global.jobs.architecture }}
+{{- range $k, $v := $selector }}
+{{ $k | quote }} = {{ toString $v | quote }}
+{{- end }}
+{{- end }}
+
+{{- define "ci-accelerator.runnerTolerations" -}}
+{{- $tolerations := dict }}
+{{- if .Values.global.buildNodes.enabled }}
+{{- range .Values.global.buildNodes.tolerations }}
+{{- $key := toString (default "" .key) }}
+{{- if ne (toString (default "Equal" .operator)) "Exists" }}
+{{- $key = printf "%s=%s" $key (toString (default "" .value)) }}
+{{- end }}
+{{- $effect := toString (default "" .effect) }}
+{{- if and (hasKey $tolerations $key) (ne (get $tolerations $key) $effect) }}
+{{- $effect = "" }}
+{{- end }}
+{{- $_ := set $tolerations $key $effect }}
+{{- end }}
+{{- end }}
+{{- range $k, $v := $tolerations }}
+{{ $k | quote }} = {{ $v | quote }}
+{{- end }}
 {{- end }}
 
 {{/*
@@ -52,7 +97,20 @@ subcharts must agree on.
 {{- if ne (toString $runner.runners.jobNamespace) $jobs }}
 {{- fail (printf "gitlab-runner.runners.jobNamespace (%s) must equal global.jobs.namespace (%s): the runner's permissions are created there." (toString $runner.runners.jobNamespace) $jobs) }}
 {{- end }}
+{{- $arch := index (default (dict) .Values.global.buildNodes.selector) "kubernetes.io/arch" }}
+{{- if and .Values.global.buildNodes.enabled $arch (ne (toString $arch) (toString .Values.global.jobs.architecture)) }}
+{{- fail (printf "global.buildNodes.selector has kubernetes.io/arch=%s but global.jobs.architecture is %s: set both to the build nodes' architecture (the runner picks its helper image from it)." (toString $arch) (toString .Values.global.jobs.architecture)) }}
 {{- end }}
+{{- /* The runner chart renders runners.config the same way; a broken
+TOML only shows up in the runner's log otherwise (the runner keeps
+running with no [[runners]] and takes no jobs). */}}
+{{- $config := tpl (toString $runner.runners.config) (dict "Values" $runner "Release" .Release "Chart" .Chart "Capabilities" .Capabilities "Template" .Template) }}
+{{- $parsed := fromToml $config }}
+{{- if hasKey $parsed "Error" }}
+{{- fail (printf "gitlab-runner.runners.config does not render to valid TOML: %s" (get $parsed "Error")) }}
+{{- end }}
+{{- end }}
+{{- include "ci-accelerator.preflightJobsNamespace" . }}
 {{- if or .Values.buildkit.fullnameOverride .Values.buildkit.nameOverride }}
 {{- fail "buildkit.fullnameOverride and buildkit.nameOverride are not supported in this chart: the runner configuration derives the daemons' address from the release name." }}
 {{- end }}
@@ -62,11 +120,34 @@ subcharts must agree on.
 {{- fail "fullnameOverride and nameOverride of victoria-metrics-single and victoria-traces-single are not supported in this chart: the daemons' OTLP endpoints are derived from the release name." }}
 {{- end }}
 {{- /* The default endpoints name this release's storage. */}}
-{{- if and (not $vm.enabled) (contains "ci-accelerator.vmName" (toString .Values.buildkit.otel.metricsEndpoint)) }}
+{{- if and (not $vm.enabled) (contains "ci-accelerator.vmService" (toString .Values.buildkit.otel.metricsEndpoint)) }}
 {{- fail "victoria-metrics-single.enabled is false, but buildkit.otel.metricsEndpoint still points at it: set it to your OTLP metrics endpoint (e.g. http://collector:4318/v1/metrics) or to \"\"." }}
 {{- end }}
-{{- if and (not $vt.enabled) (contains "ci-accelerator.vtName" (toString .Values.buildkit.otel.tracesEndpoint)) }}
+{{- if and (not $vt.enabled) (contains "ci-accelerator.vtService" (toString .Values.buildkit.otel.tracesEndpoint)) }}
 {{- fail "victoria-traces-single.enabled is false, but buildkit.otel.tracesEndpoint still points at it: set it to your OTLP traces endpoint (e.g. http://collector:4318/v1/traces) or to \"\"." }}
+{{- end }}
+{{- end }}
+
+{{/*
+The jobs namespace, when this release creates it: Helm refuses to adopt a
+namespace it did not create ("cannot be imported into the current
+release"), and one that is still being deleted (a reinstall right after
+uninstall) fails the install half-way. lookup is empty offline.
+*/}}
+{{- define "ci-accelerator.preflightJobsNamespace" -}}
+{{- if .Values.jobsNamespace.create }}
+{{- $name := .Values.global.jobs.namespace }}
+{{- $ns := lookup "v1" "Namespace" "" $name }}
+{{- if $ns }}
+{{- $owner := index (default (dict) $ns.metadata.annotations) "meta.helm.sh/release-name" }}
+{{- $ownerNs := index (default (dict) $ns.metadata.annotations) "meta.helm.sh/release-namespace" }}
+{{- if $ns.metadata.deletionTimestamp }}
+{{- fail (printf "Namespace %s (global.jobs.namespace) is still being deleted, probably by a previous uninstall of this chart. Wait until it is gone (kubectl wait --for=delete namespace/%s --timeout=5m) and install again." $name $name) }}
+{{- end }}
+{{- if not (and (eq (toString $owner) .Release.Name) (eq (toString $ownerNs) .Release.Namespace)) }}
+{{- fail (printf "Namespace %s (global.jobs.namespace) exists and was not created by this release. Either set jobsNamespace.create=false to use it as it is (label it pod-security.kubernetes.io/enforce=baseline), or delete it, or choose another global.jobs.namespace." $name) }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -87,7 +168,9 @@ lookup is empty offline, so the check is skipped there.
 {{- if not (hasKey $data "runner-registration-token") }}
 {{- fail (printf "Secret %s/%s (gitlab-runner.runners.secret) has no runner-registration-token key. The runner chart mounts it even when empty; add it: kubectl -n %s patch secret %s --type merge -p '{\"data\":{\"runner-registration-token\":\"\"}}' (or set preflight.runnerSecret=false to skip this check)" $ns $name $ns $name) }}
 {{- end }}
-{{- $token := b64dec (default "" (get $data "runner-token")) }}
+{{- /* The runner reads it with $(cat ...), which drops trailing newlines
+(a Secret made with --from-file has one). */}}
+{{- $token := b64dec (default "" (get $data "runner-token")) | trimSuffix "\n" | trimSuffix "\r" }}
 {{- $registration := b64dec (default "" (get $data "runner-registration-token")) }}
 {{- if and (not $token) (not $registration) }}
 {{- fail (printf "Secret %s/%s (gitlab-runner.runners.secret) has no token: put the runner authentication token from GitLab (glrt-...) into its runner-token key." $ns $name) }}

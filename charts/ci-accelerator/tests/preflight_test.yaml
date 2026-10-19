@@ -13,6 +13,11 @@ kubernetesProvider:
         version: v1
         resource: secrets
       namespaced: true
+    "v1/Namespace":
+      gvr:
+        version: v1
+        resource: namespaces
+      namespaced: false
 tests:
   - it: accepts a Secret with a token and the empty registration key
     kubernetesProvider:
@@ -54,6 +59,21 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: 'runner-token does not look like a token'
+
+  # kubectl create secret --from-file keeps the file's newline; the runner
+  # reads the token with $(cat ...), which drops it.
+  - it: accepts a token with a trailing newline
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: {name: gitlab-runner-token, namespace: ci-accelerator}
+          data:
+            # "glrt-abc_DEF-123\n"
+            runner-token: Z2xydC1hYmNfREVGLTEyMwo=
+            runner-registration-token: ""
+    asserts:
+      - notFailedTemplate: {}
 
   - it: refuses a Secret without any token
     kubernetesProvider:
@@ -113,3 +133,49 @@ tests:
     asserts:
       - hasDocuments:
           count: 0
+
+  # Helm cannot adopt a namespace it did not create; say so before it tries.
+  - it: refuses a jobs namespace that exists and belongs to no release
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata: {name: ci-accelerator-jobs}
+    asserts:
+      - failedTemplate:
+          errorPattern: 'Namespace ci-accelerator-jobs \(global.jobs.namespace\) exists and was not created by this release\. Either set jobsNamespace.create=false'
+
+  - it: refuses a jobs namespace that is still being deleted
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ci-accelerator-jobs
+            deletionTimestamp: "2026-10-19T10:00:00Z"
+            annotations: {meta.helm.sh/release-name: box, meta.helm.sh/release-namespace: ci-accelerator}
+    asserts:
+      - failedTemplate:
+          errorPattern: 'is still being deleted'
+
+  - it: accepts its own jobs namespace on upgrade
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ci-accelerator-jobs
+            annotations: {meta.helm.sh/release-name: box, meta.helm.sh/release-namespace: ci-accelerator}
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: uses an existing jobs namespace with jobsNamespace.create=false
+    set:
+      jobsNamespace.create: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata: {name: ci-accelerator-jobs}
+    asserts:
+      - notFailedTemplate: {}

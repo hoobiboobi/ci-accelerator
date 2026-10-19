@@ -29,11 +29,11 @@ certificate in BUILDKIT_TLS_DIR):
 
 Metrics and traces of the daemons (OTLP push):
 {{- if $vm.enabled }}
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ci-accelerator.vmName" . }}-server 8428
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ci-accelerator.vmService" . }} 8428
     then http://localhost:8428/vmui (counters are deltas: use sum_over_time)
 {{- end }}
 {{- if $vt.enabled }}
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ci-accelerator.vtName" . }}-server 10428
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ci-accelerator.vtService" . }} 10428
     then http://localhost:10428/select/vmui
 {{- end }}
 {{- if and $vt.enabled $runner.enabled }}
