@@ -78,7 +78,9 @@ Each part is usable on its own:
 - **Kubernetes 1.34 or newer.** Same-node routing (`PreferSameNode`) needs
   kube-proxy 1.34+ or a proxy that implements it.
 - **Build nodes:** one or more, labelled and tainted. Daemons and job pods
-  run only there.
+  run only there. The runner manager and the metrics and traces storage run
+  on the other nodes: keep at least one node without the taint (or see
+  [troubleshooting](docs/troubleshooting.md#the-runner) for tolerations).
 
   ```sh
   kubectl label node <node> ci-accelerator.io/node-role=build
@@ -93,6 +95,9 @@ Each part is usable on its own:
   ```
 
 - **A default StorageClass,** for the metrics and traces volumes.
+- **A CNI that enforces NetworkPolicy** (Calico, Cilium, kindnet, ...).
+  Without one, the daemons accept connections from any namespace and builds
+  can reach cloud instance metadata; mutual TLS still applies.
 - **Helm 3 (3.19+) or Helm 4.**
 
 ### 1. A namespace for the box
@@ -119,13 +124,16 @@ kubectl -n ci-accelerator create secret generic gitlab-runner-token \
 ### 3. Install
 
 ```sh
-git clone https://github.com/hoobiboobi/ci-accelerator && cd ci-accelerator
-make deps          # vendors the subcharts into charts/ci-accelerator/charts/
-helm install ci-accelerator charts/ci-accelerator -n ci-accelerator \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.1.0 \
+  -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
   --wait --timeout 10m
 ```
+
+The package contains its subcharts. From a clone instead: `make deps`, then
+`helm install ci-accelerator charts/ci-accelerator ...` with the same
+values. The daemons alone: `oci://ghcr.io/hoobiboobi/charts/buildkit`.
 
 - **Defaults:** amd64 build nodes, jobs in namespace `ci-accelerator-jobs`
   (created by the release).
@@ -228,6 +236,10 @@ one installation between teams.
   builds make progress. Stuck registry pushes can hang all builds on one
   daemon without failing a probe (moby/buildkit#7275).
 - **Upstream BuildKit issues that matter here:**
+  - cancelling one of several concurrent builds that share a step can
+    crash the daemon (moby/buildkit#7253): every build on that node fails
+    and the pod restarts. Fixed in BuildKit v0.34.0, which this release does
+    not ship yet;
   - a cancelled build can fail another build that shares its steps
     (moby/buildkit#7268);
   - heap retained after builds (moby/buildkit#7181);
@@ -242,6 +254,9 @@ one installation between teams.
 - **No CI component yet.** Registry pushes are configured by hand (see
   above).
 - **VictoriaTraces is a 0.x release.**
+- **The bundled VictoriaMetrics v1.153.0 has a cross-site scripting issue
+  in its web UI** (vmui), fixed in v1.154.0. The UI is not exposed by the
+  chart; open it only through `kubectl port-forward`.
 
 ## Testing
 

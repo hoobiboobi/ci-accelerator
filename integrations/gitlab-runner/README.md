@@ -29,20 +29,28 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build ...
 
 ## Use it
 
-1. Install the buildkit chart with the jobs namespace in
+1. Create the jobs namespace with Pod Security `baseline` (the runner chart
+   creates its Role there, and the client certificate is issued there):
+
+   ```sh
+   kubectl create namespace ci-accelerator-jobs
+   kubectl label namespace ci-accelerator-jobs pod-security.kubernetes.io/enforce=baseline
+   ```
+
+2. Install the buildkit chart with the jobs namespace in
    `tls.client.namespaces`, so that the client certificate Secret exists there.
-2. Create a runner in GitLab and put its authentication token in a Secret in
+3. Create a runner in GitLab and put its authentication token in a Secret in
    the runner's namespace, as described in
    [The runner token Secret](#the-runner-token-secret).
-
-3. Change the lines marked `ADJUST` in `values.yaml`:
+4. Change the lines marked `ADJUST` in `values.yaml`:
    - the GitLab URL;
+   - the token Secret's name (`runners.secret`);
    - the jobs namespace;
    - the buildkit Service address and client Secret name: `<fullname>` is
      `<release>-buildkit`, or the release name if it already contains
      "buildkit";
    - `kubernetes.io/arch` for arm64 build nodes.
-4. Install:
+5. Install:
 
    ```sh
    helm upgrade --install gitlab-runner gitlab-runner \

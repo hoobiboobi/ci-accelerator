@@ -27,6 +27,11 @@ names the fix; the common ones:
 | `Secret .../gitlab-runner-token ... has no runner-registration-token key` | See [The runner](#the-runner) |
 | `runner-token does not look like a token` | The Secret holds a placeholder or a pasted string with spaces; re-create it |
 | `Secret ... (tls.existingSecret) has no ca.crt` | `kubectl create secret tls` writes no `ca.crt`; use `create secret generic` with all three files |
+| `Namespace ... (global.jobs.namespace) exists and was not created by this release` | Helm cannot adopt a namespace it did not create: `jobsNamespace.create=false` to use yours (label it `baseline`), or delete it |
+| `Namespace ... (global.jobs.namespace) is still being deleted` | A reinstall right after uninstall: wait for the namespace to go |
+| `gitlab-runner.runners.config does not render to valid TOML` | Your own `runners.config` (or a value it uses) breaks the TOML; the message names the line |
+| `global.buildNodes.selector has kubernetes.io/arch=...` | Set `global.jobs.architecture` to the same architecture |
+| `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
 
 Checks that read the live cluster (Pod Security, build nodes, Secrets)
 need read access to Namespaces, Nodes and Secrets. Each one has a
@@ -65,6 +70,7 @@ kubectl -n ci-accelerator get secret gitlab-runner-token \
 | Runner pod in `ContainerCreating`, event `FailedMount ... non-existent secret key: runner-registration-token` | The empty key is missing | `kubectl -n ci-accelerator patch secret gitlab-runner-token --type merge -p '{"data":{"runner-registration-token":""}}'` |
 | Log `Verifying runner... is not valid` | Wrong or placeholder token, or the runner was deleted in GitLab | Fix the Secret, then `kubectl -n ci-accelerator rollout restart deploy/ci-accelerator-gitlab-runner` (the token is read at start) |
 | The runner is online, jobs stay pending or run elsewhere | Tags: a runner with tags that does not run untagged jobs only takes jobs with matching `tags:`. On gitlab.com untagged jobs go to the shared runners, which have no `BUILDKIT_*` variables | Add `tags:` to the job, or allow untagged jobs on the runner |
+| Runner pod `Pending` (`Unschedulable`), `helm install --wait` times out on the runner Deployment; the same for the VictoriaMetrics/VictoriaTraces pods | Every node is a tainted build node: the runner manager and the storage do not tolerate the build-node taint | Keep one node without the taint, or add tolerations: `gitlab-runner.tolerations`, `victoria-metrics-single.server.tolerations`, `victoria-traces-single.server.tolerations` |
 | Job pod `Pending` | It cannot go to a build node: missing toleration or node selector in a hand-made runner configuration | Use the configuration from the umbrella or `integrations/gitlab-runner` |
 | Job fails pulling `gitlab-runner-helper:x86_64-...` with `no match for platform` | arm64 build nodes, but the runner assumed amd64 | `global.jobs.architecture=arm64` (or `kubernetes.io/arch` in the fragment's node selector) |
 | Jobs rejected by Pod Security | The jobs namespace enforces `restricted` | Use `baseline` |
@@ -130,6 +136,12 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" debug worke
   `buildctl --timeout` only bounds connecting.
 - **A build fails with `failed to get state for index`.** Another build
   that shared its steps was cancelled (moby/buildkit#7268). Retry the job.
+- **Every build on one node fails at once and its daemon restarts after a
+  job was cancelled.** With concurrent builds sharing a step, cancelling one
+  at the moment the step finishes can crash buildkitd (`panic` in
+  `flightcontrol` in the previous container's log:
+  `kubectl -n <ns> logs <daemon pod> --previous`), moby/buildkit#7253.
+  Retry the jobs. Fixed in BuildKit v0.34.0.
 
 ## Disk, inodes and processes
 
