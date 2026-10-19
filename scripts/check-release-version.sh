@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks that a release tag matches the charts before anything is published:
-# both charts carry the tag's version, and the umbrella depends on exactly
-# that buildkit version. Prints the version on success.
+# both charts carry the tag's version, the umbrella depends on exactly that
+# buildkit version, and CHANGELOG.md has an entry with upgrade notes for it.
+# Prints the version on success.
 #
 #   scripts/check-release-version.sh v0.1.0
 #   scripts/check-release-version.sh v0.1.0-rc.1
@@ -29,5 +30,7 @@ dep=$(awk '/^  - name: buildkit$/ {found = 1; next} found && /^    version:/ {pr
 if [ "$dep" != "$version" ]; then
   echo "charts/ci-accelerator depends on buildkit $dep, the tag says $version" >&2; fail=1
 fi
+# Every release says what an upgrade to it means.
+"$ROOT/scripts/changelog-section.sh" "$version" >/dev/null || fail=1
 [ "$fail" = 0 ] || exit 1
 echo "$version"

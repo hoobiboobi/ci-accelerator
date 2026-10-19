@@ -189,6 +189,21 @@ all builds of one pipeline land in one trace. Its id is derived from the
 pipeline id, and the install notes print the command that opens a
 pipeline's trace.
 
+## Upgrading
+
+Every release upgrades in place from the previous one. Read its **Upgrade
+notes** in [CHANGELOG.md](CHANGELOG.md) first, then:
+
+```sh
+helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <new version> \
+  -n ci-accelerator --reset-then-reuse-values --wait --timeout 10m
+```
+
+`--reset-then-reuse-values` keeps your values and takes the new version's
+defaults for everything else. The end-to-end tests upgrade the previous
+release this way before every change is merged
+([ADR-0027](docs/adr/0027-upgrades-and-branches.md)).
+
 ## Limitations
 
 These are known, deliberate or not yet solved. Read them before you share
@@ -288,6 +303,7 @@ make e2e                      # ~13 min end-to-end on kind
 
 | Path | What |
 |---|---|
+| `CHANGELOG.md` | Changes and upgrade notes of every release |
 | `charts/ci-accelerator` | The box (umbrella chart) |
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
