@@ -103,6 +103,9 @@ jobs:
           PRIVATE: ${{ github.event.repository.private }}
         run: |
           {
+            # What changed and what an upgrade to this version means.
+            scripts/changelog-section.sh "$VERSION"
+            echo
             echo "## Install"
             echo
             echo '```sh'

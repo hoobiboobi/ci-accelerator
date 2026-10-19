@@ -47,6 +47,10 @@ OTHER_NS=$NS-other
 OBS_NS=$NS-obs
 BOX_NS=$NS-box
 BOX_JOBS_NS=$NS-box-jobs
+UPG_NS=$NS-upgrade
+UPG_JOBS_NS=$NS-upgrade-jobs
+UPG_REL=e2e-upgrade
+UPG_BK_REL=e2e-upgrade-bk
 REL=e2e
 OTEL_REL=$REL-otel
 # Not "box": a manual install of that name may share the cluster, and
@@ -71,6 +75,15 @@ VT_CHART_SHA256=59471db9c6e053fc740b1ad0eb6365dc872bba3f0c9e06f5780ddde9655c9e88
 RUNNER_REPO=https://charts.gitlab.io
 RUNNER_CHART_VERSION=0.93.0
 RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
+# The last published release, which the upgrade scenario installs from the
+# registry and upgrades to this tree. Bump both with every release.
+UPGRADE_FROM=0.1.0
+UPGRADE_FROM_SHA256=a4b803333d2b9da608c276dbd3e7e9ea2077866c4b426441ce7935ef94506705
+UPGRADE_FROM_BUILDKIT_SHA256=b9ac1a09e431e943749a0ec17690300742cc9cf4a06d0faa8a6da14fa43e1657
+UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
+# 1 when this tree changes the daemons' pod template on purpose (an upgrade
+# then restarts every daemon; say so in the upgrade notes).
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # Every client call: the client certificate, and the Service name for the
@@ -83,7 +96,7 @@ E2E_LABEL=ci-accelerator.io/e2e
 KEEP=${KEEP:-0}
 SCENARIOS=${SCENARIOS:-all}
 MODE=${1:-run}
-ALL_SCENARIOS="preflight tls certmanager existing netpol otel runner box cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
+ALL_SCENARIOS="preflight tls certmanager existing netpol otel runner box upgrade cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
 
 refuse() { echo "refusing to run e2e: $*" >&2; exit 2; }
 
@@ -277,10 +290,22 @@ remove_release() {
   if hc status "$BOX_REL" -n "$BOX_NS" >/dev/null 2>&1; then
     hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || true
   fi
-  # The box's jobs namespace belongs to its release; remove a leftover one.
+  for r in "$UPG_REL" "$UPG_BK_REL"; do
+    if hc status "$r" -n "$UPG_NS" >/dev/null 2>&1; then
+      hc uninstall "$r" -n "$UPG_NS" --wait --timeout 5m >/dev/null 2>&1 || true
+    fi
+  done
+  # The box's jobs namespaces belong to their releases; remove leftovers.
   if [ "$(kc get namespace "$BOX_JOBS_NS" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/instance}' 2>/dev/null)" = "$BOX_REL" ]; then
     kc delete namespace "$BOX_JOBS_NS" --wait=true --timeout=180s >/dev/null 2>&1 || true
   fi
+  if [ "$(kc get namespace "$UPG_JOBS_NS" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/instance}' 2>/dev/null)" = "$UPG_REL" ]; then
+    kc delete namespace "$UPG_JOBS_NS" --wait=true --timeout=180s >/dev/null 2>&1 || true
+  fi
+  for r in "$UPG_REL" "$UPG_BK_REL"; do
+    kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$r,ci-accelerator.io/component=buildkit" \
+      --ignore-not-found >/dev/null 2>&1 || true
+  done
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" \
     --ignore-not-found >/dev/null 2>&1 || true
   for r in "$REL" "$OTEL_REL"; do
@@ -347,7 +372,7 @@ cleanup() {
   remove_release
   echo "   release removed at $(elapsed)"
   local ns
-  for ns in "$NS" "$JOBS_NS" "$PSA_NS" "$OTHER_NS" "$OBS_NS" "$BOX_NS"; do
+  for ns in "$NS" "$JOBS_NS" "$PSA_NS" "$OTHER_NS" "$OBS_NS" "$BOX_NS" "$UPG_NS"; do
     if [ "$(kc get namespace "$ns" -o jsonpath="{.metadata.labels.ci-accelerator\.io/e2e}" 2>/dev/null)" = true ]; then
       kc delete namespace "$ns" --wait=true --timeout=180s >/dev/null 2>&1 || true
     fi
@@ -948,6 +973,120 @@ s_box() {
   check "uninstall removes the jobs namespace" \
     eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+}
+
+# The last release, as users have it, upgraded in place to this tree: the
+# chart from the registry, then helm upgrade with the values users keep
+# (--reuse-values and --reset-then-reuse-values), then helm rollback. The
+# daemon has its cache on hostPath on one node, as in production, and CI
+# jobs go through the runner before, between and after.
+s_upgrade() {
+  step "upgrade: $UPGRADE_FROM from the registry upgrades in place to this tree and rolls back"
+  local old_chart old_bk args gen0 gen1 gen2 uids0 uids1 state=$STATE_DIR/upgrade
+  ensure_ns "$UPG_NS" privileged
+  ensure_fake_gitlab "$UPG_NS" || return
+  make -C "$ROOT" deps >"$LOGS/upgrade-deps.log" 2>&1 || { fail "make deps (see $LOGS/upgrade-deps.log)"; return; }
+  # Anonymously, as a user pulls it, and checked against the release.
+  rm -rf "$LOGS/upgrade-from"; mkdir -p "$LOGS/upgrade-from"
+  local c
+  for c in ci-accelerator buildkit; do
+    if ! HELM_REGISTRY_CONFIG="$LOGS/upgrade-from/registry.json" hc pull "$UPGRADE_FROM_REPO/$c" \
+        --version "$UPGRADE_FROM" -d "$LOGS/upgrade-from" >>"$LOGS/upgrade-pull.log" 2>&1; then
+      fail "pull $c $UPGRADE_FROM from $UPGRADE_FROM_REPO (see $LOGS/upgrade-pull.log)"; return
+    fi
+  done
+  old_chart=$LOGS/upgrade-from/ci-accelerator-$UPGRADE_FROM.tgz
+  old_bk=$LOGS/upgrade-from/buildkit-$UPGRADE_FROM.tgz
+  check "the $UPGRADE_FROM packages match their release checksums" \
+    test "$(sha256 "$old_chart" | awk '{print $1}')" = "$UPGRADE_FROM_SHA256" \
+      -a "$(sha256 "$old_bk" | awk '{print $1}')" = "$UPGRADE_FROM_BUILDKIT_SHA256"
+  docker exec "$BUILD_NODE" mkdir -p "$state" || { fail "mkdir $state on $BUILD_NODE"; return; }
+  # One daemon, on the node whose cache the jobs must find again.
+  args=(-f "$ROOT/test/e2e/box-values.yaml"
+    --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token
+    --set "global.jobs.namespace=$UPG_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$UPG_JOBS_NS"
+    --set "global.jobs.architecture=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')"
+    --set-json "global.buildNodes.selector={\"ci-accelerator.io/node-role\":\"build\",\"kubernetes.io/hostname\":\"$BUILD_NODE\"}"
+    --set buildkit.storage.type=hostPath --set "buildkit.storage.hostPath.path=$state")
+  if ! hc install "$UPG_REL" "$old_chart" -n "$UPG_NS" "${args[@]}" --wait --timeout 8m >"$LOGS/upgrade-install.log" 2>&1; then
+    fail "install $UPGRADE_FROM (see $LOGS/upgrade-install.log)"; return
+  fi
+  pass "$UPGRADE_FROM installs from the registry"
+  JOB_SPEC=$(job_spec 901)
+  run_job upgrade-before "$UPG_JOBS_NS"
+  check "a CI job on $UPGRADE_FROM succeeds" test "$(cat "$LOGS/job-upgrade-before.state")" = success
+  gen0=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
+  uids0=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
+
+  # The values users keep: Helm reuses the old values tree, without the
+  # keys this tree added (they must be read with defaults).
+  if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reuse-values \
+      --wait --timeout 8m >"$LOGS/upgrade-reuse.log" 2>&1; then
+    pass "helm upgrade --reuse-values from $UPGRADE_FROM"
+  else
+    fail "helm upgrade --reuse-values from $UPGRADE_FROM (see $LOGS/upgrade-reuse.log)"; return
+  fi
+  gen1=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
+  uids1=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
+  if [ "$UPGRADE_ROLLOUT_EXPECTED" = 1 ]; then
+    info "daemon rollout expected (UPGRADE_ROLLOUT_EXPECTED=1): generation $gen0 -> $gen1"
+  else
+    check "the upgrade does not restart the daemons (generation $gen0 -> $gen1; on purpose: UPGRADE_ROLLOUT_EXPECTED=1 and upgrade notes)" \
+      test "$gen0" = "$gen1" -a "$uids0" = "$uids1"
+  fi
+  hc get manifest "$UPG_REL" -n "$UPG_NS" --revision 1 >"$LOGS/upgrade-manifest-old.yaml" 2>/dev/null
+  hc get manifest "$UPG_REL" -n "$UPG_NS" >"$LOGS/upgrade-manifest-new.yaml" 2>/dev/null
+  info "manifest diff $UPGRADE_FROM -> this tree: $(diff "$LOGS/upgrade-manifest-old.yaml" "$LOGS/upgrade-manifest-new.yaml" | grep -c '^[<>]') lines ($LOGS/upgrade-manifest-*.yaml)"
+  run_job upgrade-after "$UPG_JOBS_NS"
+  check "a CI job after the upgrade succeeds" test "$(cat "$LOGS/job-upgrade-after.state")" = success
+  check "the job after the upgrade finds the cache from before it" \
+    eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-upgrade-after.trace" | grep -q "^#[0-9]* CACHED$"'
+
+  # The recommended way: this tree's defaults plus the user's values.
+  if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values \
+      --wait --timeout 8m >"$LOGS/upgrade-reset.log" 2>&1; then
+    pass "helm upgrade --reset-then-reuse-values"
+  else
+    fail "helm upgrade --reset-then-reuse-values (see $LOGS/upgrade-reset.log)"
+  fi
+  gen2=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
+  check "--reset-then-reuse-values after --reuse-values changes nothing (generation $gen1 -> $gen2)" test "$gen1" = "$gen2"
+
+  if hc rollback "$UPG_REL" 1 -n "$UPG_NS" --wait --timeout 8m >"$LOGS/upgrade-rollback.log" 2>&1; then
+    pass "helm rollback to $UPGRADE_FROM"
+  else
+    fail "helm rollback to $UPGRADE_FROM (see $LOGS/upgrade-rollback.log)"
+  fi
+  run_job upgrade-rolled-back "$UPG_JOBS_NS"
+  check "a CI job after the rollback succeeds" test "$(cat "$LOGS/job-upgrade-rolled-back.state")" = success
+
+  hc uninstall "$UPG_REL" -n "$UPG_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the upgraded release"
+
+  # The daemons chart on its own: --reuse-values there keeps the old
+  # chart's defaults too, so a key it lacks is missing outright.
+  if ! hc install "$UPG_BK_REL" "$old_bk" -n "$UPG_NS" \
+      --set "tls.client.namespaces={$UPG_NS}" --wait --timeout 5m >"$LOGS/upgrade-bk-install.log" 2>&1; then
+    fail "install the buildkit chart $UPGRADE_FROM (see $LOGS/upgrade-bk-install.log)"
+  else
+    gen0=$(kc -n "$UPG_NS" get ds "$UPG_BK_REL-buildkit" -o jsonpath='{.metadata.generation}')
+    if hc upgrade "$UPG_BK_REL" "$CHART" -n "$UPG_NS" --reuse-values --wait --timeout 5m >"$LOGS/upgrade-bk-reuse.log" 2>&1; then
+      pass "the buildkit chart upgrades from $UPGRADE_FROM with --reuse-values"
+    else
+      fail "the buildkit chart upgrade from $UPGRADE_FROM with --reuse-values (see $LOGS/upgrade-bk-reuse.log)"
+    fi
+    gen1=$(kc -n "$UPG_NS" get ds "$UPG_BK_REL-buildkit" -o jsonpath='{.metadata.generation}')
+    if [ "$UPGRADE_ROLLOUT_EXPECTED" != 1 ]; then
+      check "the buildkit chart upgrade does not restart its daemons (generation $gen0 -> $gen1)" test "$gen0" = "$gen1"
+    fi
+    check "the buildkit chart rolls back to $UPGRADE_FROM" \
+      quiet hc rollback "$UPG_BK_REL" 1 -n "$UPG_NS" --wait --timeout 5m
+    hc uninstall "$UPG_BK_REL" -n "$UPG_NS" --wait --timeout 5m >/dev/null 2>&1 || true
+    kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$UPG_BK_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+  fi
+  eventually 60 eval '! kc get namespace "$UPG_JOBS_NS" >/dev/null 2>&1' || true
+  kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+  kc -n "$UPG_NS" wait --for=delete pod -l "app.kubernetes.io/instance=$UPG_REL" --timeout=300s >/dev/null 2>&1 || true
+  docker exec "$BUILD_NODE" rm -rf "$state" >/dev/null 2>&1 || true
 }
 
 s_cache() {
