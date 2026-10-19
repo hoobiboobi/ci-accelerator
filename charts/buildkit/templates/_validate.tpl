@@ -40,6 +40,12 @@ the install/upgrade with the fix in the message.
 {{- $v := .Values }}
 {{- $gc := $v.config.gc }}
 
+{{- /* The default digest belongs to the appVersion tag and the runtime pulls
+by digest: another tag with it would still run the appVersion image. */}}
+{{- if and $v.image.tag (ne (toString $v.image.tag) .Chart.AppVersion) (eq (toString $v.image.digest) "sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea") }}
+{{- fail (printf "image.tag is %s, but image.digest is still the digest of %s, and the runtime pulls by digest: set image.digest to the digest of %s (or to \"\" to pull by tag)." (toString $v.image.tag) .Chart.AppVersion (toString $v.image.tag)) }}
+{{- end }}
+
 {{- /* Client namespaces may be templates: check what they render to. */}}
 {{- $clientNamespaces := include "buildkit.tlsClientNamespaces" . | fromJsonArray }}
 {{- range $clientNamespaces }}

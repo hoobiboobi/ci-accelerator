@@ -9,6 +9,32 @@ tests:
       - isKind:
           of: DaemonSet
 
+  # The digest wins at pull time: a new tag with the old digest would keep
+  # running the old image while every manifest shows the new tag.
+  - it: refuses another tag with the default digest
+    set:
+      image.tag: v0.34.0
+    asserts:
+      - failedTemplate:
+          errorPattern: 'image.tag is v0.34.0, but image.digest is still the digest of v0.33.1'
+
+  - it: accepts another tag with its own digest or without one
+    set:
+      image.tag: v0.34.0
+      image.digest: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: moby/buildkit:v0.34.0
+
+  # Keeps this guard and values.yaml in step when the default digest moves.
+  - it: knows the default digest
+    set:
+      image.tag: v0.0.0-test
+    asserts:
+      - failedTemplate:
+          errorPattern: 'still the digest of'
+
   # A policy without caps and without keepDuration deletes every unused
   # record after each build; for the unfiltered policies that is the cache.
   - it: refuses default policies without any cap

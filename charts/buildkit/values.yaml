@@ -16,8 +16,9 @@ image:
   # -- Defaults to the chart appVersion.
   tag: ""
   # -- Image index digest. The runtime pulls by digest when it is set, so
-  # change or clear it together with tag. Default: the digest of the
-  # appVersion tag (multi-arch index).
+  # change or clear it together with tag (another tag with this default
+  # digest is refused). Default: the digest of the appVersion tag
+  # (multi-arch index).
   digest: "sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
   pullPolicy: IfNotPresent
 
@@ -283,7 +284,10 @@ config:
   # tables: use it for top-level keys (e.g. insecure-entitlements) and new
   # tables (e.g. [registry."docker.io"]). Never repeat [grpc], [worker.oci],
   # [worker.containerd], [history], [system] or [cdi]; the chart validates the
-  # result and fails the render otherwise.
+  # result and fails the render otherwise. Do not reach into those tables
+  # with dotted keys either (worker.oci.max-parallelism = 5): the chart's
+  # check accepts them, buildkitd's parser does not, and the daemon fails to
+  # start. Use the typed values or config.workerOCI.
   extraConfig: ""
 
 # Metrics and traces, pushed by buildkitd over OTLP. Its debug HTTP server
