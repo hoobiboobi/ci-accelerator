@@ -9,7 +9,7 @@
 # For checking the checks: E2E_CHART=<chart dir> runs against another copy of
 # the chart, E2E_EXTRA_VALUES="<file> ..." adds values files after the e2e
 # ones, E2E_RUNNER_FRAGMENT=<file> replaces integrations/gitlab-runner/values.yaml,
-# E2E_LOGS=<dir> writes the logs there instead of a temporary directory,
+# E2E_LOGS=<dir> writes the logs there (and keeps them) instead of a temporary directory,
 # E2E_BOX_EXTRA_VALUES="<file> ..." adds values files to the umbrella install. A deliberately broken chart or value must turn scenarios red.
 #
 # Installs its own release ("e2e") in its own namespace, so a development
@@ -113,10 +113,11 @@ WAKE_AT_START=$(sysctl -n kern.waketime 2>/dev/null || true)
 APP_VERSION=$(awk -F'"' '/^appVersion:/ {print $2}' "$CHART/Chart.yaml")
 IMAGE=moby/buildkit:$APP_VERSION
 # E2E_LOGS=<dir> keeps the logs in a known place (CI uploads it on failure).
+# Only a directory the script made itself is removed after a green run.
 if [ -n "${E2E_LOGS:-}" ]; then
-  LOGS=$E2E_LOGS; mkdir -p "$LOGS"
+  LOGS=$E2E_LOGS; mkdir -p "$LOGS"; OWN_LOGS=0
 else
-  LOGS=$(mktemp -d "${TMPDIR:-/tmp}/ci-accelerator-e2e.XXXXXX")
+  LOGS=$(mktemp -d "${TMPDIR:-/tmp}/ci-accelerator-e2e.XXXXXX"); OWN_LOGS=1
 fi
 
 kc() { kubectl --context "$CTX" "$@"; }
@@ -214,10 +215,12 @@ count_printed() { grep -cE "^#[0-9]+ [0-9.]+ $2\$" "$1"; }
 deps_cached() { grep -A1 'RUN sleep 3' "$1" | grep -q '^#[0-9]* CACHED$'; }
 
 # Unshared cache records of the daemon at an IP, in bytes (what GC caps see).
+# Fails (prints nothing) when du fails, so a check on it cannot pass on an error.
 cache_bytes() {
-  kc -n "$JOBS_NS" exec client-build -- buildctl --addr "tcp://$1:1234" "${TLS[@]}" du \
-    --format '{{range .}}{{if not .Shared}}{{.Size}} {{end}}{{end}}' 2>/dev/null \
-    | tr ' ' '\n' | awk '{s += $1} END {printf "%d", s}'
+  local out
+  out=$(kc -n "$JOBS_NS" exec client-build -- buildctl --addr "tcp://$1:1234" "${TLS[@]}" du \
+    --format '{{range .}}{{if not .Shared}}{{.Size}} {{end}}{{end}}' 2>/dev/null) || return 1
+  printf '%s' "$out" | tr ' ' '\n' | awk '{s += $1} END {printf "%d", s}'
 }
 
 # kube-proxy applies PreferSameNode hints ~1-2 s after endpoints change
@@ -351,7 +354,7 @@ cleanup() {
   done
   remove_state
   echo "   cleanup done at $(elapsed)"
-  if [ "$FAILED" = 0 ] && [ "$SETUP_FAILED" = 0 ]; then rm -rf "$LOGS"; fi
+  if [ "$FAILED" = 0 ] && [ "$SETUP_FAILED" = 0 ] && [ "$OWN_LOGS" = 1 ]; then rm -rf "$LOGS"; fi
 }
 
 if [ "$MODE" = clean ]; then
@@ -1176,7 +1179,8 @@ s_gc() {
   next_id
   build_at client-build "tcp://$ip:1234" gc --opt "build-arg:BUST=$ID" >"$LOGS/gc.log" 2>&1
   check "a build writing 1.2 GB of layers succeeds" test $? = 0
-  info "cache right after the build: $(( $(cache_bytes "$ip") / 1048576 )) MiB"
+  bytes=$(cache_bytes "$ip") || bytes=""
+  info "cache right after the build: ${bytes:+$((bytes / 1048576)) MiB}${bytes:-unknown (du failed)}"
   under_cap() { bytes=$(cache_bytes "$ip"); [ -n "$bytes" ] && [ "$bytes" -le "$cap" ]; }
   # GC runs about a second after a build, at most once a minute.
   if eventually 45 under_cap; then
