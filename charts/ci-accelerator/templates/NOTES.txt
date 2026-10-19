@@ -37,9 +37,12 @@ Metrics and traces of the daemons (OTLP push):
     then http://localhost:10428/select/vmui
 {{- end }}
 {{- if and $vt.enabled $runner.enabled }}
-The runner puts every job's builds into its pipeline's trace. The trace of
-pipeline <id>, with the port-forward above:
-  curl -s http://localhost:10428/select/jaeger/api/traces/{{ $runner.gitlabUrl | sha256sum | trunc 16 }}$(printf '%016x' <id>)
+The runner gives every job its own trace. With the port-forward above,
+the trace of job <job> in pipeline <pipeline>:
+  curl -s http://localhost:10428/select/jaeger/api/traces/01{{ $runner.gitlabUrl | sha256sum | trunc 6 }}$(printf '%012x%012x' <pipeline> <job>)
+the jobs of pipeline <pipeline> and their trace ids:
+  curl -s http://localhost:10428/select/logsql/query --data-urlencode start=7d \
+    --data-urlencode 'query="resource_attr:ci.pipeline.id":"<pipeline>" | uniq by (trace_id, "resource_attr:ci.job.id")'
 {{- end }}
 Builds can reach this storage: they can read other projects' traces (the
 buildctl command line is recorded, so never pass secrets as build args) and

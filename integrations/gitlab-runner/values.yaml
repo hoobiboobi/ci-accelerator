@@ -38,15 +38,16 @@ runners:
         "BUILDKIT_REMOTE_ADDR=tcp://ci-accelerator-buildkit.ci-accelerator.svc:1234",
         "BUILDKIT_TLS_DIR=/certs",
       ]
-      # Every job's builds join its pipeline's trace, without changes to
-      # .gitlab-ci.yml: buildctl reads TRACEPARENT. trace-id = a prefix for
-      # this GitLab (from gitlabUrl) + the pipeline id in hex, span-id = the
-      # job id in hex, so a pipeline's trace is found from its id. A job's own
-      # TRACEPARENT is kept.
+      # Every job gets its own trace, without changes to .gitlab-ci.yml:
+      # buildctl reads TRACEPARENT. trace-id = scheme 01, 3 bytes for this
+      # GitLab (from gitlabUrl), the pipeline id and the job id (6 bytes each);
+      # span-id = the job id. A job's trace is found from its ids, a pipeline's
+      # traces by the ci.pipeline.id attribute. Ids outside 1..2^48-1 or not
+      # numbers set nothing; a job's own TRACEPARENT is kept.
       pre_build_script = '''
-      # ci-accelerator: join this job's builds to its pipeline's trace
-      if [ -z "${TRACEPARENT:-}" ] && [ -n "${CI_PIPELINE_ID:-}" ] && [ -n "${CI_JOB_ID:-}" ]; then
-        export TRACEPARENT="00-{{ .Values.gitlabUrl | sha256sum | trunc 16 }}$(printf '%016x' "$CI_PIPELINE_ID")-$(printf '%016x' "$CI_JOB_ID")-01"
+      # ci-accelerator: one trace per job (scheme 01: GitLab, pipeline, job)
+      if [ -z "${TRACEPARENT:-}" ] && [ "${CI_PIPELINE_ID:-x}" -gt 0 ] 2>/dev/null && [ "${CI_JOB_ID:-x}" -gt 0 ] 2>/dev/null && [ "$CI_PIPELINE_ID" -le 281474976710655 ] && [ "$CI_JOB_ID" -le 281474976710655 ]; then
+        export TRACEPARENT="00-01{{ .Values.gitlabUrl | sha256sum | trunc 6 }}$(printf '%012x%012x' "$CI_PIPELINE_ID" "$CI_JOB_ID")-$(printf '%016x' "$CI_JOB_ID")-01"
       fi
       export OTEL_RESOURCE_ATTRIBUTES="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}ci.pipeline.id=${CI_PIPELINE_ID:-},ci.job.id=${CI_JOB_ID:-},ci.project.path=${CI_PROJECT_PATH:-}"
       '''

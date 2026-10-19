@@ -1,6 +1,6 @@
 # 0026. The runner sets every job's trace context
 
-Date: 2026-10-18
+Date: 2026-10-18 (trace-id layout superseded by [ADR-0028](0028-one-trace-per-job.md): one trace per job)
 
 ## Context
 

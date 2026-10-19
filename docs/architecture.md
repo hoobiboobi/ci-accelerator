@@ -136,21 +136,25 @@ Each daemon names itself in two ways:
   by BuildKit yet.
 - **Traces.** The runner configuration has a `pre_build_script` that runs in
   every job right before its script and exports:
-  - `TRACEPARENT`:
-    - trace-id = 16 hex characters derived from the GitLab URL, then the
-      pipeline id in hex;
+  - `TRACEPARENT`, one trace per job:
+    - trace-id = `01` (scheme version), 6 hex characters derived from the
+      GitLab URL, the pipeline id and the job id (12 hex characters each);
     - parent span-id = the job id in hex.
 
-    A `TRACEPARENT` the job sets itself is kept.
+    Ids that are not numbers from 1 to 2^48-1 set nothing. A `TRACEPARENT`
+    the job sets itself is kept.
   - `OTEL_RESOURCE_ATTRIBUTES` with the pipeline id, job id and project path.
 
-  `buildctl` reads them and forwards its spans through the daemon, so every
-  build of a pipeline lands in one trace with no exporter in the job and no
-  change to `.gitlab-ci.yml`. A pipeline's trace is found from its id alone.
-  The job itself is not a span yet: in the trace UI the builds hang under a
-  missing parent. Job pods also carry the annotation
-  `ci-accelerator.io/pipeline-id` (the runner adds job and project ids), from
-  which pipeline and job spans can be built.
+  `buildctl` reads them and forwards its spans through the daemon, with no
+  exporter in the job and no change to `.gitlab-ci.yml`. A job's trace is
+  found from its ids; a pipeline's jobs by the `ci.pipeline.id` attribute.
+  One trace per job also keeps BuildKit's build history clean: it attaches
+  every span of a build's trace id to the build's record, so a trace shared
+  by concurrent jobs would end up in each of their records
+  ([ADR-0028](adr/0028-one-trace-per-job.md)). The job itself is not a span
+  yet: in the trace UI the builds hang under a missing parent. Job pods
+  also carry the annotation `ci-accelerator.io/pipeline-id` (the runner adds
+  job and project ids), from which pipeline and job spans can be built.
 
 ## Rollouts and restarts
 
