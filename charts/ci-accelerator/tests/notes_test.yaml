@@ -32,7 +32,9 @@ tests:
       - matchRegexRaw:
           pattern: 'Builds can reach this storage: they can read other projects'' traces'
       - matchRegexRaw:
-          pattern: 'traces/051b90d8237d468d\$\(printf ''%016x'' <id>\)'
+          pattern: 'traces/01051b90\$\(printf ''%012x%012x'' <pipeline> <job>\)'
+      - matchRegexRaw:
+          pattern: '"resource_attr:ci.pipeline.id":"<pipeline>" \| uniq by \(trace_id, "resource_attr:ci.job.id"\)'
 
   - it: says nothing about storage that is switched off
     set:

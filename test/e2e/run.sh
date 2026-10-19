@@ -789,9 +789,31 @@ print("\n".join(re.sub(r"^\d{4}-\d\d-\d\dT[0-9:.]+Z [0-9]+[OE]\+? ?", "", l) for
 }
 
 # expected_traceparent <gitlab url> <pipeline id> <job id>: what the runner's
-# pre_build_script exports (a prefix from the GitLab URL, the ids in hex).
+# pre_build_script exports: one trace per job, trace-id = scheme 01, 3 bytes
+# from the GitLab URL, the pipeline and job ids (6 bytes each); span-id =
+# the job id.
 expected_traceparent() {
-  printf '00-%s%016x-%016x-01' "$(printf '%s' "$1" | sha256 | cut -c1-16)" "$2" "$3"
+  printf '00-01%s%012x%012x-%016x-01' "$(printf '%s' "$1" | sha256 | cut -c1-6)" "$2" "$3" "$3"
+}
+
+# trace_jobs <trace blob file>: "<trace ids> | <ci.job.id values>" of a
+# BuildKit history trace (a stream of JSON span stubs).
+trace_jobs() {
+  python3 - "$1" <<'PY'
+import json, sys
+txt = open(sys.argv[1]).read(); dec = json.JSONDecoder(); i = 0; tids = set(); jobs = set()
+while i < len(txt):
+    while i < len(txt) and txt[i].isspace():
+        i += 1
+    if i >= len(txt):
+        break
+    s, i = dec.raw_decode(txt, i)
+    tids.add(s["SpanContext"]["TraceID"])
+    for a in s.get("Resource") or []:
+        if a.get("Key") == "ci.job.id":
+            jobs.add(str(a["Value"]["Value"]))
+print(",".join(sorted(tids)), "|", ",".join(sorted(jobs)))
+PY
 }
 # job_id <name>: the GitLab job id of a run_job result.
 job_id() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$LOGS/job-$1.json" 2>/dev/null; }
@@ -904,6 +926,45 @@ s_runner() {
   check "the second job succeeds" test "$(cat "$LOGS/job-second.state")" = success
   check "the second job's dependency step is CACHED" \
     eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-second.trace" | grep -q "^#[0-9]* CACHED$"'
+  # The hook as the runner got it, run by two concurrent jobs of one
+  # pipeline whose builds share steps on one daemon. BuildKit attaches to a
+  # build record every span of the record's trace id, so with one trace per
+  # pipeline each record carried both jobs; with one per job it must not.
+  local hook d ip j rec jt
+  hook=$LOGS/runner-hook.sh
+  kc -n "$NS" exec deploy/gitlab-runner -- cat /configmaps/config.template.toml 2>/dev/null \
+    | awk "/pre_build_script = '''/ {on = 1; next} on && /^ *'''/ {exit} on {sub(/^ +/, \"\"); print}" >"$hook"
+  check "the runner's config has the pre_build_script" grep -q TRACEPARENT "$hook"
+  d=$(daemon_on "$BUILD_NODE"); ip=$(pod_ip "$d")
+  kc -n "$JOBS_NS" cp "$hook" client-build:/hook.sh || fail "copy the hook to the client"
+  next_id
+  for j in 4201 4202; do
+    kc -n "$JOBS_NS" exec client-build -- sh -c "export CI_PIPELINE_ID=4200 CI_JOB_ID=$j CI_PROJECT_PATH=e2e/jobtrace
+      . /hook.sh
+      exec buildctl --addr tcp://$ip:1234 ${TLS[*]} build --frontend dockerfile.v0 --local context=/f/dedup \
+        --local dockerfile=/f/dedup --opt target=main --opt build-arg:SEED=jt-$ID --opt build-arg:WHO=jt-$j-$ID --progress plain" \
+      >"$LOGS/jobtrace-$j.log" 2>&1 &
+  done
+  wait
+  # The trace is attached to a record a few seconds after it completes.
+  rec_trace() {
+    kc -n "$JOBS_NS" exec client-build -- buildctl --addr "tcp://$ip:1234" "${TLS[@]}" debug histories \
+      --format '{{index .Record.FrontendAttrs "build-arg:WHO"}} {{if .Record.Trace}}{{.Record.Trace.Digest}}{{end}}' 2>/dev/null \
+      | awk -v w="jt-$1-$ID" '$1 == w && NF == 2 {print $2}'
+  }
+  for j in 4201 4202; do
+    if ! eventually 30 eval '[ -n "$(rec_trace $j)" ]'; then
+      fail "job $j: its build record has no trace"; continue
+    fi
+    kc -n "$JOBS_NS" exec client-build -- buildctl --addr "tcp://$ip:1234" "${TLS[@]}" debug get "$(rec_trace $j)" \
+      >"$LOGS/jobtrace-$j.trace.json" 2>/dev/null
+    jt=$(trace_jobs "$LOGS/jobtrace-$j.trace.json")
+    rec=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 4200 "$j" | cut -d- -f2)
+    # The client's spans (with ci.job.id) are in the record only if buildctl
+    # flushes them within 3 s of the build's end; the trace id always is.
+    check "job $j of pipeline 4200: its build record has its own trace ($rec) and no other job's spans ($jt)" \
+      eval 'case "$jt" in "$rec | $j" | "$rec | ") true ;; *) false ;; esac'
+  done
   # The stand-in GitLab stays for the box scenario; cleanup removes it.
   hc uninstall gitlab-runner -n "$NS" --wait --timeout 3m >/dev/null 2>&1 || true
 }
@@ -961,14 +1022,23 @@ s_box() {
       "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/jaeger/api/services" 2>/dev/null | grep -q '"buildkitd"'
   }
   check "the box's VictoriaTraces receives the daemons' spans" eventually 30 box_traces
-  # Found from the pipeline id alone: the runner derives the trace id from it.
+  # Found from the pipeline and job ids alone: the runner derives the trace id.
   box_tid=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 778 "$(job_id box)" | cut -d- -f2)
   box_pipeline_trace() {
     kc -n "$JOBS_NS" exec client-build -- wget -qO- \
       "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/jaeger/api/traces/$box_tid" 2>/dev/null >"$LOGS/box-trace.json"
     grep -q '"serviceName":"buildctl"' "$LOGS/box-trace.json" && grep -q '"serviceName":"buildkitd"' "$LOGS/box-trace.json"
   }
-  check "the pipeline's trace ($box_tid) holds the job's buildctl and daemon spans" eventually 30 box_pipeline_trace
+  check "the job's trace ($box_tid) holds its buildctl and daemon spans" eventually 30 box_pipeline_trace
+  # A pipeline's jobs are found by its attribute, as the install notes show.
+  local logsql
+  logsql=$(python3 -c 'import urllib.parse; print(urllib.parse.urlencode({"query": "\"resource_attr:ci.pipeline.id\":\"778\" | uniq by (trace_id, \"resource_attr:ci.job.id\")", "start": "1d"}))')
+  box_pipeline_jobs() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
+      "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/logsql/query?$logsql" 2>/dev/null >"$LOGS/box-pipeline-jobs.json"
+    grep -q "\"trace_id\":\"$box_tid\"" "$LOGS/box-pipeline-jobs.json"
+  }
+  check "pipeline 778's jobs and their trace ids are found by the ci.pipeline.id attribute" eventually 30 box_pipeline_jobs
   hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the box"
   check "uninstall removes the jobs namespace" \
     eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'

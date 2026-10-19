@@ -31,3 +31,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0025](0025-releases.md) | Releases as OCI charts on ghcr.io |
 | [0026](0026-job-trace-context.md) | The runner sets every job's trace context |
 | [0027](0027-upgrades-and-branches.md) | In-place upgrades, short-lived branches, releases when they matter |
+| [0028](0028-one-trace-per-job.md) | One trace per job (supersedes the trace-id layout of 0026) |

@@ -9,7 +9,21 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- **Trace ids.** Every CI job now gets its own trace instead of sharing one
+  per pipeline. Trace ids have a new layout:
+  - `01` + 3 bytes from the GitLab URL;
+  - the pipeline id and the job id, 6 bytes each.
+
+  Traces stored by 0.1.0 keep the old layout. To find a pipeline's jobs,
+  query the `ci.pipeline.id` attribute; the install notes show how.
+  Nothing to change in values.
+
+### Changed
+
+- One trace per CI job (ADR-0028). With one trace per pipeline, BuildKit
+  attached the spans of every concurrent job of a pipeline to each of its
+  build records. Job ids beyond 2^32 (gitlab.com) now fit, and ids that
+  are not numbers no longer produce a broken `TRACEPARENT`.
 
 ### Added
 

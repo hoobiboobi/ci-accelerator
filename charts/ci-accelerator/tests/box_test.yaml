@@ -52,31 +52,33 @@ tests:
           path: data["config.template.toml"]
           pattern: 'automount_service_account_token = false'
 
-  # Every job joins its pipeline's trace without changes to .gitlab-ci.yml.
-  - it: makes the runner put each job's builds into its pipeline's trace
+  # Every job gets its own trace without changes to .gitlab-ci.yml: one
+  # trace per pipeline made BuildKit attach every concurrent job's spans to
+  # each build record of that pipeline.
+  - it: gives every job its own trace, named by the GitLab, the pipeline and the job
     template: charts/gitlab-runner/templates/configmap.yaml
     set:
       gitlab-runner.gitlabUrl: https://gitlab.example.com/
     asserts:
       - matchRegex:
           path: data["config.template.toml"]
-          pattern: 'export TRACEPARENT="00-[0-9a-f]{16}\$\(printf ''%016x'' "\$CI_PIPELINE_ID"\)-\$\(printf ''%016x'' "\$CI_JOB_ID"\)-01"'
+          pattern: 'export TRACEPARENT="00-01[0-9a-f]{6}\$\(printf ''%012x%012x'' "\$CI_PIPELINE_ID" "\$CI_JOB_ID"\)-\$\(printf ''%016x'' "\$CI_JOB_ID"\)-01"'
       - matchRegex:
           path: data["config.template.toml"]
-          pattern: 'if \[ -z "\$\{TRACEPARENT:-\}" \]'
+          pattern: 'if \[ -z "\$\{TRACEPARENT:-\}" \] && \[ "\$\{CI_PIPELINE_ID:-x\}" -gt 0 \] 2>/dev/null && \[ "\$\{CI_JOB_ID:-x\}" -gt 0 \] 2>/dev/null && \[ "\$CI_PIPELINE_ID" -le 281474976710655 \] && \[ "\$CI_JOB_ID" -le 281474976710655 \]; then'
       - matchRegex:
           path: data["config.template.toml"]
           pattern: '"ci-accelerator.io/pipeline-id" = "\$CI_PIPELINE_ID"'
 
-  # The prefix identifies the GitLab instance: pipeline ids repeat across them.
-  - it: derives the trace-id prefix from the GitLab URL
+  # The prefix identifies the GitLab instance: ids repeat across them.
+  - it: derives the trace-id prefix from the GitLab URL, after the scheme version
     template: charts/gitlab-runner/templates/configmap.yaml
     set:
       gitlab-runner.gitlabUrl: https://gitlab.example.com/
     asserts:
       - matchRegex:
           path: data["config.template.toml"]
-          pattern: 'TRACEPARENT="00-051b90d8237d468d'
+          pattern: 'TRACEPARENT="00-01051b90\$'
 
   # buildkit's own name rule: a release name containing "buildkit" is used as is.
   - it: follows buildkit's naming when the release name contains buildkit
