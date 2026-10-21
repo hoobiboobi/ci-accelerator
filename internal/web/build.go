@@ -240,7 +240,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	var job store.JobInfo
 	if p.Job != nil {
 		job = *p.Job
-		v.Name, v.GitLabURL = job.Name, job.URL
+		v.Name, v.GitLabURL = job.Name, webURL(job.URL)
 	}
 	if v.Name == "" {
 		v.Name = "Build of " + orDefault(b.Target)
@@ -360,6 +360,15 @@ func paren(s string) string {
 		return ""
 	}
 	return " (" + s + ")"
+}
+
+// webURL keeps a link to GitLab only when it is one: job data comes from
+// CI variables, and anything but http(s) would only become a dead link.
+func webURL(u string) string {
+	if strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") {
+		return u
+	}
+	return ""
 }
 
 func orDefault(target string) string {
