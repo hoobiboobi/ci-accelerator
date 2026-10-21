@@ -153,8 +153,12 @@ Each daemon names itself in two ways:
   by concurrent jobs would end up in each of their records
   ([ADR-0028](adr/0028-one-trace-per-job.md)). The job itself is not a span
   yet: in the trace UI the builds hang under a missing parent. Job pods
-  also carry the annotation `ci-accelerator.io/pipeline-id` (the runner adds
-  job and project ids), from which pipeline and job spans can be built.
+  also carry annotations under `ci-accelerator.io/` with job data from
+  GitLab's CI variables: pipeline id, source and creation time, project
+  path, job stage and start time, commit title and author, merge request.
+  The runner adds the job id, name, URL, ref, commit and project id itself.
+  An unset variable gives an empty value; a commit title reaches the pod as
+  text, never expanded.
 
 ## Rollouts and restarts
 

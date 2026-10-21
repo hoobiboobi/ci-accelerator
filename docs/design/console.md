@@ -1,8 +1,9 @@
 # Console (v0.2): design draft
 
-Status: **draft for review**. Nothing here is implemented. Decisions are
-proposals until this document is merged; the answers from the review are
-listed at the end.
+Status: **draft, reviewed**. Nothing here is implemented yet. The answers
+from the review are listed at the end; sign-in, the GitLab API and the
+kept build data are decided in
+[ADR-0029](../adr/0029-console-gitlab-and-build-data.md).
 
 ## Goal
 
@@ -40,13 +41,12 @@ Build details: https://<console>/jobs/<job id>
 A developer clicks it from the GitLab job log. The console also has a
 project list for browsing.
 
-### Pipelines of a project
+### Pipelines
 
-One row per pipeline:
-- pipeline number, branch, short commit, start time;
-- a link to the pipeline in GitLab;
-- the pipeline's build time;
-- the time saved by the cache.
+One row per pipeline, newest first: pipeline number, branch, project,
+commit title, how many builds ran and how many rebuilt something, start
+time. A filter per project comes with sign-in, which decides what a user
+may see.
 
 ### A pipeline
 
@@ -65,13 +65,41 @@ Jobs that run no build (tests outside BuildKit, deploy scripts) are listed
 with their duration only. Jobs that ran on other runners are not visible.
 The page says so: "Jobs run by this installation".
 
+Two more tabs show the pipeline as a whole:
+- **Timeline:** every job's build on one time axis, its steps coloured by
+  result; the build that ended last (it sets the pipeline's build time)
+  is outlined;
+- **Dockerfile:** the Dockerfile with one column per job, so a line shows
+  which jobs built it, took it from cache or waited for another job.
+
 ### A job
 
 A job may run several builds: an image and a test target, or two images.
 For each build the page shows:
-- the target and the Dockerfile;
-- the image it pushed, if any;
-- a step timeline.
+- the cause first: one sentence on why it was slow or rebuilt, and what
+  helps;
+- where the time went: runner and checkout, sending the context, pulling
+  the base image, waiting for another job, building, exporting and pushing;
+- the target and the image it pushed, if any;
+- three tabs:
+  - **Steps:** a table grouped by stage, runs of cached stages folded,
+    with when each step ran;
+  - **Dockerfile:** the Dockerfile this build used, as recorded by
+    BuildKit. Each line shows its step's result and duration; stages the
+    target does not use are dimmed. Hovering a line explains what
+    happened to it. Clicking opens the step: the command, its output and
+    its history over earlier builds;
+  - **Timeline:** the job on a time axis: runner and checkout, sending the
+    context, each stage and step, export and push.
+- beside them, the build's facts: node, the node of the target's last
+  build, job and BuildKit time, the target's usual time, context size, job
+  id and trace id;
+- below, the previous build of the target step by step, and the details
+  for operators.
+
+The time before and after the build (runner, checkout, script) comes from
+GitLab's API when the console has a token, from the job pod otherwise
+(ADR-0032).
 
 Each step is labelled:
 - **cached**;
@@ -80,6 +108,22 @@ Each step is labelled:
 
 For a rebuilt step it shows the reason, and it links the first rebuilt step
 to the line of the Dockerfile.
+
+### Project insights and build nodes
+
+**Project insights** answer "is it getting worse": the median pipeline
+time, how many steps were reused, the build time the cache saved, how
+many rebuilds were the node's fault, why builds were rebuilt (count and
+time), each pipeline's time, and every step of a target across its last
+builds.
+
+**Build nodes** are the operations view: per daemon its node, builds
+served, rebuilds because of the node, builds running now (and how long the
+oldest runs), its cache by kind (base images, build layers, cache mounts,
+contexts) as BuildKit counts it, its cache mounts and when they expire,
+base images held by several nodes, and the cache policies. Free disk
+space and cache per project are not reported by BuildKit (planned: a disk
+probe in the daemon pod).
 
 ### Reasons for a rebuild
 
@@ -94,6 +138,12 @@ these reasons:
 | The base image changed | The resolved base image digest differs | "`python:3.13-slim` now points to a new image" |
 | Files it reads changed | Same definition, rebuilt anyway, and it reads the build context | "`COPY src/` read changed files" |
 | Not in the cache | Same definition, no file input: evicted, or built elsewhere | "Not found in the cache" |
+| The cache is on another node | Same definition; the previous build ran on another node; and the step reads no files, or another job of the same pipeline (same commit) found this step in the cache on its node | "Not your change: the cache for `COPY common/` is on the node this target used last time" |
+| Files or node | Same definition, previous build on another node, and no job of the pipeline settles it | "Either `common/` changed, or the cache is on another node; the records cannot tell which" |
+
+When another job of the same pipeline ran on its own previous node and had
+to rebuild the same step, the files changed: the reason is "files it reads
+changed" for every job of the pipeline.
 
 The console cannot say *which* files changed: BuildKit records no content
 checksums. A later CI component could report a manifest of the context.
@@ -148,9 +198,15 @@ pipeline: 47 s of repeated work in three small pipelines.
 | The build's trace id | GitLab instance, pipeline and job of every build ([ADR-0028](../adr/0028-one-trace-per-job.md)) | Always present in a record when the runner hook ran |
 | OTLP backend (VictoriaTraces), optional | The client's spans with `ci.*` attributes, also when the history missed them | Only when the bundled storage or a compatible backend is on |
 
-The GitLab API is not used. That needs no token and no reachability of
-GitLab from the cluster. It also means no commit authors, and no jobs from
-other runners.
+Job pods carry, as annotations, the CI variables a page needs: job name and
+stage, commit title and author, ref, merge request, pipeline source, job
+start and pipeline creation. They need no token.
+
+The GitLab API is used only while a page is open and only as the signed-in
+user: one request per pipeline for jobs on other runners, the final status
+and queue time. Finished pipelines are cached; nothing polls GitLab in the
+background. A page renders without it when GitLab is unreachable or
+rate-limited.
 
 A build whose record has no trace id of our scheme (a job that set its own
 `TRACEPARENT`, or a client other than a runner job) is kept as
@@ -205,34 +261,138 @@ fixture in the collector's tests.
   CA. It discovers daemons through the headless Service and reconnects when
   pods change.
 - **No raw blobs kept.** Derived records are kept: builds, steps, edges
-  "received from". The trace blob, the largest part, is read only for its
-  trace id. Failed builds also keep an excerpt of the failing step's log.
-- **Retention:** derived data 90 days by default, failed-build log
-  excerpts 7 days (both configurable).
+  "received from", the Dockerfile text with each step's lines, and each
+  step's output (capped per step, known secret formats masked). The trace
+  blob, the largest part, is read only for its trace id.
+- **Retention:** derived data 90 days by default, step output 7 days
+  (both configurable).
 - **The history must outlive collector downtime.** With the console
   enabled, the chart raises the daemons' `[history]` limits (proposal:
   2000 records / 7 days). This changes `buildkitd.toml` and restarts the
   daemons once. It goes into the upgrade notes ([ADR-0027](../adr/0027-upgrades-and-branches.md)).
-- **Auth:** none built in. The chart supports an oauth2-proxy sidecar or
-  basic auth from a Secret. Read-only, no multi-user model.
+- **Sign-in through GitLab.** A user sees a project's builds only when
+  GitLab lets them read that project's jobs. This is checked as that user
+  and cached for a few minutes. An administrator can also sign in with
+  basic auth. The console is read-only and has no users or roles of its own.
+- **Disk usage** of each daemon's cache directory comes from a small sidecar
+  in the daemon pod; BuildKit's API does not report it.
+- **Web stack:** Go `html/template` and `go:embed`, server-rendered SVG, a
+  small script with server-sent events for live updates. No single-page
+  framework. Every page and the step panel work without the script; the
+  script adds the hints, the panel and the keyboard (arrows, Enter, Esc).
+  Everything shown comes from builds and CI jobs, so it is escaped, and
+  the content security policy allows only the console's own script and
+  stylesheet: no inline code, no other origins. Static files are linked
+  by a content version and cached for a year.
 - **Observability access** ([ADR-0021](../adr/0021-observability-access.md)):
   the console needs query access to the bundled storage. The vmauth front
   that limits builds to ingestion lands together with it.
 
-## Data model (first version)
+## Store
 
-| Table | Key | Main fields |
+SQLite by default, Postgres as an option for larger installations
+([ADR-0030](../adr/0030-console-store.md)). The queries are relational:
+pipeline → jobs → builds → steps, the history of one step across builds,
+reasons counted per project, the previous build of a target. The write
+rate is small (1000 builds per hour is 0.3 per second).
+
+**One process writes.** The collector and the web server are one binary
+in one pod with one replica, updated with `Recreate`, so two processes
+never open the files at once. The volume must be block storage
+(`ReadWriteOnce`), never NFS or another shared file system: SQLite's
+locking and its WAL shared memory do not work there.
+
+### Main database
+
+Times are Unix milliseconds (UTC); step times are offsets from the build's
+start. Hashes are the first 8 bytes of a SHA-256, kept as a 64-bit integer.
+
+| Table | Key | Fields | Why |
+|---|---|---|---|
+| `meta` | name | schema facts; the key used to mask secrets | |
+| `daemons` | id | pod name, node | Interned: every build refers to one |
+| `projects` | instance, project id | path | From job pod annotations |
+| `pipelines` | instance, pipeline id | project, ref, commit, source, created, commit title and author, merge request | From job pod annotations |
+| `jobs` | instance, job id | pipeline, name, stage, started, node of the pod | From job pod annotations |
+| `dockerfiles` | content hash | file name, text, last seen | Stored once, shared by every build that used it |
+| `step_defs` | step identity | the step's operation (normalised, secrets masked), its inputs' identities, its name, last seen | Stored once per identity, so any earlier build can be compared with a new one without its provenance |
+| `builds` | id (ingest order); unique daemon + record ref | generation, attribution, instance, pipeline, job, project, target, Dockerfile, build arguments (secret values masked), start, end, error, context size, images, reason (kind, step, old, new, argument, paths, settling build), time saved, output segment | |
+| `steps` | build, index | name (only without an identity), identity, state, start, duration, Dockerfile lines, received from, error, output length | |
+
+Indexes follow the pages:
+- `builds (instance, job)`, `builds (instance, pipeline)`;
+- `builds (instance, project, target, start)` for the previous build;
+- `builds (completed)` for retention;
+- `steps (identity, build)` for a step's history and the time it saves.
+
+**Identities make old builds comparable.** A step identity is a hash of the
+step's operation and of its inputs' identities, so `step_defs` is a
+content-addressed copy of the build graphs, like BuildKit's own. A reason
+needs the previous build's operations: they are read back from
+`step_defs`, and the raw provenance is never kept.
+
+**Secrets.** Before a step's operation is hashed or stored, the value of
+every environment variable whose name says it is a secret becomes a keyed
+hash (HMAC with a per-installation key in `meta`). A changed secret still
+changes the identity, so "build argument `API_TOKEN` changed" is still
+found, but no value is stored. A weak secret could be guessed by whoever
+holds the database file; the docs keep saying not to pass secrets as build
+arguments.
+
+**What is not stored:** the trace (only its id is used), BuildKit's vertex
+digests, raw provenance. Linking received steps to the build that executed
+them happens in memory, over the builds of the last two hours per daemon:
+after a restart the collector reads that window again from the daemons'
+history.
+
+### Step output: compressed blocks in daily files
+
+Step output is most of the data and the only part kept for 7 days. It is a
+key → value store:
+
+- **Key:** build id and step index, packed into one integer (the table's
+  row id).
+- **Value:** the output, masked and clipped (64 KiB per step), compressed
+  with zstd.
+- **One SQLite file per UTC day.** Retention deletes whole files: no
+  `DELETE`, no fragmentation, no `VACUUM` for the largest data. A build
+  row names its file.
+- **Dictionaries.** Output compressed step by step is small and compresses
+  poorly on its own; with a dictionary of the same project's recent output
+  it compresses four times better (measured below). Each daily file holds
+  its own dictionaries, built from the project's latest output when the
+  project first writes that day, and immutable afterwards. A project
+  without earlier output writes without one until it has some. Every block
+  names its dictionary. A file never depends on another file, so deleting
+  an old day never breaks a newer one.
+
+Measured on the output of 21 real gitlab.com builds (26 steps with output,
+85 KB):
+
+| Compression | Size | Ratio |
 |---|---|---|
-| `instances` | trace-id prefix | GitLab URL when known, display name |
-| `projects` | GitLab instance + project id | name, namespace |
-| `pipelines` | instance + pipeline id | project, ref, sha, first and last job times |
-| `jobs` | instance + job id | pipeline, name, ref, sha, url, start, end, status |
-| `builds` | daemon + record ref | job (nullable: unattributed), target, Dockerfile, start, end, error, pushed image, counts |
-| `steps` | build + identity | name, Dockerfile line, state (cached / built / received), start, end, cpu, memory |
-| `received_from` | waiting step → executing build | wait duration |
+| Each step alone, deflate | 20.5 KB | ×4.2 |
+| Each step alone, zstd | 21.9 KB | ×3.9 |
+| Each build alone, zstd | 21.1 KB | ×4.0 |
+| Each step, zstd with the project's earlier output as dictionary | 5.3 KB | ×16.2 |
+| Each build, zstd with that dictionary | 5.0 KB | ×17.0 |
 
-Schema migrations are forward-only and versioned. A collector that finds a
-newer schema refuses to start (ADR-0027).
+Steps stay separate blocks: a page reads one step, and whole builds gain
+little. Compressed output cannot be searched with SQL; searching output is
+not in v0.2.
+
+### Retention and migrations
+
+- **Daily:**
+  - delete builds older than 90 days in small batches (steps go with them);
+  - delete Dockerfiles and step definitions not seen within that time;
+  - return free pages to the file system (`auto_vacuum = INCREMENTAL`);
+  - delete output files older than 7 days.
+- **Schema version** in `PRAGMA user_version`. Migrations are forward-only.
+  A collector that finds a newer schema refuses to start
+  ([ADR-0027](../adr/0027-upgrades-and-branches.md)).
+- **Backups** are optional: everything is derived from builds. A copy can be
+  taken with `VACUUM INTO`.
 
 ## Scale
 
@@ -261,9 +421,11 @@ newer schema refuses to start (ADR-0027).
 
 ## Out of scope for v0.2
 
-- Jobs on other runners. The GitLab API stays optional, later.
 - Which files of the context changed (needs the CI component).
-- Users, roles, per-project access control.
+- Users and roles of the console's own; permissions come from GitLab.
+- Cache size per project: BuildKit's cache records do not say which build
+  created them.
+- GitLab webhooks.
 - Translations: the UI is in English.
 - GitHub Actions (ARC): the data model keeps a job source field.
 - Moving builds to the daemon that holds their cache (routing work, v0.4).
@@ -285,6 +447,15 @@ newer schema refuses to start (ADR-0027).
    or job numbers of two instances never merge. The UI names the instance
    only when there is more than one.
 5. **Language:** the UI is in English only.
+6. **GitLab, kept data and views** ([ADR-0029](../adr/0029-console-gitlab-and-build-data.md)):
+   sign-in and permissions through GitLab, the API only while a page is
+   open, job data from pod annotations, the Dockerfile and step output kept
+   per build, the build and pipeline tabs above, and "not your change" only
+   with proof from the same pipeline.
+7. **Store** ([ADR-0030](../adr/0030-console-store.md)): SQLite with one
+   writing pod, a content-addressed step graph instead of raw provenance,
+   and step output in daily files compressed with per-project
+   dictionaries.
 
 ## Evidence
 
@@ -295,7 +466,14 @@ newer schema refuses to start (ADR-0027).
   - normalisation through provenance;
   - deduplication visible as foreign vertices;
   - the 3-second window for client spans.
-- **Real runs on gitlab.com** (three pipelines, three jobs each, images
-  pushed to the GitLab registry):
+- **Real runs on gitlab.com** (six pipelines, three or four jobs each,
+  images pushed to the GitLab registry):
   - every record was attributed to its job by trace id;
-  - repeated work was found across daemons.
+  - repeated work was found across daemons;
+  - every record's provenance held the full Dockerfile and each step's
+    lines, and its progress held each step's output;
+  - of 8 builds whose previous build ran on another node, 1 was proven a
+    pure node effect by another job of its pipeline, 3 had changed files,
+    4 could not be told apart.
+- **A comparison of three UI designs** on those builds, by task time for
+  eight tasks of developers and platform teams. It led to the views above.

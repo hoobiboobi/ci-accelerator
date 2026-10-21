@@ -64,6 +64,13 @@ Numbers from the production setup this project is derived from:
 - **Metrics and traces** pushed by the daemons to a bundled VictoriaMetrics
   and VictoriaTraces. You can switch these off and send to your own OTLP
   backend.
+- **The console (preview, off by default: `console.enabled=true`):** pages
+  that explain each build. A job's page says why it was rebuilt (the
+  Dockerfile, a build argument, the base image, the files it copies, or
+  only the node it landed on) and where its time went. Every job's log can
+  link to it (`global.console.url`). It also has a pipeline timeline,
+  project insights and a view of the build nodes. It has no sign-in yet:
+  keep it inside the cluster (`kubectl port-forward`).
 
 Each part is usable on its own:
 
@@ -310,6 +317,8 @@ make e2e                      # ~13 min end-to-end on kind
 | `charts/ci-accelerator` | The box (umbrella chart) |
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
+| `charts/console` | The console (preview), usable on its own |
+| `cmd/console`, `internal/` | Go: the console (build history to builds and reasons, store, collector, pages) |
 | `scripts/buildkit-certs.sh` | CA and certificates for `charts/buildkit` without cert-manager (`tls.source=existingSecret`) |
 | `docs/architecture.md` | How the parts fit together: build path, cache, certificates, telemetry, rollouts |
 | `docs/troubleshooting.md` | Symptoms and fixes, runbooks |
