@@ -197,6 +197,32 @@ limit on build nodes.
   a replacement that implements `PreferSameNode`. Others balance across
   nodes silently: caches stay cold and builds still work.
 
+## The console (preview)
+
+- **No pipelines on the pages.** The console lists builds of CI jobs it can
+  attribute: the job pods must carry the runner's annotations (the box's
+  runner configuration or `integrations/gitlab-runner/values.yaml`), and
+  `console.jobs.namespace` must be the jobs namespace. Builds started
+  outside CI are stored but not listed.
+- **A build node shows as unreachable.** The console reads each daemon's
+  history over mutual TLS: check its client certificate (`<release>-console-client`)
+  and that the daemons' NetworkPolicy admits the console pod. Daemons that
+  are gone after a rollout disappear from the page by themselves.
+- **No runner or checkout time, no jobs of other runners.** Those come from
+  GitLab's API. Give the console a token that can read the projects' jobs
+  (`console.gitlab.token.existingSecret`). The console calls GitLab only
+  while a page shows a pipeline, and waits while GitLab rate-limits. The
+  build-nodes page shows the last API error.
+- **"Files or node — unclear".** The step copies files, and the job ran on
+  a node that had not built the target last. The records cannot tell which
+  it was; another job of the same pipeline on the target's previous node
+  settles it. Fewer, larger build nodes, or pinning a project to one node,
+  make it rare.
+- **Jobs do not print the console's link.** Set `global.console.url`, or
+  with your own runner add `CI_ACCELERATOR_CONSOLE_URL` to the runner's
+  `environment` and the hook lines from
+  `integrations/gitlab-runner/values.yaml`.
+
 ## Helm
 
 - **Upgrades:** use `helm upgrade --reset-then-reuse-values`. With

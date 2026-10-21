@@ -32,3 +32,7 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0026](0026-job-trace-context.md) | The runner sets every job's trace context |
 | [0027](0027-upgrades-and-branches.md) | In-place upgrades, short-lived branches, releases when they matter |
 | [0028](0028-one-trace-per-job.md) | One trace per job (supersedes the trace-id layout of 0026) |
+| [0029](0029-console-gitlab-and-build-data.md) | Console: GitLab sign-in, job data from pods, Dockerfiles and logs kept |
+| [0030](0030-console-store.md) | Console store: SQLite, a content-addressed step graph, daily output files |
+| [0031](0031-console-packaging.md) | Console packaging: one pod, its own certificate, the runner's URL once |
+| [0032](0032-console-pages-and-live-data.md) | Console pages: the agreed design, live data, a GitLab token for now |
