@@ -3,6 +3,10 @@
 
 HELM   ?= helm
 CHARTS := charts/buildkit
+# The console chart needs its own required values.
+CONSOLE := charts/console
+CONSOLE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set jobs.namespace=ci-jobs
+CONSOLE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1
 # Extra values files every chart check also renders with.
 CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
 # Values the charts require and the files above leave to the installer.
@@ -59,6 +63,12 @@ KIND_SHA256_linux_arm64 := 20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7f
 KUBECTL_VERSION := v1.37.1
 KUBECTL_SHA256_linux_amd64 := 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
 KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7
+# Go for the console (internal/, cmd/). Locally any Go >= 1.21 fetches this
+# toolchain itself (GOTOOLCHAIN, verified against the Go checksum database);
+# CI downloads the archive below. Checksums from https://go.dev/dl/?mode=json.
+GO_VERSION := 1.27.1
+GO_SHA256_linux_amd64 := 63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+GO_SHA256_linux_arm64 := 3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec
 
 OS   := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
@@ -82,6 +92,9 @@ CI_BIN      := $(TOOLS)/bin
 CI_HELM     := $(TOOLS)/helm-$(CI_HELM_VERSION)/helm
 CI_KIND     := $(TOOLS)/kind-$(KIND_VERSION)/kind
 CI_KUBECTL  := $(TOOLS)/kubectl-$(KUBECTL_VERSION)/kubectl
+CI_GO       := $(TOOLS)/go-$(GO_VERSION)/bin/go
+GO          ?= go
+GO_RUN      := GOTOOLCHAIN=go$(GO_VERSION) $(GO)
 
 # kind cluster for e2e. The context is derived from the cluster name and never
 # taken from the environment, so `make` cannot be pointed at another cluster.
@@ -135,10 +148,19 @@ $(VT_CHART):
 	$(call fetch,$(VICTORIA_RELEASES)/victoria-traces-single-$(VT_CHART_VERSION)/victoria-traces-single-$(VT_CHART_VERSION).tgz,$@,$(VT_CHART_SHA256))
 
 .PHONY: ci-tools
-ci-tools: $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) ## CI only (Linux): pinned helm (CI_HELM_VERSION), kind and kubectl into .tools/bin
+ci-tools: $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) $(CI_GO) ## CI only (Linux): pinned helm (CI_HELM_VERSION), kind, kubectl and Go into .tools/bin
 	@mkdir -p $(CI_BIN)
 	@cp $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) $(CI_BIN)/
-	@echo "==> .tools/bin: $$($(CI_BIN)/helm version --short), kind $(KIND_VERSION), kubectl $(KUBECTL_VERSION)"
+	@ln -sf $(CI_GO) $(CI_BIN)/go
+	@echo "==> .tools/bin: $$($(CI_BIN)/helm version --short), kind $(KIND_VERSION), kubectl $(KUBECTL_VERSION), $$($(CI_GO) version)"
+
+.PHONY: go-tools
+go-tools: $(CI_GO) ## CI only (Linux): pinned Go into .tools/go-<version>
+
+$(CI_GO):
+	@test "$(OS)" = linux || { echo "ci-tools is for Linux CI runners; any local Go >= 1.21 fetches go$(GO_VERSION) itself" >&2; exit 1; }
+	$(call fetch,https://go.dev/dl/go$(GO_VERSION).linux-$(ARCH).tar.gz,$(TOOLS)/dl/go-$(GO_VERSION).tgz,$(GO_SHA256_linux_$(ARCH)))
+	@mkdir -p $(TOOLS)/go-$(GO_VERSION) && tar -xzf $(TOOLS)/dl/go-$(GO_VERSION).tgz -C $(TOOLS)/go-$(GO_VERSION) --strip-components=1
 
 $(CI_HELM):
 	@test "$(OS)" = linux || { echo "ci-tools is for Linux CI runners; install helm locally" >&2; exit 1; }
@@ -167,6 +189,7 @@ UMBRELLA := charts/ci-accelerator
 deps: $(RUNNER_CHART) $(VM_CHART) $(VT_CHART) ## Vendor the umbrella chart's dependencies into charts/ci-accelerator/charts/
 	@mkdir -p $(UMBRELLA)/charts && rm -f $(UMBRELLA)/charts/*.tgz
 	@$(HELM) package charts/buildkit -d $(UMBRELLA)/charts >/dev/null
+	@$(HELM) package $(CONSOLE) -d $(UMBRELLA)/charts >/dev/null
 	@cp $(RUNNER_CHART) $(VM_CHART) $(VT_CHART) $(UMBRELLA)/charts/
 
 .PHONY: lint
@@ -181,6 +204,9 @@ lint: $(SHELLCHECK) deps ## helm lint --strict (default and example values), cha
 				|| { $(HELM) lint --strict $$c -f $$v $(RENDER_SET); exit 1; }; \
 		done; \
 	done
+	@echo "==> lint $(CONSOLE)"
+	@cmp -s LICENSE $(CONSOLE)/LICENSE || { echo "$(CONSOLE)/LICENSE differs from LICENSE"; exit 1; }
+	@$(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET) >/dev/null || { $(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET); exit 1; }
 	@echo "==> lint $(UMBRELLA)"
 	@cmp -s LICENSE $(UMBRELLA)/LICENSE || { echo "$(UMBRELLA)/LICENSE differs from LICENSE"; exit 1; }
 	@$(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml >/dev/null \
@@ -190,10 +216,25 @@ lint: $(SHELLCHECK) deps ## helm lint --strict (default and example values), cha
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
-	@for c in $(CHARTS) $(UMBRELLA); do \
+	@for c in $(CHARTS) $(CONSOLE) $(UMBRELLA); do \
 		echo "==> unittest $$c"; \
 		$(HELM) unittest --strict $$c || exit 1; \
 	done
+
+# The console image for kind and the e2e (not published from here).
+CONSOLE_IMAGE ?= ci-accelerator-console:dev
+.PHONY: console-image
+console-image: ## Build the console image for this machine's architecture and load it into kind
+	@docker buildx build -f cmd/console/Dockerfile -t $(CONSOLE_IMAGE) --load . >/dev/null
+	@kind load docker-image $(CONSOLE_IMAGE) --name $(KIND_CLUSTER) >/dev/null 2>&1
+	@echo "$(CONSOLE_IMAGE) loaded into kind cluster $(KIND_CLUSTER)"
+
+.PHONY: go-test
+go-test: ## Go: gofmt, go vet and the tests of internal/ (history model fixtures included)
+	@out=$$("$$($(GO_RUN) env GOROOT)/bin/gofmt" -l internal); \
+		if [ -n "$$out" ]; then echo "not gofmt-formatted: $$out" >&2; exit 1; fi
+	@$(GO_RUN) vet ./...
+	@$(GO_RUN) test -count=1 ./...
 
 .PHONY: validate
 validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (our charts, gitlab-runner + fragment) against Kubernetes schemas
@@ -210,6 +251,14 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		done; \
 	done
 	@for k in $(KUBE_VERSIONS); do \
+		echo "==> kubeconform $(CONSOLE) k8s $$k"; \
+		$(HELM) template test $(CONSOLE) --kube-version $$k -n ci-accelerator $(CONSOLE_SET) \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
+		echo "==> kubeconform $(CONSOLE) k8s $$k cert-manager"; \
+		$(HELM) template test $(CONSOLE) --kube-version $$k -n ci-accelerator $(CONSOLE_CERT_MANAGER_SET) \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
+	done
+	@for k in $(KUBE_VERSIONS); do \
 		echo "==> kubeconform gitlab-runner $(RUNNER_CHART_VERSION) + integrations/gitlab-runner k8s $$k"; \
 		$(HELM) template gitlab-runner $(RUNNER_CHART) --kube-version $$k -n ci-accelerator \
 			-f integrations/gitlab-runner/values.yaml \
@@ -217,6 +266,10 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		echo "==> kubeconform $(UMBRELLA) k8s $$k"; \
 		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
 			-f $(UMBRELLA)/tests/values/required.yaml \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
+		echo "==> kubeconform $(UMBRELLA) k8s $$k console"; \
+		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
+			-f $(UMBRELLA)/tests/values/required.yaml -f $(UMBRELLA)/tests/values/console.yaml \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 	done
 	@test/runner-config-parity.sh $(HELM) $(RUNNER_CHART)

@@ -27,6 +27,7 @@ Everything runs through `make`. The pinned tools are downloaded and verified int
 
 ```sh
 make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kubeconform, shellcheck
+make go-test                  # Go: gofmt, go vet, go test (any Go >= 1.21 fetches the pinned toolchain)
 make kind-up                  # a local kind cluster with three build nodes
 make e2e                      # end-to-end on kind, ~15 min; SCENARIOS="upgrade cache" runs a subset
 ```

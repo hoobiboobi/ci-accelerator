@@ -1,0 +1,7 @@
+# Only the Go sources go into an image build.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+internal/**/testdata/

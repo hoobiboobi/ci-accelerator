@@ -1,5 +1,5 @@
-# Chart checks that need no cluster, on Helm 3 and Helm 4. The same
-# `make` targets run locally.
+# Checks that need no cluster: the charts on Helm 3 and Helm 4, and the Go
+# code. The same `make` targets run locally.
 name: checks
 
 on:
@@ -44,3 +44,27 @@ jobs:
 
       - name: Lint, unit tests, schema validation
         run: make lint unittest validate
+
+  go:
+    name: go test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .tools
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile', 'go.sum') }}
+
+      - name: Install Go
+        run: |
+          make go-tools
+          echo "$PWD/.tools/go-$(awk '/^GO_VERSION/ {print $3}' Makefile)/bin" >> "$GITHUB_PATH"
+
+      - name: gofmt, go vet, go test
+        run: make go-test
