@@ -287,6 +287,7 @@ Every check is a `make` target. The same targets are meant for CI.
 
 ```sh
 make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kubeconform (k8s 1.34 and 1.37)
+make go-test ui-test          # Go tests; the console's pages in headless Chrome
 make kind-up                  # local kind cluster (examples/kind)
 make e2e                      # ~13 min end-to-end on kind
 ```
