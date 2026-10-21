@@ -1,0 +1,33 @@
+{{define "home"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="stack">
+  <div>
+    <div class="crumbs">{{with .Project}}{{.Path}}{{end}}</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">Builds, explained</h1></div>
+    <div class="sub">Pick a job on the left, or open one from the link in its GitLab job log.</div>
+  </div>
+  <section class="firstrun" aria-labelledby="frT" id="firstrun">
+    <div class="row">{{icon "log" 18}}<div class="grow1"><h2 id="frT">You will usually arrive from a GitLab job log</h2>
+      <p>With the console's address set, every job prints one line with a link to its build page. The runner hook computes it from the pipeline and job ids, so it needs no token and no change to <code>.gitlab-ci.yml</code>.</p></div>
+      <button class="iconbtn" type="button" data-act="hidefirst" aria-label="Dismiss this panel">{{icon "x" 14}}</button></div>
+    {{with .Example}}
+    <div class="log" aria-label="A line of a job log"><div><span class="n">8</span><span class="dim">$ buildctl build --frontend dockerfile.v0 …</span></div><div class="hl"><span class="n">9</span><span>ci-accelerator: why this job's builds take their time → <a href="{{.URL}}">{{.URL}}</a></span></div><div><span class="n">10</span><span class="ok">Job succeeded</span></div></div>
+    {{end}}
+    <div class="flow"><span class="s">GitLab job log</span>→<span class="s">Build: why it was slow</span>→<span class="s">Pipeline: which job sets the time</span>→<span class="s">Project: is it getting worse</span></div>
+    {{template "why" research "home"}}
+  </section>
+  <div class="cards2">
+    <section class="box"><h2 class="h">Latest pipeline {{with .Latest}}<span class="muted">{{.Dur}} · {{.When}}</span>{{end}}</h2>
+      {{with .Latest}}
+      <a class="rowbtn" href="{{.URL}}"><span class="nm wrapnm">{{.Title}}</span><span class="d mono">{{.SHA}}</span></a>
+      <div class="rows">{{range .Jobs}}<a class="rowbtn" href="{{.URL}}">{{template "vicon" .Cat}}<span class="nm">{{.Name}}</span><span class="tx">{{.Cat.Label}}</span><span class="d">{{.Dur}}</span></a>{{end}}</div>
+      {{else}}<p class="muted">No pipeline has built here yet.</p>{{end}}
+    </section>
+    <section class="box"><h2 class="h">Rebuilt, but not because of the code <span class="muted">{{len .Look}} job{{if ne (len .Look) 1}}s{{end}}</span><a class="btn" href="/?f=node">{{icon "filter" 13}}Show in list</a></h2>
+      <div class="rows">{{range .Look}}<a class="rowbtn" href="{{.URL}}">{{template "vicon" .Cat}}<span class="nm">{{.Name}}</span><span class="tx">{{.Sub}}</span><span class="d">{{.Dur}}</span></a>{{else}}<p class="muted pad6">None lately: every rebuild had a cause in the code.</p>{{end}}</div>
+      <p class="muted note6">Each build node keeps its own cache; these jobs landed on a node that had not built their target yet, or the records cannot tell.</p>
+    </section>
+  </div>
+  <div class="hints"><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> back</span><span><kbd>⌘</kbd><kbd>K</kbd> search</span><span><kbd>?</kbd> all shortcuts</span></div>
+</div>
+{{end}}

@@ -1,0 +1,30 @@
+{{define "step"}}
+<div class="drh">
+  <div class="drt"><div class="kind">{{.Kind}}</div><h2 id="drT" tabindex="-1">{{.Command}}</h2></div>
+  {{if .Full}}<a class="iconbtn" href="/builds/{{.BuildID}}" aria-label="Back to the build">{{icon "x" 14}}</a>{{else}}<button class="iconbtn" type="button" data-close aria-label="Close (esc)">{{icon "x" 14}}</button>{{end}}
+</div>
+<div class="drb">
+  <div class="sent">{{if eq .Step.State "received"}}<span class="chip received">{{icon "s_received" 11}}from {{.Step.From}}</span>{{else}}{{template "stchip" .Step.State}}{{end}}<span>{{.Sentence}}</span></div>
+  {{with .Err}}<pre class="errbox" role="alert">{{.}}</pre>{{end}}
+  {{with .Src}}<section><h3>{{$.SrcTitle}}</h3><pre class="src">{{range .}}<div><span class="n">{{.N}}</span>{{.HTML}}</div>{{end}}</pre></section>{{end}}
+  <dl class="dkv">{{range .Facts}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}{{if .JobName}}<dt>Job</dt><dd><a class="link" href="{{.JobURL}}">{{.JobName}}</a></dd>{{end}}</dl>
+  {{with .Hint}}<div class="hint2">{{.}}</div>{{end}}
+  <section><h3>Output</h3>
+    {{if .Output}}<pre class="logb">{{.Output}}</pre>{{end}}
+    <p class="muted note0">{{.OutNote}}</p>
+  </section>
+  {{if .Hist}}
+  <section><h3>{{.HistTitle}}</h3>
+    <div class="hist">{{range .Hist}}<a href="{{.URL}}" class="{{if .Cur}}cur{{end}}" data-hist title="{{.SHA}} · {{slabel .State}} · {{.Label}}"><small>{{if .Cached}}{{icon "s_cached" 11}}{{else}}{{.Label}}{{end}}</small><i class="c-{{.State}}" style="height: {{.H}}%"></i></a>{{end}}</div>
+    <div class="histx">{{range .Hist}}<span>{{.SHA}}</span>{{end}}</div>
+    <p class="muted note0">{{.HistNote}}</p>
+  </section>
+  {{end}}
+  <div class="drnav">
+    {{if ge .Prev 0}}<a class="btn" href="/builds/{{.BuildID}}/steps/{{.Prev}}" data-dstep="{{.Prev}}">{{icon "chevU" 13}}Previous step</a>{{end}}
+    {{if ge .Next 0}}<a class="btn" href="/builds/{{.BuildID}}/steps/{{.Next}}" data-dstep="{{.Next}}">{{icon "chevD" 13}}Next step</a>{{end}}
+    {{if .HasDockerfile}}<a class="btn" href="/builds/{{.BuildID}}#dockerfile" data-goto-tab="dockerfile">Dockerfile view</a>{{end}}
+    <a class="btn" href="/builds/{{.BuildID}}#timeline" data-goto-tab="timeline">Job timeline</a>
+  </div>
+</div>
+{{end}}

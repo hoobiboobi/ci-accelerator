@@ -1,0 +1,38 @@
+{{define "nodes"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <div><div class="crumbs">Build nodes</div><div class="titlerow"><h1 class="t" tabindex="-1">Build nodes</h1><span class="chip plain">{{.Ready}} ready{{if ne .Ready .Total}} of {{.Total}}{{end}}</span></div>
+    <div class="sub"><span>{{.Total}} BuildKit daemon{{if ne .Total 1}}s{{end}}{{with .Release}} · release <code>{{.}}</code>{{end}}</span><span>{{if .Measured}}{{.Measured}}{{else}}Waiting for the daemons to report{{end}}</span>{{with .APIStatus}}<span>{{.}}</span>{{end}}</div></div>
+  {{if ne .Ready .Total}}<div class="callout warn" role="note">{{icon "warn" 16}}<div><b class="k">A daemon is not reachable</b>The console cannot read its build history; its jobs' builds appear once it is back. Check the daemon pod and the NetworkPolicy.</div></div>{{end}}
+  {{with .Dups}}<div class="callout neutral">{{icon "info" 16}}<div><b class="k">Duplicate cache</b>{{range $i, $d := .}}{{if $i}}, {{end}}<code>{{$d.Name}}</code> ({{bytes $d.Size}}) is stored on {{$d.Nodes}} nodes{{end}} — {{bytes $.DupBytes}} of copies, because each node keeps its own cache. The same is true for every layer built on more than one node.</div></div>{{end}}
+  <div class="ncards">
+    {{range .Cards}}
+    <section class="box ncard" aria-label="Node {{.Short}}"><div class="hd">{{if .Ready}}<span class="okdot" aria-hidden="true"></span>{{else}}<span class="okdot bad" aria-hidden="true"></span>{{end}}<b>{{.Short}}</b>{{with .Node}}<span class="muted">on {{.}}</span>{{end}}{{if .Ready}}<span class="chip received ml">{{icon "s_cached" 11}}Ready</span>{{else}}<span class="chip failed ml">{{icon "warn" 11}}Unreachable</span>{{end}}</div>
+      <div class="nkv"><span>Builds served</span><span>{{.Builds}}</span><span>Rebuilt here because of node</span><span>{{.OtherNode}}{{if .Unclear}} <span class="wtxt" title="builds that were either rebuilt because of the node or because files changed">+{{.Unclear}} unclear</span>{{end}}</span><span>Running now</span><span>{{.Running}} · {{.RunningNote}}</span></div>
+      {{if .Inspected}}
+      <div><div class="nkv"><span>Cache by BuildKit</span><span><b>{{bytes .Total}}</b></span></div>
+        {{if .Segs}}<div class="sstack" role="img" aria-label="{{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>
+        <div class="legend">{{range .Segs}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{.Size}}</b></span>{{end}}</div>{{end}}</div>
+      {{with .MountRows}}<div class="nkv">{{range .}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>{{end}}
+      {{else}}<p class="muted">{{if .Err}}Could not read its cache: {{.Err}}{{else}}Reading its cache…{{end}}</p>{{end}}
+      {{with .Since}}<p class="muted">{{.}}</p>{{end}}
+      {{with .Version}}<p class="muted sm">BuildKit {{.}}</p>{{end}}
+      <div class="btnrow"><button class="btn" type="button" disabled aria-describedby="planned">Clear project cache</button><button class="btn" type="button" disabled aria-describedby="planned">Drain node</button></div></section>
+    {{else}}
+    <section class="box"><p class="muted">No daemon reached yet. The console finds them through the daemons' headless Service.</p></section>
+    {{end}}
+  </div>
+  {{if .GoneBuilds}}<p class="muted note-up">{{.GoneBuilds}} more build{{if ne .GoneBuilds 1}}s{{end}} ran on {{.GoneDaemons}} daemon{{if ne .GoneDaemons 1}}s{{end}} replaced since (a rollout or a restart): they count in the projects below, not on these cards.</p>{{end}}
+  <p class="muted note-up" id="planned">Clear and drain actions are planned; they are shown disabled. Free disk space needs a disk probe in the daemon pod (planned): BuildKit does not report it.</p>
+  <div class="cards2">
+    <section class="box" aria-labelledby="cpT"><h2 class="h" id="cpT">Builds by project</h2><div class="tbox"><table><thead><tr><th>Project</th><th class="num">Pipelines</th><th class="num">Builds</th><th class="num">Last build</th></tr></thead><tbody>
+      {{range .ProjRows}}<tr><td>{{.Path}}</td><td class="num">{{.Pipelines}}</td><td class="num">{{.Builds}}</td><td class="num">{{.Last}}</td></tr>{{else}}<tr><td colspan="4" class="muted">No builds yet.</td></tr>{{end}}
+      </tbody></table></div>
+      <p class="muted note6">Records are matched to projects through the job id in their trace id. Cache size per project is not measured: BuildKit's cache records do not say which build created them.</p></section>
+    <section class="box" aria-labelledby="gcT"><h2 class="h" id="gcT">Garbage collection</h2>
+      {{with .Caps}}<div class="nkv">{{range .}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>{{end}}
+      <div class="nkv mt8">{{range .GC}}<span>{{.What}}</span><span>{{.Rule}}</span>{{else}}<span>Policies</span><span>not reported yet</span>{{end}}</div></section>
+  </div>
+  {{template "why" research "nodes"}}
+</div>
+{{end}}

@@ -1,0 +1,16 @@
+{{define "job"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="crumbs"><a href="{{if .PipeURL}}{{.PipeURL}}{{else}}/{{end}}" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/">Pipelines</a>{{if .PipeURL}}<span class="sepr">/</span><a href="{{.PipeURL}}">{{.PipeLabel}}</a>{{end}}<span class="sepr">/</span><span>{{.Name}}</span></div>
+<div class="titlerow"><h1 class="t" tabindex="-1">{{.Name}}</h1>{{if .Running}}<span class="chip running">{{icon "clock" 11}}Running</span>{{else}}<span class="chip first">{{icon "job" 11}}No build on this box</span>{{end}}
+  <div class="tools">{{if .URL}}<a class="btn" href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab job</span></a>{{end}}</div></div>
+<div class="sub">{{with .Commit}}<span class="q">“{{.}}”</span>{{end}}{{with .Started}}<span>{{.}}</span>{{end}}{{with .Node}}<span>on node {{.}}</span>{{end}}{{with .Status}}<span>{{.}}</span>{{end}}</div>
+<div class="stack mt14">
+  {{if .Running}}
+  <section class="verdict tone-first"><span class="k">{{icon "clock" 14}}Running</span><div class="vt">This job is running; its build page appears when its first build completes.</div>
+    <div class="vd">{{if .Active}}Building now on its node: {{range $i, $a := .Active}}{{if $i}}; {{end}}{{$a}}{{end}}.{{else}}No build is running on its node's daemon yet: the job is preparing, checking out, or not building.{{end}} This page updates by itself.</div></section>
+  {{else}}
+  <section class="verdict tone-first"><span class="k">{{icon "job" 14}}No build here</span><div class="vt">This job ran no build on this box's daemons.</div>
+    <div class="vd">It ran on another runner, built nothing, or its builds are past retention.</div></section>
+  {{end}}
+</div>
+{{end}}

@@ -1,0 +1,89 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{with .Title}}{{.}} · {{end}}ci-accelerator</title>
+<link rel="icon" href="{{asset "favicon.svg"}}" type="image/svg+xml">
+<link rel="stylesheet" href="{{asset "console.css"}}">
+<script src="{{asset "theme.js"}}"></script>
+<script src="{{asset "console.js"}}" defer></script>
+</head>
+<body>
+<div class="app" id="app" data-collapsed="false">
+  <aside class="side" id="side" aria-label="Sidebar">
+    <div class="side-top">
+      <a class="brand" href="/" aria-label="ci-accelerator home"><span class="mark"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 11.5 7 4l2.5 5L13 4.5"/></svg></span><span class="brand-name">ci-accelerator</span></a>
+      <button class="iconbtn" id="collapseBtn" type="button" aria-label="Collapse sidebar ([)" aria-expanded="true">{{icon "side" 15}}</button>
+    </div>
+    {{with .Project}}{{if .ID}}
+    <button class="sbtn projsw" id="projBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="projMenu">
+      <span class="av" aria-hidden="true">{{projInitial .Path}}</span>
+      <span class="lbl"><span>{{projName .Path .ID}}</span><small>{{projNS .Path}}</small></span>
+      <span class="lbl chevw">{{icon "chevD" 13}}</span>
+    </button>
+    {{end}}{{end}}
+    <div class="projmenu" id="projMenu" hidden>
+      <div class="hint">Project</div>
+      {{$cur := .Project}}{{range .Projects}}<a class="sbtn" href="/projects/{{.Instance}}/{{.ID}}" aria-current="{{if eq .ID $cur.ID}}true{{else}}false{{end}}">{{if eq .ID $cur.ID}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span></a>{{end}}
+      <div class="hint">{{if gt (len .Projects) 1}}The project filters every page.{{else}}One project on this box. With more, this filters every page.{{end}}</div>
+    </div>
+    <button class="sbtn search" id="searchBtn" type="button" aria-label="Search or jump to (Ctrl+K)">{{icon "search" 15}}<span class="lbl">Search or jump to…</span><kbd id="kbdK">⌘K</kbd></button>
+    <nav class="navgrp nav" aria-label="Main">
+      <a class="sbtn" href="/" {{if eq .Nav "pipes"}}aria-current="page"{{end}}>{{icon "pipes" 15}}<span class="lbl">Pipelines</span>{{if .Count}}<span class="count">{{.Count}}</span>{{end}}</a>
+      <a class="sbtn" href="/insights" {{if eq .Nav "insights"}}aria-current="page"{{end}}>{{icon "insights" 15}}<span class="lbl">Project insights</span></a>
+      <a class="sbtn" href="/nodes" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 15}}<span class="lbl">Build nodes</span>{{with .Warn}}<span class="wdot" role="img" aria-label="{{.}}" title="{{.}}"></span>{{end}}</a>
+    </nav>
+    <div class="side-foot">
+      <p class="side-live" id="live" role="status" hidden></p>
+      <button class="sbtn" id="themeBtn" type="button" aria-label="Toggle theme (t)"><span class="th-dark">{{icon "moon" 15}}<span class="lbl">Dark theme</span></span><span class="th-light">{{icon "sun" 15}}<span class="lbl">Light theme</span></span><kbd>t</kbd></button>
+      <button class="sbtn" id="helpBtn" type="button" aria-label="Keyboard shortcuts (?)">{{icon "kbd" 15}}<span class="lbl">Shortcuts</span><kbd>?</kbd></button>
+      <div class="side-note">Preview · no sign-in yet: keep the console inside the cluster.</div>
+    </div>
+  </aside>
+  <div class="main" id="mainwrap">
+    <header class="mhead">
+      <a class="brand" href="/" aria-label="ci-accelerator home"><span class="mark"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 11.5 7 4l2.5 5L13 4.5"/></svg></span></a>
+      <span class="proj">{{with .Project}}{{.Path}}{{end}}</span>
+      <button class="iconbtn" id="mTheme" type="button" aria-label="Toggle theme">{{icon "moon" 15}}</button>
+    </header>
+    <div id="main" {{with .Live}}data-live="{{.}}"{{end}}{{if .LiveNodes}} data-live-nodes="true"{{end}}>
+    {{if .Split}}
+    <div class="split" data-has="{{.Has}}">
+      {{template "list" .List}}
+      <section class="pane" aria-label="Details">{{template "content" .}}</section>
+    </div>
+    {{else}}
+    {{template "content" .}}
+    {{end}}
+    </div>
+  </div>
+</div>
+<nav class="bbar" id="bbar" aria-label="Main">
+  <a href="/" {{if eq .Nav "pipes"}}aria-current="page"{{end}}>{{icon "pipes" 18}}Pipelines</a>
+  <a href="/insights" {{if eq .Nav "insights"}}aria-current="page"{{end}}>{{icon "insights" 18}}Insights</a>
+  <a href="/nodes" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 18}}Nodes</a>
+  <button type="button" id="bSearch" aria-label="Search">{{icon "search" 18}}Search</button>
+</nav>
+<div class="scrim" id="scrim" hidden></div>
+<div class="dlg" id="pal" role="dialog" aria-modal="true" aria-label="Search" hidden>
+  <div class="pal-in">{{icon "search" 16}}<input id="palQ" type="text" role="combobox" aria-expanded="true" aria-controls="palL" aria-autocomplete="list" aria-label="Search jobs, pipelines and pages" placeholder="Search jobs, pipelines, commits, pages…" autocomplete="off" spellcheck="false"><kbd>esc</kbd></div>
+  <div class="pal-l" id="palL" role="listbox" aria-label="Results"></div>
+  <div class="pal-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span><span class="pal-try">Try a job name, a commit, “node”, “theme”</span></div>
+</div>
+<div class="dlg" id="help" role="dialog" aria-modal="true" aria-labelledby="helpT" hidden>
+  <div class="help">
+    <h2 id="helpT">Keyboard shortcuts <button class="iconbtn" type="button" data-close-help aria-label="Close">{{icon "x" 14}}</button></h2>
+    <h3>Anywhere</h3>
+    <dl><dt>Search or jump to</dt><dd><kbd>⌘</kbd> <kbd>K</kbd></dd><dt>Search (alternative)</dt><dd><kbd>/</kbd></dd><dt>This overlay</dt><dd><kbd>?</kbd></dd><dt>Toggle theme</dt><dd><kbd>t</kbd></dd><dt>Collapse sidebar</dt><dd><kbd>[</kbd></dd></dl>
+    <h3>Go to</h3>
+    <dl><dt>Pipelines</dt><dd><kbd>g</kbd> <kbd>p</kbd></dd><dt>Project insights</dt><dd><kbd>g</kbd> <kbd>i</kbd></dd><dt>Build nodes</dt><dd><kbd>g</kbd> <kbd>n</kbd></dd></dl>
+    <h3>List and detail</h3>
+    <dl><dt>Next / previous job</dt><dd><kbd>j</kbd> <kbd>k</kbd></dd><dt>Back (job → pipeline → list)</dt><dd><kbd>esc</kbd></dd><dt>Expand / fold all stages</dt><dd><kbd>e</kbd></dd><dt>Copy trace id of this build</dt><dd><kbd>c</kbd></dd><dt>Move between Dockerfile lines</dt><dd><kbd>↑</kbd> <kbd>↓</kbd></dd><dt>Open a step's output and history</dt><dd><kbd>↵</kbd></dd></dl>
+  </div>
+</div>
+<div class="pop" id="pop" role="tooltip" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-label="Step" hidden></aside>
+<div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>{{end}}
