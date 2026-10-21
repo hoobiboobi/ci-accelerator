@@ -1,0 +1,12 @@
+{{define "dockerfile"}}
+<div class="dfbox"><div class="dfin" role="list">
+{{range .Lines}}
+  <div class="dl{{if ge .Step 0}} step st-{{.State}}{{end}}{{if .First}} mark{{end}}{{if .Dim}} dim{{end}}" role="listitem"{{if ge .Step 0}} data-step="{{.Step}}" tabindex="0"{{end}}>
+    <span class="dg">{{if .Opens}}<span class="si {{.State}}" aria-label="{{slabel .State}}">{{icon (sicon .State) 11}}</span>{{end}}</span>
+    <span class="dn">{{.N}}</span>
+    <span class="dc">{{.HTML}}{{if .First}}<span class="rtag">rebuild started here</span>{{end}}{{if .Meta}}<span class="mtag">metadata only</span>{{end}}{{if and .Dim .Head}}<span class="mtag">not part of target {{$.Target}}</span>{{end}}</span>
+    <span class="dr">{{if .Opens}}{{if eq .State "cached"}}cached{{else if eq .State "image"}}on node{{else}}<b>{{.Showed}}</b>{{end}}{{end}}</span>
+  </div>
+{{end}}
+</div></div>
+{{end}}

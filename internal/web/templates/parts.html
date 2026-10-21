@@ -1,0 +1,26 @@
+{{/* A verdict category as an icon with its words for assistive tech. */}}
+{{define "vicon"}}<span class="vi vi-{{.Key}}" role="img" aria-label="{{.Label}}" title="{{.Label}}">{{icon .Icon 14}}</span>{{end}}
+
+{{/* A verdict category as a chip: icon and words, never colour alone. */}}
+{{define "catchip"}}<span class="chip {{.Key}}">{{icon .Icon 11}}{{.Label}}</span>{{end}}
+
+{{/* A step state as a chip. */}}
+{{define "stchip"}}<span class="chip {{.}}">{{icon (sicon .) 11}}{{slabel .}}</span>{{end}}
+
+{{define "verdict"}}
+<section class="verdict tone-{{.Tone}}" aria-labelledby="vT">
+  <span class="k">{{with .Icon}}{{icon . 14}}{{end}}{{.Kicker}}</span>
+  <div class="vt" id="vT">{{.Title}}</div>
+  {{with .Diff}}<div class="diff" role="group" aria-label="Changed line"><div class="del">- {{index . 0}}</div><div class="add">+ {{index . 1}}</div></div>{{end}}
+  {{with .Detail}}<div class="vd">{{.}}</div>{{end}}
+  {{with .Hint}}<div class="hint">{{.}}</div>{{end}}
+</section>
+{{end}}
+
+{{/* Where the time went: the bar, its legend. */}}
+{{define "timebar"}}
+<div class="tb" role="img" aria-label="{{range $i, $s := .}}{{if $i}}, {{end}}{{$s.Label}} {{dur $s.D}}{{end}}">{{range .}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{dur .D}}"></i>{{end}}</div>
+<div class="legend">{{range .}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{dur .D}}</b></span>{{end}}</div>
+{{end}}
+
+{{define "why"}}<details class="why"><summary>{{icon "info" 13}}Why this screen looks like this — research</summary><ul>{{range .}}<li>{{index . 0}} <a class="link" href="{{index . 1}}" rel="noopener noreferrer" target="_blank">source ↗</a></li>{{end}}</ul></details>{{end}}

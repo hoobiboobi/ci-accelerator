@@ -1,0 +1,71 @@
+{{define "pipeline"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="crumbs"><a href="/" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/">Pipelines</a><span class="sepr">/</span><span>#{{.P.ID}}</span></div>
+<div class="titlerow"><h1 class="t" tabindex="-1">{{.Title}}</h1>
+  <div class="tools">
+    {{if .NewerURL}}<a class="btn sq" href="{{.NewerURL}}" aria-label="Newer pipeline">{{icon "chevU" 14}}</a>{{else}}<span class="btn sq" aria-disabled="true">{{icon "chevU" 14}}</span>{{end}}
+    {{if .OlderURL}}<a class="btn sq" href="{{.OlderURL}}" aria-label="Older pipeline">{{icon "chevD" 14}}</a>{{else}}<span class="btn sq" aria-disabled="true">{{icon "chevD" 14}}</span>{{end}}
+    {{if .GitLabURL}}<a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab pipeline</span></a>{{end}}
+  </div>
+</div>
+<div class="sub"><span>Pipeline #{{.P.ID}}</span>{{with .P.SHA}}<span class="mono">{{short . 8}}</span>{{end}}{{with .P.Ref}}<span>{{.}}</span>{{end}}<span>{{if not .P.Created.IsZero}}{{ago .P.Created}}{{else}}{{ago .P.Started}}{{end}}</span>{{if and .P.Status (ne .P.Status "success")}}<span>{{.P.Status}}</span>{{end}}</div>
+
+<nav class="vtabs" role="tablist" aria-label="Pipeline views">
+  <a role="tab" href="#summary" data-tab="summary" aria-selected="true">{{icon "sum" 14}}Summary</a>
+  <a role="tab" href="#timeline" data-tab="timeline" aria-selected="false">{{icon "tl" 14}}Timeline <span class="k2">pipeline › job › stage › step</span></a>
+  {{if .Lines}}<a role="tab" href="#dockerfile" data-tab="dockerfile" aria-selected="false">{{icon "dfile" 14}}Dockerfile <span class="k2">one chip per job</span></a>{{end}}
+</nav>
+
+<div class="tabpane stack mt14" id="summary" data-pane="summary" role="tabpanel" aria-label="Summary">
+  <div class="stats">
+    <div class="stat"><span class="l">Pipeline time</span><span class="v"{{if .TimeElapsed}} data-elapsed="{{.TimeElapsed}}"{{end}}>{{dur .Time}}</span><span class="s">{{if .SetBy}}set by <b>{{.SetBy}}</b>{{else if .Running}}so far: jobs still running{{end}}</span></div>
+    <div class="stat"><span class="l">Steps rebuilt / from cache</span><span class="v">{{.Rebuilt}} / {{.FromCache}}</span><span class="s">across {{.Builds}} build{{if ne .Builds 1}}s{{end}}</span></div>
+    <div class="stat"><span class="l">Cache saved</span><span class="v">≈{{dur .Saved}}</span><span class="s">build time, summed over jobs</span></div>
+    <div class="stat"><span class="l">Rebuilt because of node</span><span class="v">{{.NodeN}}{{if .UnclearN}} <small class="wtxt">+{{.UnclearN}}?</small>{{end}}</span><span class="s">{{if .UnclearN}}unclear: files or node{{else}}job{{if ne .NodeN 1}}s{{end}}{{end}}</span></div>
+  </div>
+  {{if .Running}}<div class="callout neutral">{{icon "clock" 16}}<div><b class="k">{{.Running}} job{{if ne .Running 1}}s{{end}} still running</b>Their builds appear here as they complete; this page updates by itself.</div></div>{{end}}
+  {{if .Gantt}}
+  <section aria-labelledby="tlT"><h2 class="h" id="tlT">Timeline <span class="muted">hover a bar for its step</span></h2>
+    <div class="gantt"><div class="ginner">
+      {{range .Gantt}}
+      <div class="grow"><div class="lab"><span class="vi vi-{{.Glyph}}">{{icon .Icon 14}}</span><a href="{{.Link}}">{{.Name}}</a></div>
+        <div class="track" role="img" aria-label="{{.Name}}{{if .Crit}}, sets the pipeline time{{end}}">{{range $.Ticks}}<b class="gl" style="left: {{.L}}%"></b>{{end}}{{range .Bars}}<i class="c-{{.Class}}" style="left: {{.L}}%; width: {{.W}}%"{{with .Title}} title="{{.}}"{{end}}></i>{{end}}{{if .Crit}}<span class="crit" style="left: {{critL .}}%; width: {{critW .}}%"></span>{{end}}</div></div>
+      {{end}}
+      <div class="axis"><span></span><div class="ticks">{{range .Ticks}}<span style="left: {{.L}}%">{{.Label}}</span>{{end}}</div></div>
+    </div></div>
+    <div class="legend"><span><i class="sw c-runner"></i>Runner &amp; checkout</span><span><i class="sw c-xfer"></i>Send context</span><span><i class="sw c-push"></i>Export &amp; push</span><span><i class="sw c-image"></i>Base image</span><span><i class="sw c-built"></i>Built</span><span><i class="sw c-cached"></i>From cache</span><span><i class="sw c-received"></i>Waiting for another job</span><span><i class="sw sw-crit"></i>Sets the pipeline time</span></div>
+  </section>
+  {{end}}
+  <section aria-labelledby="jbT"><h2 class="h" id="jbT">Jobs <span class="muted">why each one took its time</span></h2>
+    <div class="tbox"><table class="jt"><thead><tr><th>Job</th><th>Why</th><th class="nodecol">Node</th><th class="num">Time</th></tr></thead><tbody>
+      {{range .Jobs}}<tr{{if .Retried}} class="retried"{{end}}><td><span class="jn">{{template "vicon" .Cat}}<a href="{{.URL}}">{{.Name}}</a></span>{{if .Crit}}<span class="muted sm">sets the pipeline time</span>{{end}}{{if .Retried}}<span class="muted sm">retried: a later attempt follows</span>{{end}}</td><td class="why"><span class="vc">{{template "catchip" .Cat}}</span>{{.Why}}</td><td class="nodecol mono muted">{{.Node}}</td><td class="num">{{.Time}}</td></tr>{{end}}
+      {{range .Other}}<tr class="nobuild{{if .Retried}} retried{{end}}"><td><span class="jn">{{template "vicon" .Cat}}<a href="{{.URL}}">{{.Name}}</a></span>{{if .Retried}}<span class="muted sm">retried: a later attempt follows</span>{{end}}</td><td class="why muted">{{.Why}}</td><td class="nodecol"></td><td class="num"{{if .Elapsed}} data-elapsed="{{.Elapsed}}"{{end}}>{{.Time}}</td></tr>{{end}}
+    </tbody></table></div>
+  </section>
+  {{template "why" research "pipeline"}}
+</div>
+
+<div class="tabpane stack mt14" id="timeline" data-pane="timeline" role="tabpanel" aria-label="Timeline">
+  {{template "waterfall" .WF}}
+  {{template "why" research "timeline"}}
+</div>
+
+{{if .Lines}}
+<div class="tabpane stack mt14" id="dockerfile" data-pane="dockerfile" role="tabpanel" aria-label="Dockerfile">
+  <div class="dfwrap">
+    <div class="dfbar">{{if .Mixed}}The jobs used different Dockerfiles; this is the first job's, with the {{.DfJobs}} jobs that used it.{{else}}{{.DfJobs}} job{{if ne .DfJobs 1}}s{{end}} of this pipeline used this Dockerfile. Each step line shows one chip per job.{{end}}</div>
+    <div class="dfbox"><div class="dfin pm pm{{len .Columns}}" role="list">
+      <div class="dl hd" role="listitem"><span class="dg"></span><span class="dn"></span><span class="dc">Dockerfile</span><span class="dr">{{range .Columns}}<span class="jh" title="{{.}}">{{.}}</span>{{end}}</span></div>
+      {{range .Lines}}
+      <div class="dl{{if .Started}} mark{{end}}" role="listitem">
+        <span class="dg">{{if .Started}}<span class="si built">{{icon "up" 11}}</span>{{end}}</span><span class="dn">{{.N}}</span>
+        <span class="dc">{{.HTML}}{{with .Started}}<span class="rtag">rebuild started here · {{join . ", "}}</span>{{end}}{{if .Meta}}<span class="mtag">metadata only</span>{{end}}</span>
+        <span class="dr">{{range .Chips}}{{if eq .State "cont"}}<span class="jc cont"></span>{{else if .State}}<a class="jc {{.State}}" href="{{.URL}}" title="{{.Title}}" aria-label="{{.Title}}">{{icon (sicon .State) 10}}<span class="full">{{.Col}}</span></a>{{else}}<span class="jc none"></span>{{end}}{{end}}</span>
+      </div>
+      {{end}}
+    </div></div>
+  </div>
+  {{template "why" research "pdockerfile"}}
+</div>
+{{end}}
+{{end}}
