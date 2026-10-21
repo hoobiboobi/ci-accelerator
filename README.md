@@ -8,9 +8,9 @@ cache, plus metrics and traces for every build. Hosted services such as
 Depot, Namespace or Docker Build Cloud do this for you; this project does it
 on hardware you already run.
 
-> **Status: pre-release.** v0.1 is in progress: the charts work and are
-> tested (see [Testing](#testing)), but nothing is published yet, and values
-> may still change. Install from source.
+> **Status:** v0.1.0 is released: signed charts on ghcr.io, installed as in
+> the [Quickstart](#quickstart). `main` also holds unreleased work, listed
+> under "Unreleased" in the [changelog](CHANGELOG.md).
 
 ## Why
 
