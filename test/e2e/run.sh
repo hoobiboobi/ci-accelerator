@@ -10,7 +10,10 @@
 # the chart, E2E_EXTRA_VALUES="<file> ..." adds values files after the e2e
 # ones, E2E_RUNNER_FRAGMENT=<file> replaces integrations/gitlab-runner/values.yaml,
 # E2E_LOGS=<dir> writes the logs there (and keeps them) instead of a temporary directory,
-# E2E_BOX_EXTRA_VALUES="<file> ..." adds values files to the umbrella install. A deliberately broken chart or value must turn scenarios red.
+# E2E_BOX_EXTRA_VALUES="<file> ..." adds values files to the umbrella install.
+# The box scenario also runs the browser checks of test/ui against its
+# console when Node >= 22 (make ui-tools, or E2E_NODE) and Chrome are there;
+# E2E_UI=1 makes their absence a failure instead of a skip. A deliberately broken chart or value must turn scenarios red.
 #
 # Installs its own release ("e2e") in its own namespace, so a development
 # release in the same cluster is not touched, and runs CI-job-like clients
@@ -1077,12 +1080,39 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   }
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
   box_settle
+  box_ui
   hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the box"
   check "uninstall removes the jobs namespace" \
     eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'
   check "uninstall keeps the console's store" quiet kc -n "$BOX_NS" get pvc "$BOX_REL-console-data"
   kc -n "$BOX_NS" delete pvc "$BOX_REL-console-data" --ignore-not-found >/dev/null 2>&1
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+}
+
+# box_ui: the browser checks of test/ui against the box's console, which
+# by now has real daemons, a job through the runner and the settle
+# pipelines.
+box_ui() {
+  local node=${E2E_NODE:-} port=${E2E_UI_PORT:-18431} pf ok=0
+  if [ -z "$node" ]; then
+    node=$(find "$ROOT/.tools" -maxdepth 3 -path '*/node-v*/bin/node' 2>/dev/null | sort | tail -n 1)
+    [ -n "$node" ] || node=$(command -v node || true)
+  fi
+  if [ -z "$node" ] || ! "$node" -e 'process.exit(typeof WebSocket === "undefined" ? 1 : 0)' 2>/dev/null; then
+    if [ "${E2E_UI:-}" = 1 ]; then fail "browser checks: no Node >= 22 (make ui-tools)"; else info "browser checks skipped: no Node >= 22 (make ui-tools)"; fi
+    return
+  fi
+  kc -n "$BOX_NS" port-forward "svc/$BOX_REL-console" "$port:8080" >"$LOGS/box-ui-port-forward.log" 2>&1 &
+  pf=$!
+  eventually 15 quiet curl -fsS "http://127.0.0.1:$port/healthz" || { fail "browser checks: no port-forward to the console"; kill "$pf" 2>/dev/null; return; }
+  if "$node" "$ROOT/test/ui/ui.mjs" --base "http://127.0.0.1:$port" >"$LOGS/box-ui.log" 2>&1; then ok=1; fi
+  kill "$pf" 2>/dev/null; wait "$pf" 2>/dev/null
+  if [ "$ok" = 0 ] && grep -q 'no Chrome found' "$LOGS/box-ui.log" && [ "${E2E_UI:-}" != 1 ]; then
+    info "browser checks skipped: no Chrome"
+    return
+  fi
+  check "the console's pages pass the browser checks ($(tail -n 1 "$LOGS/box-ui.log" | sed 's/^# //'))" [ "$ok" = 1 ]
+  [ "$ok" = 1 ] || grep '^FAIL' "$LOGS/box-ui.log" | head -n 10 | while read -r l; do info "$l"; done
 }
 
 # settle_job <pipeline> <job> <node> <files ConfigMap>: a CI job pod as the

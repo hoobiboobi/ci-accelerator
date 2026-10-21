@@ -28,11 +28,12 @@ Everything runs through `make`. The pinned tools are downloaded and verified int
 ```sh
 make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kubeconform, shellcheck
 make go-test                  # Go: gofmt, go vet, go test (any Go >= 1.21 fetches the pinned toolchain)
+make ui-test                  # the console's pages in headless Chrome (pinned Node; needs Chrome), ~2 min
 make kind-up                  # a local kind cluster with three build nodes
 make e2e                      # end-to-end on kind, ~15 min; SCENARIOS="upgrade cache" runs a subset
 ```
 
-- **Tests for every change.** A change to a template needs a unit test in `charts/*/tests`. A change in behaviour needs an end-to-end check in `test/e2e/run.sh`.
+- **Tests for every change.** A change to a template needs a unit test in `charts/*/tests`. A change in behaviour needs an end-to-end check in `test/e2e/run.sh`. A change to the console's pages or script needs to pass `make ui-test` (test/ui), and an interaction it adds belongs there.
 - **Make sure a new check can fail.** Break the code it guards and see it go red before you trust it.
 
 ## Style

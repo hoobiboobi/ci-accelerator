@@ -69,6 +69,13 @@ KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb
 GO_VERSION := 1.27.1
 GO_SHA256_linux_amd64 := 63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
 GO_SHA256_linux_arm64 := 3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec
+# Node for the browser checks (test/ui): LTS line 24, the newest release at
+# least two weeks old; sums from nodejs.org SHASUMS256.txt.
+NODE_VERSION := 24.21.0
+NODE_SHA256_linux_amd64  := fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6
+NODE_SHA256_linux_arm64  := 6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2
+NODE_SHA256_darwin_arm64 := 6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe
+NODE_SHA256_darwin_amd64 := 0ae5a24c24bb7d015cd816c5036b3f90f2945aa872fcf54e58da054753b3a299
 
 OS   := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
@@ -93,6 +100,7 @@ CI_HELM     := $(TOOLS)/helm-$(CI_HELM_VERSION)/helm
 CI_KIND     := $(TOOLS)/kind-$(KIND_VERSION)/kind
 CI_KUBECTL  := $(TOOLS)/kubectl-$(KUBECTL_VERSION)/kubectl
 CI_GO       := $(TOOLS)/go-$(GO_VERSION)/bin/go
+NODE        := $(TOOLS)/node-v$(NODE_VERSION)/bin/node
 GO          ?= go
 GO_RUN      := GOTOOLCHAIN=go$(GO_VERSION) $(GO)
 
@@ -228,6 +236,17 @@ console-image: ## Build the console image for this machine's architecture and lo
 	@docker buildx build -f cmd/console/Dockerfile -t $(CONSOLE_IMAGE) --load . >/dev/null
 	@kind load docker-image $(CONSOLE_IMAGE) --name $(KIND_CLUSTER) >/dev/null 2>&1
 	@echo "$(CONSOLE_IMAGE) loaded into kind cluster $(KIND_CLUSTER)"
+
+.PHONY: ui-tools
+ui-tools: $(NODE) ## Pinned Node for the browser checks into .tools/node-v<version>
+
+$(NODE):
+	$(call fetch,https://nodejs.org/dist/v$(NODE_VERSION)/node-v$(NODE_VERSION)-$(OS)-$(if $(filter amd64,$(ARCH)),x64,arm64).tar.xz,$(TOOLS)/dl/node-$(NODE_VERSION).txz,$(NODE_SHA256_$(OS)_$(ARCH)))
+	@mkdir -p $(TOOLS)/node-v$(NODE_VERSION) && tar -xJf $(TOOLS)/dl/node-$(NODE_VERSION).txz -C $(TOOLS)/node-v$(NODE_VERSION) --strip-components=1
+
+.PHONY: ui-test
+ui-test: $(NODE) ## Browser checks of the console's pages on its fixtures (needs Chrome; CHROME=<path> to pick one)
+	@UI_TEST=1 NODE=$(NODE) $(GO_RUN) test -count=1 -v -run '^TestUI$$' -timeout 15m ./internal/web/
 
 .PHONY: go-test
 go-test: ## Go: gofmt, go vet and the tests of internal/ (history model fixtures included)
