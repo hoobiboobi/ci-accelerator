@@ -83,7 +83,9 @@ UPGRADE_FROM_BUILDKIT_SHA256=b9ac1a09e431e943749a0ec17690300742cc9cf4a06d0faa8a6
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
 # then restarts every daemon; say so in the upgrade notes).
-UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
+# 0.2: the daemons carry their node as a worker label, and the box keeps
+# more build history; both change the pod template.
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # Every client call: the client certificate, and the Service name for the
@@ -915,6 +917,18 @@ s_runner() {
   tp=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 777 "$(job_id first)")
   check "the runner sets TRACEPARENT from the pipeline and job ids ($tp)" job_printed first "TRACEPARENT=$tp"
   check "the job pod carries its pipeline id" grep -q '"ci-accelerator.io/pipeline-id": "777"' "$pod"
+  check "the job pod has its job's URL, without the job token" python3 -c '
+import json, sys
+u = json.load(open(sys.argv[1]))["items"][0]["metadata"]["annotations"]["job.runner.gitlab.com/url"]
+sys.exit(0 if u.startswith("http://fake-gitlab.") and u.endswith("/e2e/project/-/jobs/%s" % sys.argv[2]) and "token" not in u else "url %r" % u)' "$pod" "$(job_id first)"
+  check "the job pod carries the job data from GitLab's variables" python3 -c '
+import json, sys
+a = json.load(open(sys.argv[1]))["items"][0]["metadata"]["annotations"]
+want = {"pipeline-source": "push", "pipeline-created-at": "2026-10-20T10:00:00Z", "project-path": "e2e/project",
+        "job-stage": "build", "job-started-at": "2026-10-20T10:00:05Z", "commit-author": "E2E Author <e2e@example.com>",
+        "commit-title": "e2e: \"quoted\" $CI_JOB_ID ${CI_PIPELINE_ID}", "merge-request-iid": ""}
+bad = {k: a.get("ci-accelerator.io/" + k) for k, v in want.items() if a.get("ci-accelerator.io/" + k) != v}
+sys.exit("unexpected: %r" % bad if bad else 0)' "$pod"
   check "the build container asks for the small tier (50m CPU)" \
     eval 'python3 -c "import json,sys; c=[x for x in json.load(open(sys.argv[1]))[\"items\"][0][\"spec\"][\"containers\"] if x[\"name\"]==\"build\"][0]; sys.exit(0 if c[\"resources\"][\"requests\"][\"cpu\"]==\"50m\" else 1)" "$pod"'
   daemon_node=$(kc -n "$NS" get pod "$(grep -o 'worker.hostname: *[^ ]*' "$LOGS/job-first.trace" | head -1 | awk '{print $2}')" \
@@ -975,8 +989,10 @@ s_box() {
   ensure_ns "$BOX_NS" privileged
   ensure_fake_gitlab "$BOX_NS" || return
   make -C "$ROOT" deps >"$LOGS/box-deps.log" 2>&1 || { fail "make deps (see $LOGS/box-deps.log)"; return; }
+  make -C "$ROOT" console-image >"$LOGS/box-console-image.log" 2>&1 \
+    || { fail "build the console image (see $LOGS/box-console-image.log)"; return; }
   arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
-  local extra=()
+  local extra=(-f "$ROOT/test/e2e/box-console-values.yaml")
   for f in ${E2E_BOX_EXTRA_VALUES:-}; do extra+=(-f "$f"); done
   hc upgrade --install "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" -f "$ROOT/test/e2e/box-values.yaml" ${extra[@]+"${extra[@]}"} \
     --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -1039,10 +1055,124 @@ s_box() {
     grep -q "\"trace_id\":\"$box_tid\"" "$LOGS/box-pipeline-jobs.json"
   }
   check "pipeline 778's jobs and their trace ids are found by the ci.pipeline.id attribute" eventually 30 box_pipeline_jobs
+  # The console reads the daemons' history and the job pod: the build is
+  # attributed to the job, and compared (a first build), which needs the
+  # project from the pod.
+  box_console() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/api/v1/builds?limit=50" \
+      2>/dev/null >"$LOGS/box-console.json"
+    python3 -c 'import json,sys
+b = [x for x in json.load(open(sys.argv[1]))["builds"] if x.get("job") == int(sys.argv[2])]
+sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and b[0]["steps"].get("built") else 1)' \
+      "$LOGS/box-console.json" "$(job_id box)"
+  }
+  check "the console stores the job's build, attributed and compared (project from the job pod)" eventually 60 box_console
+  # The job's address leads to its build's page, which says why it took
+  # its time. The instance is the trace id's GitLab part.
+  box_console_page() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
+      "http://$BOX_REL-console.$BOX_NS.svc:8080/jobs/${box_tid:2:6}/$(job_id box)" 2>/dev/null >"$LOGS/box-console-page.html"
+    grep -q 'First build of target <code>' "$LOGS/box-console-page.html" &&
+      grep -q 'class="dl step st-built' "$LOGS/box-console-page.html"
+  }
+  check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
+  box_settle
   hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the box"
   check "uninstall removes the jobs namespace" \
     eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'
+  check "uninstall keeps the console's store" quiet kc -n "$BOX_NS" get pvc "$BOX_REL-console-data"
+  kc -n "$BOX_NS" delete pvc "$BOX_REL-console-data" --ignore-not-found >/dev/null 2>&1
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+}
+
+# settle_job <pipeline> <job> <node> <files ConfigMap>: a CI job pod as the
+# runner makes one (labels, annotations, trace context), pinned to <node>
+# and building on that node's daemon, so jobs of one pipeline can be put on
+# different nodes.
+settle_job() {
+  local pipeline=$1 job=$2 node=$3 files=$4 ip tp
+  ip=$(kc -n "$BOX_NS" get pods -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" \
+    -o jsonpath="{range .items[?(@.spec.nodeName=='$node')]}{.status.podIP}{end}")
+  [ -n "$ip" ] || { fail "no daemon of the box on $node"; return 1; }
+  tp=$(expected_traceparent "http://fake-gitlab.$NS.svc/" "$pipeline" "$job")
+  kc -n "$BOX_JOBS_NS" apply -f - >/dev/null <<YAML || return 1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: settle-$job
+  labels: {ci-accelerator.io/component: ci-job}
+  annotations:
+    job.runner.gitlab.com/id: "$job"
+    job.runner.gitlab.com/url: "http://fake-gitlab.$NS.svc/e2e/settle/-/jobs/$job"
+    job.runner.gitlab.com/name: "build-$job"
+    job.runner.gitlab.com/sha: "$(printf '%040d' "$pipeline")"
+    project.runner.gitlab.com/id: "4242"
+    ci-accelerator.io/pipeline-id: "$pipeline"
+    ci-accelerator.io/project-path: e2e/settle
+spec:
+  nodeName: $node
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: job
+      image: $IMAGE
+      command: [sh, -c]
+      args:
+        - >-
+          export TRACEPARENT=$tp &&
+          buildctl --addr tcp://$ip:1234 --tlsdir /certs --tlsservername $BOX_REL-buildkit.$BOX_NS.svc
+          build --frontend dockerfile.v0 --local context=/src --local dockerfile=/src --progress plain
+      volumeMounts:
+        - {name: certs, mountPath: /certs, readOnly: true}
+        - {name: src, mountPath: /src, readOnly: true}
+  volumes:
+    - {name: certs, secret: {secretName: $BOX_REL-buildkit-client}}
+    - name: src
+      configMap:
+        name: $files
+        items: [{key: Dockerfile, path: Dockerfile}, {key: app, path: files/app.txt}]
+YAML
+  kc -n "$BOX_JOBS_NS" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/settle-$job" --timeout=180s >/dev/null \
+    || { kc -n "$BOX_JOBS_NS" logs "settle-$job" >"$LOGS/settle-$job.log" 2>&1; fail "job $job did not build (see $LOGS/settle-$job.log)"; return 1; }
+}
+
+# settle_reason <job>: the console's reason kind for the job's build, and
+# whether it names the job that settled it ("kind by").
+settle_reason() {
+  kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/api/v1/builds?limit=200" 2>/dev/null \
+    | python3 -c 'import json,sys
+b = [x for x in json.load(sys.stdin)["builds"] if x.get("job") == int(sys.argv[1])]
+r = (b[0].get("reason") or {}) if b else {}
+print(r.get("kind", "none"), "by" if r.get("by") else "-")' "$1"
+}
+
+# box_settle: reasons that need two daemons. A rebuild on a node that never
+# built the target is blamed on the node only when another job of the same
+# pipeline found the step in the cache on its own node; when such a job had
+# to rebuild the step on its own node too, the files changed.
+box_settle() {
+  local a b
+  a=$(echo "$BUILD_NODES" | awk '{print $1}'); b=$(echo "$BUILD_NODES" | awk '{print $2}')
+  local df
+  df=$'FROM alpine:3.22\nCOPY files/ /files/\nRUN cat /files/app.txt && echo SETTLE_BUILT\n'
+  next_id
+  kc -n "$BOX_JOBS_NS" create configmap settle-v1 --from-literal=Dockerfile="$df" --from-literal=app="one $ID" >/dev/null
+  kc -n "$BOX_JOBS_NS" create configmap settle-v2 --from-literal=Dockerfile="$df" --from-literal=app="two $ID" >/dev/null
+  # Pipeline 9100 builds on node a; in 9200 the same files go to node b
+  # (cold: the cache is on a) and then to node a (from cache).
+  settle_job 9100 9101 "$a" settle-v1 || return
+  settle_job 9200 9201 "$b" settle-v1 || return
+  settle_job 9200 9202 "$a" settle-v1 || return
+  check "a rebuild on another node is blamed on the node when a job of the pipeline found the step in its node's cache" \
+    eventually 60 eval '[ "$(settle_reason 9201)" = "other-node by" ]'
+  # Pipeline 9300 changes the file: rebuilt on node a, where the target was
+  # built last, so on node b the files changed too, not the node.
+  settle_job 9300 9302 "$a" settle-v2 || return
+  settle_job 9300 9301 "$b" settle-v2 || return
+  check "a rebuild on another node is put down to the files when a job of the pipeline rebuilt the step on its own node" \
+    eventually 60 eval '[ "$(settle_reason 9301)" = "files-changed by" ]'
+  check "the job's page says it was not the job's change" \
+    eventually 30 eval 'kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/jobs/$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)/9201" 2>/dev/null | grep -q "Not your change"'
 }
 
 # The last release, as users have it, upgraded in place to this tree: the
