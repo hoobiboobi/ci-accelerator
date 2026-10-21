@@ -120,10 +120,11 @@ help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-# fetch <url> <dest> <sha256>: download, verify, keep only on a match.
+# fetch <url> <dest> <sha256>: download (retried: CI runners see dropped
+# connections), verify, keep only on a match.
 define fetch
 	@mkdir -p $(dir $(2))
-	@curl -fsSL -o $(2).part $(1)
+	@curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors -o $(2).part $(1)
 	@echo "$(3)  $(2).part" | $(SHA256) -c - >/dev/null || { echo "checksum mismatch for $(1)" >&2; rm -f $(2).part; exit 1; }
 	@mv $(2).part $(2)
 endef
