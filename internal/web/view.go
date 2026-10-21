@@ -96,7 +96,9 @@ func steps(b *history.Build, r history.Reason, received func(ref string) string,
 	for i, s := range b.Steps {
 		v := StepView{Index: i, Key: s.Key, Name: s.Name, Stage: stageOf(s.Key), State: stateOf(s), D: s.Duration(),
 			Lines: lineText(s.Lines), HasOutput: withOutput[i]}
-		if !s.Started.IsZero() && !b.Started.IsZero() {
+		// A step received from another build may have started a moment
+		// before this build did.
+		if !s.Started.IsZero() && !b.Started.IsZero() && s.Started.After(b.Started) {
 			v.Offset = s.Started.Sub(b.Started)
 		}
 		if s.State == history.Received {

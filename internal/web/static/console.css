@@ -776,3 +776,9 @@ details.disc[aria-disabled="true"] > summary { cursor: default; }
 
 .wfv.crit-on .row:not(.oncrit):not(.k-pipe) .tc > *, .wfv.crit-on .row:not(.oncrit):not(.k-pipe) .tl { opacity: var(--dimop); }
 .howto { margin-bottom: 14px; }
+
+/* Image references with digests and long commands wrap instead of widening
+   the page on a phone. */
+.verdict { min-width: 0; max-width: 100%; }
+.verdict .vt, .verdict .vd, .verdict .diff { min-width: 0; overflow-wrap: anywhere; }
+.verdict code { overflow-wrap: anywhere; word-break: break-word; }

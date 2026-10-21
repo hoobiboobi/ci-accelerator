@@ -106,7 +106,7 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sh.List, sh.Split, sh.Has = lv, true, "pipe"
-	v := &PipelineView{P: p, Key: key, Title: p.CommitTitle, GitLabURL: p.WebURL}
+	v := &PipelineView{P: p, Key: key, Title: p.CommitTitle, GitLabURL: webURL(p.WebURL)}
 	if v.Title == "" {
 		v.Title = "Pipeline #" + strconv.FormatUint(p.ID, 10)
 	}
@@ -371,7 +371,7 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	}
 	v := &JobView{}
 	if job != nil {
-		v.Name, v.Running, v.Node, v.URL, v.Commit = job.Name, true, job.Node, job.URL, job.CommitTitle
+		v.Name, v.Running, v.Node, v.URL, v.Commit = job.Name, true, job.Node, webURL(job.URL), job.CommitTitle
 		if !job.StartedAt.IsZero() {
 			v.Started = ago(job.StartedAt) + " · running for " + duration(s.now().Sub(job.StartedAt).Truncate(time.Second))
 		}
@@ -397,7 +397,7 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 			for _, j := range jobs {
 				if j.ID == id {
 					found = true
-					v.Name, v.Status, v.Node, v.URL, v.Commit = j.Name, j.Status, j.Node, j.URL, p.CommitTitle
+					v.Name, v.Status, v.Node, v.URL, v.Commit = j.Name, j.Status, j.Node, webURL(j.URL), p.CommitTitle
 					v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(instance, p.ID), "#"+strconv.FormatUint(p.ID, 10)
 					if !j.Started.IsZero() {
 						v.Started = ago(j.Started)
