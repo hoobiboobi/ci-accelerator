@@ -149,11 +149,19 @@ tests:
           path: data["buildkitd.toml"]
           pattern: '\[history\]\n  maxAge = "168h"\n  maxEntries = 0\n'
 
+  # The console reads the history: more than buildkit's 50 records.
+  - it: keeps 1000 history records for 48 h by default
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[history\]\n  maxAge = "48h"\n  maxEntries = 1000\n'
+
   # An empty [history] table makes buildkit delete every completed record.
   - it: renders no [history] table when its keys are empty
     set:
       config.history:
         maxAge: ""
+        maxEntries: null
     asserts:
       - notMatchRegex:
           path: data["buildkitd.toml"]

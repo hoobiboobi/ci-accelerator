@@ -1,0 +1,146 @@
+{{- include "console.validate" . }}
+{{- $jobs := include "console.jobsNamespace" . }}
+{{- $urlsFrom := include "console.urlsConfigMap" . }}
+{{- $token := dig "token" "existingSecret" "" .Values.gitlab }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "console.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+spec:
+  # One writer: SQLite on a ReadWriteOnce volume. Recreate, so the old pod
+  # is gone before the new one opens the store.
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "console.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "console.podLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "console.fullname" . }}
+      # The token is needed only to watch the job pods.
+      automountServiceAccountToken: {{ ne $jobs "" }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: console
+          image: {{ include "console.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -data=/data
+            - -tls-dir=/certs
+            - -listen=:{{ .Values.service.port }}
+            - -discover={{ include "console.discover" . }}
+            {{- with .Values.daemons.serverName }}
+            - -server-name={{ tpl . $ }}
+            {{- end }}
+            {{- range .Values.gitlab.urls }}
+            - -gitlab-url={{ . }}
+            {{- end }}
+            {{- with $jobs }}
+            - -jobs-namespace={{ . }}
+            {{- end }}
+            - -keep-days={{ int .Values.retention.days }}
+            - -keep-output-days={{ int .Values.retention.outputDays }}
+            - -release={{ .Release.Name }}
+            {{- if $token }}
+            - -gitlab-token-file=/gitlab/token
+            {{- end }}
+          {{- with $urlsFrom }}
+          env:
+            - name: GITLAB_URLS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.gitlab.urlsFrom.key }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            # SQLite's temporary files.
+            - name: tmp
+              mountPath: /tmp
+            {{- if $token }}
+            - name: gitlab-token
+              mountPath: /gitlab
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "console.pvcName" . }}
+        - name: certs
+          secret:
+            secretName: {{ include "console.tlsSecretName" . }}
+            defaultMode: 0440
+        - name: tmp
+          emptyDir: {}
+        {{- if $token }}
+        - name: gitlab-token
+          secret:
+            secretName: {{ $token }}
+            defaultMode: 0440
+            items:
+              - key: {{ dig "token" "key" "token" .Values.gitlab }}
+                path: token
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

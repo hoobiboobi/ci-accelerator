@@ -143,7 +143,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 72912284c74b30ce4f28c38a32774a5a112f95557d3e90d593538bb4fc52f6dd
+          value: f95348ca6801fac46e2ac612b63e39d8db0ad2d6873a9e3608cb29b1817370ab
 
   - it: changes the config checksum when the config changes
     template: daemonset.yaml
@@ -152,7 +152,7 @@ tests:
     asserts:
       - notEqual:
           path: spec.template.metadata.annotations["checksum/config"]
-          value: 72912284c74b30ce4f28c38a32774a5a112f95557d3e90d593538bb4fc52f6dd
+          value: f95348ca6801fac46e2ac612b63e39d8db0ad2d6873a9e3608cb29b1817370ab
 
   # Tracing variables in the container env made every probe wait 10-30 s for
   # a trace backend; with a dead one, every daemon was restarted at once.
@@ -245,12 +245,12 @@ tests:
 
   # Enabling the debug server (pprof, cache load) through a flag or env var
   # must not slip past the TOML tests.
-  - it: starts buildkitd with the rendered config only
+  - it: starts buildkitd with the rendered config and its node label only
     template: daemonset.yaml
     asserts:
       - equal:
           path: spec.template.spec.containers[0].args
-          value: [--config, /etc/buildkitd/buildkitd.toml]
+          value: [--config, /etc/buildkitd/buildkitd.toml, --oci-worker-labels, "ci-accelerator.io/node=$(CI_ACCELERATOR_NODE_NAME)"]
       - equal:
           path: spec.template.spec.containers[0].ports
           value:

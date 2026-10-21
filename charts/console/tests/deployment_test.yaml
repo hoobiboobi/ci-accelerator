@@ -1,0 +1,124 @@
+suite: deployment
+templates:
+  - deployment.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  - it: runs one pod that is replaced, never doubled (one SQLite writer)
+    asserts:
+      - equal: { path: spec.replicas, value: 1 }
+      - equal: { path: spec.strategy, value: { type: Recreate } }
+
+  - it: passes the daemons, the GitLab URLs and retention as arguments
+    set:
+      gitlab.urls: [https://gitlab.example.com/, https://other.example.com/]
+      retention: { days: 30, outputDays: 3 }
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - -data=/data
+            - -tls-dir=/certs
+            - -listen=:8080
+            - -discover=buildkit-headless.ci-accelerator.svc:1234
+            - -gitlab-url=https://gitlab.example.com/
+            - -gitlab-url=https://other.example.com/
+            - -keep-days=30
+            - -keep-output-days=3
+            - -release=c
+
+  # The box passes names from its own values: rendered with tpl.
+  - it: renders the daemons, the jobs namespace and the server name with tpl
+    set:
+      daemons.discover: '{{ .Release.Name }}-buildkit-headless.{{ .Release.Namespace }}.svc:1234'
+      daemons.serverName: '{{ .Release.Name }}-buildkit.{{ .Release.Namespace }}.svc'
+      jobs.namespace: '{{ .Release.Namespace }}-jobs'
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: -discover=c-buildkit-headless.ci-accelerator.svc:1234 }
+      - contains: { path: "spec.template.spec.containers[0].args", content: -server-name=c-buildkit.ci-accelerator.svc }
+      - contains: { path: "spec.template.spec.containers[0].args", content: -jobs-namespace=ci-accelerator-jobs }
+
+  - it: reads the GitLab URLs from a ConfigMap when told
+    set:
+      gitlab.urls: []
+      gitlab.urlsFrom.configMap: '{{ .Release.Name }}-gitlab'
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env
+          value:
+            - name: GITLAB_URLS
+              valueFrom: { configMapKeyRef: { name: c-gitlab, key: urls } }
+      - notContains: { path: "spec.template.spec.containers[0].args", content: -gitlab-url=https://gitlab.example.com/ }
+
+  # The token only to watch job pods.
+  - it: mounts the service account token only when it watches job pods
+    asserts:
+      - equal: { path: spec.template.spec.automountServiceAccountToken, value: false }
+  - it: mounts the token with a jobs namespace
+    set:
+      jobs.namespace: ci-jobs
+    asserts:
+      - equal: { path: spec.template.spec.automountServiceAccountToken, value: true }
+
+  - it: runs as non-root with a read-only root file system
+    asserts:
+      - equal: { path: spec.template.spec.securityContext.runAsNonRoot, value: true }
+      - equal: { path: spec.template.spec.securityContext.fsGroup, value: 65532 }
+      - equal: { path: "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem", value: true }
+      - equal: { path: "spec.template.spec.containers[0].securityContext.capabilities.drop", value: [ALL] }
+
+  - it: mounts the store, the client certificate and a temp dir
+    asserts:
+      - equal: { path: "spec.template.spec.volumes[0].persistentVolumeClaim.claimName", value: c-console-data }
+      - equal: { path: "spec.template.spec.volumes[1].secret", value: { secretName: console-client, defaultMode: 0440 } }
+      - equal: { path: "spec.template.spec.volumes[2]", value: { name: tmp, emptyDir: {} } }
+
+  - it: uses an existing claim when given
+    set:
+      persistence.existingClaim: my-data
+    asserts:
+      - equal: { path: "spec.template.spec.volumes[0].persistentVolumeClaim.claimName", value: my-data }
+
+  - it: tags the image v<appVersion> by default, by digest when given
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].image", value: "ghcr.io/hoobiboobi/ci-accelerator-console:v0.1.0" }
+  - it: pulls by digest when given
+    set:
+      image.digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].image", value: "ghcr.io/hoobiboobi/ci-accelerator-console:v0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+
+  # A chart release that changes nothing else must not restart the console.
+  - it: keeps the chart version out of the pod template
+    asserts:
+      - notExists: { path: 'spec.template.metadata.labels["helm.sh/chart"]' }
+      - notExists: { path: 'spec.template.metadata.labels["app.kubernetes.io/version"]' }
+      - equal: { path: 'spec.template.metadata.labels["ci-accelerator.io/component"]', value: console }
+
+  - it: probes /healthz
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].readinessProbe.httpGet", value: { path: /healthz, port: http } }
+      - equal: { path: "spec.template.spec.containers[0].livenessProbe.httpGet", value: { path: /healthz, port: http } }
+
+  # GitLab's API for job times: a Secret's key mounted as a file, only when
+  # given.
+  - it: reads no GitLab token by default
+    asserts:
+      - notContains: { path: "spec.template.spec.containers[0].args", content: -gitlab-token-file=/gitlab/token }
+      - notContains:
+          path: spec.template.spec.volumes
+          content: { name: gitlab-token, secret: { secretName: gl, defaultMode: 0440, items: [{ key: token, path: token }] } }
+  - it: mounts the GitLab token's key from its Secret
+    set:
+      gitlab.token: { existingSecret: gl, key: api-token }
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: -gitlab-token-file=/gitlab/token }
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: gitlab-token, secret: { secretName: gl, defaultMode: 0440, items: [{ key: api-token, path: token }] } }
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: { name: gitlab-token, mountPath: /gitlab, readOnly: true }

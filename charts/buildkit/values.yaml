@@ -257,11 +257,16 @@ config:
   # buildkit's prune syntax, e.g. "type==exec.cachemount".
   gcPolicy: []
 
-  # -- Build history (used by the console in later releases). Keys: maxAge
+  # -- Build history, which the console reads (it copies each record when
+  # it completes, and reads the history again after a restart). Keys: maxAge
   # (duration) and maxEntries (int). Set both, or neither: a key that is not
   # set becomes 0, not the buildkit default (48h / 50); maxEntries 0 stops
   # recording new history, and maxAge alone drops the 50-entry floor.
-  history: {}
+  # 1000 records cover about an hour of a busy farm; buildkit's own 50 last
+  # minutes there.
+  history:
+    maxAge: 48h
+    maxEntries: 1000
 
   # -- Container Device Interface (GPUs and other devices for RUN steps).
   # Off by default: CI builds need no devices. Requires buildkit >= v0.33.1:

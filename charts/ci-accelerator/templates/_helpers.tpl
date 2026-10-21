@@ -19,6 +19,21 @@ are refused below).
 {{- end }}
 
 {{/*
+The issuer of the daemons' certificates, as the buildkit subchart picks it:
+global.tls.issuerRef, or the CA it creates (<namespace>-<full name>-ca).
+*/}}
+{{- define "ci-accelerator.issuerName" -}}
+{{- default (printf "%s-%s-ca" .Release.Namespace (include "ci-accelerator.buildkitName" .) | trunc 240 | trimSuffix "-") .Values.global.tls.issuerRef.name }}
+{{- end }}
+
+{{/*
+The daemons' headless Service, by the buildkit subchart's rule.
+*/}}
+{{- define "ci-accelerator.buildkitHeadless" -}}
+{{- printf "%s-headless" (include "ci-accelerator.buildkitName" . | trunc 54 | trimSuffix "-") }}
+{{- end }}
+
+{{/*
 Service names of the VictoriaMetrics and VictoriaTraces subcharts, by their
 common chart's rule: the full name is <release>-<name> (or the release name
 when it contains the name), and the Service is "<full name>-server" cut to
@@ -111,6 +126,9 @@ running with no [[runners]] and takes no jobs). */}}
 {{- end }}
 {{- end }}
 {{- include "ci-accelerator.preflightJobsNamespace" . }}
+{{- if and (dig "console" "enabled" false .Values.AsMap) (eq (toString .Values.buildkit.tls.source) "existingSecret") (not (dig "console" "tls" "existingSecret" "" .Values.AsMap)) }}
+{{- fail "console.enabled with buildkit.tls.source=existingSecret: give the console its own client certificate signed by the daemons' CA, console.tls.existingSecret (a Secret with ca.crt, tls.crt and tls.key in the release namespace)." }}
+{{- end }}
 {{- if or .Values.buildkit.fullnameOverride .Values.buildkit.nameOverride }}
 {{- fail "buildkit.fullnameOverride and buildkit.nameOverride are not supported in this chart: the runner configuration derives the daemons' address from the release name." }}
 {{- end }}

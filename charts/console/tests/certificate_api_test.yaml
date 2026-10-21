@@ -1,0 +1,15 @@
+suite: client certificate without cert-manager
+templates:
+  - certificate.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  - it: names the way out when cert-manager is missing
+    set:
+      tls.existingSecret: ""
+      global.tls.issuerRef.name: ca
+    asserts:
+      - failedTemplate: { errorPattern: "Install cert-manager, or set tls.existingSecret" }

@@ -14,6 +14,10 @@ matches the reviewed default config:
         key = "/etc/buildkitd-tls/tls.key"
         ca = "/etc/buildkitd-tls/ca.crt"
 
+      [history]
+        maxAge = "48h"
+        maxEntries = 1000
+
       [cdi]
         disabled = true
 
