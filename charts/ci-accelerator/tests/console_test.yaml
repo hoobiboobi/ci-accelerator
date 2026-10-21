@@ -1,0 +1,85 @@
+suite: console
+templates:
+  - console-gitlab.yaml
+  - validate.yaml
+  - charts/console/templates/deployment.yaml
+  - charts/console/templates/certificate.yaml
+  - charts/console/templates/rbac.yaml
+  - charts/buildkit/templates/networkpolicy.yaml
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  # A disabled subchart's templates are not rendered at all (helm-unittest
+  # cannot select them), so the default shows in this chart's own ConfigMap.
+  - it: is off by default
+    template: console-gitlab.yaml
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  # One GitLab URL, set once for the runner: the console reads the same
+  # string, which the trace ids carry a hash of.
+  - it: gives the console the runner's GitLab URL
+    template: console-gitlab.yaml
+    set:
+      console.enabled: true
+    asserts:
+      - equal: { path: metadata.name, value: box-console-gitlab }
+      - equal: { path: data.urls, value: "https://gitlab.example.com/" }
+  - it: points the console at this release's daemons, ConfigMap and jobs namespace
+    template: charts/console/templates/deployment.yaml
+    set:
+      console.enabled: true
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: -discover=box-buildkit-headless.ci-accelerator.svc:1234 }
+      - contains: { path: "spec.template.spec.containers[0].args", content: -jobs-namespace=ci-accelerator-jobs }
+      - equal:
+          path: "spec.template.spec.containers[0].env[0].valueFrom.configMapKeyRef"
+          value: { name: box-console-gitlab, key: urls }
+  - it: lets the console read pods in the jobs namespace
+    template: charts/console/templates/rbac.yaml
+    set:
+      console.enabled: true
+    documentIndex: 0
+    asserts:
+      - equal: { path: metadata.namespace, value: ci-accelerator-jobs }
+
+  - it: issues the console's certificate from the daemons' own CA
+    template: charts/console/templates/certificate.yaml
+    set:
+      console.enabled: true
+    asserts:
+      - equal:
+          path: spec.issuerRef
+          value: { name: ci-accelerator-box-buildkit-ca, kind: ClusterIssuer, group: cert-manager.io }
+  - it: uses the global issuer when the box has one
+    template: charts/console/templates/certificate.yaml
+    set:
+      console.enabled: true
+      global.tls.issuerRef.name: company-ca
+    asserts:
+      - equal: { path: spec.issuerRef.name, value: company-ca }
+
+  - it: lets the console reach the daemons
+    template: charts/buildkit/templates/networkpolicy.yaml
+    asserts:
+      - contains:
+          path: "spec.ingress[0].from"
+          content:
+            podSelector:
+              matchLabels:
+                ci-accelerator.io/component: console
+
+  - it: asks for the console's own certificate when the daemons' come from a Secret
+    template: validate.yaml
+    set:
+      console.enabled: true
+      buildkit.tls.source: existingSecret
+      buildkit.tls.existingSecret: daemons-tls
+    asserts:
+      - failedTemplate: { errorPattern: "console.tls.existingSecret" }

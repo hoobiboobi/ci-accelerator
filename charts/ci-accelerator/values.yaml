@@ -32,6 +32,10 @@ global:
     # -- CPU architecture of the build nodes (kubernetes.io/arch). The
     # runner picks its helper image by it.
     architecture: amd64
+  console:
+    # -- The console's address as users reach it (https://...). When set,
+    # every job prints the link to its page in its log. Empty: no link.
+    url: ""
 
 # Install-time checks against the live cluster. Skipped by `helm template`
 # and by GitOps tools that render offline.
@@ -64,6 +68,12 @@ buildkit:
   # networkPolicy.egress.clusterCIDRs to keep builds out of the cluster.
   networkPolicy:
     enabled: true
+    ingress:
+      # The console (console.enabled) reads the daemons' build history.
+      extraFrom:
+        - podSelector:
+            matchLabels:
+              ci-accelerator.io/component: console
     egress:
       # The metrics and traces storage of this release stays reachable when
       # clusterCIDRs are listed.
@@ -113,6 +123,9 @@ gitlab-runner:
         environment = [
           "BUILDKIT_REMOTE_ADDR=tcp://{{ include "ci-accelerator.buildkitName" . }}.{{ .Release.Namespace }}.svc:1234",
           "BUILDKIT_TLS_DIR=/certs",
+          {{- with dig "console" "url" "" .Values.global }}
+          "CI_ACCELERATOR_CONSOLE_URL={{ . }}",
+          {{- end }}
         ]
         # Every job gets its own trace, without changes to .gitlab-ci.yml:
         # buildctl reads TRACEPARENT. trace-id = scheme 01, 3 bytes for this
@@ -126,6 +139,10 @@ gitlab-runner:
           export TRACEPARENT="00-01{{ .Values.gitlabUrl | sha256sum | trunc 6 }}$(printf '%012x%012x' "$CI_PIPELINE_ID" "$CI_JOB_ID")-$(printf '%016x' "$CI_JOB_ID")-01"
         fi
         export OTEL_RESOURCE_ATTRIBUTES="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}ci.pipeline.id=${CI_PIPELINE_ID:-},ci.job.id=${CI_JOB_ID:-},ci.project.path=${CI_PROJECT_PATH:-}"
+        # ci-accelerator: this job's page in the console, when its address is set
+        if [ -n "${CI_ACCELERATOR_CONSOLE_URL:-}" ] && [ "${CI_JOB_ID:-x}" -gt 0 ] 2>/dev/null; then
+          echo "ci-accelerator: why this job's builds take their time: ${CI_ACCELERATOR_CONSOLE_URL%/}/jobs/{{ .Values.gitlabUrl | sha256sum | trunc 6 }}/$CI_JOB_ID"
+        fi
         '''
         [runners.kubernetes]
           namespace = "{{ .Values.global.jobs.namespace }}"
@@ -146,10 +163,20 @@ gitlab-runner:
           {{- with include "ci-accelerator.runnerTolerations" . | trim }}{{ . | nindent 6 }}{{ end }}
           [runners.kubernetes.pod_labels]
             "ci-accelerator.io/component" = "ci-job"
-          # The pipeline id on the job pod (the runner adds job and project ids
-          # itself), for tools that build pipeline and job spans from the pods.
+          # Job data from GitLab's CI variables on the job pod, for tools that
+          # show builds by pipeline and job (the runner adds the job id, name,
+          # URL, ref, commit and project id itself). An unset variable gives an
+          # empty value; values are expanded once, never as templates.
           [runners.kubernetes.pod_annotations]
             "ci-accelerator.io/pipeline-id" = "$CI_PIPELINE_ID"
+            "ci-accelerator.io/pipeline-source" = "$CI_PIPELINE_SOURCE"
+            "ci-accelerator.io/pipeline-created-at" = "$CI_PIPELINE_CREATED_AT"
+            "ci-accelerator.io/project-path" = "$CI_PROJECT_PATH"
+            "ci-accelerator.io/job-stage" = "$CI_JOB_STAGE"
+            "ci-accelerator.io/job-started-at" = "$CI_JOB_STARTED_AT"
+            "ci-accelerator.io/commit-title" = "$CI_COMMIT_TITLE"
+            "ci-accelerator.io/commit-author" = "$CI_COMMIT_AUTHOR"
+            "ci-accelerator.io/merge-request-iid" = "$CI_MERGE_REQUEST_IID"
           [[runners.kubernetes.volumes.secret]]
             name = "{{ include "ci-accelerator.buildkitName" . }}-client"
             mount_path = "/certs"
@@ -212,3 +239,24 @@ victoria-traces-single:
     retentionPeriod: 14d
     persistentVolume:
       size: 10Gi
+
+# The console: reads every daemon's build history and the CI job pods, and
+# explains each build. Preview: off by default, no sign-in yet (its API is a
+# ClusterIP Service only). See charts/console for every value.
+console:
+  enabled: false
+  # The runner's GitLab URL, from a ConfigMap this chart writes.
+  gitlab:
+    urlsFrom:
+      configMap: '{{ .Release.Name }}-console-gitlab'
+  daemons:
+    discover: '{{ include "ci-accelerator.buildkitHeadless" . }}.{{ .Release.Namespace }}.svc:1234'
+  tls:
+    # With buildkit.tls.source=existingSecret, set console.tls.existingSecret
+    # (a client certificate from the daemons' CA).
+    existingSecret: ""
+    certManager:
+      issuerRef:
+        name: '{{ include "ci-accelerator.issuerName" . }}'
+  jobs:
+    namespace: '{{ .Values.global.jobs.namespace }}'

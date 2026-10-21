@@ -37,6 +37,8 @@ runners:
       environment = [
         "BUILDKIT_REMOTE_ADDR=tcp://ci-accelerator-buildkit.ci-accelerator.svc:1234",
         "BUILDKIT_TLS_DIR=/certs",
+        # ADJUST: with the console, its address, so each job prints its page:
+        # "CI_ACCELERATOR_CONSOLE_URL=https://console.example.com",
       ]
       # Every job gets its own trace, without changes to .gitlab-ci.yml:
       # buildctl reads TRACEPARENT. trace-id = scheme 01, 3 bytes for this
@@ -50,6 +52,10 @@ runners:
         export TRACEPARENT="00-01{{ .Values.gitlabUrl | sha256sum | trunc 6 }}$(printf '%012x%012x' "$CI_PIPELINE_ID" "$CI_JOB_ID")-$(printf '%016x' "$CI_JOB_ID")-01"
       fi
       export OTEL_RESOURCE_ATTRIBUTES="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}ci.pipeline.id=${CI_PIPELINE_ID:-},ci.job.id=${CI_JOB_ID:-},ci.project.path=${CI_PROJECT_PATH:-}"
+      # ci-accelerator: this job's page in the console, when its address is set
+      if [ -n "${CI_ACCELERATOR_CONSOLE_URL:-}" ] && [ "${CI_JOB_ID:-x}" -gt 0 ] 2>/dev/null; then
+        echo "ci-accelerator: why this job's builds take their time: ${CI_ACCELERATOR_CONSOLE_URL%/}/jobs/{{ .Values.gitlabUrl | sha256sum | trunc 6 }}/$CI_JOB_ID"
+      fi
       '''
       [runners.kubernetes]
         namespace = "{{ default .Release.Namespace .Values.runners.jobNamespace }}"
@@ -78,10 +84,20 @@ runners:
           "ci-accelerator.io/node-role=build" = "NoSchedule"
         [runners.kubernetes.pod_labels]
           "ci-accelerator.io/component" = "ci-job"
-        # The pipeline id on the job pod (the runner adds job and project ids
-        # itself), for tools that build pipeline and job spans from the pods.
+        # Job data from GitLab's CI variables on the job pod, for tools that
+        # show builds by pipeline and job (the runner adds the job id, name,
+        # URL, ref, commit and project id itself). An unset variable gives an
+        # empty value; values are expanded once, never as templates.
         [runners.kubernetes.pod_annotations]
           "ci-accelerator.io/pipeline-id" = "$CI_PIPELINE_ID"
+          "ci-accelerator.io/pipeline-source" = "$CI_PIPELINE_SOURCE"
+          "ci-accelerator.io/pipeline-created-at" = "$CI_PIPELINE_CREATED_AT"
+          "ci-accelerator.io/project-path" = "$CI_PROJECT_PATH"
+          "ci-accelerator.io/job-stage" = "$CI_JOB_STAGE"
+          "ci-accelerator.io/job-started-at" = "$CI_JOB_STARTED_AT"
+          "ci-accelerator.io/commit-title" = "$CI_COMMIT_TITLE"
+          "ci-accelerator.io/commit-author" = "$CI_COMMIT_AUTHOR"
+          "ci-accelerator.io/merge-request-iid" = "$CI_MERGE_REQUEST_IID"
         # The client certificate cert-manager issues into the jobs namespace
         # (buildkit chart: tls.client.namespaces).
         # ADJUST: <buildkit fullname>-client

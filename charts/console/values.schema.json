@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image", "gitlab", "daemons", "tls", "jobs", "retention", "persistence", "service", "resources"],
+  "properties": {
+    "enabled": { "type": "boolean", "description": "The switch a parent chart uses to include this one." },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "commonLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "pullPolicy"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^$|^sha256:[a-f0-9]{64}$" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
+    "gitlab": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["urls", "urlsFrom"],
+      "properties": {
+        "urls": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^https?://[^\\s,]+$" }
+        },
+        "token": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": { "type": "string" },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        },
+        "urlsFrom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["configMap", "key"],
+          "properties": {
+            "configMap": { "type": "string" },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "daemons": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discover", "serverName"],
+      "properties": {
+        "discover": { "type": "string" },
+        "serverName": { "type": "string" }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["existingSecret", "certManager"],
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "certManager": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["issuerRef", "duration", "renewBeforePercentage"],
+          "properties": {
+            "issuerRef": { "$ref": "#/$defs/issuerRef" },
+            "duration": { "type": "string", "pattern": "^[0-9]{1,6}h$" },
+            "renewBeforePercentage": { "type": "integer", "minimum": 5, "maximum": 95 }
+          }
+        }
+      }
+    },
+    "jobs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "rbac"],
+      "properties": {
+        "namespace": { "type": "string" },
+        "rbac": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["create"],
+          "properties": { "create": { "type": "boolean" } }
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["days", "outputDays"],
+      "properties": {
+        "days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+        "outputDays": { "type": "integer", "minimum": 1, "maximum": 3650 }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["size", "storageClass", "existingClaim"],
+      "properties": {
+        "size": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti)$" },
+        "storageClass": { "type": "string" },
+        "existingClaim": { "type": "string" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port"],
+      "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+    },
+    "resources": { "type": "object" },
+    "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+    "tolerations": { "type": "array", "items": { "type": "object" } },
+    "affinity": { "type": "object" },
+    "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+    "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } },
+    "global": { "type": "object" }
+  },
+  "$defs": {
+    "issuerRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "group"],
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "enum": ["Issuer", "ClusterIssuer"] },
+        "group": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -20,16 +20,18 @@ version=${tag#v}
 chart_version() { awk '/^version:/ {print $2; exit}' "$1"; }
 
 fail=0
-for chart in buildkit ci-accelerator; do
+for chart in buildkit console ci-accelerator; do
   v=$(chart_version "$ROOT/charts/$chart/Chart.yaml")
   if [ "$v" != "$version" ]; then
     echo "charts/$chart/Chart.yaml has version $v, the tag says $version" >&2; fail=1
   fi
 done
-dep=$(awk '/^  - name: buildkit$/ {found = 1; next} found && /^    version:/ {print $2; exit}' "$ROOT/charts/ci-accelerator/Chart.yaml")
-if [ "$dep" != "$version" ]; then
-  echo "charts/ci-accelerator depends on buildkit $dep, the tag says $version" >&2; fail=1
-fi
+for sub in buildkit console; do
+  dep=$(awk "/^  - name: $sub\$/ {found = 1; next} found && /^    version:/ {print \$2; exit}" "$ROOT/charts/ci-accelerator/Chart.yaml")
+  if [ "$dep" != "$version" ]; then
+    echo "charts/ci-accelerator depends on $sub $dep, the tag says $version" >&2; fail=1
+  fi
+done
 # Every release says what an upgrade to it means.
 "$ROOT/scripts/changelog-section.sh" "$version" >/dev/null || fail=1
 [ "$fail" = 0 ] || exit 1

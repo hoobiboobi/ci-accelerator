@@ -19,7 +19,7 @@ runner end to end. See "What the e2e proves" below.
 | Small jobs | 50m CPU / 64Mi requested, 512Mi memory limit: the build runs in the daemon |
 | Isolation | Jobs run in their own namespace (`runners.jobNamespace`, Pod Security `baseline` is enough), without a Kubernetes API token |
 | Least privilege | The runner gets only the permissions the Kubernetes executor needs in the jobs namespace, not the chart's default `*` on core resources |
-| Traces | A `pre_build_script` exports `TRACEPARENT` (one trace per job, its id derived from the pipeline and job ids) and `OTEL_RESOURCE_ATTRIBUTES` (pipeline, job, project) in every job, without changes to `.gitlab-ci.yml`; job pods get a `ci-accelerator.io/pipeline-id` annotation |
+| Traces | A `pre_build_script` exports `TRACEPARENT` (one trace per job, its id derived from the pipeline and job ids) and `OTEL_RESOURCE_ATTRIBUTES` (pipeline, job, project) in every job, without changes to `.gitlab-ci.yml`; job pods get `ci-accelerator.io/` annotations with the job's data from GitLab's CI variables (pipeline, project path, stage, start time, commit title and author, merge request) |
 
 A job then builds with:
 

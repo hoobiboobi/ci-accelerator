@@ -29,6 +29,10 @@ dependencies:
   - name: buildkit
     version: 0.1.0
     repository: file://../buildkit
+  - name: console
+    version: 0.1.0
+    repository: file://../console
+    condition: console.enabled
   - name: gitlab-runner
     version: 0.93.0
     repository: https://charts.gitlab.io

@@ -65,6 +65,10 @@ spec:
           args:
             - --config
             - {{ include "buildkit.configDir" . }}/buildkitd.toml
+            # The node, as a worker label: tools that read the daemons
+            # (the console) show which node each one runs on.
+            - --oci-worker-labels
+            - ci-accelerator.io/node=$(CI_ACCELERATOR_NODE_NAME)
           securityContext:
             # Rootful daemon: RUN steps run in runc sandboxes inside it. The
             # rootless variant is not supported yet.

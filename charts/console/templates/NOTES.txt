@@ -1,0 +1,20 @@
+The console reads the daemons behind {{ include "console.discover" . }}
+{{- with include "console.jobsNamespace" . }} and the CI job pods in {{ . }}{{ end }}.
+
+Its pages and API have no sign-in yet: keep it inside the cluster. To look
+at it:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "console.fullname" . }} {{ .Values.service.port }}
+
+then open http://localhost:{{ .Values.service.port }}/ (pipelines, builds and why
+they rebuilt, project insights, build nodes) or
+http://localhost:{{ .Values.service.port }}/api/v1/builds?limit=10.
+{{- if not (dig "token" "existingSecret" "" .Values.gitlab) }}
+
+Job times come from the job pods. With a GitLab token that can read the
+projects' jobs (gitlab.token.existingSecret), the pages also show the time
+before each build (runner and checkout) and jobs that ran elsewhere.
+{{- end }}
+
+The store is on the PersistentVolumeClaim {{ include "console.pvcName" . }}
+{{- if not .Values.persistence.existingClaim }}, which is kept when the release is removed{{ end }}.

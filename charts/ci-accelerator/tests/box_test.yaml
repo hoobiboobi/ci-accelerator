@@ -1,6 +1,7 @@
 suite: box
 templates:
   - jobs-namespace.yaml
+  - charts/buildkit/templates/configmap.yaml
   - validate.yaml
   - charts/gitlab-runner/templates/configmap.yaml
   - charts/buildkit/templates/certificates.yaml
@@ -69,6 +70,30 @@ tests:
       - matchRegex:
           path: data["config.template.toml"]
           pattern: '"ci-accelerator.io/pipeline-id" = "\$CI_PIPELINE_ID"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/pipeline-source" = "\$CI_PIPELINE_SOURCE"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/pipeline-created-at" = "\$CI_PIPELINE_CREATED_AT"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/project-path" = "\$CI_PROJECT_PATH"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/job-stage" = "\$CI_JOB_STAGE"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/job-started-at" = "\$CI_JOB_STARTED_AT"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/commit-title" = "\$CI_COMMIT_TITLE"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/commit-author" = "\$CI_COMMIT_AUTHOR"'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"ci-accelerator.io/merge-request-iid" = "\$CI_MERGE_REQUEST_IID"'
 
   # The prefix identifies the GitLab instance: ids repeat across them.
   - it: derives the trace-id prefix from the GitLab URL, after the scheme version
@@ -235,3 +260,36 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: 'buildkit.fullnameOverride and buildkit.nameOverride are not supported'
+
+  # The console's address in the job environment makes every job print the
+  # link to its page; without it, nothing is printed and nothing is set.
+  - it: prints each job's console page when the console's address is set
+    template: charts/gitlab-runner/templates/configmap.yaml
+    set:
+      global.console.url: https://console.example.com/
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"CI_ACCELERATOR_CONSOLE_URL=https://console.example.com/",'
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'echo "ci-accelerator: why this job.s builds take their time: \$\{CI_ACCELERATOR_CONSOLE_URL%/\}/jobs/[0-9a-f]{6}/\$CI_JOB_ID"'
+  - it: sets no console address by default
+    template: charts/gitlab-runner/templates/configmap.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["config.template.toml"]
+          pattern: CI_ACCELERATOR_CONSOLE_URL=
+  - it: refuses a console address that could break the runner configuration
+    template: jobs-namespace.yaml
+    set:
+      global.console.url: 'https://x/"]'
+    asserts:
+      - failedTemplate: {}
+  # The console reads the history again after a restart.
+  - it: keeps 1000 build records per daemon for the console
+    template: charts/buildkit/templates/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '\[history\]\n  maxAge = "48h"\n  maxEntries = 1000'

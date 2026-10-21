@@ -21,6 +21,16 @@
         "jobs"
       ],
       "properties": {
+        "console": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The console's address as users reach it; printed in every job's log.",
+              "pattern": "^$|^https?://[^\\s\"'\\\\]+$"
+            }
+          }
+        },
         "jobs": {
           "type": "object",
           "additionalProperties": false,

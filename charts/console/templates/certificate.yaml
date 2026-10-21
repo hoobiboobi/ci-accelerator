@@ -1,0 +1,31 @@
+{{- if not .Values.tls.existingSecret }}
+{{- if not (.Capabilities.APIVersions.Has "cert-manager.io/v1") }}
+{{- fail "console: the client certificate is issued with cert-manager, whose API (cert-manager.io/v1) this cluster does not have. Install cert-manager, or set tls.existingSecret to a Secret with ca.crt, tls.crt and tls.key signed by the daemons' CA. For an offline render pass --api-versions cert-manager.io/v1." }}
+{{- end }}
+# The console's client certificate for the daemons, from their CA.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "console.fullname" . }}-client
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "console.tlsSecretName" . }}
+  commonName: {{ include "console.fullname" . | trunc 64 | quote }}
+  usages:
+    - client auth
+    - digital signature
+  duration: {{ .Values.tls.certManager.duration }}
+  renewBeforePercentage: {{ int .Values.tls.certManager.renewBeforePercentage }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    {{- include "console.issuerRef" . | nindent 4 }}
+  secretTemplate:
+    labels:
+      {{- include "console.selectorLabels" . | nindent 6 }}
+      {{- include "console.componentLabels" . | nindent 6 }}
+{{- end }}
