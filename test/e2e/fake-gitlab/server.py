@@ -26,14 +26,16 @@ QUEUE = []  # job ids waiting for a runner
 JOBS = {}  # id -> {"spec": ..., "state": ..., "trace": ...}
 
 
-def job_payload(job_id, spec):
+def job_payload(job_id, spec, host):
     timeout = spec.get("timeout", 600)
     return {
         "id": job_id,
         "token": "job-token-%d" % job_id,
         "allow_git_fetch": False,
         "job_info": {"name": "e2e-%d" % job_id, "stage": "build", "project_id": 1, "project_name": "e2e"},
-        "git_info": {"repo_url": "", "ref": "main", "sha": "0" * 40, "before_sha": "0" * 40, "ref_type": "branch"},
+        # As GitLab sends it: with the job token in it. The runner derives the
+        # job's URL from it (and must drop the token).
+        "git_info": {"repo_url": "http://gitlab-ci-token:job-token-%d@%s/e2e/project.git" % (job_id, host), "ref": "main", "sha": "0" * 40, "before_sha": "0" * 40, "ref_type": "branch"},
         "runner_info": {"timeout": timeout},
         # No checkout: the job builds a context it writes itself.
         # A few of the predefined variables GitLab sends; the runner adds the
@@ -43,6 +45,14 @@ def job_payload(job_id, spec):
             {"key": "CI_JOB_ID", "value": str(job_id), "public": True},
             {"key": "CI_PIPELINE_ID", "value": str(spec.get("pipeline_id", 1000)), "public": True},
             {"key": "CI_PROJECT_PATH", "value": "e2e/project", "public": True},
+            {"key": "CI_PIPELINE_SOURCE", "value": "push", "public": True},
+            {"key": "CI_PIPELINE_CREATED_AT", "value": "2026-10-20T10:00:00Z", "public": True},
+            {"key": "CI_JOB_STAGE", "value": "build", "public": True},
+            {"key": "CI_JOB_STARTED_AT", "value": "2026-10-20T10:00:05Z", "public": True},
+            # A commit title is written by whoever pushes: it must reach the
+            # pod as text, never expanded.
+            {"key": "CI_COMMIT_TITLE", "value": 'e2e: "quoted" $CI_JOB_ID ${CI_PIPELINE_ID}', "public": True},
+            {"key": "CI_COMMIT_AUTHOR", "value": "E2E Author <e2e@example.com>", "public": True},
         ],
         "steps": [{"name": "script", "script": spec["script"], "timeout": timeout, "when": "on_success", "allow_failure": False}],
         "image": {"name": spec["image"]},
@@ -77,7 +87,7 @@ class Handler(BaseHTTPRequestHandler):
                 job_id = QUEUE.pop(0) if QUEUE else None
                 if job_id is not None:
                     JOBS[job_id]["state"] = "running"
-                    return self._send(201, job_payload(job_id, JOBS[job_id]["spec"]))
+                    return self._send(201, job_payload(job_id, JOBS[job_id]["spec"], self.headers.get("Host", "fake-gitlab")))
             return self._send(204)
         if self.path == "/e2e/jobs":
             spec = json.loads(body or b"{}")

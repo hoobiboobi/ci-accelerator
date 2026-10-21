@@ -1,0 +1,12 @@
+# e2e-only: the box's console, from the image `make console-image` loads
+# into kind, on the control-plane node like the storage.
+console:
+  enabled: true
+  image:
+    repository: ci-accelerator-console
+    tag: dev
+    pullPolicy: Never
+  persistence:
+    size: 1Gi
+  tolerations:
+    - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
