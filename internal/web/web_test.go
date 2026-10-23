@@ -27,6 +27,10 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
+// testNow is the pages' clock: the recorded builds were made the evening
+// before.
+var testNow = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+
 var ctx = context.Background()
 
 const evil = `<script>alert(1)</script><img src=x onerror=alert(2)>`
@@ -44,6 +48,13 @@ func consoleServer(t *testing.T) (*httptest.Server, *store.Store, map[string]int
 }
 
 func consoleWith(t *testing.T, opt Options) (*httptest.Server, *store.Store, map[string]int64, *Server) {
+	t.Helper()
+	return consoleBuild(t, func(*store.Store) Options { return opt }, httptest.NewServer)
+}
+
+// consoleBuild is consoleWith for options that need the store (sign-in),
+// served by start (plain or TLS).
+func consoleBuild(t *testing.T, options func(*store.Store) Options, start func(http.Handler) *httptest.Server) (*httptest.Server, *store.Store, map[string]int64, *Server) {
 	t.Helper()
 	st, err := store.Open(ctx, t.TempDir(), store.Options{Now: func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }})
 	if err != nil {
@@ -118,13 +129,18 @@ func consoleWith(t *testing.T, opt Options) (*httptest.Server, *store.Store, map
 	if os.Getenv("WEB_TEST_LOG") != "" {
 		logTo = os.Stderr
 	}
-	srv, err := New(st, slog.New(slog.NewTextHandler(logTo, nil)), opt)
+	srv, err := New(st, slog.New(slog.NewTextHandler(logTo, nil)), options(st))
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The pages' windows (the last 24 hours, 7 days) end when the
+	// recorded builds were made.
+	srv.now = func() time.Time { return testNow }
 	mux := http.NewServeMux()
 	srv.Register(mux)
-	ts := httptest.NewServer(Secure(mux))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") })
+	mux.HandleFunc("GET /api/v1/builds", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "[]") })
+	ts := start(Secure(srv.Gate(mux)))
 	t.Cleanup(ts.Close)
 	return ts, st, ids, srv
 }
@@ -194,12 +210,32 @@ func (p page) safe(t *testing.T) {
 	}
 }
 
-// Every page reachable from the home page renders, is safe, and the data
+// pipelines returns the pipelines of the recorded builds, newest first,
+// with their builds.
+func pipelines(t *testing.T, st *store.Store) (keys []string, builds map[string][]store.BuildRow) {
+	t.Helper()
+	inst := history.InstancePrefix("https://gitlab.example.com/")
+	rows, err := st.Builds(ctx, store.BuildQuery{Project: store.ProjectKey{Instance: inst, ID: 42}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	builds = map[string][]store.BuildRow{}
+	for _, b := range rows {
+		k := store.PipelineKey(b.Instance, b.Pipeline)
+		if _, ok := builds[k]; !ok {
+			keys = append(keys, k)
+		}
+		builds[k] = append(builds[k], b)
+	}
+	return keys, builds
+}
+
+// Every page reachable from the overview renders, is safe, and the data
 // with markup shows up as text.
 func TestPagesRenderAndEscape(t *testing.T) {
 	ts, _, _ := console(t)
 	seen := map[string]bool{}
-	queue := []string{"/"}
+	queue := []string{"/", "/builds?group=pipeline", "/images?window=7d", "/nodes"}
 	kinds := map[string]int{}
 	for len(queue) > 0 {
 		path := queue[0]
@@ -209,17 +245,12 @@ func TestPagesRenderAndEscape(t *testing.T) {
 		}
 		seen[path] = true
 		p := get(t, ts, path)
-		if p.status == http.StatusFound {
+		if p.status == http.StatusFound || p.status == http.StatusMovedPermanently {
 			queue = append(queue, p.header.Get("Location"))
 			continue
 		}
-		for _, m := range stepSpan.FindAllStringSubmatch(p.body, -1) {
-			if m[1] == m[2] {
-				t.Errorf("%s: a step's time range with equal ends: %s", path, m[0])
-			}
-		}
 		if p.status != http.StatusOK {
-			t.Errorf("%s: %d %s", path, p.status, p.body)
+			t.Errorf("%s: %d %.200s", path, p.status, p.body)
 			continue
 		}
 		if strings.HasPrefix(path, "/static/") {
@@ -248,7 +279,7 @@ func TestPagesRenderAndEscape(t *testing.T) {
 			}
 		}
 	}
-	if kinds[""] != 1 || kinds["pipelines"] < 8 || kinds["builds"] < 13 {
+	if kinds[""] != 1 || kinds["pipelines"] < 8 || kinds["builds"] < 13 || kinds["images"] < 3 || kinds["nodes"] != 1 {
 		t.Errorf("pages visited: %v", kinds)
 	}
 	all := ""
@@ -260,6 +291,7 @@ func TestPagesRenderAndEscape(t *testing.T) {
 	for _, want := range []string{
 		"fix &lt;script&gt;alert(1)&lt;/script&gt;", // commit title
 		"build-api&lt;script&gt;",                   // job name
+		"main&lt;script&gt;",                        // branch
 		"RUN echo &#39;&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(2)&gt;&#39;", // step name
 	} {
 		if !strings.Contains(all, want) {
@@ -272,7 +304,7 @@ func TestNotFoundAndBadPaths(t *testing.T) {
 	ts, _, _ := console(t)
 	for _, path := range []string{
 		"/builds/99999", "/builds/abc", "/builds/1/steps/999", "/builds/1/steps/-1", "/builds/1/steps/x",
-		"/pipelines/abcdef/1", "/pipelines/abcdef/x", "/jobs/abcdef/77", "/jobs/abcdef/x", "/nope",
+		"/pipelines/abcdef/1", "/pipelines/abcdef/x", "/jobs/abcdef/77", "/jobs/abcdef/x", "/images/no-such-image", "/nope",
 	} {
 		p := get(t, ts, path)
 		if p.status != http.StatusNotFound {
@@ -285,6 +317,10 @@ func TestNotFoundAndBadPaths(t *testing.T) {
 	}
 	if p := get(t, ts, "/builds/99999?x="+url.QueryEscape(evil)); p.status != http.StatusNotFound {
 		t.Errorf("unknown build with a query: %d", p.status)
+	}
+	// The first preview's insights page moved.
+	if p := get(t, ts, "/insights"); p.status != http.StatusMovedPermanently || p.header.Get("Location") != "/images" {
+		t.Errorf("/insights: %d %q", p.status, p.header.Get("Location"))
 	}
 }
 
@@ -306,63 +342,539 @@ func TestStaticFilesAreVersioned(t *testing.T) {
 	}
 }
 
-// A job's address leads to its last build.
-func TestJobRedirect(t *testing.T) {
-	ts, st, ids := console(t)
-	ps, err := st.Pipelines(ctx, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, jobs, builds, err := st.PipelinePage(ctx, ps[0].Instance, ps[0].ID)
-	if err != nil || len(jobs) == 0 {
-		t.Fatal(jobs, err)
-	}
-	var want int64
-	for _, b := range builds {
-		if b.Build.Attribution.Job == jobs[0].ID && b.ID > want {
-			want = b.ID
+// The overview: one sentence, the reasons for rebuilds by the time they
+// took, the images with their last builds.
+func TestOverview(t *testing.T) {
+	ts, st, _ := console(t)
+	_, byPipe := pipelines(t, st)
+	n, cached := 0, 0
+	for _, bs := range byPipe {
+		for _, b := range bs {
+			n++
+			if b.Built == 0 && b.Error == "" {
+				cached++
+			}
 		}
 	}
-	p := get(t, ts, fmt.Sprintf("/jobs/%s/%d", ps[0].Instance, jobs[0].ID))
-	if p.status != http.StatusFound || p.header.Get("Location") != fmt.Sprintf("/builds/%d?via=log", want) {
-		t.Errorf("job redirect: %d to %q, want build %d (%d builds stored)", p.status, p.header.Get("Location"), want, len(ids))
+	p := get(t, ts, "/")
+	p.safe(t)
+	want := fmt.Sprintf("<b>%d</b> image builds in the last 24 hours, <b>%d%%</b> fully from the cache.", n, cached*100/n)
+	if !strings.Contains(p.body, want) {
+		t.Errorf("overview sentence: want %q in %s", want, p.body)
 	}
-	// Arriving from the job log, the page says how, with the line.
-	via := get(t, ts, p.header.Get("Location"))
-	if !strings.Contains(via.body, "How you got here") || !strings.Contains(via.body, fmt.Sprintf("/jobs/%s/%d", ps[0].Instance, jobs[0].ID)) {
-		t.Errorf("no way back to the job log")
+	if !strings.Contains(p.body, "Why images were rebuilt") || strings.Count(p.body, `class="rrow"`) == 0 {
+		t.Error("no reasons")
 	}
-	if strings.Contains(get(t, ts, fmt.Sprintf("/builds/%d", want)).body, "How you got here") {
-		t.Errorf("the job-log banner shows without the job log")
+	// Reasons come most time first.
+	var lost []time.Duration
+	for _, m := range regexp.MustCompile(`<span class="rl">([^<]+)</span>`).FindAllStringSubmatch(p.body, -1) {
+		lost = append(lost, parseDur(t, m[1]))
+	}
+	if !sort.SliceIsSorted(lost, func(i, j int) bool { return lost[i] > lost[j] }) {
+		t.Errorf("reasons not by time lost: %v", lost)
+	}
+	// What needs attention, not a wall of figures: the images are a page
+	// of their own, where each strip has its legend.
+	if strings.Contains(p.body, `class="sq st-`) || !strings.Contains(p.body, `href="/images"`) {
+		t.Error("the overview draws image strips, or does not link the images")
+	}
+	img := get(t, ts, "/images")
+	if strings.Count(img.body, `class="sq st-`) == 0 {
+		t.Error("no image strips")
+	}
+	// Five statuses at most, and never colour alone: each has its word.
+	for _, k := range statusKeys {
+		if !strings.Contains(img.body, statuses[k].Label+"</span>") {
+			t.Errorf("legend lacks %q", statuses[k].Label)
+		}
+	}
+	// A week back the same builds; two days later none in the window.
+	if w := get(t, ts, "/?window=7d"); !strings.Contains(w.body, "in the last 7 days") {
+		t.Error("7-day window")
 	}
 }
 
-// The pipeline page's Dockerfile has one cell per job on every line, so a
-// job that did not run a line leaves its cell empty instead of shifting
-// the next job's result into its column.
-func TestPipelineDockerfileColumns(t *testing.T) {
-	ts, st, _ := console(t)
-	ps, err := st.Pipelines(ctx, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checked := 0
-	for _, pl := range ps {
-		if pl.Builds < 2 {
-			continue
+// parseDur reads a duration as the pages print it.
+func parseDur(t *testing.T, s string) time.Duration {
+	t.Helper()
+	s = strings.ReplaceAll(s, "\u00a0", " ")
+	var d time.Duration
+	for _, part := range []struct {
+		re   string
+		unit time.Duration
+	}{{`([0-9.]+) h`, time.Hour}, {`([0-9.]+) min`, time.Minute}, {`([0-9.]+) s`, time.Second}} {
+		if m := regexp.MustCompile(part.re).FindStringSubmatch(s); m != nil {
+			f, _ := strconv.ParseFloat(m[1], 64)
+			d += time.Duration(f * float64(part.unit))
 		}
-		p := get(t, ts, fmt.Sprintf("/pipelines/%s/%d", pl.Instance, pl.ID))
-		cols := strings.Count(p.body, `<span class="jh"`)
-		rows := regexp.MustCompile(`(?s)<span class="dr">(.*?)</span>\s*</div>`).FindAllStringSubmatch(p.body, -1)
-		for _, r := range rows[1:] {
-			if n := strings.Count(r[1], `class="jc`); n != cols {
-				t.Errorf("pipeline %d: a line has %d cells for %d jobs: %s", pl.ID, n, cols, r[1])
+	}
+	return d
+}
+
+// The build list: every build, newest first, with filters in the address
+// and pages of fifty.
+func TestBuildList(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	all := 0
+	for _, bs := range byPipe {
+		all += len(bs)
+	}
+	rows := func(path string) []string {
+		p := get(t, ts, path)
+		p.safe(t)
+		return regexp.MustCompile(`<a class="brow[^"]*" href="(/builds/\d+)"`).FindAllString(p.body, -1)
+	}
+	if n := len(rows("/builds")); n != all {
+		t.Errorf("all builds: %d of %d", n, all)
+	}
+	rebuilt := rows("/builds?outcome=rebuilt")
+	cached := rows("/builds?outcome=cached")
+	if len(rebuilt)+len(cached) != all || len(rebuilt) == 0 || len(cached) == 0 {
+		t.Errorf("rebuilt %d + cached %d != %d", len(rebuilt), len(cached), all)
+	}
+	sum := 0
+	for _, o := range []string{"change", "farm", "unclear", "failed"} {
+		got := rows("/builds?outcome=" + o)
+		sum += len(got)
+		body := get(t, ts, "/builds?outcome="+o).body
+		if c := strings.Count(body, `class="stat st-`+o+`"`); o != "failed" && c != len(got) {
+			t.Errorf("outcome %s: %d rows, %d of that status", o, len(got), c)
+		}
+	}
+	if sum != len(rebuilt) {
+		t.Errorf("statuses add up to %d, rebuilt %d", sum, len(rebuilt))
+	}
+	// Cached builds are in the list, quietly.
+	if !strings.Contains(get(t, ts, "/builds").body, `class="brow quiet"`) {
+		t.Error("cached builds are not quiet")
+	}
+	// One image only.
+	img := get(t, ts, "/builds?image=api").body
+	if n := strings.Count(img, `<span class="bn">api</span>`); n == 0 || n != strings.Count(img, `class="brow`) {
+		t.Errorf("image filter: %d of %d", n, strings.Count(img, `class="brow`))
+	}
+	// Grouped by pipeline: a heading per pipeline, linking its page.
+	g := get(t, ts, "/builds?group=pipeline").body
+	if n := strings.Count(g, `class="boxh pgh"`); n != len(keys) {
+		t.Errorf("%d groups for %d pipelines", n, len(keys))
+	}
+	// An unknown outcome is no filter.
+	if n := len(rows("/builds?outcome=" + url.QueryEscape(evil))); n != all {
+		t.Errorf("an unknown outcome filtered: %d", n)
+	}
+}
+
+// Pages of the list: fifty builds, then an address for the older ones.
+func TestBuildListPages(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	base := byPipe[keys[0]][0]
+	for i := 0; i < 60; i++ {
+		b, err := st.BuildPage(ctx, base.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := *b.Build
+		x.Ref = fmt.Sprintf("page-%d", i)
+		x.Started = testNow.Add(-time.Duration(i+1) * time.Minute)
+		x.Completed = x.Started.Add(3 * time.Second)
+		if _, err := st.SaveBuild(ctx, store.Build{Build: &x, Generation: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := get(t, ts, "/builds")
+	if n := strings.Count(first.body, `class="brow`); n != pageSize {
+		t.Fatalf("first page: %d builds", n)
+	}
+	m := regexp.MustCompile(`href="(/builds\?before=\d+)"`).FindStringSubmatch(first.body)
+	if m == nil {
+		t.Fatal("no address for older builds")
+	}
+	second := get(t, ts, strings.ReplaceAll(m[1], "&amp;", "&"))
+	if n := strings.Count(second.body, `class="brow`); n == 0 || !strings.Contains(second.body, `href="/builds">Newest</a>`) {
+		t.Errorf("second page: %d builds", n)
+	}
+	firstIDs := regexp.MustCompile(`href="/builds/(\d+)"`).FindAllString(first.body, -1)
+	for _, id := range regexp.MustCompile(`href="/builds/(\d+)"`).FindAllString(second.body, -1) {
+		for _, f := range firstIDs {
+			if f == id {
+				t.Errorf("%s on both pages", id)
 			}
+		}
+	}
+}
+
+// A pipeline's page: its image builds, rebuilt first, one timeline, and
+// how many other jobs it had.
+func TestPipelinePage(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	checked := 0
+	for _, k := range keys {
+		bs := byPipe[k]
+		p := get(t, ts, "/pipelines/"+k)
+		p.safe(t)
+		if p.status != 200 {
+			t.Fatalf("%s: %d", k, p.status)
+		}
+		// One job row per build on the timeline, opening into its steps.
+		if n := len(regexp.MustCompile(`class="row k-job[^"]*"[^>]*data-link="/builds/\d+"`).FindAllString(p.body, -1)); n != len(bs) {
+			t.Errorf("%s: timeline of %d builds for %d", k, n, len(bs))
+		}
+		if !strings.Contains(p.body, `data-wf`) || !strings.Contains(p.body, `class="row k-step`) {
+			t.Errorf("%s: the timeline has no steps", k)
+		}
+		if !strings.Contains(p.body, fmt.Sprintf("%d image", len(bs))) && !strings.Contains(p.body, fmt.Sprintf("All %d image", len(bs))) {
+			t.Errorf("%s: sentence does not count %d images", k, len(bs))
 		}
 		checked++
 	}
-	if checked == 0 {
-		t.Fatal("no pipeline with several builds")
+	if checked < 8 {
+		t.Errorf("%d pipelines", checked)
+	}
+	// Jobs that built nothing are one line, with GitLab's page.
+	inst, id, _ := strings.Cut(keys[0], "/")
+	pid, _ := strconv.ParseUint(id, 10, 64)
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 9_100_001, PipelineID: pid, ProjectID: 42, Name: "unit-tests",
+		URL: "https://gitlab.example.com/p/-/jobs/9100001"}); err != nil {
+		t.Fatal(err)
+	}
+	p := get(t, ts, "/pipelines/"+keys[0])
+	if !strings.Contains(p.body, "1 other job of this pipeline built no image here") ||
+		!strings.Contains(p.body, `href="https://gitlab.example.com/p/-/pipelines/`+id+`"`) {
+		t.Error("the other jobs are not one line with GitLab's link")
+	}
+	if strings.Contains(p.body, "unit-tests") {
+		t.Error("a job without a build is listed")
+	}
+}
+
+// A job's address leads to its last build; a job that built nothing gets
+// a short page that says so.
+func TestJobPages(t *testing.T) {
+	f, asked := fakeGitLab(t, "Running with gitlab-runner\n$ make test\ntoken glpat-AbCdEfGhIjKlMnOpQrSt12 used\nok\n")
+	ts, st, _, _ := consoleWith(t, Options{API: f, Token: gitlab.Token("t")})
+	keys, byPipe := pipelines(t, st)
+	b := byPipe[keys[0]][0]
+	p := get(t, ts, fmt.Sprintf("/jobs/%s/%d", b.Instance, b.Job))
+	if p.status != http.StatusFound || !strings.HasPrefix(p.header.Get("Location"), "/builds/") || !strings.HasSuffix(p.header.Get("Location"), "?via=log") {
+		t.Fatalf("job redirect: %d to %q", p.status, p.header.Get("Location"))
+	}
+	// Arriving from the job log, the page says how, with the line.
+	via := get(t, ts, p.header.Get("Location"))
+	if !strings.Contains(via.body, "From the GitLab job log") || !strings.Contains(via.body, fmt.Sprintf("/jobs/%s/%d", b.Instance, b.Job)) {
+		t.Errorf("no way back to the job log")
+	}
+	if strings.Contains(get(t, ts, strings.TrimSuffix(p.header.Get("Location"), "?via=log")).body, "From the GitLab job log") {
+		t.Errorf("the job-log banner shows without the job log")
+	}
+	inst, id, _ := strings.Cut(keys[0], "/")
+	pid, _ := strconv.ParseUint(id, 10, 64)
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 9_100_002, PipelineID: pid, ProjectID: 42, Name: "lint" + evil,
+		URL: "https://gitlab.example.com/p/-/jobs/9100002"}); err != nil {
+		t.Fatal(err)
+	}
+	j := get(t, ts, fmt.Sprintf("/jobs/%s/9100002", inst))
+	j.safe(t)
+	if j.status != 200 || !strings.Contains(j.body, "This job built no image on the box.") || !strings.Contains(j.body, "lint&lt;script&gt;") ||
+		!strings.Contains(j.body, `data-url="/jobs/`+inst+`/9100002/log"`) {
+		t.Errorf("job page: %d", j.status)
+	}
+	// The log is read from GitLab only when asked, masked.
+	if *asked != "" {
+		t.Errorf("a log was read before anyone asked: %s", *asked)
+	}
+	lg := get(t, ts, fmt.Sprintf("/jobs/%s/9100002/log", inst))
+	if lg.status != 200 || *asked != "/api/v4/projects/42/jobs/9100002/trace" || strings.Contains(lg.body, "glpat-") || !strings.Contains(lg.body, "[masked]") {
+		t.Errorf("log: %d %q, asked %q", lg.status, lg.body, *asked)
+	}
+}
+
+// An image's page: its builds over a window, the steps that rebuild most,
+// the reasons; no builds in a window is a page that says so.
+func TestImagePage(t *testing.T) {
+	ts, st, _ := console(t)
+	_, byPipe := pipelines(t, st)
+	n := 0
+	for _, bs := range byPipe {
+		for _, b := range bs {
+			if b.Target == "api" {
+				n++
+			}
+		}
+	}
+	p := get(t, ts, "/images/api?window=7d")
+	p.safe(t)
+	if p.status != 200 || !strings.Contains(p.body, fmt.Sprintf("of %d builds in the last 7 days", n)) {
+		t.Errorf("image page: %d", p.status)
+	}
+	if strings.Count(p.body, `class="dot st-`) != n {
+		t.Errorf("%d dots for %d builds", strings.Count(p.body, `class="dot st-`), n)
+	}
+	if !strings.Contains(p.body, "Steps that rebuild most") || strings.Count(p.body, `<div class="srow">`) == 0 {
+		t.Error("no steps")
+	}
+	if steps := regexp.MustCompile(`(?s)<div class="srows">.*?</section>`).FindString(p.body); steps == "" || strings.Contains(steps, "FROM ") {
+		t.Errorf("resolving a base image counted as a rebuilt step: %.300s", steps)
+	}
+	list := get(t, ts, "/images?window=7d")
+	if !strings.Contains(list.body, `href="/images/api"`) {
+		t.Error("images list lacks api")
+	}
+
+	// The year comes from the daily figures: finished days only.
+	before := 0
+	for _, bs := range byPipe {
+		for _, b := range bs {
+			if b.Target == "api" && b.Started.Before(testNow.Truncate(24*time.Hour)) {
+				before++
+			}
+		}
+	}
+	if err := st.Rollup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	y := get(t, ts, "/images/api?window=1y")
+	y.safe(t)
+	switch {
+	case y.status != 200:
+		t.Errorf("year: %d", y.status)
+	case before == 0:
+		if !strings.Contains(y.body, "No build of api in the last year") {
+			t.Errorf("year without finished days: %.300s", y.body)
+		}
+	default:
+		if !strings.Contains(y.body, fmt.Sprintf("of %d builds in the last year", before)) || strings.Count(y.body, `class="wcol"`) < 52 {
+			t.Errorf("year: %d builds before today, %d weeks", before, strings.Count(y.body, `class="wcol"`))
+		}
+	}
+}
+
+// A live page's stream says when its pipeline changed, and only its own;
+// a project's page hears its project's pipelines and says something is
+// new rather than reloading.
+func TestEvents(t *testing.T) {
+	ts, st, _, srv := consoleServer(t)
+	srv.Heartbeat = 50 * time.Millisecond
+	keys, byPipe := pipelines(t, st)
+	key := keys[0]
+	mine, other := byPipe[keys[0]][0], byPipe[keys[1]][0]
+	home := get(t, ts, "/")
+	pipe := get(t, ts, "/pipelines/"+key)
+	project := "project:" + mine.Instance + "/42"
+	if !strings.Contains(home.body, `data-live="`+project+`"`) || !strings.Contains(home.body, `data-live-notify="true"`) ||
+		!strings.Contains(pipe.body, `data-live="`+key+`"`) || strings.Contains(pipe.body, `data-live-notify`) {
+		t.Fatalf("live markers missing")
+	}
+	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	stream := func(q string) (func(bool) string, func()) {
+		req, _ := http.NewRequestWithContext(sctx, "GET", ts.URL+"/events?"+q, nil)
+		res, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Header.Get("Content-Type") != "text/event-stream" || res.Header.Get("Content-Security-Policy") == "" {
+			t.Errorf("headers %v", res.Header)
+		}
+		lines := make(chan string)
+		go func() {
+			sc := bufio.NewScanner(res.Body)
+			for sc.Scan() {
+				lines <- sc.Text()
+			}
+			close(lines)
+		}()
+		return func(skipPings bool) string {
+			t.Helper()
+			for {
+				select {
+				case l, ok := <-lines:
+					if !ok {
+						t.Fatal("stream closed")
+					}
+					if l == "" || strings.HasPrefix(l, "retry:") || (skipPings && l == ": ping") {
+						continue
+					}
+					return l
+				case <-sctx.Done():
+					t.Fatal("no event")
+				}
+			}
+		}, func() { res.Body.Close() }
+	}
+	next, done := stream("pipeline=" + url.QueryEscape(key))
+	defer done()
+	if l := next(false); l != ": ping" {
+		t.Errorf("first line %q, want a heartbeat", l)
+	}
+	job := func(b store.BuildRow, project uint64, name string) {
+		if err := st.SaveJob(ctx, store.Job{Instance: b.Instance, JobID: 9_000_000 + b.Pipeline, PipelineID: b.Pipeline, ProjectID: project, Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	job(other, 42, "elsewhere")
+	st.Announce("")
+	job(mine, 42, "here")
+	if l := next(true); l != "event: changed" {
+		t.Errorf("got %q", l)
+	}
+	if l := next(true); l != "data: "+key {
+		t.Errorf("got %q, want only the page's pipeline", l)
+	}
+	// The project's stream: its pipelines, not another project's.
+	pnext, pdone := stream("project=" + url.QueryEscape(mine.Instance+"/42"))
+	defer pdone()
+	if err := st.SaveJob(ctx, store.Job{Instance: mine.Instance, JobID: 9_200_001, PipelineID: 9_200_000, ProjectID: 7, Name: "other project"}); err != nil {
+		t.Fatal(err)
+	}
+	job(other, 42, "again")
+	if l := pnext(true); l != "event: changed" {
+		t.Errorf("project stream got %q", l)
+	}
+	if l := pnext(true); l != "data: "+store.PipelineKey(other.Instance, other.Pipeline) {
+		t.Errorf("project stream got %q, want its own pipeline only", l)
+	}
+}
+
+type live []collector.DaemonState
+
+func (l live) Daemons() []collector.DaemonState { return l }
+
+// The nodes page shows each daemon's cache and running builds.
+func TestNodes(t *testing.T) {
+	started := testNow.Add(-42 * time.Second)
+	daemons := live{{Name: "box-buildkit-abcde", Connected: true, InspectedAt: testNow,
+		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1",
+			GC: []collector.GCRule{{Filters: []string{"type==exec.cachemount"}, Keep: 336 * time.Hour}, {MaxUsed: 40 << 30, MinFree: 16 << 30}},
+			Usage: collector.Usage{Total: 300 << 20, Images: 200 << 20, Layers: 90 << 20, Mounts: 10 << 20,
+				ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20, "golang:1.27": 300 << 20},
+				MountList:  []collector.Mount{{Description: "cached mount /root/.cache/pip from exec x", Size: 10 << 20, LastUsed: testNow}}}},
+		Active: []collector.Active{{Daemon: "box-buildkit-abcde", Target: "api" + evil, Started: started}}},
+		{Name: "box-buildkit-fghij", Connected: false, Inspection: collector.Inspection{Usage: collector.Usage{ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20}}}}}
+	ts, _, _, _ := consoleWith(t, Options{Live: daemons, Release: "box"})
+	nodes := get(t, ts, "/nodes")
+	nodes.safe(t)
+	for _, want := range []string{"1 ready of 2", "on node-1", "300 MB", "/root/.cache/pip cache mount", "Duplicate cache",
+		"python:3.13-slim", "Keep cache up to", "40.0 GB per node", "14 days after last use", "Running now", "Unreachable", "release <code>box</code>",
+		"replaced since"} {
+		if !strings.Contains(nodes.body, want) {
+			t.Errorf("nodes page lacks %q", want)
+		}
+	}
+	if strings.Contains(nodes.body, "golang:1.27") {
+		t.Errorf("an image on one node listed as duplicate")
+	}
+	if !strings.Contains(get(t, ts, "/").body, `class="wdot"`) {
+		t.Errorf("no warning dot for the unreachable daemon")
+	}
+}
+
+// rewrite sends every request to the test server, whatever host it names.
+type rewrite struct{ to *url.URL }
+
+func (r rewrite) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.URL.Scheme, req.URL.Host = r.to.Scheme, r.to.Host
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// The build page reads the job's times from GitLab once, and says what
+// the job spent besides building.
+func TestGitLabAPIOnOpen(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	var ids []uint64
+	var starts []time.Time
+	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		var out []map[string]any
+		for i, id := range ids {
+			out = append(out, map[string]any{"id": id, "name": "x", "status": "success",
+				"started_at": starts[i].Add(-5 * time.Second).Format(time.RFC3339Nano), "finished_at": starts[i].Add(time.Minute).Format(time.RFC3339Nano),
+				"duration": 65.0, "queued_duration": 3.0, "pipeline": map[string]any{"status": "success", "web_url": "https://gitlab.example.com/p/-/pipelines/1"}})
+		}
+		json.NewEncoder(w).Encode(out)
+	}))
+	defer gl.Close()
+	to, _ := url.Parse(gl.URL)
+	client := gitlab.New([]string{"https://gitlab.example.com/"})
+	client.HTTP = &http.Client{Transport: rewrite{to}}
+	f := &gitlab.Fetcher{Client: client}
+	ts, st, _, srv := consoleWith(t, Options{API: f, Token: gitlab.Token("t")})
+	f.Store = st
+	srv.APIWait = 3 * time.Second
+	keys, byPipe := pipelines(t, st)
+	builds := byPipe[keys[0]]
+	mu.Lock()
+	seen := map[uint64]bool{}
+	for i := len(builds) - 1; i >= 0; i-- {
+		b := builds[i]
+		if !seen[b.Job] {
+			seen[b.Job] = true
+			ids, starts = append(ids, b.Job), append(starts, b.Started)
+		}
+	}
+	mu.Unlock()
+	page := get(t, ts, fmt.Sprintf("/builds/%d", builds[0].ID))
+	if !strings.Contains(page.body, "1\u00a0min 5\u00a0s in all") || !strings.Contains(page.body, "Waited for a runner") {
+		t.Errorf("the build page did not use GitLab's job times (%d calls)", calls)
+	}
+	get(t, ts, fmt.Sprintf("/builds/%d", builds[0].ID))
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Errorf("%d calls to GitLab for a finished pipeline", calls)
+	}
+}
+
+// A reason that names a daemon that is gone says so.
+func TestGoneDaemon(t *testing.T) {
+	ts, st, _, _ := consoleWith(t, Options{Live: live{{Name: "daemon-a", Connected: true}}})
+	keys, byPipe := pipelines(t, st)
+	row := byPipe[keys[0]][0]
+	p, err := st.BuildPage(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := p.Build
+	err = st.SetReason(ctx, b.Ref, b.Daemon, history.Reason{Kind: history.CacheElsewhere, Step: b.Steps[len(b.Steps)-1],
+		Old: "box-buildkit-old12", New: "daemon-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page := get(t, ts, fmt.Sprintf("/builds/%d", row.ID)); !strings.Contains(page.body, "<b>old12</b> is gone") {
+		t.Errorf("no note that the daemon is gone")
+	}
+}
+
+// The build page: the verdict, what changed since the previous build of
+// the target (only what differs), the steps.
+func TestBuildPage(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	compared := 0
+	for _, k := range keys {
+		for _, b := range byPipe[k] {
+			p := get(t, ts, fmt.Sprintf("/builds/%d", b.ID))
+			p.safe(t)
+			st := rowStatus(b)
+			if !strings.Contains(p.body, `class="stat st-`+st.Key+`"`) || !strings.Contains(p.body, st.Long+"</span>") {
+				t.Errorf("build %d: status %s not shown", b.ID, st.Key)
+			}
+			if strings.Contains(p.body, "What changed since the previous build") && strings.Contains(p.body, `<dl class="chg">`) {
+				compared++
+			}
+			if !strings.Contains(p.body, fmt.Sprintf("<b>%d</b> of ", b.Built)) {
+				t.Errorf("build %d: steps run not said", b.ID)
+			}
+		}
+	}
+	if compared == 0 {
+		t.Error("no build page says what changed")
 	}
 }
 
@@ -377,326 +889,6 @@ func TestStepPageAndPanel(t *testing.T) {
 	}
 	if strings.Contains(panel.body, `<aside class="side"`) || !strings.Contains(panel.body, `data-close`) {
 		t.Errorf("panel: %.300s", panel.body)
-	}
-}
-
-// A live page's stream says when its pipeline changed, and only its own.
-func TestEvents(t *testing.T) {
-	ts, st, _, srv := consoleServer(t)
-	srv.Heartbeat = 50 * time.Millisecond
-	ps, err := st.Pipelines(ctx, 100)
-	if err != nil || len(ps) < 2 {
-		t.Fatal(ps, err)
-	}
-	mine, other := ps[0], ps[1]
-	key := store.PipelineKey(mine.Instance, mine.ID)
-	home := get(t, ts, "/")
-	pipe := get(t, ts, "/pipelines/"+key)
-	if !strings.Contains(home.body, `data-live="all"`) || !strings.Contains(pipe.body, `data-live="`+key+`"`) {
-		t.Fatalf("live markers missing")
-	}
-	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(sctx, "GET", ts.URL+"/events?pipeline="+url.QueryEscape(key), nil)
-	res, err := ts.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res.Body.Close()
-	if res.Header.Get("Content-Type") != "text/event-stream" || res.Header.Get("Content-Security-Policy") == "" {
-		t.Errorf("headers %v", res.Header)
-	}
-	lines := make(chan string)
-	go func() {
-		sc := bufio.NewScanner(res.Body)
-		for sc.Scan() {
-			lines <- sc.Text()
-		}
-		close(lines)
-	}()
-	next := func(skipPings bool) string {
-		t.Helper()
-		for {
-			select {
-			case l, ok := <-lines:
-				if !ok {
-					t.Fatal("stream closed")
-				}
-				if l == "" || strings.HasPrefix(l, "retry:") || (skipPings && l == ": ping") {
-					continue
-				}
-				return l
-			case <-sctx.Done():
-				t.Fatal("no event")
-			}
-		}
-	}
-	if l := next(false); l != ": ping" {
-		t.Errorf("first line %q, want a heartbeat", l)
-	}
-	job := func(p store.Pipeline, name string) {
-		if err := st.SaveJob(ctx, store.Job{Instance: p.Instance, JobID: 9_000_000 + p.ID, PipelineID: p.ID, Name: name}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	job(other, "elsewhere")
-	// The daemons' live state: not for a pipeline's page.
-	st.Announce("")
-	job(mine, "here")
-	if l := next(true); l != "event: changed" {
-		t.Errorf("got %q", l)
-	}
-	if l := next(true); l != "data: "+key {
-		t.Errorf("got %q, want only the page's pipeline", l)
-	}
-
-	// The nodes page asks for the daemons' state.
-	nodesPage := get(t, ts, "/nodes")
-	if !strings.Contains(nodesPage.body, `data-live-nodes="true"`) || strings.Contains(pipe.body, `data-live-nodes`) {
-		t.Errorf("live-nodes marker on the wrong pages")
-	}
-	req2, _ := http.NewRequestWithContext(sctx, "GET", ts.URL+"/events?nodes=1", nil)
-	res2, err := ts.Client().Do(req2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res2.Body.Close()
-	sc := bufio.NewScanner(res2.Body)
-	for sc.Scan() {
-		if strings.HasPrefix(sc.Text(), "retry:") {
-			break
-		}
-	}
-	st.Announce("")
-	got := ""
-	for sc.Scan() {
-		if l := sc.Text(); strings.HasPrefix(l, "data: ") {
-			got = l
-			break
-		}
-	}
-	if got != "data: live" {
-		t.Errorf("nodes stream got %q", got)
-	}
-}
-
-type running []store.Job
-
-func (r running) Jobs() []store.Job { return r }
-
-type live []collector.DaemonState
-
-func (l live) Daemons() []collector.DaemonState { return l }
-
-// Jobs in progress show in the list before they have a build, with a page
-// of their own; the nodes page shows each daemon's cache and running
-// builds; GitLab's job times split a build's job.
-func TestLiveSources(t *testing.T) {
-	inst := history.InstancePrefix("https://gitlab.example.com/")
-	started := time.Now().Add(-42 * time.Second)
-	rj := store.Job{Instance: inst, JobID: 777001, PipelineID: 999, ProjectID: 42, Name: "deploy" + evil, StartedAt: started,
-		CommitTitle: "running " + evil, Node: "node-1"}
-	daemons := live{{Name: "box-buildkit-abcde", Connected: true, InspectedAt: time.Now(),
-		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1",
-			GC: []collector.GCRule{{Filters: []string{"type==exec.cachemount"}, Keep: 336 * time.Hour}, {MaxUsed: 40 << 30, MinFree: 16 << 30}},
-			Usage: collector.Usage{Total: 300 << 20, Images: 200 << 20, Layers: 90 << 20, Mounts: 10 << 20,
-				ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20},
-				MountList:  []collector.Mount{{Description: "cached mount /root/.cache/pip from exec x", Size: 10 << 20, LastUsed: time.Now()}}}},
-		Active: []collector.Active{{Daemon: "box-buildkit-abcde", Target: "api" + evil, Started: started}}},
-		{Name: "box-buildkit-fghij", Connected: false, Inspection: collector.Inspection{Usage: collector.Usage{ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20}}}}}
-	other := store.Job{Instance: inst, JobID: 777002, PipelineID: 998, ProjectID: 7, Name: "elsewhere-job", StartedAt: started}
-	daemons[0].Inspection.GC = append([]collector.GCRule{{Filters: []string{"type==source.local"}, Keep: 48 * time.Hour, MaxUsed: 100 << 30}}, daemons[0].Inspection.GC...)
-	daemons[0].Inspection.Usage.ImageSizes["golang:1.27"] = 300 << 20
-	ts, st, _, _ := consoleWith(t, Options{Running: running{rj, other}, Live: daemons, Release: "box"})
-
-	home := get(t, ts, "/")
-	home.safe(t)
-	if !strings.Contains(home.body, "/jobs/"+inst+"/777001") || !strings.Contains(home.body, "deploy&lt;script&gt;") {
-		t.Errorf("running job not in the list")
-	}
-	if !regexp.MustCompile(`data-elapsed="4[0-9]"`).MatchString(home.body) {
-		t.Errorf("the running job's time does not count on in the list")
-	}
-	if strings.Contains(home.body, "elsewhere-job") {
-		t.Errorf("a running job of another project is in the list")
-	}
-	jp := get(t, ts, "/jobs/"+inst+"/777001")
-	jp.safe(t)
-	if jp.status != 200 || !strings.Contains(jp.body, "running for") || !strings.Contains(jp.body, "building api&lt;script&gt;") {
-		t.Errorf("job page: %d", jp.status)
-	}
-	nodes := get(t, ts, "/nodes")
-	nodes.safe(t)
-	for _, want := range []string{"1 ready of 2", "on node-1", "300 MB", "/root/.cache/pip cache mount", "Duplicate cache",
-		"python:3.13-slim", "Keep cache up to", "40.0 GB per node", "14 days after last use", "Running now", "Unreachable", "release <code>box</code>",
-		"daemon replaced since"} {
-		if !strings.Contains(nodes.body, want) {
-			t.Errorf("nodes page lacks %q", want)
-		}
-	}
-	if strings.Contains(nodes.body, "golang:1.27") {
-		t.Errorf("an image on one node listed as duplicate")
-	}
-	if !strings.Contains(nodes.body, `class="wdot"`) {
-		t.Errorf("no warning dot for the unreachable daemon")
-	}
-
-	// GitLab's times: the job started 7 s before its build.
-	ps, _ := st.Pipelines(ctx, 100)
-	_, jobs, builds, _ := st.PipelinePage(ctx, ps[0].Instance, ps[0].ID)
-	b := builds[0]
-	var job store.JobInfo
-	for _, j := range jobs {
-		if j.ID == b.Build.Attribution.Job {
-			job = j
-		}
-	}
-	err := st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: ps[0].Instance, ID: ps[0].ID, ProjectID: 42, Status: "success",
-		WebURL: "https://gitlab.example.com/p/-/pipelines/1", Read: time.Now(), Jobs: []store.APIJob{{ID: job.ID, Status: "success",
-			Started: b.Build.Started.Add(-7 * time.Second), Finished: b.Build.Completed.Add(2 * time.Second),
-			Duration: b.Build.Completed.Sub(b.Build.Started) + 9*time.Second}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bp := get(t, ts, fmt.Sprintf("/builds/%d", b.ID))
-	if !strings.Contains(bp.body, "Runner &amp; checkout <b>7.0 s</b>") || !strings.Contains(bp.body, "After the build <b>2.0 s</b>") {
-		t.Errorf("build page without GitLab's times")
-	}
-	pp := get(t, ts, "/pipelines/"+ps[0].Instance+"/"+strconv.FormatUint(ps[0].ID, 10))
-	if !strings.Contains(pp.body, `href="https://gitlab.example.com/p/-/pipelines/1"`) {
-		t.Errorf("pipeline page without its GitLab link")
-	}
-}
-
-// The list's filters: rebuilt leaves running jobs out; a category keeps
-// only its jobs.
-func TestListFilter(t *testing.T) {
-	inst := history.InstancePrefix("https://gitlab.example.com/")
-	ts, _, _, _ := consoleWith(t, Options{Running: running{{Instance: inst, JobID: 777003, PipelineID: 997, ProjectID: 42, Name: "now-running"}}})
-	jobsIn := func(body string) int { return strings.Count(body, `class="opt j`) }
-	// Only the list: the home page shows the latest pipeline's jobs again.
-	list := func(path string) string {
-		b := get(t, ts, path).body
-		i := strings.Index(b, `id="list"`)
-		j := strings.Index(b[i:], "</section>")
-		return b[i : i+j]
-	}
-	all, rebuilt, files := list("/"), list("/?f=rebuilt"), list("/?f=files")
-	if !strings.Contains(all, "now-running") || strings.Contains(rebuilt, "now-running") || jobsIn(rebuilt) != jobsIn(all)-1 {
-		t.Errorf("rebuilt filter: %d of %d jobs", jobsIn(rebuilt), jobsIn(all))
-	}
-	if n := jobsIn(files); n == 0 || n != strings.Count(files, `<span class="vi vi-files"`) || n == jobsIn(all) {
-		t.Errorf("files filter: %d jobs, %d files", n, strings.Count(files, `<span class="vi vi-files"`))
-	}
-	if !strings.Contains(files, `href="/" aria-label="Clear filter"`) {
-		t.Errorf("a category filter has no way back")
-	}
-}
-
-// A job whose pod still exists but which GitLab reports finished is not
-// shown running.
-func TestFinishedJobNotRunning(t *testing.T) {
-	ts0, st0, _ := console(t)
-	ts0.Close()
-	ps, _ := st0.Pipelines(ctx, 100)
-	p := ps[0]
-	_, jobs, _, _ := st0.PipelinePage(ctx, p.Instance, p.ID)
-	j := jobs[0]
-	ts, st, _, _ := consoleWith(t, Options{Running: running{{Instance: j.Instance, JobID: j.ID, PipelineID: p.ID, ProjectID: 42, Name: j.Name}}})
-	ps, _ = st.Pipelines(ctx, 100)
-	running := func() bool { return strings.Contains(get(t, ts, "/").body, "vi-running") }
-	if !running() {
-		t.Fatal("a job with a pod is not shown running")
-	}
-	err := st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: p.Instance, ID: p.ID, ProjectID: 42, Status: "success", Read: time.Now(),
-		Jobs: []store.APIJob{{ID: j.ID, Status: "success"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if running() {
-		t.Error("a job GitLab reports finished is shown running")
-	}
-	if pp := get(t, ts, "/pipelines/"+p.Instance+"/"+strconv.FormatUint(p.ID, 10)).body; strings.Contains(pp, "still running") {
-		t.Error("the pipeline page counts a finished job as running")
-	}
-}
-
-// rewrite sends every request to the test server, whatever host it names.
-type rewrite struct{ to *url.URL }
-
-func (r rewrite) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.Clone(req.Context())
-	req.URL.Scheme, req.URL.Host = r.to.Scheme, r.to.Host
-	return http.DefaultTransport.RoundTrip(req)
-}
-
-// Opening a pipeline asks GitLab for its jobs, and the build page then
-// splits the job's time.
-func TestGitLabAPIOnOpen(t *testing.T) {
-	var calls int
-	var mu sync.Mutex
-	var ids []uint64
-	var starts []time.Time
-	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		calls++
-		var out []map[string]any
-		for i, id := range ids {
-			out = append(out, map[string]any{"id": id, "name": "x", "status": "success",
-				"started_at": starts[i].Add(-5 * time.Second).Format(time.RFC3339Nano), "finished_at": starts[i].Add(time.Minute).Format(time.RFC3339Nano),
-				"duration": 65.0, "pipeline": map[string]any{"status": "success", "web_url": "https://gitlab.example.com/p/-/pipelines/1"}})
-		}
-		json.NewEncoder(w).Encode(out)
-	}))
-	defer gl.Close()
-	to, _ := url.Parse(gl.URL)
-	client := gitlab.New([]string{"https://gitlab.example.com/"}, "t")
-	client.HTTP = &http.Client{Transport: rewrite{to}}
-	f := &gitlab.Fetcher{Client: client}
-	ts, st, _, srv := consoleWith(t, Options{API: f})
-	f.Store = st
-	srv.APIWait = 3 * time.Second
-	ps, _ := st.Pipelines(ctx, 100)
-	p := ps[0]
-	_, jobs, builds, _ := st.PipelinePage(ctx, p.Instance, p.ID)
-	mu.Lock()
-	seen := map[uint64]bool{}
-	for _, b := range builds {
-		for _, j := range jobs {
-			// A job's start is before its first build.
-			if j.ID == b.Build.Attribution.Job && !seen[j.ID] {
-				seen[j.ID] = true
-				ids, starts = append(ids, j.ID), append(starts, b.Build.Started)
-			}
-		}
-	}
-	mu.Unlock()
-	page := get(t, ts, fmt.Sprintf("/builds/%d", builds[0].ID))
-	if !strings.Contains(page.body, "Runner &amp; checkout <b>5.0 s</b>") || !strings.Contains(page.body, "1 min 5 s total") {
-		t.Errorf("the build page did not use GitLab's job times (%d calls)", calls)
-	}
-	get(t, ts, fmt.Sprintf("/builds/%d", builds[0].ID))
-	mu.Lock()
-	defer mu.Unlock()
-	if calls != 1 {
-		t.Errorf("%d calls to GitLab for a finished pipeline", calls)
-	}
-}
-
-// A reason that names a daemon that is gone says so.
-func TestGoneDaemon(t *testing.T) {
-	ts, st, _, _ := consoleWith(t, Options{Live: live{{Name: "daemon-a", Connected: true}}})
-	ps, _ := st.Pipelines(ctx, 100)
-	_, _, builds, _ := st.PipelinePage(ctx, ps[0].Instance, ps[0].ID)
-	b := builds[len(builds)-1]
-	err := st.SetReason(ctx, b.Build.Ref, b.Build.Daemon, history.Reason{Kind: history.CacheElsewhere, Step: b.Build.Steps[len(b.Build.Steps)-1],
-		Old: "box-buildkit-old12", New: "daemon-a"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page := get(t, ts, fmt.Sprintf("/builds/%d", b.ID)); !strings.Contains(page.body, "<b>old12</b> is gone") {
-		t.Errorf("no note that the daemon is gone")
 	}
 }
 
@@ -737,11 +929,11 @@ func TestFailedBuild(t *testing.T) {
 	p := get(t, ts, fmt.Sprintf("/builds/%d", id))
 	p.safe(t)
 	row := regexp.MustCompile(`(?s)<tr class="st[^"]*" data-of="\d+" data-step="` + strconv.Itoa(last) + `".*?</tr>`).FindString(p.body)
-	if !strings.Contains(row, `chip failed`) || strings.Contains(row, `chip built`) || !strings.Contains(row, `c-failed`) {
+	if !strings.Contains(row, `chip failed`) || strings.Contains(row, `chip built`) {
 		t.Errorf("failed step row: %s", row)
 	}
-	if !strings.Contains(p.body, "1 failed") || !strings.Contains(p.body, "only for builds that succeed") {
-		t.Error("failed build: no failed count or no note on the missing Dockerfile")
+	if !strings.Contains(p.body, `class="stat st-failed"`) || !strings.Contains(p.body, "The build failed.") {
+		t.Error("failed build: not shown failed")
 	}
 	panel := get(t, ts, fmt.Sprintf("/builds/%d/steps/%d?part=panel", id, last))
 	if !strings.Contains(panel.body, `class="errbox"`) || !strings.Contains(panel.body, "exit code: 3") ||
@@ -761,7 +953,7 @@ func TestFailedBuild(t *testing.T) {
 	c.safe(t)
 	crow := regexp.MustCompile(`(?s)<tr class="st[^"]*" data-of="\d+" data-step="` + strconv.Itoa(last) + `".*?</tr>`).FindString(c.body)
 	if !strings.Contains(c.body, "The build was canceled.") || strings.Contains(c.body, "The build failed.") ||
-		!strings.Contains(crow, "chip canceled") || !strings.Contains(c.body, "1 canceled") {
+		!strings.Contains(crow, "chip canceled") || !strings.Contains(c.body, ">Canceled<") {
 		t.Errorf("canceled build shown as failed: %s", crow)
 	}
 	e := get(t, ts, fmt.Sprintf("/builds/%d", eid))
@@ -772,98 +964,161 @@ func TestFailedBuild(t *testing.T) {
 	}
 }
 
-// Jobs without a build say what GitLab says about them, and no job "sets
-// the pipeline time" while others still run.
-func TestPipelineJobStates(t *testing.T) {
-	ts, st, _ := console(t)
-	ps, _ := st.Pipelines(ctx, 100)
-	p := ps[0]
-	_, jobs, _, _ := st.PipelinePage(ctx, p.Instance, p.ID)
-	var apiJobs []store.APIJob
-	for _, j := range jobs {
-		apiJobs = append(apiJobs, store.APIJob{ID: j.ID, Name: j.Name, Status: "success"})
-	}
-	extra := []store.APIJob{{ID: 900001, Name: "queued", Status: "pending"}, {ID: 900002, Name: "starting", Status: "running", Started: time.Now().Add(-3 * time.Hour)},
-		{ID: 900003, Name: "deploy", Status: "manual"}, {ID: 900004, Name: "notify", Status: "success"},
-		{ID: 900005, Name: "gate", Status: "waiting_for_resource"}, {ID: 900006, Name: "notify", Status: "failed"}}
-	save := func(status string) {
-		err := st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: p.Instance, ID: p.ID, ProjectID: 42, Status: status, Read: time.Now(),
-			Jobs: append(append([]store.APIJob(nil), apiJobs...), extra...)})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	url := "/pipelines/" + p.Instance + "/" + strconv.FormatUint(p.ID, 10)
-	save("running")
-	pg := get(t, ts, url)
-	pg.safe(t)
-	for _, want := range []string{"Waiting to start (pending)", "Waiting to start (waiting for resource)", "A manual job",
-		"Running — its builds appear", "No build on the daemons · success", "so far: jobs still running"} {
-		if !strings.Contains(pg.body, want) {
-			t.Errorf("running pipeline lacks %q", want)
-		}
-	}
-	// notify was retried: its first attempt says so, the retry does not.
-	if n := strings.Count(pg.body, "retried: a later attempt follows"); n != 1 {
-		t.Errorf("%d jobs marked retried, want 1", n)
-	}
-	if strings.Contains(pg.body, "sets the pipeline time") || strings.Contains(pg.body, "it ran elsewhere") {
-		t.Error("a job sets the time of a pipeline that still runs")
-	}
-	// The time so far counts from the running job's start, not only the
-	// builds that completed.
-	if m := regexp.MustCompile(`Pipeline time</span><span class="v" data-elapsed="\d+">([^<]+)<`).FindStringSubmatch(pg.body); m == nil || !strings.Contains(m[1], "h") {
-		t.Errorf("time so far: %v", m)
-	}
-	if !regexp.MustCompile(`data-elapsed="10[0-9]{3}">3 h 0 min<`).MatchString(pg.body) {
-		t.Error("the running job's time does not count on")
-	}
-	extra[1].Status = "success"
-	save("success")
-	pg = get(t, ts, url)
-	if !strings.Contains(pg.body, "sets the pipeline time") || strings.Contains(pg.body, "so far") {
-		t.Error("a finished pipeline without the job that set its time")
-	}
-}
-
-// A pipeline whose jobs run but whose builds have not completed yet has a
-// page: the list links to it from the start.
-func TestPipelineWithoutBuildsYet(t *testing.T) {
-	inst := history.InstancePrefix("https://gitlab.example.com/")
-	rj := store.Job{Instance: inst, JobID: 880001, PipelineID: 8800, ProjectID: 42, Name: "build-api", StartedAt: time.Now().Add(-20 * time.Second),
-		CommitTitle: "first " + evil}
-	ts, st, _, _ := consoleWith(t, Options{Running: running{rj}})
-	if err := st.SaveJob(ctx, rj); err != nil {
-		t.Fatal(err)
-	}
-	home := get(t, ts, "/")
-	if !strings.Contains(home.body, `href="/pipelines/`+inst+`/8800"`) {
-		t.Fatal("running pipeline not in the list")
-	}
-	p := get(t, ts, "/pipelines/"+inst+"/8800")
-	p.safe(t)
-	if p.status != http.StatusOK || !strings.Contains(p.body, "first &lt;script&gt;") || !strings.Contains(p.body, "Running — its builds appear") {
-		t.Errorf("running pipeline page: %d", p.status)
-	}
-}
-
-// A job that ran two builds shows two rows named by their targets.
+// A job that ran two builds names the other on each build's page.
 func TestJobWithTwoBuilds(t *testing.T) {
 	ts, st, _ := console(t)
-	ps, _ := st.Pipelines(ctx, 100)
-	p := ps[0]
-	_, _, builds, _ := st.PipelinePage(ctx, p.Instance, p.ID)
-	if len(builds) < 2 {
+	keys, byPipe := pipelines(t, st)
+	bs := byPipe[keys[0]]
+	if len(bs) < 2 {
 		t.Skip("fixture pipeline with one build")
 	}
-	a, b := builds[0].Build, *builds[1].Build
-	b.Ref, b.Attribution.Job, b.Target = "secondref", a.Attribution.Job, "second<i>"
+	a, err := st.BuildPage(ctx, bs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.BuildPage(ctx, bs[1].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := *second.Build
+	b.Ref, b.Attribution.Job, b.Target = "secondref", a.Build.Attribution.Job, "second<i>"
 	if _, err := st.SaveBuild(ctx, store.Build{Build: &b, Generation: 1}); err != nil {
 		t.Fatal(err)
 	}
-	pg := get(t, ts, "/pipelines/"+p.Instance+"/"+strconv.FormatUint(p.ID, 10))
+	pg := get(t, ts, fmt.Sprintf("/builds/%d", bs[0].ID))
 	pg.safe(t)
-	if !strings.Contains(pg.body, " · second&lt;i&gt;") {
-		t.Error("the job's second build is not named by its target")
+	if !strings.Contains(pg.body, "This job ran ") || !strings.Contains(pg.body, ">second&lt;i&gt;</a>") {
+		t.Error("the job's second build is not named on the page")
+	}
+}
+
+// fakeGitLab answers a job's log with logBody and every other API call
+// with no jobs; it records the last log asked for.
+func fakeGitLab(t *testing.T, logBody string) (*gitlab.Fetcher, *string) {
+	t.Helper()
+	asked := new(string)
+	var mu sync.Mutex
+	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/trace") {
+			mu.Lock()
+			*asked = r.URL.Path
+			mu.Unlock()
+			fmt.Fprint(w, logBody)
+			return
+		}
+		w.Write([]byte("[]"))
+	}))
+	t.Cleanup(gl.Close)
+	to, _ := url.Parse(gl.URL)
+	client := gitlab.New([]string{"https://gitlab.example.com/"})
+	client.HTTP = &http.Client{Transport: rewrite{to}}
+	return &gitlab.Fetcher{Client: client}, asked
+}
+
+// With Assets the pages come from a directory, read again for every page:
+// an edited template shows on the next request.
+func TestDevAssets(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{"templates", "static"} {
+		entries, err := files.ReadDir(sub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			data, _ := files.ReadFile(sub + "/" + e.Name())
+			if err := os.WriteFile(filepath.Join(dir, sub, e.Name()), data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	ts, _, _, _ := consoleWith(t, Options{Assets: os.DirFS(dir)})
+	if p := get(t, ts, "/"); p.status != 200 || strings.Contains(p.body, "edited-on-disk") {
+		t.Fatalf("before the edit: %d", p.status)
+	}
+	path := filepath.Join(dir, "templates", "overview.html")
+	data, _ := os.ReadFile(path)
+	edited := strings.Replace(string(data), "<h1 class=\"t\" tabindex=\"-1\">Overview</h1>", "<h1 class=\"t\" tabindex=\"-1\">Overview edited-on-disk</h1>", 1)
+	if edited == string(data) {
+		t.Fatal("the overview's title is not where the test looks for it")
+	}
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if p := get(t, ts, "/"); !strings.Contains(p.body, "edited-on-disk") {
+		t.Error("an edited template does not show without a restart")
+	}
+}
+
+// The pipelines page: one card per pipeline, newest first, with its jobs
+// by stage on a time axis, and how long they waited for a runner as
+// GitLab says (read for the pipelines on the page, once when finished).
+func TestPipelinesPage(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	jobsOf := map[string][]map[string]any{}
+	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		parts := strings.Split(r.URL.Path, "/") // /api/v4/projects/42/pipelines/<id>/jobs
+		id := ""
+		for i, p := range parts {
+			if p == "pipelines" && i+1 < len(parts) {
+				id = parts[i+1]
+			}
+		}
+		out := jobsOf[id]
+		if out == nil {
+			out = []map[string]any{}
+		}
+		json.NewEncoder(w).Encode(out)
+	}))
+	defer gl.Close()
+	to, _ := url.Parse(gl.URL)
+	client := gitlab.New([]string{"https://gitlab.example.com/"})
+	client.HTTP = &http.Client{Transport: rewrite{to}}
+	f := &gitlab.Fetcher{Client: client}
+	ts, st, _, _ := consoleWith(t, Options{API: f, Token: gitlab.Token("t")})
+	f.Store = st
+	keys, byPipe := pipelines(t, st)
+	mu.Lock()
+	for _, k := range keys {
+		_, id, _ := strings.Cut(k, "/")
+		for _, b := range byPipe[k] {
+			jobsOf[id] = append(jobsOf[id], map[string]any{"id": b.Job, "name": "build " + b.Target, "stage": "build", "status": "success",
+				"started_at": b.Started.Add(-2 * time.Second).Format(time.RFC3339Nano), "finished_at": b.Completed.Add(time.Second).Format(time.RFC3339Nano),
+				"duration": 9.0, "queued_duration": 4.0, "pipeline": map[string]any{"status": "success", "web_url": "https://gitlab.example.com/p/-/pipelines/" + id}})
+		}
+	}
+	mu.Unlock()
+	p := get(t, ts, "/pipelines")
+	p.safe(t)
+	if p.status != 200 || strings.Count(p.body, `<article class="pcard">`) != min(len(keys), pipePage) {
+		t.Fatalf("pipelines page: %d, %d cards for %d pipelines", p.status, strings.Count(p.body, `<article class="pcard">`), len(keys))
+	}
+	if !strings.Contains(p.body, "waiting for a runner: usually <b>4.0 s</b>") || !strings.Contains(p.body, `class="q r0"`) {
+		t.Error("no runner waits from GitLab on the cards")
+	}
+	if !strings.Contains(p.body, `class="pg-lane`) || !strings.Contains(p.body, ">build</span>") || !strings.Contains(p.body, "Passed") {
+		t.Error("no lanes by stage, or no pipeline status")
+	}
+	if !strings.Contains(p.body, `href="/pipelines/`+keys[0]+`"`) {
+		t.Error("a card does not open its pipeline")
+	}
+	mu.Lock()
+	first := calls
+	mu.Unlock()
+	get(t, ts, "/pipelines")
+	mu.Lock()
+	if calls != first {
+		t.Errorf("finished pipelines read from GitLab again: %d calls, then %d", first, calls)
+	}
+	mu.Unlock()
+	pp := get(t, ts, "/pipelines/"+keys[0])
+	if !strings.Contains(pp.body, "waited 4.0 s") || !strings.Contains(pp.body, `class="pstate ps-passed"`) {
+		t.Error("the pipeline page does not show the runner wait or the pipeline's status")
 	}
 }

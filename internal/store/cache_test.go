@@ -1,0 +1,44 @@
+package store
+
+import (
+	"errors"
+	"testing"
+	"time"
+)
+
+func TestCacheScans(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 22, 20, 0, 0, 0, time.UTC)}
+	s := open(t, t.TempDir(), c)
+	inst := "051b90"
+	p := ProjectKey{Instance: inst, ID: 42}
+	yes, no := true, false
+	t0 := c.t.Add(-time.Hour)
+	objs := []CacheObject{{ProjectID: 42, Key: "go-mod-main-protected", Bytes: 67128, Modified: t0}, {ProjectID: 42, Key: "tools", Bytes: 353, Modified: t0}, {ProjectID: 7, Key: "x", Bytes: 1, Modified: t0}}
+	if err := s.ReplaceCacheScan(ctx, "s3.example.com/ci-cache/box/051b90", inst, c.t, objs, &no, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, stores, err := s.ProjectCache(ctx, p)
+	if err != nil || len(got) != 2 || got[0].Key != "go-mod-main-protected" || got[0].Bytes != 67128 || !got[0].Modified.Equal(t0) {
+		t.Fatalf("project cache %+v, %v", got, err)
+	}
+	if len(stores) != 1 || stores[0].Lifecycle == nil || *stores[0].Lifecycle || !stores[0].Scanned.Equal(c.t) || stores[0].Err != "" {
+		t.Fatalf("stores %+v", stores)
+	}
+	// A failed listing keeps what was known and says why.
+	if err := s.ReplaceCacheScan(ctx, "s3.example.com/ci-cache/box/051b90", inst, c.t.Add(time.Minute), nil, nil, errors.New("listing: 403")); err != nil {
+		t.Fatal(err)
+	}
+	got, stores, _ = s.ProjectCache(ctx, p)
+	if len(got) != 2 || stores[0].Err != "listing: 403" || stores[0].Lifecycle == nil {
+		t.Errorf("after a failed listing: %+v %+v", got, stores)
+	}
+	// A new listing replaces the old one.
+	if err := s.ReplaceCacheScan(ctx, "s3.example.com/ci-cache/box/051b90", inst, c.t.Add(2*time.Minute), objs[1:2], &yes, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, stores, _ = s.ProjectCache(ctx, p)
+	if len(got) != 1 || got[0].Key != "tools" || !*stores[0].Lifecycle || stores[0].Err != "" {
+		t.Errorf("after a new listing: %+v %+v", got, stores)
+	}
+
+}

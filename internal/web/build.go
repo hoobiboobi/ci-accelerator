@@ -94,61 +94,57 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 	if p.Reason.By != "" {
 		by = name(p.Reason.By)
 	}
-	d.Verdict = verdictFor(b, p.Reason, by, d.Built, p.Saved, rec)
+	d.Verdict = withVia(verdictFor(b, p.Reason, by, d.Built, p.Saved, rec), p.Reason, p.Via)
 	d.Cat = catOf(p.Reason.Kind, b.Error, d.Built)
 	d.Verdict.Icon = d.Cat.Icon
 	return d, nil
 }
 
-// BuildView is the build page.
+// BuildView is the build page: the verdict first, what changed since the
+// previous build of the target, the steps; the rest under Details.
 type BuildView struct {
 	Shell
-	ID        int64
-	Name      string
-	Cat       Cat
-	Verdict   Verdict
-	PipeURL   string
-	PipeLabel string
-	PrevURL   string
-	NextURL   string
-	GitLabURL string
-	Commit    string
-	SHA       string
-	Ref       string
-	Target    string
-	Total     time.Duration
-	Segs      []Seg
-	BuildKit  time.Duration
-	Usual     time.Duration
-	Speed     string // slower, faster, usual, or ""
-	Saved     time.Duration
-	Cached    int
-	Context   int64
-	Blocks    []Block
-	StepCount int
-	Tone      string
-	Lines     []Line
-	DfName    string
-	WF        *Waterfall
-	Compare   *Compare
-	Details   []KV
-	Aside     Aside
-	Steps     []StepView
-	Failed    bool
-	Others    []OtherBuild
-	Tab       string
+	ID      int64
+	Name    string
+	Target  string
+	Status  Status
+	Verdict Verdict
+	// At most three numbers under the verdict.
+	Dur, Delta string
+	Slower     bool
+	Usual      string
+	Ran, Steps int
+	Ref, SHA   string
+	Commit     string
+	Node       string
+	PipeURL    string
+	PipeLabel  string
+	GitLabURL  string
+	LogURL     string
+	Changes    []Change
+	PrevURL    string
+	PrevLabel  string
+	Blocks     []Block
+	Gantt      []StepRow // steps that took time, by start
+	GanttSkip  int       // steps from the cache, left out of the timeline
+	StepCount  int
+	Tone       string
+	Lines      []Line
+	DfName     string
+	StepViews  []StepView
+	Failed     bool
+	Others     []OtherBuild
+	Details    []KV
+	Trace      string
 	// ViaLog: the reader came from the link in the job's log.
 	ViaLog  bool
 	LogLine string
 }
 
-// Aside is the facts column of the build page.
-type Aside struct {
-	Node, NodeHost, Last string
-	OtherNode, SameNode  bool
-	Started, Job, Build  string
-	Usual, Context       string
-	JobID, Trace         string
+// Change is one difference from the previous build of the target.
+type Change struct {
+	K string
+	V template.HTML
 }
 
 // KV is a labelled fact.
@@ -157,20 +153,7 @@ type KV struct{ K, V string }
 // OtherBuild is another build of the same job.
 type OtherBuild struct {
 	URL, Target, Dur string
-	Cat              Cat
-}
-
-// Compare is the build next to the previous build of its target.
-type Compare struct {
-	URL, Name, Pipe, SHA, Msg, From, To, Dur string
-	Rows                                     []CompareRow
-	Differ                                   int
-}
-
-// CompareRow is one step before and now.
-type CompareRow struct {
-	Name, Before, Now string
-	Mark              bool
+	Status           Status
 }
 
 func (s *Server) build(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +164,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	p, err := s.store.BuildPage(ctx, id)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !s.mayBuild(r, p)) {
 		s.notFound(w, r, "build")
 		return
 	}
@@ -189,10 +172,27 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if s.ensureAPI(p.Pipeline) {
+	if s.ensureAPI(r, p.Pipeline) {
 		if p, err = s.store.BuildPage(ctx, id); err != nil {
 			s.fail(w, err)
 			return
+		}
+	}
+	// Files or node: GitLab's comparison of the two commits decides it,
+	// now for this build, in the background for the project's others.
+	if p.Reason.Kind == history.CacheElsewhere && p.Via == "" && p.Pipeline != nil && p.Pipeline.ProjectID != 0 {
+		key := store.ProjectKey{Instance: p.Pipeline.Instance, ID: p.Pipeline.ProjectID}
+		if api, cred := s.api(r); api != nil && api.Client.Knows(key.Instance) {
+			sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			n, _ := s.settle(sctx, api, cred, key, id, 1)
+			cancel()
+			if n > 0 {
+				if p, err = s.store.BuildPage(ctx, id); err != nil {
+					s.fail(w, err)
+					return
+				}
+			}
+			s.settleLater(r, key)
 		}
 	}
 	d, err := s.explain(ctx, p)
@@ -206,33 +206,29 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if a.State == history.Attributed {
 		live = store.PipelineKey(a.Instance, a.Pipeline)
 	}
-	sh, err := s.shell(r, "pipes", live)
+	sh, err := s.shell(r, "builds", live)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	open := ""
-	if a.State == history.Attributed {
-		open = fmt.Sprintf("j:%s/%d", a.Instance, a.Job)
-		// The list shows the build's project.
-		if p.Pipeline != nil && p.Pipeline.ProjectID != 0 {
-			for _, pr := range sh.Projects {
-				if pr.Instance == a.Instance && pr.ID == p.Pipeline.ProjectID {
-					sh.Project = pr
-				}
-			}
+	project := uint64(0)
+	if p.Pipeline != nil {
+		project = p.Pipeline.ProjectID
+		pinProject(&sh, a.Instance, project)
+	}
+	running := b.Completed.IsZero()
+	ran := d.Built
+	for _, sv := range d.Views {
+		if sv.State == "failed" || sv.State == "canceled" {
+			ran++
 		}
 	}
-	lv, err := s.listFor(ctx, r, &sh, open, r.URL.Path)
-	if err != nil {
-		s.fail(w, err)
-		return
+	v := &BuildView{ID: id, Target: b.Target, Status: statusOf(p.Reason.Kind, b.Error, d.Built, running), Verdict: d.Verdict,
+		Ran: ran, Steps: len(b.Steps), Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b), DfName: p.DockerfileName,
+		StepViews: d.Views, Node: shortDaemon(b.Daemon), Failed: b.Error != ""}
+	if !running {
+		v.Dur = duration(b.Completed.Sub(b.Started))
 	}
-	sh.List, sh.Split, sh.Has = lv, true, "job"
-	v := &BuildView{ID: id, Cat: d.Cat, Verdict: d.Verdict, Target: b.Target, BuildKit: b.Completed.Sub(b.Started),
-		Saved: p.Saved, Cached: d.Cached, Context: b.ContextBytes, Steps: d.Views, Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b),
-		DfName: p.DockerfileName, Tab: "steps"}
-	v.PrevURL, v.NextURL = lv.neighbours(open)
 	if r.URL.Query().Get("via") == "log" && a.State == history.Attributed {
 		v.ViaLog = true
 		v.LogLine = fmt.Sprintf("ci-accelerator: why this job's builds take their time: %s/jobs/%s/%d", origin(r), a.Instance, a.Job)
@@ -243,44 +239,57 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		v.Name, v.GitLabURL = job.Name, webURL(job.URL)
 	}
 	if v.Name == "" {
-		v.Name = "Build of " + orDefault(b.Target)
+		v.Name = orDefault(b.Target)
 	}
 	sh.Title = v.Name
 	if pl := p.Pipeline; pl != nil {
 		v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(pl.Instance, pl.ID), "#"+strconv.FormatUint(pl.ID, 10)
 		v.Commit, v.SHA, v.Ref = pl.CommitTitle, short(pl.SHA, 8), pl.Ref
 	}
-	jt := timesOf(job, b.Started, b.Completed)
-	v.Total = jt.Total
-	v.Segs = timeSegs(b, jt)
-	project := uint64(0)
-	if p.Pipeline != nil {
-		project = p.Pipeline.ProjectID
+	if api, _ := s.api(r); api != nil && job.ID != 0 && api.Client.Knows(a.Instance) && job.ProjectID != 0 {
+		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", a.Instance, job.ID)
 	}
-	if v.Usual, err = s.store.Usual(ctx, b, project); err != nil {
-		s.fail(w, err)
-		return
+	// The usual time of builds like this one: from the cache, or rebuilt.
+	var usual time.Duration
+	if project != 0 {
+		st, err := s.recent(ctx, store.ProjectKey{Instance: a.Instance, ID: project})
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		usual, _ = st.usual[b.Target].of(d.Built > 0)
 	}
-	if v.Usual > 0 && b.Error == "" {
-		switch r := float64(v.BuildKit) / float64(v.Usual); {
-		case r > 1.3:
-			v.Speed = "slower"
-		case r < 0.7:
-			v.Speed = "faster"
-		default:
-			v.Speed = "usual"
+	if usual == 0 {
+		if usual, err = s.store.Usual(ctx, b, project); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+	if usual > 0 && !running {
+		v.Usual = duration(usual)
+		if b.Error == "" && d.Built > 0 {
+			v.Delta, v.Slower = delta(b.Completed.Sub(b.Started), usual)
 		}
 	}
 	v.Blocks = blocksOf(b, d.Views)
+	v.Gantt, v.GanttSkip = gantt(v.Blocks)
 	v.StepCount = len(b.Steps)
-	v.Failed = b.Error != ""
-	v.WF = waterfall("", []wfJob{{Name: v.Name, Cat: d.Cat, Times: jt, Build: b, BuildID: id, Views: d.Views}}, jt.Start, true)
 	prev, _, err := s.store.Previous(ctx, b)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	v.Compare = s.compare(ctx, b, prev, d)
+	if v.Changes, err = s.changes(ctx, b, prev, p.Reason, d); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if prev != nil {
+		v.PrevURL = fmt.Sprintf("/builds/%d", prev.ID)
+		v.PrevLabel = "the previous build"
+		if pa := prev.Build.Attribution; pa.State == history.Attributed {
+			v.PrevLabel = "the previous build, pipeline #" + strconv.FormatUint(pa.Pipeline, 10)
+		}
+	}
 	nodeHost := map[string]string{}
 	if s.opt.Live != nil {
 		for _, dm := range s.opt.Live.Daemons() {
@@ -294,34 +303,25 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	v.Aside = Aside{Node: shortDaemon(b.Daemon), NodeHost: nodeHost[b.Daemon], Started: ago(b.Started), Job: duration(jt.Total),
-		Build: duration(v.BuildKit), Context: bytesText(b.ContextBytes)}
-	if v.Usual > 0 {
-		v.Aside.Usual = duration(v.Usual)
-	}
-	if prev != nil {
-		v.Aside.Last = shortDaemon(prev.Build.Daemon)
-		v.Aside.OtherNode, v.Aside.SameNode = prev.Build.Daemon != b.Daemon, prev.Build.Daemon == b.Daemon
-	}
 	if a.State == history.Attributed {
-		v.Aside.JobID = strconv.FormatUint(a.Job, 10)
-		v.Aside.Trace = traceID(a)
+		v.Trace = traceID(a)
 	}
-	v.Details = []KV{{"Build node", b.Daemon + paren(nodeHost[b.Daemon])}, {"Record", b.Ref}}
-	if prev != nil {
-		v.Details = append(v.Details, KV{"Previous build of the target on", prev.Build.Daemon + paren(nodeHost[prev.Build.Daemon])})
-	}
-	if v.Aside.Trace != "" {
-		v.Details = append(v.Details, KV{"Trace id", v.Aside.Trace})
-	}
+	v.Details = []KV{{"Build node", b.Daemon + paren(nodeHost[b.Daemon])}}
 	if job.ID != 0 {
-		v.Details = append(v.Details, KV{"GitLab job", fmt.Sprintf("%d · %s total, %s in BuildKit", job.ID, duration(jt.Total), duration(v.BuildKit))})
+		jt := timesOf(job, b.Started, b.Completed)
+		v.Details = append(v.Details, KV{"GitLab job", fmt.Sprintf("%s · %d · %s in all, %s of it building", job.Name, job.ID, duration(jt.Total), v.Dur)})
 		if job.Waited > 0 {
 			v.Details = append(v.Details, KV{"Waited for a runner", duration(job.Waited)})
 		}
 		if job.Runner != "" {
 			v.Details = append(v.Details, KV{"Runner", job.Runner})
 		}
+	}
+	if b.ContextBytes > 0 {
+		v.Details = append(v.Details, KV{"Build context sent", bytesText(b.ContextBytes)})
+	}
+	if p.Saved > 0 {
+		v.Details = append(v.Details, KV{"Time the cache saved, about", duration(p.Saved)})
 	}
 	v.Details = append(v.Details, KV{"Started", b.Started.UTC().Format(time.RFC3339)})
 	if len(b.Images) > 0 {
@@ -330,7 +330,10 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if b.Error != "" {
 		v.Details = append(v.Details, KV{"Error", b.Error})
 	}
-	v.Details = append(v.Details, KV{"API", fmt.Sprintf("GET /api/v1/builds?limit=50 (this build is id %d)", id)})
+	if v.Trace != "" {
+		v.Details = append(v.Details, KV{"Trace id", v.Trace})
+	}
+	v.Details = append(v.Details, KV{"Record", b.Ref}, KV{"API", fmt.Sprintf("GET /api/v1/builds?limit=50 (this build is id %d)", id)})
 	if a.State == history.Attributed {
 		ids, err := s.store.JobBuilds(ctx, a.Instance, a.Job)
 		if err != nil {
@@ -348,115 +351,66 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			}
 			ob := o.Page.Build
 			v.Others = append(v.Others, OtherBuild{URL: fmt.Sprintf("/builds/%d", oid), Target: orDefault(ob.Target),
-				Dur: duration(ob.Completed.Sub(ob.Started)), Cat: o.Cat})
+				Dur: duration(ob.Completed.Sub(ob.Started)), Status: statusOf(o.Page.Reason.Kind, ob.Error, o.Built, ob.Completed.IsZero())})
 		}
 	}
 	v.Shell = sh
 	s.render(w, "build", http.StatusOK, v)
 }
 
-func paren(s string) string {
-	if s == "" {
-		return ""
-	}
-	return " (" + s + ")"
-}
-
-// webURL keeps a link to GitLab only when it is one: job data comes from
-// CI variables, and anything but http(s) would only become a dead link.
-func webURL(u string) string {
-	if strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") {
-		return u
-	}
-	return ""
-}
-
-func orDefault(target string) string {
-	if target == "" {
-		return "the default target"
-	}
-	return target
-}
-
-func ago(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format("2 Jan 15:04 UTC")
-}
-
-// traceID is the trace id the runner gives a job.
-func traceID(a history.Attribution) string {
-	return fmt.Sprintf("01%s%012x%012x", a.Instance, a.Pipeline, a.Job)
-}
-
-// compare sets a build next to the previous build of its target, step by
-// step.
-func (s *Server) compare(ctx context.Context, b *history.Build, prev *store.Stored, d *built) *Compare {
+// changes says what differs from the previous build of the target, as far
+// as BuildKit's records tell: only what differs.
+func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stored, r history.Reason, d *built) ([]Change, error) {
 	if prev == nil {
-		return nil
+		return nil, nil
 	}
 	pb := prev.Build
-	c := &Compare{URL: fmt.Sprintf("/builds/%d", prev.ID), From: shortDaemon(pb.Daemon), To: shortDaemon(b.Daemon),
-		Dur: duration(pb.Completed.Sub(pb.Started))}
-	if a := pb.Attribution; a.State == history.Attributed {
-		c.Pipe = "#" + shortID(a.Pipeline)
-		if pl, _, _, err := s.store.PipelinePage(ctx, a.Instance, a.Pipeline); err == nil && pl != nil {
-			c.SHA, c.Msg = short(pl.SHA, 7), pl.CommitTitle
+	var out []Change
+	if pa, a := pb.Attribution, b.Attribution; pa.State == history.Attributed && a.State == history.Attributed && pa.Pipeline != a.Pipeline {
+		before, err := s.store.PipelineInfo(ctx, pa.Instance, pa.Pipeline)
+		if err != nil {
+			return nil, err
 		}
-		if jobs, err := s.store.PipelineJobs(ctx, a.Instance, a.Pipeline); err == nil {
-			for _, j := range jobs {
-				if j.ID == a.Job {
-					c.Name = j.Name
-				}
-			}
+		now := d.Page.Pipeline
+		if before != nil && now != nil && before.SHA != now.SHA && now.SHA != "" {
+			out = append(out, Change{"Commit", template.HTML(fmt.Sprintf(`<span class="mono">%s</span> → <span class="mono">%s</span> %s`,
+				e(short(before.SHA, 8)), e(short(now.SHA, 8)), e(now.CommitTitle)))})
 		}
 	}
-	state := func(st history.Step) string {
-		if isFrom(st) {
-			return "image"
-		}
-		return string(st.State)
+	if pb.Daemon != b.Daemon {
+		out = append(out, Change{"Node", template.HTML(fmt.Sprintf(`<span class="old">%s</span> → <span class="new">%s</span> <span class="muted">— the previous build's cache is on %s</span>`,
+			e(shortDaemon(pb.Daemon)), e(shortDaemon(b.Daemon)), e(shortDaemon(pb.Daemon))))})
 	}
-	keyOf := func(st history.Step) string { return st.Key + "|" + st.Name }
-	var keys []string
-	before, now := map[string]history.Step{}, map[string]history.Step{}
+	at := ""
+	if r.Step.Name != "" {
+		at = code(r.Step.Name)
+	}
+	switch r.Kind {
+	case history.StepChanged, history.NewStep:
+		if r.Old != "" && r.Old != r.New {
+			out = append(out, Change{"Dockerfile", template.HTML(fmt.Sprintf(`<span class="old mono">%s</span><br><span class="new mono">%s</span>`, e(r.Old), e(r.New)))})
+		} else {
+			out = append(out, Change{"Dockerfile", template.HTML(at + " is new or changed")})
+		}
+	case history.ArgChanged:
+		out = append(out, Change{"Build argument", template.HTML(fmt.Sprintf(`<code>%s</code>: <span class="old mono">%s</span> → <span class="new mono">%s</span>`, e(r.Arg), e(r.Old), e(r.New)))})
+	case history.BaseImageChanged:
+		out = append(out, Change{"Base image", template.HTML(fmt.Sprintf(`<span class="old mono">%s</span> → <span class="new mono">%s</span>`, e(r.Old), e(r.New)))})
+	case history.FilesChanged:
+		out = append(out, Change{"Files", template.HTML(at + " reads " + orContext(r.Paths) + " — changed")})
+	case history.CacheElsewhere:
+		out = append(out, Change{"Files", template.HTML(at + " reads " + orContext(r.Paths) + " — changed or not: the previous build ran on another node, and BuildKit does not record the files")})
+	}
+	prevBuilt := 0
 	for _, st := range pb.Steps {
-		k := keyOf(st)
-		if _, ok := before[k]; !ok {
-			keys = append(keys, k)
+		if st.State == history.Built && !isFrom(st) {
+			prevBuilt++
 		}
-		before[k] = st
 	}
-	for _, st := range b.Steps {
-		k := keyOf(st)
-		if _, ok := before[k]; !ok {
-			if _, ok := now[k]; !ok {
-				keys = append(keys, k)
-			}
-		}
-		now[k] = st
+	if prevBuilt != d.Built {
+		out = append(out, Change{"Steps run", template.HTML(fmt.Sprintf("%d, last time %d", d.Built, prevBuilt))})
 	}
-	reasonKey := ""
-	if d.Page.Reason.Kind != "" {
-		reasonKey = keyOf(d.Page.Reason.Step)
-	}
-	for _, k := range keys {
-		x, okA := before[k]
-		y, okB := now[k]
-		row := CompareRow{Mark: k == reasonKey && d.Cat.Key != "cached"}
-		if okA {
-			row.Name, row.Before = x.Key+" "+x.Name, state(x)
-		}
-		if okB {
-			row.Name, row.Now = y.Key+" "+y.Name, state(y)
-		}
-		if !okA || !okB || row.Before != row.Now {
-			c.Differ++
-		}
-		c.Rows = append(c.Rows, row)
-	}
-	return c
+	return out, nil
 }
 
 // ---- the step panel ----
@@ -516,7 +470,7 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	d, err := s.readBuild(ctx, id)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && (idx < 0 || idx >= len(d.Page.Build.Steps))) {
+	if errors.Is(err, store.ErrNotFound) || (err == nil && (idx < 0 || idx >= len(d.Page.Build.Steps) || !s.mayBuild(r, d.Page))) {
 		s.notFound(w, r, "step")
 		return
 	}
@@ -683,4 +637,39 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 	sh.Title = "Step " + st.Key
 	sd.Shell, sd.Full = sh, true
 	s.render(w, "steppage", http.StatusOK, sd)
+}
+
+func paren(s string) string {
+	if s == "" {
+		return ""
+	}
+	return " (" + s + ")"
+}
+
+// webURL keeps a link to GitLab only when it is one: job data comes from
+// CI variables, and anything but http(s) would only become a dead link.
+func webURL(u string) string {
+	if strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") {
+		return u
+	}
+	return ""
+}
+
+func orDefault(target string) string {
+	if target == "" {
+		return "the default target"
+	}
+	return target
+}
+
+func ago(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("2 Jan 15:04 UTC")
+}
+
+// traceID is the trace id the runner gives a job.
+func traceID(a history.Attribution) string {
+	return fmt.Sprintf("01%s%012x%012x", a.Instance, a.Pipeline, a.Job)
 }

@@ -184,6 +184,34 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 	return Verdict{Tone: "built", Kicker: string(r.Kind), Title: template.HTML(fmt.Sprintf("Rebuilt from %s%s.", code(r.Step.Name), at))}
 }
 
+// withVia tells how a reason settled after the build was stored: GitLab's
+// comparison of the commits of this build and of the image's previous one.
+func withVia(v Verdict, r history.Reason, via string) Verdict {
+	cmp, ok := strings.CutPrefix(via, "gitlab ")
+	switch {
+	case strings.HasPrefix(via, "same commit"):
+		cmp, ok = "", true
+	case !ok:
+		return v
+	}
+	source := "The previous build of this image built the same commit"
+	if cmp != "" {
+		source = fmt.Sprintf("GitLab's comparison of the commits of the previous build and this one (<code>%s</code>)", e(cmp))
+	}
+	switch r.Kind {
+	case history.OtherNode:
+		v.Detail = template.HTML(fmt.Sprintf("%s copies %s, and %s shows no change there. Its cache is on node <b>%s</b>, where the previous build ran; this job ran on <b>%s</b>.",
+			code(r.Step.Name), orContext(r.Paths), source, e(shortDaemon(r.Old)), e(shortDaemon(r.New))))
+		if cmp == "" {
+			v.Detail = template.HTML(fmt.Sprintf("%s: nothing %s copies changed. Its cache is on node <b>%s</b>, where that build ran; this job ran on <b>%s</b>.",
+				source, code(r.Step.Name), e(shortDaemon(r.Old)), e(shortDaemon(r.New))))
+		}
+	case history.FilesChanged:
+		v.Detail += template.HTML(fmt.Sprintf(" %s lists them; the previous build ran on another node, so it would have been rebuilt there too.", source))
+	}
+	return v
+}
+
 func orContext(ps []string) string {
 	if len(ps) == 0 {
 		return "its input"
@@ -195,13 +223,14 @@ func orContext(ps []string) string {
 func duration(d time.Duration) string {
 	s := d.Seconds()
 	switch {
+	// A no-break space keeps a number with its unit.
 	case s < 10:
-		return fmt.Sprintf("%.1f s", s)
+		return fmt.Sprintf("%.1f\u00a0s", s)
 	case s < 60:
-		return fmt.Sprintf("%.0f s", s)
+		return fmt.Sprintf("%.0f\u00a0s", s)
 	case s >= 3600:
-		return fmt.Sprintf("%d h %d min", int(s)/3600, int(s)%3600/60)
+		return fmt.Sprintf("%d\u00a0h %d\u00a0min", int(s)/3600, int(s)%3600/60)
 	default:
-		return fmt.Sprintf("%d min %d s", int(s)/60, int(s)%60)
+		return fmt.Sprintf("%d\u00a0min %d\u00a0s", int(s)/60, int(s)%60)
 	}
 }

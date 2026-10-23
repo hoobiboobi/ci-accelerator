@@ -1,7 +1,7 @@
 // Browser checks of the console's pages: what a tester would do by hand.
 //
 //   node test/ui/ui.mjs --base http://localhost:8080 [--chrome PATH]
-//        [--live /pipelines/<instance>/<id>]
+//        [--live /pipelines/<instance>/<id>] [--cookie NAME=VALUE]
 //
 // It starts a headless Chrome of its own and talks to it over the DevTools
 // protocol (Node >= 22: WebSocket is built in; no packages). It visits every
@@ -9,7 +9,11 @@
 // interactive parts, and fails on script errors, content security policy
 // reports, failed requests, broken text and pages wider than the screen.
 // --live names a pipeline page whose pipeline changes while the checks run
-// (the Go test announces it): its waterfall search must survive the update.
+// (the Go test announces it): what the reader unfolded must survive it.
+// --cookie is a session cookie of a console with sign-in: the pages are
+// checked as that person, then the sign-in page, then signing out.
+// --shots DIR saves a full-page screenshot of the first two pages of each
+// kind (ids aside) at both widths, with an index.html to look through.
 // Exit status 1 when a check fails; each check prints one line.
 "use strict";
 import { spawn } from "node:child_process";
@@ -22,7 +26,7 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) =>
   return acc;
 }, []));
 const base = (args.base || "").replace(/\/$/, "");
-if (!base) { console.error("usage: ui.mjs --base URL [--chrome PATH] [--live PATH]"); process.exit(2); }
+if (!base) { console.error("usage: ui.mjs --base URL [--chrome PATH] [--live PATH] [--cookie NAME=VALUE]"); process.exit(2); }
 if (typeof WebSocket === "undefined") { console.error("Node >= 22 needed (built-in WebSocket)"); process.exit(2); }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -194,6 +198,27 @@ const audit = `(() => {
   return out;
 })()`;
 
+// ---- screenshots (--shots) ----
+const shotsTaken = [], shotKinds = new Map();
+async function shot(s, width, p) {
+  const kind = width + " " + p.split("?")[0].replace(/\d+/g, "N");
+  const n = (shotKinds.get(kind) || 0) + 1;
+  shotKinds.set(kind, n);
+  if (n > 2) return;
+  const r = await s.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+  const name = `${width}${p.replace(/[^A-Za-z0-9]+/g, "-").replace(/-$/, "") || "-home"}.png`;
+  fs.mkdirSync(args.shots, { recursive: true });
+  fs.writeFileSync(path.join(args.shots, name), Buffer.from(r.data, "base64"));
+  shotsTaken.push({ width, page: p, name });
+}
+function shotIndex() {
+  if (!args.shots || !shotsTaken.length) return;
+  const esc = t => t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const rows = shotsTaken.map(x => `<figure><figcaption>${x.width}px ${esc(x.page)}</figcaption><img src="${esc(x.name)}" loading="lazy" style="max-width:${x.width}px;width:100%;border:1px solid #ccc"></figure>`);
+  fs.writeFileSync(path.join(args.shots, "index.html"), `<!doctype html><meta charset=utf-8><title>Console screenshots</title><body style="font:14px system-ui;margin:16px">${rows.join("\n")}`);
+  console.log(`# ${shotsTaken.length} screenshots in ${args.shots}/index.html`);
+}
+
 // ---- the checks ----
 async function crawl(s, width) {
   await s.size(width, width < 600 ? 844 : 900);
@@ -214,6 +239,7 @@ async function crawl(s, width) {
     if (s.main !== 200) found.push("status " + s.main);
     if (ms > 3000) { slow++; found.push("loaded in " + (ms === Infinity ? "never" : ms + " ms")); }
     if (found.length) { bad++; check(`${width}px ${p}`, false, found.join(" | ").slice(0, 400)); }
+    if (args.shots) await shot(s, width, p);
     for (const h of await s.eval(`[...document.querySelectorAll("a[href]")].map(a => a.getAttribute("href"))`)) {
       if (!h.startsWith("/") || h.startsWith("//") || h.startsWith("/static/") || h.startsWith("/api/")) continue;
       const q = h.split("#")[0];
@@ -277,32 +303,93 @@ async function buildPage(s, pages) {
 }
 
 async function pipelinePage(s, pages) {
-  const pipes = pages.filter(p => /^\/pipelines\/[^/]+\/\d+$/.test(p));
   let p = null;
-  for (const x of pipes) { await s.go(x); if (await s.eval(`!!document.querySelector("[data-wf] .row")`)) { p = x; break; } }
+  for (const x of pages.filter(x => /^\/pipelines\/[^/]+\/\d+$/.test(x))) {
+    await s.go(x);
+    if (await s.eval(`!!document.querySelector("[data-wf] .row.k-job")`)) { p = x; if (await s.eval(`!!document.querySelector("#cachedFold")`)) break; }
+  }
   if (!p) return check("a pipeline with a timeline", false, "none found");
-  await s.click('[data-tab="timeline"]');
+  await s.go(p);
+  if (await s.eval(`!!document.querySelector("#cachedFold")`)) {
+    await s.click("#cachedFold > summary");
+    check(`${p} the cached images unfold`, await s.eval(`document.querySelector("#cachedFold").open && document.querySelectorAll("#cachedFold .brow").length > 0`));
+  }
   const visibleRows = () => s.eval(`[...document.querySelectorAll("[data-wf] .row")].filter(r => !r.hidden).length`);
-  for (const d of ["jobs", "stages", "steps"]) {
+  // Several jobs: it opens on one row per job; one job: on its stages.
+  const first = await visibleRows();
+  const pressed = await s.eval(`document.querySelector('[data-wf-depth][aria-pressed="true"]').dataset.wfDepth`);
+  for (const d of ["stages", "steps", "jobs"]) {
     if (await s.click(`[data-wf-depth="${d}"]`)) check(`${p} timeline depth ${d}`, (await visibleRows()) > 0);
   }
+  await s.click(`[data-wf-depth="${pressed}"]`);
+  check(`${p} the timeline opens as its depth button says (${pressed})`, (await visibleRows()) === first, `${first}`);
   await s.click("[data-wf-q]");
   await s.type("zzzqqq");
   check(`${p} timeline search without a match hides every row`, (await visibleRows()) === 0);
   await s.eval(`(() => { const i = document.querySelector("[data-wf-q]"); i.value = ""; i.dispatchEvent(new Event("input")); i.blur(); })()`);
   if (await s.click("[data-wf-crit]")) check(`${p} critical path`, await s.eval(`document.querySelector("[data-wf]").classList.contains("crit-on")`));
+  await s.click('[data-wf-depth="steps"]');
   const row = await s.eval(`(() => { const r = [...document.querySelectorAll("[data-wf] .row[data-wstep]")].find(r => !r.hidden); return r && r.dataset.id; })()`);
   if (row) {
     await s.click(`[data-wf] .row[data-id="${row}"]`, 900);
     check(`${p} a timeline step opens the panel`, await s.visible("#drawer"));
     await s.key("Escape");
   }
-  if (await s.click('[data-tab="dockerfile"]') && await s.eval(`!!document.querySelector('[data-pane="dockerfile"] a.jc')`)) {
-    const before = await s.eval("location.pathname");
-    await s.click('[data-pane="dockerfile"] a.jc', 900);
-    check(`${p} a Dockerfile chip opens the panel in place`, (await s.visible("#drawer")) && (await s.eval("location.pathname")) === before);
-    await s.key("Escape");
+  const href = await s.eval(`(() => { const a = document.querySelector('[data-wf] .row.k-job a.nm[href^="/builds/"]'); return a && a.getAttribute("href"); })()`);
+  if (href) {
+    await s.click(`[data-wf] .row.k-job a.nm[href="${href}"]`, 1200);
+    check(`${p} a job's build opens from the timeline`, (await s.eval("location.pathname")) === href, href);
+    if (await s.click('[data-tab="timeline"]')) {
+      check(`${href} the build's steps on a timeline`, await s.eval(`[...document.querySelectorAll(".sgantt .srow2")].some(r => r.offsetParent)`));
+    }
   }
+  check(`${p} no errors`, s.take().length === 0);
+}
+
+// The pipelines: one card each with its jobs by stage; a card opens its
+// pipeline.
+async function pipelinesPage(s) {
+  await s.go("/pipelines");
+  const st = await s.eval(`({ cards: document.querySelectorAll(".pcard").length, jobs: document.querySelectorAll(".pg-tr a.j").length,
+    href: (document.querySelector(".pcard .pc-head") || {}).getAttribute?.call(document.querySelector(".pcard .pc-head"), "href") })`);
+  check("pipelines: cards with their jobs on a time axis", st.cards > 0 && st.jobs > 0, JSON.stringify(st));
+  if (st.href) {
+    await s.click(".pcard .pc-head", 1200);
+    check("pipelines: a card opens its pipeline", (await s.eval("location.pathname")) === st.href, st.href);
+  }
+  check("pipelines: no errors", s.take().length === 0);
+}
+
+// The build list: a filter applies as it changes and lands in the address.
+async function buildList(s) {
+  await s.go("/builds");
+  const all = await s.eval(`document.querySelectorAll(".brow").length`);
+  await s.eval(`(() => { const sel = document.getElementById("fOutcome"); sel.value = "rebuilt"; sel.dispatchEvent(new Event("change")); })()`);
+  await sleep(1200);
+  const st = await s.eval(`({ url: location.search, rows: document.querySelectorAll(".brow").length, quiet: document.querySelectorAll(".brow.quiet").length })`);
+  check("builds: a filter applies at once and is in the address", /outcome=rebuilt/.test(st.url) && st.rows > 0 && st.rows <= all && st.quiet === 0, JSON.stringify(st));
+  await s.go("/builds?group=pipeline");
+  check("builds: grouped by pipeline", await s.eval(`document.querySelectorAll("a.pgh").length > 0`));
+  check("builds: no errors", s.take().length === 0);
+}
+
+// A job that built no image: its page reads the end of its log from
+// GitLab when asked, as text.
+async function jobPage(s, pages) {
+  let p = null;
+  for (const x of pages.filter(x => /^\/jobs\/[^/]+\/\d+$/.test(x))) {
+    await s.go(x);
+    if (await s.eval(`!!document.querySelector('[data-act="showlog"]')`)) { p = x; break; }
+  }
+  if (!p) return check("a job page offers its log", true, "none here (no GitLab token)");
+  await s.click('[data-act="showlog"]', 300);
+  let text = "";
+  for (let i = 0; i < 30 && !text; i++) {
+    await sleep(200);
+    text = await s.eval(`(() => { const pre = document.querySelector("[data-log]"); return pre && !pre.hidden ? pre.textContent : ""; })()`);
+  }
+  check(`${p} shows the end of its log`, text.length > 0 && !/\x1b/.test(text), JSON.stringify(text.slice(0, 60)));
+  check(`${p} log: secrets masked, markup shown as text`, !/glpat-/.test(text) && !(await s.eval(`!!document.querySelector("[data-log] script, [data-log] img")`)));
   check(`${p} no errors`, s.take().length === 0);
 }
 
@@ -348,21 +435,45 @@ async function notFound(s) {
   s.take();
 }
 
-// The page's pipeline changes while the reader types in its waterfall.
+// The page's pipeline changes while the reader has unfolded part of it:
+// the update keeps it unfolded.
 async function liveUpdate(s, p) {
-  await s.go(p + "#timeline");
-  await s.click("[data-wf-q]");
-  await s.type("zzzqqq");
+  await s.go(p);
+  const fold = await s.eval(`!!document.querySelector("#cachedFold")`);
+  if (fold) await s.click("#cachedFold > summary");
   let status = "";
   for (let i = 0; i < 40 && !/^Updated/.test(status); i++) {
     await sleep(250);
     status = await s.eval(`(document.getElementById("live") || {}).textContent || ""`);
   }
-  const st = await s.eval(`({ q: document.querySelector("[data-wf-q]").value, rows: [...document.querySelectorAll("[data-wf] .row")].filter(r => !r.hidden).length,
-    focus: document.activeElement && document.activeElement.matches("[data-wf-q]") })`);
-  check("a live update keeps the waterfall search", /^Updated/.test(status) && st.q === "zzzqqq" && st.rows === 0 && st.focus,
-    `${status} ${JSON.stringify(st)}`);
+  const open = fold ? await s.eval(`document.querySelector("#cachedFold").open`) : true;
+  check("a live update keeps what the reader unfolded", /^Updated/.test(status) && open, `${status} fold ${fold} open ${open}`);
   check("live update: no errors", s.take().length === 0);
+}
+
+// Signed in: who it is shows on every page; the sign-in page passes the
+// same checks as the others; signing out ends the session.
+async function signedIn(s) {
+  await s.go("/");
+  check("signed in: the sidebar names the person and offers to sign out",
+    await s.eval(`!!document.querySelector(".who small") && /^@/.test(document.querySelector(".who small").textContent) && !!document.querySelector("form.signout button")`));
+  for (const w of [1400, 390]) {
+    await s.size(w, w < 600 ? 844 : 900);
+    await s.go("/auth/sign-in?e=denied&to=%2F");
+    const issues = await s.eval(audit);
+    check(`${w}px: the sign-in page`, s.main === 200 && issues.length === 0 && await s.visible(".signin-btn"), issues.join("; "));
+  }
+  await s.size(1400, 900);
+  await s.go("/");
+  await s.click("form.signout button", 1200);
+  check("signing out lands on the sign-in page and says so", (await s.eval("location.pathname + location.search")) === "/auth/sign-in?e=out" &&
+    /You are signed out/.test(await s.eval("document.body.innerText")));
+  const before = s.take();
+  const status = await s.eval(`fetch("/search-index").then(r => r.status)`);
+  check("after signing out, data is refused", status === 401, String(status));
+  // That refusal is the point; anything else is a problem.
+  const left = before.concat(s.take().filter(p => !/search-index|status of 401/.test(p)));
+  check("sign-in: no errors", left.length === 0, left.join("; "));
 }
 
 // ---- run ----
@@ -370,14 +481,23 @@ const chrome = await launch();
 console.log(`# ${chrome.version} against ${base}`);
 try {
   const s = await page(chrome.port);
+  if (args.cookie) {
+    const [name, ...v] = args.cookie.split("=");
+    const ok = (await s.send("Network.setCookie", { name, value: v.join("="), url: base + "/", path: "/", secure: true, httpOnly: true, sameSite: "Lax" })).success;
+    check("the session cookie is set", ok !== false);
+  }
   const pages = await crawl(s, 1400);
   await crawl(s, 390);
   await navigationBurst(s, pages);
   await buildPage(s, pages);
   await pipelinePage(s, pages);
+  await pipelinesPage(s);
+  await buildList(s);
+  await jobPage(s, pages);
   await keys(s, pages);
   await notFound(s);
   if (args.live) await liveUpdate(s, args.live);
+  if (args.cookie) await signedIn(s);
   await s.close();
 } catch (e) {
   check("the checks ran to the end", false, e.stack || String(e));
@@ -386,5 +506,6 @@ try {
   await sleep(300);
   fs.rmSync(chrome.dir, { recursive: true, force: true });
 }
+shotIndex();
 console.log(`# ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

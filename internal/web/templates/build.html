@@ -1,112 +1,84 @@
 {{define "build"}}{{template "layout" .}}{{end}}
 {{define "content"}}
-<div id="ctx" data-build="{{.ID}}" data-trace="{{.Aside.Trace}}" hidden></div>
+<div id="ctx" data-build="{{.ID}}" data-trace="{{.Trace}}" hidden></div>
+<div class="page">
 {{if .ViaLog}}<div class="howto" role="region" aria-label="How you got here" id="howto">
-  <div class="row"><span class="k">{{icon "log" 13}}How you got here · the GitLab job log</span><code title="{{.LogLine}}">{{.LogLine}}</code>
-    <span class="acts">{{if .GitLabURL}}<a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">Job log</a>{{end}}<button class="iconbtn sm" type="button" data-act="hidehow" aria-label="Dismiss">{{icon "x" 12}}</button></span></div>
+  <div class="row"><span class="k">{{icon "log" 13}}From the GitLab job log</span><code title="{{.LogLine}}">{{.LogLine}}</code>
+    <span class="acts"><button class="iconbtn sm" type="button" data-act="hidehow" aria-label="Dismiss">{{icon "x" 12}}</button></span></div>
 </div>{{end}}
-<div class="crumbs"><a href="{{if .PipeURL}}{{.PipeURL}}{{else}}/{{end}}" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/">Pipelines</a>{{if .PipeURL}}<span class="sepr">/</span><a href="{{.PipeURL}}">{{.PipeLabel}}</a>{{end}}<span class="sepr">/</span><span>{{.Name}}</span></div>
-<div class="titlerow"><h1 class="t" tabindex="-1">{{.Name}}</h1>{{template "catchip" .Cat}}
-  <div class="tools">
-    {{if .PrevURL}}<a class="btn sq" href="{{.PrevURL}}" data-key="k" aria-label="Previous job (k)">{{icon "chevU" 14}}</a>{{else}}<span class="btn sq" aria-disabled="true">{{icon "chevU" 14}}</span>{{end}}
-    {{if .NextURL}}<a class="btn sq" href="{{.NextURL}}" data-key="j" aria-label="Next job (j)">{{icon "chevD" 14}}</a>{{else}}<span class="btn sq" aria-disabled="true">{{icon "chevD" 14}}</span>{{end}}
-    {{if .GitLabURL}}<a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab job</span></a>{{end}}
-  </div>
+<header class="phead">
+  <div class="crumbs"><a href="{{if .PipeURL}}{{.PipeURL}}{{else}}/builds{{end}}" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/builds">Builds</a>{{if .PipeURL}}<span class="sepr">/</span><a href="{{.PipeURL}}">{{.PipeLabel}}</a>{{end}}<span class="sepr">/</span><span>{{.Name}}</span></div>
+  <div class="titlerow"><h1 class="t" tabindex="-1">{{.Name}}</h1>{{template "statuslong" .Status}}
+    {{if .GitLabURL}}<div class="tools"><a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab job</span></a></div>{{end}}</div>
+  <div class="sub">{{if .Commit}}<span class="q">“{{.Commit}}”</span>{{end}}{{if .SHA}}<span><span class="mono">{{.SHA}}</span>{{with .Ref}} on {{.}}{{end}}</span>{{end}}{{if .Target}}<span>target <span class="mono">{{.Target}}</span></span>{{end}}<span>node <span class="mono">{{.Node}}</span></span></div>
+</header>
+
+{{template "verdict" .Verdict}}
+<div class="nums">
+  {{if .Dur}}<span><b>{{.Dur}}</b>{{if .Delta}} <span class="{{if .Slower}}slow{{else}}fast{{end}}">{{.Delta}} vs usual</span>{{else if .Usual}} <span class="muted">usual {{.Usual}}</span>{{end}}</span>{{else}}<span><b>building</b></span>{{end}}
+  <span><b>{{.Ran}}</b> of {{.Steps}} step{{if ne .Steps 1}}s{{end}} ran</span>
 </div>
-<div class="sub">{{if .Commit}}<span class="q">“{{.Commit}}”</span>{{end}}{{if .SHA}}<span><span class="mono">{{.SHA}}</span>{{with .Ref}} on {{.}}{{end}}</span>{{end}}<span>target <span class="mono">{{if .Target}}{{.Target}}{{else}}default{{end}}</span></span><span>{{dur .Total}} total</span></div>
+{{with .Others}}<p class="others">This job ran {{add (len .) 1}} builds: {{range $i, $o := .}}{{if $i}}, {{end}}<a class="link" href="{{$o.URL}}">{{$o.Target}}</a> ({{$o.Dur}}, {{$o.Status.Label}}){{end}}.</p>{{end}}
 
-<div class="dgrid">
-  <div class="stack">
-    {{template "verdict" .Verdict}}
-    {{with .Others}}<div class="others">This job ran {{add (len .) 1}} builds: {{range $i, $o := .}}{{if $i}}, {{end}}<a class="link" href="{{$o.URL}}">{{$o.Target}}</a> ({{$o.Dur}}, {{$o.Cat.Label}}){{end}}.</div>{{end}}
+<section class="box" aria-labelledby="chgT"><div class="boxh"><h2 class="h" id="chgT">What changed since the previous build</h2>{{if .PrevURL}}<a class="link" href="{{.PrevURL}}">{{.PrevLabel}}</a>{{end}}</div>
+  {{if .PrevURL}}{{if .Changes}}<dl class="chg">{{range .Changes}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}</dl>{{else}}<p class="muted pad">Nothing BuildKit records differs.</p>{{end}}
+  {{else}}<p class="muted pad">No earlier build of {{if .Target}}{{.Target}}{{else}}this target{{end}} on record.</p>{{end}}
+</section>
 
-    <section aria-labelledby="tbT"><h2 class="h" id="tbT">Where the {{dur .Total}} went</h2>
-      {{template "timebar" .Segs}}
-      <div class="facts"><span>BuildKit <b>{{dur .BuildKit}}</b> — {{if eq .Speed "slower"}}<span class="slow">slower</span> than usual ({{dur .Usual}}){{else if eq .Speed "faster"}}faster than usual ({{dur .Usual}}){{else if eq .Speed "usual"}}about as usual ({{dur .Usual}}){{else}}no earlier build of this target to compare with{{end}}</span><span><b>{{.Cached}}</b> step{{if ne .Cached 1}}s{{end}} from cache{{if .Saved}} · saved <b>≈{{dur .Saved}}</b>{{end}}</span>{{if .Context}}<span>Context sent <b>{{bytes .Context}}</b></span>{{end}}</div>
-    </section>
-
-    <div>
-      <nav class="vtabs" role="tablist" aria-label="Build views">
-        <a role="tab" href="#steps" data-tab="steps" aria-selected="true">{{icon "steps" 14}}Steps <span class="k2">{{.StepCount}}</span></a>
-        {{if .Lines}}<a role="tab" href="#dockerfile" data-tab="dockerfile" aria-selected="false">{{icon "dfile" 14}}Dockerfile</a>{{end}}
-        <a role="tab" href="#timeline" data-tab="timeline" aria-selected="false">{{icon "tl" 14}}Timeline</a>
-      </nav>
-
-      <div class="tabpane" id="steps" data-pane="steps" role="tabpanel" aria-label="Steps">
-      <section aria-labelledby="stT">
-        {{if not .Blocks}}<h2 class="h" id="stT">Steps</h2>
-        <p class="muted">{{if .Failed}}No step ran: the build failed before its first step (see the error above).{{else}}This build ran no steps.{{end}}</p>
-        {{else}}<h2 class="h" id="stT">Steps <span class="muted">{{.StepCount}} steps · cached stages folded · click a step for its output</span><button class="btn" type="button" data-act="toggleall">{{icon "chevD" 13}}<span>Expand all</span></button></h2>
-        <div class="tbox tone-{{.Tone}}"><table><thead><tr><th class="num">Line</th><th>Step</th><th>Result</th><th class="wfc">When</th><th class="num">Time</th></tr></thead><tbody>
-        {{range $bi, $blk := .Blocks}}
-          {{if eq .Kind "from"}}
-          <tr class="grp"><td colspan="5"><div class="grpstatic">{{template "stchip" "image"}}<span class="gname mono">{{.Name}}</span><span class="gmeta">{{if .Pulled}}pulled{{else}}already on this node{{end}}{{if .Line}} · line {{.Line}}{{end}}</span><span class="gd">{{dur .D}}</span></div></td></tr>
-          {{else}}
-          <tr class="grp"><td colspan="5"><button class="grpbtn" type="button" data-blk="{{$bi}}" data-fold="{{if eq .Kind "cached"}}true{{else}}false{{end}}" aria-expanded="true">{{icon "chev" 13 "chev"}}<span class="gname">{{.Name}}</span>{{if eq .Kind "cached"}}<span class="chip cached">{{icon "s_cached" 11}}from cache</span>{{else if eq .State "received"}}<span class="chip received">{{icon "s_received" 11}}from {{if .From}}{{.From}}{{else}}another job{{end}}</span>{{else}}{{template "stchip" .State}}{{end}}<span class="gmeta">{{.Meta}}{{if .First}} · <span class="firstmk">rebuild started here</span>{{end}}</span><span class="gd">{{dur .D}}</span></button></td></tr>
-          {{range .Rows}}
-          <tr class="st{{if .FirstRebuilt}} mark{{end}}" data-of="{{$bi}}" data-step="{{.Index}}" tabindex="0">
-            <td class="ln">{{if .Line}}{{.Line}}{{end}}</td>
-            <td class="cmd"><a class="steplink c" href="/builds/{{$.ID}}/steps/{{.Index}}" tabindex="-1" title="{{.Name}} — output and history">{{.Name}}</a>{{if .FirstRebuilt}}<span class="firstmk blk">↳ first rebuilt step</span>{{end}}<span class="meta">{{.Key}} · {{$a := dur .Start}}{{$b := dur .End}}{{$a}}{{if ne $a $b}}–{{$b}}{{end}} after start</span></td>
-            <td class="res">{{if eq .State "received"}}<span class="chip received">{{icon "s_received" 11}}from {{.From}}</span>{{else}}{{template "stchip" .State}}{{end}}</td>
-            <td class="wfc"><span class="wf"><i class="c-{{.State}}" style="left: {{.L}}%; width: {{.W}}%"></i></span></td>
-            <td class="num">{{dur .D}}</td>
-          </tr>
-          {{end}}
-          {{end}}
-        {{end}}
-        </tbody></table></div>
-        {{if and .Failed (not .Lines)}}<p class="muted">No Dockerfile view: BuildKit records the Dockerfile and its line numbers only for builds that succeed.</p>{{end}}
-        {{end}}
-      </section>
-      </div>
-
-      {{if .Lines}}
-      <div class="tabpane" id="dockerfile" data-pane="dockerfile" role="tabpanel" aria-label="Dockerfile">
-        <div class="dfwrap">
-          <div class="dfbar">Recorded by BuildKit for <b>{{.Name}}</b>{{with .DfName}} · <code>{{.}}</code>{{end}} · target <b>{{if .Target}}{{.Target}}{{else}}default{{end}}</b></div>
-          {{template "dockerfile" .}}
-          <div class="dfbar"><span class="legend"><span><i class="si built">{{icon "s_built" 11}}</i>built</span><span><i class="si cached">{{icon "s_cached" 11}}</i>from cache</span><span><i class="si received">{{icon "s_received" 11}}</i>from another job</span><span><i class="si image">{{icon "s_image" 11}}</i>base image</span><span><span class="rtag nm0">rebuild started here</span></span><span>dimmed: not part of this target</span></span></div>
-          <div class="hints"><span><kbd>↑</kbd><kbd>↓</kbd> move between lines</span><span><kbd>↵</kbd> output and history</span><span><kbd>esc</kbd> close</span><span>Hover a line for what happened on it.</span></div>
-        </div>
-      </div>
-      {{end}}
-
-      <div class="tabpane" id="timeline" data-pane="timeline" role="tabpanel" aria-label="Timeline">
-        {{template "waterfall" .WF}}
-      </div>
-    </div>
-
-    {{with .Compare}}
-    <details class="disc"><summary>{{icon "chev" 14 "chev"}}<b>Compared with the previous build of {{if $.Target}}{{$.Target}}{{else}}this target{{end}}</b><span class="muted">{{.Pipe}}{{with .SHA}} · <span class="mono">{{.}}</span>{{end}}{{with .Msg}} “{{.}}”{{end}} · node {{.From}} → {{.To}} · {{if .Differ}}{{.Differ}} steps differ{{else}}same result for every step{{end}}</span></summary>
-      <div class="body"><div class="tbox"><table><thead><tr><th>Step</th><th>Before</th><th>Now</th></tr></thead><tbody>
-        {{range .Rows}}<tr class="st{{if .Mark}} mark{{end}}"><td class="cmd"><span class="c" title="{{.Name}}">{{.Name}}</span></td><td>{{if .Before}}{{template "stchip" .Before}}{{else}}<span class="muted">—</span>{{end}}</td><td>{{if .Now}}{{template "stchip" .Now}}{{else}}<span class="muted">—</span>{{end}}{{if .Mark}}<span class="firstmk">first rebuilt</span>{{end}}</td></tr>{{end}}
-      </tbody></table></div>
-      <p class="muted note0">Previous: <a class="link" href="{{.URL}}">{{if .Name}}{{.Name}}{{else}}build{{end}}{{with .Pipe}} in pipeline {{.}}{{end}}</a> · {{.Dur}} in BuildKit</p></div>
-    </details>
+<section class="box" aria-labelledby="stT">
+  <div class="boxh"><h2 class="h" id="stT">Steps</h2>
+    {{if .Blocks}}<nav class="seg" role="tablist" aria-label="Steps as"><a role="tab" href="#steps" data-tab="steps" aria-selected="true">List</a>{{if .Gantt}}<a role="tab" href="#timeline" data-tab="timeline" aria-selected="false">Timeline</a>{{end}}{{if .Lines}}<a role="tab" href="#dockerfile" data-tab="dockerfile" aria-selected="false">Dockerfile</a>{{end}}</nav>
+    <button class="btn ml" type="button" data-act="toggleall">{{icon "chevD" 13}}<span>Expand all</span></button>{{end}}</div>
+  {{if not .Blocks}}<p class="muted pad">{{if .Failed}}No step ran: the build failed before its first step.{{else}}This build ran no steps.{{end}}</p>
+  {{else}}
+  <div class="tabpane" id="steps" data-pane="steps" role="tabpanel" aria-label="Steps">
+  <div class="tbox tone-{{.Tone}}"><table><thead><tr><th class="num">Line</th><th>Step</th><th>Result</th><th class="num">Time</th></tr></thead><tbody>
+  {{range $bi, $blk := .Blocks}}
+    {{if eq .Kind "from"}}
+    <tr class="grp"><td colspan="4"><div class="grpstatic">{{template "stchip" "image"}}<span class="gname mono">{{.Name}}</span><span class="gmeta">{{if .Pulled}}pulled{{else}}already on this node{{end}}{{if .Line}} · line {{.Line}}{{end}}</span><span class="gd">{{dur .D}}</span></div></td></tr>
     {{else}}
-    <details class="disc" aria-disabled="true"><summary>{{icon "chev" 14 "chev"}}<b>Compared with the previous build</b><span class="muted">— none: this is the first build of {{if .Target}}{{.Target}}{{else}}this target{{end}} on record</span></summary></details>
+    <tr class="grp"><td colspan="4"><button class="grpbtn" type="button" data-blk="{{$bi}}" data-fold="{{if eq .Kind "cached"}}true{{else}}false{{end}}" aria-expanded="true">{{icon "chev" 13 "chev"}}<span class="gname">{{.Name}}</span>{{if eq .Kind "cached"}}<span class="chip cached">{{icon "s_cached" 11}}from cache</span>{{else if eq .State "received"}}<span class="chip received">{{icon "s_received" 11}}from {{if .From}}{{.From}}{{else}}another job{{end}}</span>{{else}}{{template "stchip" .State}}{{end}}<span class="gmeta">{{.Meta}}{{if .First}} · <span class="firstmk">rebuild started here</span>{{end}}</span><span class="gd">{{dur .D}}</span></button></td></tr>
+    {{range .Rows}}
+    <tr class="st{{if .FirstRebuilt}} mark{{end}}" data-of="{{$bi}}" data-step="{{.Index}}" tabindex="0">
+      <td class="ln">{{if .Line}}{{.Line}}{{end}}</td>
+      <td class="cmd"><a class="steplink c" href="/builds/{{$.ID}}/steps/{{.Index}}" tabindex="-1" title="{{.Name}} — output and history">{{.Name}}</a>{{if .FirstRebuilt}}<span class="firstmk blk">↳ first rebuilt step</span>{{end}}</td>
+      <td class="res">{{if eq .State "received"}}<span class="chip received">{{icon "s_received" 11}}from {{.From}}</span>{{else}}{{template "stchip" .State}}{{end}}</td>
+      <td class="num">{{dur .D}}</td>
+    </tr>
     {{end}}
-
-    <details class="disc"><summary>{{icon "chev" 14 "chev"}}<b>Details for DevOps</b><span class="muted">node, record, trace, API</span></summary>
-      <div class="body"><dl class="kv">{{range .Details}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}</dl></div>
-    </details>
-    {{template "why" research "build"}}
+    {{end}}
+  {{end}}
+  </tbody></table></div>
   </div>
+  {{if .Gantt}}
+  <div class="tabpane" id="timeline" data-pane="timeline" role="tabpanel" aria-label="Timeline" hidden>
+    <div class="sgantt">
+      <div class="gaxis"><span>0 s</span><span>{{if .Dur}}{{.Dur}}{{else}}now{{end}}</span></div>
+      {{range .Gantt}}<a class="srow2{{if .FirstRebuilt}} mark{{end}}" href="/builds/{{$.ID}}/steps/{{.Index}}" title="{{.Name}} · {{.State}} · {{dur .D}} · from +{{dur .Start}}"><span class="gn mono">{{.Name}}</span><span class="gt"><i class="c-{{.State}}" style="left: {{.L}}%; width: {{.W}}%"></i></span><span class="gd">{{dur .D}}</span></a>
+      {{end}}
+    </div>
+    <div class="dfbar"><span class="legend"><span><i class="si built">{{icon "s_built" 11}}</i>built</span><span><i class="si received">{{icon "s_received" 11}}</i>waited for another job</span><span><i class="si image">{{icon "s_image" 11}}</i>base image pulled</span></span>{{with .GanttSkip}}<span class="muted">{{.}} step{{if ne . 1}}s{{end}} from the cache took no time and {{if eq . 1}}is{{else}}are{{end}} not drawn.</span>{{end}}</div>
+  </div>
+  {{end}}
+  {{if .Lines}}
+  <div class="tabpane" id="dockerfile" data-pane="dockerfile" role="tabpanel" aria-label="Dockerfile" hidden>
+    <div class="dfwrap">
+      {{template "dockerfile" .}}
+      <div class="dfbar"><span class="legend"><span><i class="si built">{{icon "s_built" 11}}</i>built</span><span><i class="si cached">{{icon "s_cached" 11}}</i>from cache</span><span><i class="si received">{{icon "s_received" 11}}</i>from another job</span><span><i class="si image">{{icon "s_image" 11}}</i>base image</span><span>dimmed: not part of this target</span></span></div>
+    </div>
+  </div>
+  {{end}}
+  {{end}}
+</section>
 
-  <aside class="aside" aria-label="Build facts"><p class="ttl">Build</p><dl>
-    <dt>Node</dt><dd><span class="mono">{{.Aside.Node}}</span>{{with .Aside.NodeHost}} · {{.}}{{end}}</dd>
-    <dt>Last time</dt><dd>{{if .Aside.Last}}<span class="mono">{{.Aside.Last}}</span>{{if .Aside.OtherNode}} <span class="chip node">other node</span>{{else}} · same{{end}}{{else}}—{{end}}</dd>
-    <dt>Started</dt><dd>{{.Aside.Started}}</dd>
-    <dt>Job</dt><dd>{{.Aside.Job}}</dd>
-    <dt>BuildKit</dt><dd>{{.Aside.Build}}</dd>
-    <dt>Usual</dt><dd>{{if .Aside.Usual}}{{.Aside.Usual}}{{else}}—{{end}}</dd>
-    <dt>Context</dt><dd>{{.Aside.Context}}</dd>
-    {{with .Aside.JobID}}<dt>Job id</dt><dd class="mono">{{.}}</dd>{{end}}
-    {{with .Aside.Trace}}<dt>Trace</dt><dd><span class="tid"><code title="{{.}}">{{.}}</code><button class="iconbtn" type="button" data-copy="{{.}}" aria-label="Copy trace id (c)">{{icon "copy" 13}}</button></span></dd>{{end}}
-  </dl></aside>
+<details class="box fold"><summary>{{icon "chev" 14 "chev"}}<b>Details</b><span class="muted">node, job, context, trace, record</span></summary>
+  <div class="pad"><dl class="kv">{{range .Details}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}</dl>
+  {{if .Trace}}<p><button class="btn" type="button" data-copy="{{.Trace}}">{{icon "copy" 13}}Copy the trace id</button></p>{{end}}
+  {{with .LogURL}}{{template "logbox" .}}{{end}}</div>
+</details>
 </div>
 
-{{range .Steps}}
+{{range .StepViews}}
 <template id="pop-{{.Index}}">
   <div class="ph2"><b>{{.Key}}</b>{{if .Stage}}<span>stage {{.Stage}}</span>{{end}}{{with .Lines}}<span>line {{.}}</span>{{end}}<span>{{dur .D}}</span></div>
   <code class="cmd2">{{.Name}}</code>

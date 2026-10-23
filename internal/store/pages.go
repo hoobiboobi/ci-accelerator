@@ -22,7 +22,8 @@ type Pipeline struct {
 	CommitTitle  string
 	CommitAuthor string
 	MergeRequest uint64
-	// Over the pipeline's builds stored here.
+	// Builds stored here, and the pipeline's time over its builds and
+	// jobs (a pipeline whose jobs built no image has no builds).
 	Builds   int
 	Started  time.Time
 	Finished time.Time
@@ -31,6 +32,10 @@ type Pipeline struct {
 	Status string
 	WebURL string
 	APIAt  time.Time
+	// Activity is the latest a job of it started or ended, as the
+	// console saw: after APIAt, GitLab's word is out of date (a manual
+	// job was run, a job retried).
+	Activity time.Time
 }
 
 // JobInfo is a CI job as its pod described it.
@@ -38,6 +43,7 @@ type JobInfo struct {
 	Instance   string
 	ID         uint64
 	PipelineID uint64
+	ProjectID  uint64
 	Name       string
 	Stage      string
 	URL        string
@@ -50,6 +56,11 @@ type JobInfo struct {
 	Duration time.Duration
 	Waited   time.Duration // queued before a runner took it
 	Runner   string
+	// AllowFailure: its failure does not fail the pipeline.
+	AllowFailure bool
+	// StartedBy is who started it (GitLab username); for a manual job,
+	// who ran it.
+	StartedBy string
 }
 
 // BuildPage is everything the build page shows about one build.
@@ -78,130 +89,82 @@ type StepRun struct {
 	Started  time.Time
 }
 
-// rebuilt counts a pipeline's builds that executed a step other than
-// resolving an image.
-const rebuilt = `SUM(EXISTS (SELECT 1 FROM steps s LEFT JOIN step_defs d ON d.identity = s.identity
-	WHERE s.build_id = b.id AND s.state = 1 AND COALESCE(s.name, d.name) NOT LIKE 'FROM %'))`
-
-// Pipelines returns the latest pipelines with builds here, newest first.
-func (s *Store) Pipelines(ctx context.Context, limit int) ([]Pipeline, error) {
-	return s.pipelines(ctx, "", limit)
-}
-
-// pipelines lists pipelines whose builds match where (conditions on b,
-// starting with AND), newest first; the last argument is the limit.
-func (s *Store) pipelines(ctx context.Context, where string, args ...any) ([]Pipeline, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT b.instance, b.pipeline_id, COALESCE(p.project_id, MAX(b.project_id)), COALESCE(pr.path, ''),
-			COALESCE(p.ref, ''), COALESCE(p.sha, ''), COALESCE(p.source, ''), p.created_at,
-			COALESCE(p.commit_title, ''), COALESCE(p.commit_author, ''), p.mr_iid,
-			COALESCE(p.status, ''), COALESCE(p.web_url, ''), p.api_at,
-			count(*), MIN(b.started_at), MAX(b.completed_at),
-			`+rebuilt+`
-		FROM builds b
-		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
-		LEFT JOIN projects pr ON pr.instance = b.instance AND pr.project_id = COALESCE(p.project_id, b.project_id)
-		WHERE b.pipeline_id IS NOT NULL `+where+`
-		GROUP BY b.instance, b.pipeline_id
-		ORDER BY MIN(b.started_at) DESC LIMIT ?`, args...)
-	if err != nil {
+// PipelineInfo returns a pipeline without its jobs and builds; nil when
+// nothing of it is stored. Its times span its builds and jobs.
+func (s *Store) PipelineInfo(ctx context.Context, instance string, id uint64) (*Pipeline, error) {
+	inst, pid := nullInstance(instance), nullUint(id)
+	p := &Pipeline{Instance: instance, ID: id}
+	var (
+		known                                    bool
+		project, created, mr, apiAt              sql.NullInt64
+		bProject, bStart, bEnd, jProject, jStart sql.NullInt64
+		jEnd, jAct                               sql.NullInt64
+		nBuilds, nJobs                           int
+	)
+	err := s.db.QueryRowContext(ctx, `SELECT project_id, ref, sha, source, created_at, commit_title, commit_author, mr_iid,
+			status, web_url, api_at FROM pipelines WHERE instance = ? AND pipeline_id = ?`, inst, pid).
+		Scan(&project, &p.Ref, &p.SHA, &p.Source, &created, &p.CommitTitle, &p.CommitAuthor, &mr, &p.Status, &p.WebURL, &apiAt)
+	switch {
+	case err == nil:
+		known = true
+	case !errors.Is(err, sql.ErrNoRows):
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Pipeline
-	for rows.Next() {
-		p, err := scanPipeline(rows)
-		if err != nil {
+	// The indexes are named: the planner otherwise walks every build or
+	// job of the instance for the project id.
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*), max(project_id), min(started_at), max(completed_at), COALESCE(SUM(built > 0), 0)
+		FROM builds INDEXED BY builds_pipeline WHERE instance = ? AND pipeline_id = ?`, inst, pid).
+		Scan(&nBuilds, &bProject, &bStart, &bEnd, &p.Rebuilt); err != nil {
+		return nil, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*), max(project_id), min(COALESCE(started_at, queued_at)), max(finished_at),
+			max(max(COALESCE(started_at, 0), COALESCE(finished_at, 0)))
+		FROM jobs INDEXED BY jobs_pipeline WHERE instance = ? AND pipeline_id = ?`, inst, pid).
+		Scan(&nJobs, &jProject, &jStart, &jEnd, &jAct); err != nil {
+		return nil, err
+	}
+	if !known && nBuilds == 0 && nJobs == 0 {
+		return nil, nil
+	}
+	p.Builds = nBuilds
+	switch {
+	case project.Valid:
+		p.ProjectID = uint64(project.Int64)
+	case bProject.Valid:
+		p.ProjectID = uint64(bProject.Int64)
+	case jProject.Valid:
+		p.ProjectID = uint64(jProject.Int64)
+	}
+	if p.ProjectID != 0 {
+		if err := s.db.QueryRowContext(ctx, "SELECT path FROM projects WHERE instance = ? AND project_id = ?", inst, p.ProjectID).
+			Scan(&p.ProjectPath); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		out = append(out, p)
 	}
-	return out, rows.Err()
-}
-
-func scanPipeline(rows *sql.Rows) (Pipeline, error) {
-	var (
-		p                              Pipeline
-		instance, project, created, mr sql.NullInt64
-		started, finished, apiAt       sql.NullInt64
-	)
-	if err := rows.Scan(&instance, &p.ID, &project, &p.ProjectPath, &p.Ref, &p.SHA, &p.Source, &created,
-		&p.CommitTitle, &p.CommitAuthor, &mr, &p.Status, &p.WebURL, &apiAt, &p.Builds, &started, &finished, &p.Rebuilt); err != nil {
-		return p, err
+	p.MergeRequest = uint64(mr.Int64)
+	p.Created, p.APIAt = msTime(created), msTime(apiAt)
+	first := func(a, b sql.NullInt64, less bool) sql.NullInt64 {
+		switch {
+		case !a.Valid:
+			return b
+		case !b.Valid:
+			return a
+		case (a.Int64 < b.Int64) == less:
+			return a
+		}
+		return b
 	}
-	p.Instance = fmt.Sprintf("%06x", instance.Int64)
-	p.ProjectID, p.MergeRequest = uint64(project.Int64), uint64(mr.Int64)
-	p.Created, p.Started, p.Finished, p.APIAt = msTime(created), msTime(started), msTime(finished), msTime(apiAt)
+	p.Started = msTime(first(bStart, jStart, true))
+	p.Finished = msTime(first(bEnd, jEnd, false))
+	if act := first(bEnd, jAct, false); act.Int64 > 0 {
+		p.Activity = msTime(act)
+	}
 	return p, nil
 }
 
-// PipelinePage returns a pipeline, its jobs and its builds (with steps and
-// reasons, graphs not restored); nil when nothing of it is stored.
-func (s *Store) PipelinePage(ctx context.Context, instance string, id uint64) (*Pipeline, []JobInfo, []*Stored, error) {
-	inst := nullInstance(instance)
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT b.instance, b.pipeline_id, COALESCE(p.project_id, MAX(b.project_id)), COALESCE(pr.path, ''),
-			COALESCE(p.ref, ''), COALESCE(p.sha, ''), COALESCE(p.source, ''), p.created_at,
-			COALESCE(p.commit_title, ''), COALESCE(p.commit_author, ''), p.mr_iid,
-			COALESCE(p.status, ''), COALESCE(p.web_url, ''), p.api_at,
-			count(*), MIN(b.started_at), MAX(b.completed_at),
-			`+rebuilt+`
-		FROM builds b
-		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
-		LEFT JOIN projects pr ON pr.instance = b.instance AND pr.project_id = COALESCE(p.project_id, b.project_id)
-		WHERE b.instance = ? AND b.pipeline_id = ?
-		GROUP BY b.instance, b.pipeline_id`, inst, nullUint(id))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	var pipeline *Pipeline
-	for rows.Next() {
-		p, err := scanPipeline(rows)
-		if err != nil {
-			rows.Close()
-			return nil, nil, nil, err
-		}
-		pipeline = &p
-	}
-	rows.Close()
-	if pipeline == nil {
-		// No build completed yet: the pipeline is known from its running
-		// jobs' pods or from GitLab's API.
-		rows, err := s.db.QueryContext(ctx, `
-			SELECT p.instance, p.pipeline_id, p.project_id, COALESCE(pr.path, ''),
-				COALESCE(p.ref, ''), COALESCE(p.sha, ''), COALESCE(p.source, ''), p.created_at,
-				COALESCE(p.commit_title, ''), COALESCE(p.commit_author, ''), p.mr_iid,
-				COALESCE(p.status, ''), COALESCE(p.web_url, ''), p.api_at, 0, NULL, NULL, 0
-			FROM pipelines p
-			LEFT JOIN projects pr ON pr.instance = p.instance AND pr.project_id = p.project_id
-			WHERE p.instance = ? AND p.pipeline_id = ?`, inst, nullUint(id))
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		for rows.Next() {
-			p, err := scanPipeline(rows)
-			if err != nil {
-				rows.Close()
-				return nil, nil, nil, err
-			}
-			pipeline = &p
-		}
-		rows.Close()
-	}
-	if pipeline == nil {
-		return nil, nil, nil, nil
-	}
-	jobs, err := s.jobs(ctx, "WHERE instance = ? AND pipeline_id = ? ORDER BY started_at, job_id", inst, nullUint(id))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	builds, err := s.Pipeline(ctx, instance, id)
-	return pipeline, jobs, builds, err
-}
-
 func (s *Store) jobs(ctx context.Context, where string, args ...any) ([]JobInfo, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT instance, job_id, pipeline_id, name, stage, url, node, started_at,
-		status, queued_at, finished_at, duration_ms, queued_ms, runner FROM jobs `+where, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT instance, job_id, pipeline_id, project_id, name, stage, url, node, started_at,
+		status, queued_at, finished_at, duration_ms, queued_ms, runner, allow_failure, started_by FROM jobs `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -210,17 +173,24 @@ func (s *Store) jobs(ctx context.Context, where string, args ...any) ([]JobInfo,
 	for rows.Next() {
 		var (
 			j                                  JobInfo
-			instance, pipeline, started        sql.NullInt64
+			instance, pipeline, project        sql.NullInt64
+			started                            sql.NullInt64
 			queued, finished, duration, waited sql.NullInt64
 		)
-		if err := rows.Scan(&instance, &j.ID, &pipeline, &j.Name, &j.Stage, &j.URL, &j.Node, &started,
-			&j.Status, &queued, &finished, &duration, &waited, &j.Runner); err != nil {
+		if err := rows.Scan(&instance, &j.ID, &pipeline, &project, &j.Name, &j.Stage, &j.URL, &j.Node, &started,
+			&j.Status, &queued, &finished, &duration, &waited, &j.Runner, &j.AllowFailure, &j.StartedBy); err != nil {
 			return nil, err
 		}
 		j.Instance = fmt.Sprintf("%06x", instance.Int64)
-		j.PipelineID, j.Started = uint64(pipeline.Int64), msTime(started)
+		j.PipelineID, j.ProjectID, j.Started = uint64(pipeline.Int64), uint64(project.Int64), msTime(started)
 		j.Queued, j.Finished = msTime(queued), msTime(finished)
 		j.Duration, j.Waited = time.Duration(duration.Int64)*time.Millisecond, time.Duration(waited.Int64)*time.Millisecond
+		// GitLab last said the job was not over (running, or manual or
+		// pending before it ran), and its pod has ended since: how it
+		// ended is not known until GitLab is read again.
+		if j.Status != "" && !Finished(j.Status) && !j.Finished.IsZero() {
+			j.Status = ""
+		}
 		out = append(out, j)
 	}
 	return out, rows.Err()
@@ -283,11 +253,9 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 		if len(jobs) > 0 {
 			p.Job = &jobs[0]
 		}
-		pipeline, _, _, err := s.PipelinePage(ctx, a.Instance, a.Pipeline)
-		if err != nil {
+		if p.Pipeline, err = s.PipelineInfo(ctx, a.Instance, a.Pipeline); err != nil {
 			return nil, err
 		}
-		p.Pipeline = pipeline
 	}
 	return p, nil
 }

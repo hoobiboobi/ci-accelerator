@@ -1,69 +1,41 @@
 package web
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"html/template"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
-// PipelineView is the pipeline page.
+// PipelineView is a pipeline's image builds: what was rebuilt and why,
+// when the images were ready. Its other jobs are GitLab's to show.
 type PipelineView struct {
 	Shell
-	P         *store.Pipeline
-	Key       string
-	Title     string
-	NewerURL  string
-	OlderURL  string
-	GitLabURL string
-	Time      time.Duration
-	SetBy     string
-	Rebuilt   int
-	FromCache int
-	Saved     time.Duration
-	NodeN     int
-	UnclearN  int
-	Builds    int
-	Gantt     []WFRow
-	Ticks     []Tick
-	Jobs      []PJob
-	Other     []PJob // jobs without a build here
-	WF        *Waterfall
-	Lines     []PipelineLine
-	Columns   []string
-	Mixed     bool
-	DfJobs    int
-	Running   int
-	// TimeElapsed: while jobs run, the seconds so far; the page counts on.
-	TimeElapsed int
-}
-
-// PJob is a job in the pipeline's jobs table.
-type PJob struct {
-	Name, URL, Node, Time, Status string
-	Cat                           Cat
-	Why                           template.HTML
-	Crit                          bool
-	Retried                       bool // a later attempt of the job followed
-	Elapsed                       int  // seconds a running job has run
-}
-
-// PipelineLine is a Dockerfile line with every job's result on it.
-type PipelineLine struct {
-	Line
-	Chips   []Chip // one per column; State "" where the job did not run this line
-	Started []string
-}
-
-// Chip is one job's result on a line.
-type Chip struct {
-	Col, State, Title, URL string
+	Key, Title string
+	ID         uint64
+	Ref, SHA   string
+	Started    string
+	GitLabURL  string
+	Sentence   string
+	Ready      string // from the first build's start to the last build's end
+	Rebuilt    []BuildItem
+	Cached     []BuildItem
+	Running    int
+	WF         *Waterfall
+	Card       PipeCard // its status and what its jobs waited, as the pipelines page says
+	SetBy      string   // the job that ended last
+	OtherJobs  int
+	OtherDrawn int // of them, on the timeline (GitLab or a pod said when they ran)
+	NoBuilds   bool
 }
 
 func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
@@ -74,271 +46,258 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 	}
 	instance := r.PathValue("instance")
 	ctx := r.Context()
-	p, _, builds, err := s.store.PipelinePage(ctx, instance, id)
+	project, err := s.store.PipelineProject(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	if p == nil {
+	if project == 0 || !s.may(r, instance, project) {
 		s.notFound(w, r, "pipeline")
 		return
 	}
-	if s.ensureAPI(p) {
-		if p, _, builds, err = s.store.PipelinePage(ctx, instance, id); err != nil {
+	key := store.PipelineKey(instance, id)
+	sh, err := s.shell(r, "pipelines", key)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	pinProject(&sh, instance, project)
+	s.settleLater(r, store.ProjectKey{Instance: instance, ID: project})
+	// GitLab says when each job waited and ran: read it, briefly, first.
+	info, err := s.store.PipelineInfo(ctx, instance, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if info != nil && s.ensureAPI(r, info) {
+		if info, err = s.store.PipelineInfo(ctx, instance, id); err != nil {
 			s.fail(w, err)
 			return
 		}
 	}
-	key := store.PipelineKey(p.Instance, p.ID)
-	sh, err := s.shell(r, "pipes", key)
+	rows, err := s.store.Builds(ctx, store.BuildQuery{Project: store.ProjectKey{Instance: instance, ID: project}, Pipeline: id})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	for _, pr := range sh.Projects {
-		if pr.Instance == p.Instance && pr.ID == p.ProjectID {
-			sh.Project = pr
-		}
-	}
-	lv, err := s.listFor(ctx, r, &sh, "p:"+key, r.URL.Path)
+	st, err := s.recent(ctx, store.ProjectKey{Instance: instance, ID: project})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	sh.List, sh.Split, sh.Has = lv, true, "pipe"
-	v := &PipelineView{P: p, Key: key, Title: p.CommitTitle, GitLabURL: webURL(p.WebURL)}
-	if v.Title == "" {
-		v.Title = "Pipeline #" + strconv.FormatUint(p.ID, 10)
-	}
-	sh.Title = v.Title
-	v.NewerURL, v.OlderURL = lv.pipeNeighbours("p:" + key)
+	v := &PipelineView{Key: key, ID: id, Title: fmt.Sprintf("Pipeline #%d", id), NoBuilds: len(rows) == 0}
 	jobs, err := s.store.PipelineJobs(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	retried := retriedOf(jobs, func(j store.JobInfo) (string, uint64) { return j.Name, j.ID })
-	jobByID := map[uint64]store.JobInfo{}
+	v.OtherJobs = len(jobs) - len(jobsWithBuilds(rows))
+	if info != nil {
+		v.Card = s.pipeCard(store.PipeRow{Instance: instance, ID: id, Status: info.Status, Created: info.Created, WebURL: info.WebURL}, jobs, rows)
+	}
 	for _, j := range jobs {
-		jobByID[j.ID] = j
-	}
-	nodeHost := map[string]string{}
-	if s.opt.Live != nil {
-		for _, dm := range s.opt.Live.Daemons() {
-			nodeHost[dm.Name] = dm.Inspection.Node
+		if v.GitLabURL == "" {
+			v.GitLabURL = pipelineURL(j.URL, id)
 		}
 	}
-	var wjobs []wfJob
-	var start time.Time
-	withBuild := map[uint64]bool{}
-	cols := map[string]bool{}
-	var dfBuilds []colBuild
-	// A job that ran several builds gets one row per build, named by target.
-	perJob := map[uint64]int{}
-	for _, st := range builds {
-		perJob[st.Build.Attribution.Job]++
-	}
-	for _, st := range builds {
-		page, err := s.store.BuildPage(ctx, st.ID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		d, err := s.explain(ctx, page)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		b := page.Build
-		j := jobByID[b.Attribution.Job]
-		withBuild[b.Attribution.Job] = true
-		name := j.Name
-		if name == "" {
-			name = "job " + strconv.FormatUint(b.Attribution.Job, 10)
-		}
-		if perJob[b.Attribution.Job] > 1 {
-			t := b.Target
-			if t == "" {
-				t = "default target"
-			}
-			name += " · " + t
-		}
-		jt := timesOf(j, b.Started, b.Completed)
-		if start.IsZero() || jt.Start.Before(start) {
-			start = jt.Start
-		}
-		wjobs = append(wjobs, wfJob{Name: name, Cat: d.Cat, Times: jt, Build: b, BuildID: st.ID, Views: d.Views,
-			Link: fmt.Sprintf("/builds/%d", st.ID)})
-		v.Builds++
-		v.Saved += page.Saved
-		for _, vw := range d.Views {
-			switch vw.State {
-			case "built":
-				v.Rebuilt++
-			case "cached":
-				v.FromCache++
+	var t0, t1 time.Time
+	for i := len(rows) - 1; i >= 0; i-- { // oldest first
+		b := rows[i]
+		if i == len(rows)-1 {
+			v.Ref, v.SHA = b.Ref, short(b.SHA, 8)
+			if b.Title != "" {
+				v.Title = b.Title
 			}
 		}
-		switch d.Cat.Key {
-		case "node":
-			v.NodeN++
-		case "unknown":
-			v.UnclearN++
-		}
-		v.Jobs = append(v.Jobs, PJob{Name: name, URL: fmt.Sprintf("/builds/%d", st.ID), Node: shortDaemon(b.Daemon) + paren(nodeHost[b.Daemon]),
-			Time: duration(jt.Total), Cat: d.Cat, Why: d.Verdict.Title, Retried: retried[b.Attribution.Job]})
-		col := b.Target
-		if col == "" || cols[col] {
-			col = name
-		}
-		cols[col] = true
-		dfBuilds = append(dfBuilds, colBuild{col: col, d: d})
-	}
-	running := map[uint64]bool{}
-	if s.opt.Running != nil {
-		for _, j := range s.opt.Running.Jobs() {
-			// A pod outlives its job a little; GitLab's status wins.
-			if j.Instance == p.Instance && j.PipelineID == p.ID && !store.Finished(jobByID[j.JobID].Status) {
-				running[j.JobID] = true
-				v.Running++
-			}
-		}
-	}
-	// GitLab may say a job runs before its pod shows up.
-	for _, j := range jobs {
-		if j.Status == "running" && !withBuild[j.ID] && !running[j.ID] {
-			running[j.ID] = true
+		it := s.item(b, st.usual)
+		switch it.Status.Key {
+		case "cached":
+			v.Cached = append(v.Cached, it)
+		case "running":
 			v.Running++
-		}
-	}
-	// The job that ended last sets the pipeline's time; while jobs still
-	// run, none does yet.
-	crit := -1
-	var end time.Time
-	for i, j := range wjobs {
-		if j.Times.End.After(end) {
-			end, crit = j.Times.End, i
-		}
-	}
-	if v.Running > 0 {
-		// Still running: the time so far, from the first job's start.
-		first := start
-		for _, j := range jobs {
-			if running[j.ID] && !j.Started.IsZero() && (first.IsZero() || j.Started.Before(first)) {
-				first = j.Started
-			}
-		}
-		if !first.IsZero() {
-			v.TimeElapsed = int(time.Since(first).Seconds())
-			v.Time = time.Duration(v.TimeElapsed) * time.Second
-		}
-	} else if crit >= 0 {
-		v.Time = end.Sub(start)
-		wjobs[crit].Crit = true
-		v.Jobs[crit].Crit = true
-		v.SetBy = wjobs[crit].Name
-	}
-	for _, j := range jobs {
-		if withBuild[j.ID] {
-			continue
-		}
-		pj := PJob{Name: j.Name, URL: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.ID), Status: j.Status, Cat: cats["nobuild"], Retried: retried[j.ID]}
-		switch {
-		case running[j.ID]:
-			pj.Cat, pj.Why = cats["running"], "Running — its builds appear when they complete."
-			if !j.Started.IsZero() {
-				pj.Elapsed = int(time.Since(j.Started).Seconds())
-				pj.Time = duration(time.Duration(pj.Elapsed) * time.Second)
-			}
-		case j.Status == "manual":
-			pj.Why = "A manual job: it has not been started."
-		case j.Status != "" && !store.Finished(j.Status):
-			pj.Why = template.HTML("Waiting to start (" + template.HTMLEscapeString(strings.ReplaceAll(j.Status, "_", " ")) + ").")
+			v.Rebuilt = append(v.Rebuilt, it)
 		default:
-			st := ""
-			if j.Status != "" {
-				st = " · " + template.HTMLEscapeString(j.Status)
-			}
-			pj.Why = template.HTML("No build on the daemons" + st + ": the job built nothing, or ran on another runner.")
+			v.Rebuilt = append(v.Rebuilt, it)
 		}
-		if j.Duration > 0 && pj.Elapsed == 0 {
-			pj.Time = duration(j.Duration)
+		if t0.IsZero() || b.Started.Before(t0) {
+			t0 = b.Started
 		}
-		v.Other = append(v.Other, pj)
+		end := b.Completed
+		if end.IsZero() {
+			end = s.now()
+		}
+		if end.After(t1) {
+			t1 = end
+		}
 	}
-	if len(wjobs) > 0 {
-		v.WF = waterfall(v.Title, wjobs, start, false)
-		for _, row := range v.WF.Rows {
-			if row.Kind == "job" {
-				v.Gantt = append(v.Gantt, row)
-			}
-		}
-		v.Ticks = v.WF.Ticks
+	if len(rows) > 0 {
+		v.Started = clock(t0, s.now())
+		v.Ready = duration(t1.Sub(t0))
+		v.Sentence = pipelineSentence(v)
 	}
-	v.addDockerfiles(dfBuilds)
+	if v.WF, v.SetBy, v.OtherDrawn, err = s.pipelineWaterfall(ctx, v.Title, rows, jobs); err != nil {
+		s.fail(w, err)
+		return
+	}
+	sh.Title = v.Title
 	v.Shell = sh
 	s.render(w, "pipeline", http.StatusOK, v)
 }
 
-// addDockerfiles lays out the Dockerfile with one column per job that used
-// it: the first job's Dockerfile, and a note when the jobs used several.
-// colBuild is a build with the name of its Dockerfile column.
-type colBuild struct {
-	col string
-	d   *built
-}
-
-func (v *PipelineView) addDockerfiles(bs []colBuild) {
-	text := ""
-	for _, cb := range bs {
-		if cb.d.Page.Dockerfile == "" {
+// pipelineWaterfall lays every job of a pipeline out on one time axis,
+// in the order they started: a job with an image build opens into its
+// stages and steps; any other job is one bar, as GitLab (or its pod) says.
+func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []store.BuildRow, jobs []store.JobInfo) (*Waterfall, string, int, error) {
+	byID := map[uint64]store.JobInfo{}
+	perJob := map[uint64]int{}
+	for _, j := range jobs {
+		byID[j.ID] = j
+	}
+	for _, b := range rows {
+		perJob[b.Job]++
+	}
+	var wjobs []wfJob
+	for i := len(rows) - 1; i >= 0; i-- {
+		page, err := s.store.BuildPage(ctx, rows[i].ID)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		if page == nil {
 			continue
 		}
-		if text == "" {
-			text = cb.d.Page.Dockerfile
-			for _, l := range dockerfile(text, cb.d.Views, cb.d.Page.Build) {
-				l.Step, l.State, l.Opens, l.First, l.Dim, l.Showed = -1, "", false, false, false, ""
-				v.Lines = append(v.Lines, PipelineLine{Line: l})
-			}
+		d, err := s.explain(ctx, page)
+		if err != nil {
+			return nil, "", 0, err
 		}
-		if cb.d.Page.Dockerfile != text {
-			v.Mixed = true
+		b := page.Build
+		j := byID[rows[i].Job]
+		name := j.Name
+		if name == "" {
+			name = orDefault(b.Target)
+		}
+		if perJob[rows[i].Job] > 1 {
+			name += " · " + orDefault(b.Target)
+		}
+		end := b.Completed
+		if end.IsZero() {
+			end = s.now()
+		}
+		st := rowStatus(rows[i])
+		wjobs = append(wjobs, wfJob{Name: name, Status: &st, Times: timesOf(j, b.Started, end), Build: b, BuildID: rows[i].ID,
+			Views: d.Views, Link: fmt.Sprintf("/builds/%d", rows[i].ID)})
+	}
+	with := jobsWithBuilds(rows)
+	drawn := 0
+	for _, j := range jobs {
+		if with[j.ID] || j.Started.IsZero() {
 			continue
 		}
-		v.Columns = append(v.Columns, cb.col)
-		v.DfJobs++
-		for i := range v.Lines {
-			v.Lines[i].Chips = append(v.Lines[i].Chips, Chip{})
+		end := j.Finished
+		note := j.Status
+		switch {
+		case note == "success":
+			note = "passed"
+		case note == "failed" && j.AllowFailure:
+			note = "allowed to fail"
+		case note == "":
+			note = "no image built"
 		}
-		c := len(v.Columns) - 1
-		for _, l := range dockerfile(text, cb.d.Views, cb.d.Page.Build) {
-			if l.Step < 0 || l.N-1 >= len(v.Lines) {
+		if end.IsZero() {
+			if store.Finished(j.Status) {
 				continue
 			}
-			sv := cb.d.Views[l.Step]
-			title := fmt.Sprintf("%s: %s, %s", cb.col, stateLabels[sv.State], duration(sv.D))
-			if sv.From != "" {
-				title = fmt.Sprintf("%s: from %s, waited %s", cb.col, sv.From, duration(sv.D))
-			}
-			chip := Chip{Col: cb.col, State: sv.State, Title: title, URL: fmt.Sprintf("/builds/%d/steps/%d", cb.d.Page.ID, l.Step)}
-			if !l.Opens {
-				chip.State = "cont"
-			}
-			v.Lines[l.N-1].Chips[c] = chip
-			if l.First {
-				v.Lines[l.N-1].Started = append(v.Lines[l.N-1].Started, cb.col)
-			}
+			end, note = s.now(), "running"
+		}
+		jt := jobTimes{Start: j.Started, End: end, Total: end.Sub(j.Started), Known: true}
+		jt.Queued = queuedAt(j, j.Started)
+		wjobs = append(wjobs, wfJob{Name: j.Name, Times: jt, Note: note, Link: webURL(j.URL)})
+		drawn++
+	}
+	if len(wjobs) == 0 {
+		return nil, "", 0, nil
+	}
+	sort.SliceStable(wjobs, func(a, b int) bool { return wjobs[a].Times.Start.Before(wjobs[b].Times.Start) })
+	// The axis starts when the first job began to wait for a runner.
+	start, crit := wjobs[0].Times.Start, 0
+	for _, j := range wjobs {
+		if q := j.Times.Queued; !q.IsZero() && q.Before(start) {
+			start = q
 		}
 	}
+	for i, j := range wjobs {
+		if j.Times.End.After(wjobs[crit].Times.End) {
+			crit = i
+		}
+	}
+	wjobs[crit].Crit = true
+	return waterfall(title, wjobs, start, false), wjobs[crit].Name, drawn, nil
 }
 
-// JobView is the page of a job without a build here yet: running, or one
-// that never built.
+func jobsWithBuilds(rows []store.BuildRow) map[uint64]bool {
+	out := map[uint64]bool{}
+	for _, b := range rows {
+		if b.Job != 0 {
+			out[b.Job] = true
+		}
+	}
+	return out
+}
+
+// pipelineSentence says what a pipeline's builds came down to.
+func pipelineSentence(v *PipelineView) string {
+	n := len(v.Rebuilt) + len(v.Cached)
+	if len(v.Rebuilt) == 0 {
+		return fmt.Sprintf("All %d image%s came from the cache. They were ready %s after the first build started.", n, plural(n), v.Ready)
+	}
+	by := map[string]int{}
+	for _, it := range v.Rebuilt {
+		by[it.Status.Key]++
+	}
+	var parts []string
+	for _, k := range []string{"change", "farm", "unclear", "failed", "running"} {
+		if by[k] == 0 {
+			continue
+		}
+		switch k {
+		case "change":
+			parts = append(parts, fmt.Sprintf("%d because of the change", by[k]))
+		case "farm":
+			parts = append(parts, fmt.Sprintf("%d because of the build farm", by[k]))
+		case "unclear":
+			parts = append(parts, fmt.Sprintf("%d unclear (last built on another node)", by[k]))
+		case "failed":
+			parts = append(parts, fmt.Sprintf("%d failed", by[k]))
+		case "running":
+			parts = append(parts, fmt.Sprintf("%d still building", by[k]))
+		}
+	}
+	if len(v.Cached) == 0 {
+		return fmt.Sprintf("All %d image%s were rebuilt: %s. Ready %s after the first build started.", n, plural(n), strings.Join(parts, ", "), v.Ready)
+	}
+	return fmt.Sprintf("%d image%s: %d from the cache, %d rebuilt (%s). Ready %s after the first build started.",
+		n, plural(n), len(v.Cached), len(v.Rebuilt), strings.Join(parts, ", "), v.Ready)
+}
+
+var jobPath = regexp.MustCompile(`/-/jobs/\d+$`)
+
+// pipelineURL is a pipeline's page in GitLab, from one of its jobs'.
+func pipelineURL(jobURL string, id uint64) string {
+	u := webURL(jobURL)
+	if u == "" || !jobPath.MatchString(u) {
+		return ""
+	}
+	return jobPath.ReplaceAllString(u, fmt.Sprintf("/-/pipelines/%d", id))
+}
+
+// JobView is a job that built no image: the console has nothing to
+// explain about it, and says so.
 type JobView struct {
 	Shell
-	Name, Status, Node, Started, Commit, URL, PipeURL, PipeLabel string
-	Running                                                      bool
-	Active                                                       []string
+	Name, Stage string
+	GitLabURL   string
+	PipeURL     string
+	PipeLabel   string
+	LogURL      string
 }
 
 func (s *Server) job(w http.ResponseWriter, r *http.Request) {
@@ -360,96 +319,69 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, fmt.Sprintf("/builds/%d?via=log", ids[len(ids)-1]), http.StatusFound)
 		return
 	}
-	var job *store.Job
-	if s.opt.Running != nil {
-		for _, j := range s.opt.Running.Jobs() {
-			if j.Instance == instance && j.JobID == id {
-				j := j
-				job = &j
-			}
-		}
-	}
-	v := &JobView{}
-	if job != nil {
-		v.Name, v.Running, v.Node, v.URL, v.Commit = job.Name, true, job.Node, webURL(job.URL), job.CommitTitle
-		if !job.StartedAt.IsZero() {
-			v.Started = ago(job.StartedAt) + " · running for " + duration(s.now().Sub(job.StartedAt).Truncate(time.Second))
-		}
-		if job.PipelineID != 0 {
-			v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(instance, job.PipelineID), "#"+strconv.FormatUint(job.PipelineID, 10)
-		}
-	} else {
-		found := false
-		ps, err := s.store.Pipelines(ctx, 200)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		for _, p := range ps {
-			if p.Instance != instance {
-				continue
-			}
-			jobs, err := s.store.PipelineJobs(ctx, instance, p.ID)
-			if err != nil {
-				s.fail(w, err)
-				return
-			}
-			for _, j := range jobs {
-				if j.ID == id {
-					found = true
-					v.Name, v.Status, v.Node, v.URL, v.Commit = j.Name, j.Status, j.Node, webURL(j.URL), p.CommitTitle
-					v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(instance, p.ID), "#"+strconv.FormatUint(p.ID, 10)
-					if !j.Started.IsZero() {
-						v.Started = ago(j.Started)
-					}
-				}
-			}
-		}
-		if !found {
-			s.notFound(w, r, "job (its builds appear when they complete)")
-			return
-		}
-	}
-	live := ""
-	if v.PipeURL != "" {
-		live = strings.TrimPrefix(v.PipeURL, "/pipelines/")
-	}
-	sh, err := s.shell(r, "pipes", live)
+	j, err := s.store.Job(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	// A running job shows its running builds.
-	sh.LiveNodes = true
-	if s.opt.Live != nil && v.Node != "" {
-		for _, d := range s.opt.Live.Daemons() {
-			if d.Inspection.Node != v.Node {
-				continue
-			}
-			for _, a := range d.Active {
-				v.Active = append(v.Active, fmt.Sprintf("%s: building %s for %s", shortDaemon(d.Name), orDefault(a.Target),
-					duration(s.now().Sub(a.Started).Truncate(time.Second))))
-			}
-		}
+	if j == nil || !s.may(r, instance, j.ProjectID) {
+		s.notFound(w, r, "job")
+		return
 	}
-	lv, err := s.listFor(ctx, r, &sh, fmt.Sprintf("j:%s/%d", instance, id), r.URL.Path)
+	sh, err := s.shell(r, "builds", "")
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	sh.List, sh.Split, sh.Has, sh.Title = lv, true, "job", v.Name
+	pinProject(&sh, instance, j.ProjectID)
+	v := &JobView{Name: j.Name, Stage: j.Stage, GitLabURL: webURL(j.URL)}
+	if j.PipelineID != 0 {
+		v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(instance, j.PipelineID), "#"+strconv.FormatUint(j.PipelineID, 10)
+	}
+	if api, _ := s.api(r); api != nil && api.Client.Knows(instance) && j.ProjectID != 0 {
+		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", instance, id)
+	}
+	sh.Title = v.Name
 	v.Shell = sh
 	s.render(w, "job", http.StatusOK, v)
 }
 
-// sortedKeys returns a map's keys in order.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+// jobLog answers "Show the end of the log": the job's last lines from
+// GitLab, secrets masked, as plain text. GitLab is read only then.
+func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+	instance := r.PathValue("instance")
+	if err != nil {
+		http.NotFound(w, r)
+		return
 	}
-	sort.Strings(out)
-	return out
+	j, err := s.store.Job(r.Context(), instance, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	api, cred := s.api(r)
+	if j == nil || api == nil || !s.may(r, instance, j.ProjectID) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, "The console has no GitLab token, or does not know this job.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	text, err := api.JobLog(ctx, cred, instance, j.ProjectID, id, 100)
+	var rl *gitlab.RateLimited
+	switch {
+	case errors.As(err, &rl):
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprintf(w, "GitLab asks the console to wait until %s.", rl.Until.UTC().Format("15:04:05 UTC"))
+		return
+	case err != nil:
+		s.log.Warn("job log", "job", id, "err", err)
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprint(w, "GitLab did not give the log. It may be gone, or the token may not read this project.")
+		return
+	}
+	fmt.Fprint(w, history.MaskSecrets(text))
 }
-
-var _ = history.Built

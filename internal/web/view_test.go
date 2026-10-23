@@ -103,36 +103,8 @@ func TestDockerfileLines(t *testing.T) {
 	if strings.Contains(string(lines[2].HTML), "syn-i") || !strings.Contains(string(lines[1].HTML), "syn-i") {
 		t.Errorf("a continuation line is not an instruction: %s / %s", lines[1].HTML, lines[2].HTML)
 	}
-	if lines[11].Showed != "20 s" || lines[2].Showed != "" {
+	if lines[11].Showed != "20\u00a0s" || lines[2].Showed != "" {
 		t.Errorf("durations: %q %q", lines[11].Showed, lines[2].Showed)
-	}
-}
-
-func TestSegments(t *testing.T) {
-	b, _ := sample()
-	segs, total := segments(b)
-	if total != 30*time.Second {
-		t.Errorf("total %v", total)
-	}
-	got := map[string]time.Duration{}
-	var w float64
-	for _, s := range segs {
-		got[s.Class] = s.D
-		w += s.W
-	}
-	// Context 1 s before the first step, 2 s pulling, 21 s built, 5 s
-	// export after the last step, 1 s unaccounted.
-	want := map[string]time.Duration{"xfer": time.Second, "image": 2 * time.Second, "built": 21 * time.Second, "push": 5 * time.Second, "other": time.Second}
-	for k, v := range want {
-		if got[k] != v {
-			t.Errorf("%s: %v, want %v (all %v)", k, got[k], v, got)
-		}
-	}
-	if len(got) != len(want) || w < 999.9 || w > 1000.1 {
-		t.Errorf("segments %v, width %v", got, w)
-	}
-	if segs, _ := segments(&history.Build{}); segs != nil {
-		t.Errorf("an empty build has segments: %v", segs)
 	}
 }
 
@@ -202,7 +174,7 @@ func TestVerdicts(t *testing.T) {
 	}
 	rec := []Received{{Stages: []string{"deps", "base"}, From: "build-api<i>", Wait: 3 * time.Second}}
 	v := verdictFor(b, history.Reason{}, "", 0, 90*time.Second, rec)
-	if v.Tone != "cached" || !strings.Contains(string(v.Detail), "1 min 30 s") ||
+	if v.Tone != "cached" || !strings.Contains(string(v.Detail), "1\u00a0min 30\u00a0s") ||
 		!strings.Contains(string(v.Detail), "stages <b>deps, base</b> from <b>build-api&lt;i&gt;</b>") {
 		t.Errorf("cached: %+v", v)
 	}
@@ -224,19 +196,8 @@ func TestDuration(t *testing.T) {
 		0: "0.0 s", 400 * time.Millisecond: "0.4 s", 9500 * time.Millisecond: "9.5 s", 12 * time.Second: "12 s",
 		76 * time.Second: "1 min 16 s", 3*time.Hour + 5*time.Minute: "3 h 5 min",
 	} {
-		if got := duration(d); got != want {
+		if got := strings.ReplaceAll(duration(d), "\u00a0", " "); got != want {
 			t.Errorf("%v: %q, want %q", d, got, want)
 		}
-	}
-}
-
-func TestRetriedOf(t *testing.T) {
-	type j struct {
-		name string
-		id   uint64
-	}
-	got := retriedOf([]j{{"build", 5}, {"test", 6}, {"build", 9}, {"build", 7}}, func(x j) (string, uint64) { return x.name, x.id })
-	if len(got) != 2 || !got[5] || !got[7] || got[9] || got[6] {
-		t.Errorf("%v", got)
 	}
 }

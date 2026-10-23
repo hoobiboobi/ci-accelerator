@@ -1,9 +1,3 @@
-{{/* A verdict category as an icon with its words for assistive tech. */}}
-{{define "vicon"}}<span class="vi vi-{{.Key}}" role="img" aria-label="{{.Label}}" title="{{.Label}}">{{icon .Icon 14}}</span>{{end}}
-
-{{/* A verdict category as a chip: icon and words, never colour alone. */}}
-{{define "catchip"}}<span class="chip {{.Key}}">{{icon .Icon 11}}{{.Label}}</span>{{end}}
-
 {{/* A step state as a chip. */}}
 {{define "stchip"}}<span class="chip {{.}}">{{icon (sicon .) 11}}{{slabel .}}</span>{{end}}
 
@@ -17,10 +11,15 @@
 </section>
 {{end}}
 
-{{/* Where the time went: the bar, its legend. */}}
-{{define "timebar"}}
-<div class="tb" role="img" aria-label="{{range $i, $s := .}}{{if $i}}, {{end}}{{$s.Label}} {{dur $s.D}}{{end}}">{{range .}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{dur .D}}"></i>{{end}}</div>
-<div class="legend">{{range .}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{dur .D}}</b></span>{{end}}</div>
-{{end}}
+{{/* A status: shape, colour and words together. */}}
+{{define "status"}}<span class="stat st-{{.Key}}">{{icon .Icon 12}}{{.Label}}</span>{{end}}
+{{define "statuslong"}}<span class="stat st-{{.Key}}">{{icon .Icon 12}}{{.Long}}</span>{{end}}
 
-{{define "why"}}<details class="why"><summary>{{icon "info" 13}}Why this screen looks like this — research</summary><ul>{{range .}}<li>{{index . 0}} <a class="link" href="{{index . 1}}" rel="noopener noreferrer" target="_blank">source ↗</a></li>{{end}}</ul></details>{{end}}
+{{/* One build as a row of a list. */}}
+{{define "brow"}}<a class="brow{{if .Quiet}} quiet{{end}}" href="{{.URL}}"><span class="bt">{{.When}}</span><span class="bn">{{.Target}}</span><span class="bs">{{template "status" .Status}}</span><span class="bw">{{.Why}}</span><span class="bd{{if .Slower}} slow{{end}}"{{if .Slower}} title="slower than 19 in 20 rebuilds of this image"{{end}}>{{.Dur}}</span><span class="bp">{{.Ref}}{{with .PipeLabel}} · {{.}}{{end}}</span></a>{{end}}
+
+{{/* An image's last builds, oldest to newest. */}}
+{{define "strip"}}<span class="strip">{{range .}}<a class="sq st-{{.Status.Key}}" href="{{.URL}}" title="{{.Title}}" aria-label="{{.Title}}"></a>{{end}}</span>{{end}}
+
+{{/* The end of a job's log, read from GitLab only when asked. */}}
+{{define "logbox"}}<div class="logbox"><button class="btn" type="button" data-act="showlog" data-url="{{.}}">{{icon "log" 13}}<span>Show the end of the job log</span></button><p class="muted note0" data-log-note>Read from GitLab when you ask, nothing before.</p><pre class="logb" data-log hidden></pre></div>{{end}}

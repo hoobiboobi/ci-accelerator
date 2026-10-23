@@ -23,10 +23,13 @@ import (
 
 // Options configure a store. Zero values take the defaults.
 type Options struct {
-	// Keep is how long builds are kept (default 90 days).
+	// Keep is how long builds are kept (default 30 days).
 	Keep time.Duration
 	// KeepOutput is how many days of step output are kept (default 7).
 	KeepOutput int
+	// KeepDays is how many days the images' daily figures are kept
+	// (default 365).
+	KeepDays int
 	// Now replaces the clock in tests.
 	Now func() time.Time
 }
@@ -50,8 +53,11 @@ var ErrNewerSchema = errors.New("store: the database has a newer schema than thi
 
 // Open opens or creates the store in dir.
 func Open(ctx context.Context, dir string, opts Options) (*Store, error) {
+	if opts.KeepDays == 0 {
+		opts.KeepDays = 365
+	}
 	if opts.Keep == 0 {
-		opts.Keep = 90 * 24 * time.Hour
+		opts.Keep = 30 * 24 * time.Hour
 	}
 	if opts.KeepOutput == 0 {
 		opts.KeepOutput = 7

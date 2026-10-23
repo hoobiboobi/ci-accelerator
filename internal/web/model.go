@@ -38,24 +38,15 @@ var cats = map[string]Cat{
 	"canceled": {"canceled", "Canceled", "canceled", "first", "x"},
 	"running":  {"running", "Running", "running", "first", "clock"},
 	"nobuild":  {"none", "No build on this box", "no build", "first", "job"},
-}
-
-// retriedOf finds the earlier attempts of retried jobs: a retry has the
-// job's name and a higher job id.
-func retriedOf[T any](items []T, key func(T) (name string, id uint64)) map[uint64]bool {
-	latest := map[string]uint64{}
-	for _, it := range items {
-		if n, id := key(it); id > latest[n] {
-			latest[n] = id
-		}
-	}
-	out := map[uint64]bool{}
-	for _, it := range items {
-		if n, id := key(it); id < latest[n] {
-			out[id] = true
-		}
-	}
-	return out
+	// Jobs that built no image, by what GitLab says of them.
+	"passed":  {"passed", "Passed", "passed", "first", "check"},
+	"allowed": {"allowed", "Allowed to fail", "allowed to fail", "unknown", "warn"},
+	// A plan with -detailed-exitcode ends with code 2 when it finds changes.
+	"changes": {"changes", "Changes found", "changes found", "unknown", "warn"},
+	"waiting": {"waiting", "Waiting", "waiting", "first", "clock"},
+	"manual":  {"manual", "Manual", "manual", "first", "job"},
+	"skipped": {"skipped", "Skipped", "skipped", "first", "job"},
+	"done":    {"done", "Finished", "finished", "first", "job"},
 }
 
 // canceled says whether a build or step error is a cancellation (the job
@@ -96,37 +87,6 @@ func catOf(kind history.ReasonKind, buildErr string, built int) Cat {
 	return cats["cached"]
 }
 
-// Filters of the pipeline list.
-var filters = []struct{ Key, Label string }{{"", "All"}, {"rebuilt", "Rebuilt"}, {"node", "Node-related"}}
-
-func passes(filter string, c Cat) bool {
-	switch filter {
-	case "":
-		return true
-	case "rebuilt":
-		return c.Key != "cached" && c.Key != "running"
-	case "node":
-		return c.Key == "node" || c.Key == "unknown"
-	}
-	return c.Key == filter
-}
-
-// filterLabel names a filter that is not one of the list's buttons.
-func filterLabel(f string) string {
-	for _, c := range cats {
-		if c.Key == f {
-			if f == "step" {
-				return "Dockerfile changed"
-			}
-			if f == "unknown" {
-				return "Files or node — unclear"
-			}
-			return c.Label
-		}
-	}
-	return f
-}
-
 // ---- icons ----
 
 var icons = map[string]string{
@@ -146,6 +106,8 @@ var icons = map[string]string{
 	"copy":       `<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.8c0-.7-.6-1.3-1.3-1.3H3.8c-.7 0-1.3.6-1.3 1.3v5.4c0 .7.6 1.3 1.3 1.3h1.7"/>`,
 	"x":          `<path d="m4 4 8 8M12 4l-8 8"/>`,
 	"check":      `<path d="m3.5 8.4 2.8 2.8 6.2-6.4"/>`,
+	"lock":       `<rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>`,
+	"out":        `<path d="M9 3H3.5v10H9M6.5 8h7m0 0-2.4-2.4M13.5 8l-2.4 2.4"/>`,
 	"log":        `<path d="M3 3.5h10v9H3z"/><path d="M5.5 6.5 7 8l-1.5 1.5M8.5 9.5h2"/>`,
 	"filter":     `<path d="M2.5 4h11M4.5 8h7M6.5 12h3"/>`,
 	"pipe":       `<circle cx="3.5" cy="8" r="1.6"/><circle cx="12.5" cy="8" r="1.6"/><path d="M5.1 8h5.8"/>`,
@@ -168,6 +130,15 @@ var icons = map[string]string{
 	"tl":         `<path d="M2.5 4h6M4.5 8h7M7 12h6.5"/>`,
 	"steps":      `<path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"/>`,
 	"sum":        `<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 10.5V8M8 10.5V5.5M11 10.5V7"/>`,
+	"overview":   `<rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/>`,
+	"builds":     `<path d="M2.5 4h11M2.5 8h11M2.5 12h11"/>`,
+	"images":     `<path d="M8 2.2 13.5 5v6L8 13.8 2.5 11V5Z"/><path d="M2.5 5 8 7.8 13.5 5M8 7.8v6"/>`,
+	// The five statuses: a shape each, so they read without colour.
+	"st_cached":  `<circle cx="8" cy="8" r="4.6" fill="currentColor" stroke="none"/>`,
+	"st_change":  `<rect x="3.6" y="3.6" width="8.8" height="8.8" rx="1.4" fill="currentColor" stroke="none"/>`,
+	"st_farm":    `<path d="M8 2.6 13.4 12.6H2.6Z" fill="currentColor" stroke="none"/>`,
+	"st_unclear": `<path d="M8 2.4 13.6 8 8 13.6 2.4 8Z" stroke-width="2"/>`,
+	"st_failed":  `<path d="m4 4 8 8M12 4l-8 8" stroke-width="2.4"/>`,
 }
 
 // icon renders a named icon as inline SVG (stroke icons, 16-unit grid).
@@ -243,6 +214,20 @@ type jobTimes struct {
 	Start, End time.Time
 	Total      time.Duration
 	Known      bool // the job's own times, not only its builds'
+	// Queued is when the job began waiting for a runner: its start less
+	// the time GitLab says it waited. (GitLab creates every job of a
+	// pipeline at once, so a job's creation also counts the earlier
+	// stages: not a runner's fault.)
+	Queued time.Time
+}
+
+// queuedAt is when a job began waiting for a runner, zero when GitLab has
+// not said.
+func queuedAt(j store.JobInfo, start time.Time) time.Time {
+	if j.Waited <= 0 || start.IsZero() {
+		return time.Time{}
+	}
+	return start.Add(-j.Waited)
 }
 
 func timesOf(j store.JobInfo, buildStart, buildEnd time.Time) jobTimes {
@@ -258,48 +243,13 @@ func timesOf(j store.JobInfo, buildStart, buildEnd time.Time) jobTimes {
 	if t.Total <= 0 || !t.Known {
 		t.Total = t.End.Sub(t.Start)
 	}
+	if t.Known {
+		t.Queued = queuedAt(j, t.Start)
+	}
 	return t
 }
 
 // ---- the time bar ----
-
-// Seg is one part of where a build's time went.
-type Seg struct {
-	Class, Label string
-	D            time.Duration
-	Flex         string // the part's share, for the bar
-}
-
-// timeSegs splits a job's time: runner and checkout (before the build),
-// sending the context, base images, waiting for another job, building,
-// export and push, the rest (cache checks and scheduling), and the job's
-// time after its build.
-func timeSegs(b *history.Build, jt jobTimes) []Seg {
-	segs, total := segments(b)
-	var out []Seg
-	add := func(class, label string, d time.Duration) {
-		if d >= 50*time.Millisecond {
-			out = append(out, Seg{Class: class, Label: label, D: d})
-		}
-	}
-	if jt.Known {
-		add("runner", "Runner & checkout", b.Started.Sub(jt.Start))
-	}
-	for _, s := range segs {
-		add(s.Class, s.Label, s.D)
-	}
-	if jt.Known && total > 0 {
-		add("after", "After the build", jt.End.Sub(b.Completed))
-	}
-	var sum time.Duration
-	for _, s := range out {
-		sum += s.D
-	}
-	for i := range out {
-		out[i].Flex = strconv.FormatFloat(float64(out[i].D)/float64(sum)*100, 'f', 2, 64)
-	}
-	return out
-}
 
 // ---- the steps table ----
 
@@ -427,299 +377,30 @@ func blocksOf(b *history.Build, views []StepView) []Block {
 	return out
 }
 
+// gantt is the steps of a build on its timeline, by start: what ran,
+// was pulled or was waited for. Steps from the cache take no time and are
+// only counted.
+func gantt(blocks []Block) ([]StepRow, int) {
+	var rows []StepRow
+	skip := 0
+	for _, b := range blocks {
+		for _, r := range b.Rows {
+			if r.State == "cached" || (r.State == "image" && !b.Pulled) {
+				skip++
+				continue
+			}
+			rows = append(rows, r)
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Start < rows[j].Start })
+	return rows, skip
+}
+
 func plural(n int) string {
 	if n == 1 {
 		return ""
 	}
 	return "s"
-}
-
-// ---- the waterfall (timeline) ----
-
-// WFBar is one bar of a waterfall row.
-type WFBar struct {
-	Class string
-	L, W  string // percent of the axis
-	Title string
-}
-
-// WFRow is one row of the waterfall: the pipeline, a job, a segment of a
-// job (runner, context, push), a stage, or a step.
-type WFRow struct {
-	ID, Parent string
-	Depth      int
-	Kind       string // pipe, job, seg, group, step
-	Glyph      string // its icon's class
-	Icon       string
-	Name       string
-	Key        string // a step's key
-	Mono       bool
-	Chip       *Cat
-	Crit       bool
-	Open       bool // its children show at first
-	Kids       bool
-	Bars       []WFBar
-	Label      template.HTML
-	LabelL     string // where the label sits, percent
-	LabelEnd   string // or, near the right edge, how far from it the label ends
-	State      string // for the filters: built, cached, received, image
-	Link       string
-	Step       string // build/step for the step panel
-	Text       string // what the search matches
-	OnCrit     bool   // part of the job that sets the pipeline's time
-}
-
-// Waterfall is a pipeline (or one job of it) on a time axis.
-type Waterfall struct {
-	Rows  []WFRow
-	Ticks []Tick
-	Lanes []Lane
-	Span  time.Duration
-	Jobs  int
-}
-
-// Lane is a job in the overview strip above the waterfall.
-type Lane struct {
-	Name string
-	Crit bool
-	Bars []WFBar
-	Link string
-	Top  string // percent
-}
-
-// Tick is a time mark.
-type Tick struct {
-	L     string
-	Label string
-}
-
-// wfJob is a job's build placed on the pipeline's time axis.
-type wfJob struct {
-	Name    string
-	Cat     Cat
-	Times   jobTimes
-	Build   *history.Build
-	BuildID int64
-	Views   []StepView
-	Link    string
-	Crit    bool
-}
-
-func ticksFor(span time.Duration) []Tick {
-	step := niceStep(span)
-	var out []Tick
-	for t := time.Duration(0); t <= span; t += step {
-		out = append(out, Tick{L: strconv.FormatFloat(pctOf(t, span), 'f', 2, 64), Label: tickLabel(t)})
-	}
-	return out
-}
-
-func tickLabel(t time.Duration) string {
-	s := t.Seconds()
-	if s >= 60 && math.Mod(s, 60) == 0 {
-		return fmt.Sprintf("%dm", int(s)/60)
-	}
-	if s == math.Trunc(s) {
-		return fmt.Sprintf("%ds", int(s))
-	}
-	return fmt.Sprintf("%.1fs", s)
-}
-
-func niceStep(span time.Duration) time.Duration {
-	for _, s := range []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second,
-		30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour} {
-		if span/s <= 8 {
-			return s
-		}
-	}
-	return 2 * time.Hour
-}
-
-// waterfall lays jobs out: pipeline > job > segment / stage > step.
-// start is the axis origin.
-func waterfall(pipeName string, jobs []wfJob, start time.Time, onlyOne bool) *Waterfall {
-	var end time.Time
-	for _, j := range jobs {
-		if j.Times.End.After(end) {
-			end = j.Times.End
-		}
-	}
-	span := end.Sub(start)
-	if span <= 0 {
-		span = time.Second
-	}
-	// Room on the right for the labels after the last bars.
-	span = span * 118 / 100
-	at := func(t time.Time) string { return strconv.FormatFloat(pctOf(t.Sub(start), span), 'f', 2, 64) }
-	width := func(d time.Duration) string {
-		return strconv.FormatFloat(math.Max(0.25, pctOf(d, span)), 'f', 2, 64)
-	}
-	labelAfter := func(t time.Time, text string) (template.HTML, string) {
-		return template.HTML(e(text)), strconv.FormatFloat(pctOf(t.Sub(start), span)+0.6, 'f', 2, 64)
-	}
-	w := &Waterfall{Ticks: ticksFor(span), Span: span, Jobs: len(jobs)}
-	if !onlyOne {
-		var pipeEnd time.Time
-		for _, j := range jobs {
-			if j.Times.End.After(pipeEnd) {
-				pipeEnd = j.Times.End
-			}
-		}
-		lab, ll := labelAfter(pipeEnd, fmt.Sprintf("%s · %d jobs", duration(pipeEnd.Sub(start)), len(jobs)))
-		w.Rows = append(w.Rows, WFRow{ID: "p", Kind: "pipe", Glyph: "pipes", Icon: "pipes", Name: pipeName, Open: true, Kids: len(jobs) > 0,
-			Bars: []WFBar{{Class: "pipe", L: "0", W: width(pipeEnd.Sub(start))}}, Label: lab, LabelL: ll, Text: strings.ToLower(pipeName)})
-	}
-	for ji, j := range jobs {
-		b := j.Build
-		jid := fmt.Sprintf("j%d", ji)
-		parent := "p"
-		depth := 1
-		if onlyOne {
-			parent, depth = "", 0
-		}
-		row := WFRow{ID: jid, Parent: parent, Depth: depth, Kind: "job", Glyph: j.Cat.Key, Icon: j.Cat.Icon, Name: j.Name, Chip: &j.Cat,
-			Crit: j.Crit, Open: true, Kids: b != nil, Link: j.Link, Text: strings.ToLower(j.Name)}
-		if b != nil {
-			if j.Times.Known && b.Started.After(j.Times.Start) {
-				row.Bars = append(row.Bars, WFBar{Class: "runner", L: at(j.Times.Start), W: width(b.Started.Sub(j.Times.Start)), Title: "Runner & checkout"})
-			}
-			segs, _ := segments(b)
-			x := b.Started
-			for _, s := range segs {
-				if s.Class == "other" {
-					continue
-				}
-				if s.Class == "push" {
-					x = b.Completed.Add(-s.D)
-				}
-				row.Bars = append(row.Bars, WFBar{Class: s.Class, L: at(x), W: width(s.D), Title: s.Label + ": " + duration(s.D)})
-				if s.Class == "xfer" {
-					x = x.Add(s.D)
-				}
-			}
-			if j.Times.Known && j.Times.End.Sub(b.Completed) >= 50*time.Millisecond {
-				row.Bars = append(row.Bars, WFBar{Class: "after", L: at(b.Completed), W: width(j.Times.End.Sub(b.Completed)), Title: "After the build: " + duration(j.Times.End.Sub(b.Completed))})
-			}
-			row.Label, row.LabelL = labelAfter(j.Times.End, fmt.Sprintf("%s · job · %s in BuildKit", duration(j.Times.Total), duration(b.Completed.Sub(b.Started))))
-		} else {
-			row.Bars = append(row.Bars, WFBar{Class: "runner", L: at(j.Times.Start), W: width(j.Times.End.Sub(j.Times.Start)), Title: "Job"})
-			row.Label, row.LabelL = labelAfter(j.Times.End, duration(j.Times.Total)+" · no build")
-		}
-		w.Rows = append(w.Rows, row)
-		lane := Lane{Name: j.Name, Crit: j.Crit, Link: j.Link, Top: strconv.Itoa(ji * 10)}
-		for _, br := range row.Bars {
-			lane.Bars = append(lane.Bars, br)
-		}
-		w.Lanes = append(w.Lanes, lane)
-		if b == nil {
-			continue
-		}
-		seg := func(id, glyph, ic, name string, from, to time.Time, class, label string) {
-			d := to.Sub(from)
-			r := WFRow{ID: jid + id, Parent: jid, Depth: depth + 1, Kind: "seg", Glyph: glyph, Icon: ic, Name: name, Mono: true,
-				Bars: []WFBar{{Class: class, L: at(from), W: width(d)}}, Text: strings.ToLower(name)}
-			r.Label, r.LabelL = labelAfter(to, label)
-			w.Rows = append(w.Rows, r)
-		}
-		if j.Times.Known && b.Started.After(j.Times.Start) {
-			seg(".r", "runner", "clock", "runner & checkout", j.Times.Start, b.Started, "runner", duration(b.Started.Sub(j.Times.Start)))
-		}
-		segs, _ := segments(b)
-		for _, s := range segs {
-			if s.Class == "xfer" {
-				label := duration(s.D)
-				if b.ContextBytes > 0 {
-					label += " · " + bytesText(b.ContextBytes)
-				}
-				seg(".x", "xfer", "up", "send context", b.Started, b.Started.Add(s.D), "xfer", label)
-			}
-		}
-		for gi, g := range stagesOf(j.Views) {
-			gid := fmt.Sprintf("%s.g%d", jid, gi)
-			first, last := b.Completed, b.Started
-			for _, v := range g.Steps {
-				s := b.Steps[v.Index]
-				if !s.Started.IsZero() && s.Started.Before(first) {
-					first = s.Started
-				}
-				if s.Completed.After(last) {
-					last = s.Completed
-				}
-			}
-			if last.Before(first) {
-				last = first
-			}
-			if g.State == "image" {
-				v := g.Steps[0]
-				r := WFRow{ID: gid, Parent: jid, Depth: depth + 1, Kind: "step", Glyph: "image", Icon: "s_image", Name: "FROM " + v.Name, Mono: true,
-					Bars: []WFBar{{Class: "image", L: at(first), W: width(g.D)}}, State: "image", Step: fmt.Sprintf("%d/%d", j.BuildID, v.Index),
-					Text: strings.ToLower(v.Name)}
-				if g.D < 200*time.Millisecond {
-					r.Label, r.LabelL = labelAfter(last, "already on node")
-				} else {
-					r.Label, r.LabelL = labelAfter(last, "pulled · "+duration(g.D))
-				}
-				w.Rows = append(w.Rows, r)
-				continue
-			}
-			name := fmt.Sprintf("%s · %d step%s", g.Name, len(g.Steps), plural(len(g.Steps)))
-			gr := WFRow{ID: gid, Parent: jid, Depth: depth + 1, Kind: "group", Glyph: g.State, Icon: stateIcon(g.State), Name: name,
-				Kids: true, Open: g.State != "cached", State: g.State, Text: strings.ToLower(g.Name),
-				Bars: []WFBar{{Class: g.State, L: at(first), W: width(last.Sub(first))}}}
-			if g.FirstRebuilt {
-				gr.Crit = true
-			}
-			word := stateLabels[g.State]
-			gr.Label, gr.LabelL = labelAfter(last, word+" · "+duration(last.Sub(first)))
-			w.Rows = append(w.Rows, gr)
-			for _, v := range g.Steps {
-				s := b.Steps[v.Index]
-				st := s.Started
-				if st.IsZero() {
-					st = first
-				}
-				r := WFRow{ID: fmt.Sprintf("%s.s%d", gid, v.Index), Parent: gid, Depth: depth + 2, Kind: "step", Glyph: v.State, Icon: stateIcon(v.State),
-					Name: v.Name, Key: v.Key, Mono: true, State: v.State, Crit: v.FirstRebuilt,
-					Bars: []WFBar{{Class: v.State, L: at(st), W: width(v.D)}}, Step: fmt.Sprintf("%d/%d", j.BuildID, v.Index),
-					Text: strings.ToLower(v.Key + " " + v.Name)}
-				label := duration(v.D)
-				if v.State == "received" && v.From != "" {
-					label = "from " + v.From + " · " + label
-				}
-				r.Label, r.LabelL = labelAfter(st.Add(v.D), label)
-				w.Rows = append(w.Rows, r)
-			}
-		}
-		for _, s := range segs {
-			if s.Class == "push" {
-				seg(".e", "push", "up", "export & push", b.Completed.Add(-s.D), b.Completed, "push", duration(s.D))
-			}
-		}
-	}
-	// Rows of the job that sets the pipeline's time, for the critical path.
-	critJob := ""
-	for _, r := range w.Rows {
-		if r.Kind == "job" && r.Crit {
-			critJob = r.ID
-		}
-	}
-	for i := range w.Rows {
-		id := w.Rows[i].ID
-		w.Rows[i].OnCrit = critJob != "" && (id == critJob || strings.HasPrefix(id, critJob+"."))
-	}
-	// A label that would run off the right edge ends where its bars begin.
-	for i := range w.Rows {
-		r := &w.Rows[i]
-		if l, _ := strconv.ParseFloat(r.LabelL, 64); l > 86 {
-			lo, _ := barSpan(*r)
-			at := 100 - lo + 0.6 // before the bars
-			if lo < 40 {
-				at = 0 // at the right edge
-			}
-			r.LabelEnd = strconv.FormatFloat(at, 'f', 2, 64)
-		}
-	}
-	return w
 }
 
 func bytesText(n int64) string {

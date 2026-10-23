@@ -75,29 +75,15 @@
     }
   }
 
-  // ---- running times count on between updates ----
-  function since(secs) {
-    const s = Math.floor(secs);
-    if (s < 60) return s + " s";
-    if (s < 3600) return Math.floor(s / 60) + " min " + (s % 60) + " s";
-    return Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min";
-  }
-  setInterval(() => {
-    $$("[data-elapsed]", main).forEach(el => {
-      if (!el.dataset.t0) el.dataset.t0 = String(Date.now());
-      el.textContent = since(+el.dataset.elapsed + (Date.now() - +el.dataset.t0) / 1000);
-    });
-  }, 1000);
-
   // ---- per-page setup (run again after a live update) ----
   function setup() {
     setupTabs();
+    setupWaterfall();
     setupSteps();
     setupFolds();
-    setupWaterfall();
-    setupFirstRun();
-    const cur = $(".opt.open", main);
-    if (cur) cur.scrollIntoView({ block: "nearest" });
+    setupFilters();
+    setupHowTo();
+    setupLog();
   }
 
   // Tabs: the hash names the pane (#steps, #dockerfile, #timeline, ...).
@@ -145,18 +131,37 @@
     if (lbl) lbl.textContent = open ? "Fold cached" : "Expand all";
   }
 
-  // The first-run panel stays dismissed.
-  function setupFirstRun() {
+  // A job's log, read from GitLab when the reader asks; shown as text.
+  function setupLog() {
+    const b = $('[data-act="showlog"]', main), pre = $("[data-log]", main), note = $("[data-log-note]", main);
+    if (!b || !pre) return;
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      if (note) note.textContent = "Reading from GitLab…";
+      try {
+        const res = await fetch(b.dataset.url, { cache: "no-store" });
+        const text = await res.text();
+        if (!res.ok) { if (note) note.textContent = text; return; }
+        pre.textContent = text || "The log is empty.";
+        pre.hidden = false;
+        pre.scrollTop = pre.scrollHeight;
+        if (note) note.textContent = "Its last 100 lines, as GitLab has them now; secrets masked.";
+        const lbl = $("span", b);
+        if (lbl) lbl.textContent = "Read it again";
+      } catch (e) {
+        if (note) note.textContent = "The console did not answer.";
+      } finally {
+        b.disabled = false;
+      }
+    });
+  }
+
+  // "From the GitLab job log" can be dismissed.
+  function setupHowTo() {
     const how = $("#howto", main);
-    if (how) {
-      const x = $('[data-act="hidehow"]', how);
-      if (x) x.addEventListener("click", () => { how.hidden = true; });
-    }
-    const fr = $("#firstrun", main);
-    if (!fr) return;
-    if (store.get("firstrun-hidden") === "true") fr.hidden = true;
-    const x = $('[data-act="hidefirst"]', fr);
-    if (x) x.addEventListener("click", () => { fr.hidden = true; store.set("firstrun-hidden", "true"); });
+    if (!how) return;
+    const x = $('[data-act="hidehow"]', how);
+    if (x) x.addEventListener("click", () => { how.hidden = true; });
   }
 
   // ---- step hints and the step panel ----
@@ -211,16 +216,6 @@
     }
     return true;
   }
-  // A job's chip in the pipeline's Dockerfile opens that job's step in the
-  // panel, as the timeline does; the link still works in a new tab.
-  main.addEventListener("click", ev => {
-    const a = ev.target.closest("a.jc[href]");
-    if (!a || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
-    const m = a.getAttribute("href").match(/^\/builds\/(\d+)\/steps\/(\d+)$/);
-    if (!m || !drawer) return;
-    ev.preventDefault();
-    openPanel(m[1], m[2]);
-  });
   if (drawer) {
     drawer.addEventListener("click", ev => {
       if (ev.target.closest("[data-close]")) { closePanel(); return; }
@@ -273,6 +268,15 @@
     markOpen();
   }
   window.addEventListener("scroll", () => { if (popFor && popFor.isConnected) showPop(popFor); }, { passive: true });
+
+  // ---- filters apply as they change; the Apply button is for no script ----
+  function setupFilters() {
+    $$("form[data-autosubmit]", main).forEach(f => {
+      const btn = $('button[type="submit"]', f);
+      if (btn) btn.hidden = true;
+      $$("select, input", f).forEach(el => el.addEventListener("change", () => f.requestSubmit ? f.requestSubmit() : f.submit()));
+    });
+  }
 
   // ---- the waterfall ----
   // What the reader set in each waterfall survives live updates of the page.
@@ -380,6 +384,7 @@
       render();
     });
   }
+
 
   // ---- dialogs: search and shortcuts ----
   const scrim = $("#scrim"), pal = $("#pal"), palQ = $("#palQ"), palL = $("#palL"), help = $("#help");
@@ -544,7 +549,7 @@
     if (typing || ev.metaKey || ev.ctrlKey || ev.altKey) return;
     if (gPressed && Date.now() - gPressed < 1200) {
       gPressed = 0;
-      const to = { p: "/", i: "/insights", n: "/nodes" }[ev.key];
+      const to = { o: "/", p: "/pipelines", b: "/builds", i: "/images", n: "/nodes" }[ev.key];
       if (to) { location.href = to; return; }
     }
     switch (ev.key) {
@@ -555,15 +560,6 @@
       case "[": setCollapsed(app.dataset.collapsed !== "true"); return;
       case "e": if ($('[data-act="toggleall"]', main)) toggleAll(); return;
       case "c": { const ctx = $("#ctx", main); if (ctx && ctx.dataset.trace) copy(ctx.dataset.trace); return; }
-      case "j": case "k": {
-        const link = $('[data-key="' + ev.key + '"]', main);
-        if (link) { location.href = link.getAttribute("href"); return; }
-        const opts = $$(".opt", main);
-        if (!opts.length) return;
-        const cur = opts.findIndex(o => o.classList.contains("open"));
-        const next = opts[ev.key === "j" ? Math.min(cur + 1, opts.length - 1) : Math.max(cur - 1, 0)];
-        if (next) location.href = next.getAttribute("href");
-      }
     }
   });
 
@@ -576,7 +572,9 @@
   const status = $("#live");
   if (!live || !window.EventSource) return;
   const params = new URLSearchParams();
-  if (live !== "all") params.set("pipeline", live);
+  const notify = main.dataset.liveNotify === "true";
+  if (live.startsWith("project:")) params.set("project", live.slice(8));
+  else if (live !== "all") params.set("pipeline", live);
   if (main.dataset.liveNodes) params.set("nodes", "1");
   const filterQ = params.toString() ? "?" + params.toString() : "";
   let timer = null, busy = false;
@@ -595,14 +593,12 @@
       // Typing in the waterfall's search: keep the caret where it was.
       const typing = active && main.contains(active) && active.matches("[data-wf-q]") ? [active.selectionStart, active.selectionEnd] : null;
       const folds = new Map($$(".grpbtn[data-blk]", main).map(b => [b.dataset.blk, b.getAttribute("aria-expanded")]));
-      const list = $(".list", main);
-      const listScroll = list ? list.scrollTop : 0;
+      const unfolded = $$("details[id][open]", main).map(d => d.id);
       hidePop();
       main.replaceChildren(...next.childNodes);
       setup();
       $$(".grpbtn[data-blk]", main).forEach(b => { if (folds.has(b.dataset.blk)) fold(b, folds.get(b.dataset.blk) === "true"); });
-      const l2 = $(".list", main);
-      if (l2) l2.scrollTop = listScroll;
+      unfolded.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
       if (focused !== undefined) {
         const el = $('[data-step="' + focused + '"]', main);
         if (el) el.focus({ preventScroll: true });
@@ -624,7 +620,13 @@
   function connect() {
     if (es) return;
     es = new EventSource("/events" + filterQ);
-    es.addEventListener("changed", () => { if (!timer) timer = setTimeout(refresh, 1000); });
+    es.addEventListener("changed", () => {
+      if (!notify) { if (!timer) timer = setTimeout(refresh, 1000); return; }
+      // A page on a whole project only says something is new, at most
+      // every 30 seconds: with hundreds of builds an hour it would
+      // otherwise never hold still.
+      if (!timer) timer = setTimeout(() => { timer = null; const nd = $("#newdata", main); if (nd) nd.hidden = false; }, 30000);
+    });
     es.addEventListener("open", () => { if (status) { status.hidden = false; status.textContent = "Live"; } });
     es.addEventListener("error", () => { if (status) status.textContent = "Reconnecting…"; });
   }
@@ -638,8 +640,12 @@
   function resume() {
     if (es) return;
     connect();
-    if (!timer) timer = setTimeout(refresh, 0);
+    if (!notify && !timer) timer = setTimeout(refresh, 0);
   }
+  main.addEventListener("click", ev => {
+    if (!ev.target.closest("#newdataBtn")) return;
+    refresh();
+  });
   document.addEventListener("visibilitychange", () => { if (document.hidden) disconnect(); else resume(); });
   window.addEventListener("pagehide", disconnect);
   window.addEventListener("pageshow", ev => { if (ev.persisted && !document.hidden) resume(); });

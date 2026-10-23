@@ -1,13 +1,12 @@
 // Package web serves the console's pages: server-rendered HTML with a
 // small script, no framework. Everything shown comes from builds and CI
-// jobs and is escaped. The pages have no sign-in of their own yet: until
-// sign-in through GitLab exists they must not be exposed beyond the
-// cluster.
+// jobs and is escaped. Without sign-in (Options.Auth nil) the pages show
+// everything to whoever reaches them and must not be exposed beyond the
+// cluster; with it, each person sees what GitLab lets them read.
 package web
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -16,11 +15,12 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/auth"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -34,18 +34,21 @@ type Live interface {
 	Daemons() []collector.DaemonState
 }
 
-// Running is the CI jobs in progress (their pods exist).
-type Running interface {
-	Jobs() []store.Job
-}
-
 // Options are the console's sources besides its store; each may be nil.
 type Options struct {
-	Live    Live
-	Running Running
-	API     *gitlab.Fetcher
+	Live Live
+	API  *gitlab.Fetcher
+	// Token is the installation's GitLab token; nil: none. Not used with
+	// sign-in: GitLab is read with each person's own token.
+	Token gitlab.Credential
+	// Auth signs people in through GitLab; nil: no sign-in.
+	Auth *auth.Auth
 	// Release names the installation on the nodes page.
 	Release string
+	// Assets replaces the built-in templates and static files (a directory
+	// with templates/ and static/), read again for every page: for working
+	// on the pages without rebuilding the console.
+	Assets fs.FS
 }
 
 // Server renders the pages.
@@ -53,6 +56,8 @@ type Server struct {
 	store  *store.Store
 	opt    Options
 	log    *slog.Logger
+	files  fs.FS // templates/ and static/
+	tmplMu sync.Mutex
 	tmpl   map[string]*template.Template
 	assets map[string]string // static file -> its URL with a content version
 	// Open event streams, bounded: each holds a connection.
@@ -62,6 +67,15 @@ type Server struct {
 	// APIWait is how long a page waits for GitLab's API.
 	APIWait time.Duration
 	now     func() time.Time
+
+	// Figures computed over a project's recent builds, kept briefly.
+	statsMu sync.Mutex
+	stats   map[string]*cachedStats
+
+	// Projects whose CacheElsewhere builds are being settled, and when
+	// each was last tried.
+	settleMu sync.Mutex
+	settling map[store.ProjectKey]time.Time
 }
 
 // MaxStreams bounds the open live-update streams.
@@ -69,65 +83,97 @@ const MaxStreams = 256
 
 // The templates of each page besides the layout and the shared parts.
 var pageFiles = map[string][]string{
-	"home":     nil,
-	"build":    {"dockerfile", "waterfall"},
-	"pipeline": {"dockerfile", "waterfall"},
-	"job":      nil,
-	"step":     nil,
-	"steppage": {"step"},
-	"notfound": nil,
-	"insights": nil,
-	"nodes":    nil,
+	"overview":  nil,
+	"builds":    nil,
+	"pipelines": nil,
+	"images":    nil,
+	"image":     nil,
+	"build":     {"dockerfile"},
+	"pipeline":  {"waterfall"},
+	"job":       nil,
+	"step":      nil,
+	"steppage":  {"step"},
+	"notfound":  nil,
+	"nodes":     nil,
+	"signin":    nil,
 }
 
 // New parses the templates; a template that does not parse is a build
 // error, caught by the tests.
 func New(s *store.Store, log *slog.Logger, opt Options) (*Server, error) {
-	srv := &Server{store: s, opt: opt, log: log, tmpl: map[string]*template.Template{}, assets: map[string]string{},
+	srv := &Server{store: s, opt: opt, log: log, files: files,
 		streams: make(chan struct{}, MaxStreams), Heartbeat: 25 * time.Second, APIWait: 700 * time.Millisecond, now: time.Now}
-	static, _ := fs.ReadDir(files, "static")
+	if opt.Assets != nil {
+		srv.files = opt.Assets
+	}
+	tmpl, assets, err := parsePages(srv.files)
+	if err != nil {
+		return nil, err
+	}
+	srv.tmpl, srv.assets = tmpl, assets
+	return srv, nil
+}
+
+// parsePages parses every page's templates and versions the static files.
+func parsePages(src fs.FS) (map[string]*template.Template, map[string]string, error) {
+	tmpl, assets := map[string]*template.Template{}, map[string]string{}
+	static, _ := fs.ReadDir(src, "static")
 	for _, f := range static {
-		data, err := files.ReadFile("static/" + f.Name())
+		data, err := fs.ReadFile(src, "static/"+f.Name())
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		sum := sha256.Sum256(data)
-		srv.assets[f.Name()] = "/static/" + f.Name() + "?v=" + hex.EncodeToString(sum[:6])
+		assets[f.Name()] = "/static/" + f.Name() + "?v=" + hex.EncodeToString(sum[:6])
 	}
 	asset := func(name string) (string, error) {
-		if u, ok := srv.assets[name]; ok {
+		if u, ok := assets[name]; ok {
 			return u, nil
 		}
 		return "", fmt.Errorf("no static file %q", name)
 	}
 	for page, more := range pageFiles {
-		names := []string{"templates/layout.html", "templates/parts.html", "templates/list.html", "templates/" + page + ".html"}
+		names := []string{"templates/layout.html", "templates/parts.html", "templates/" + page + ".html"}
 		for _, m := range more {
 			names = append(names, "templates/"+m+".html")
 		}
-		t, err := template.New(page).Funcs(funcs).Funcs(template.FuncMap{"asset": asset}).ParseFS(files, names...)
+		t, err := template.New(page).Funcs(funcs).Funcs(template.FuncMap{"asset": asset}).ParseFS(src, names...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		srv.tmpl[page] = t
+		tmpl[page] = t
 	}
-	return srv, nil
+	return tmpl, assets, nil
 }
 
 // Register adds the pages to mux.
 func (s *Server) Register(mux *http.ServeMux) {
-	static, _ := fs.Sub(files, "static")
+	static, _ := fs.Sub(s.files, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheFor(http.FileServerFS(static))))
-	mux.HandleFunc("GET /{$}", s.home)
+	mux.HandleFunc("GET /{$}", s.overview)
+	mux.HandleFunc("GET /pipelines", s.pipelines)
+	mux.HandleFunc("GET /builds", s.builds)
+	mux.HandleFunc("GET /images", s.images)
+	mux.HandleFunc("GET /images/{target}", s.image)
 	mux.HandleFunc("GET /pipelines/{instance}/{id}", s.pipeline)
 	mux.HandleFunc("GET /jobs/{instance}/{id}", s.job)
+	mux.HandleFunc("GET /jobs/{instance}/{id}/log", s.jobLog)
 	mux.HandleFunc("GET /builds/{id}", s.build)
 	mux.HandleFunc("GET /builds/{id}/steps/{step}", s.step)
-	mux.HandleFunc("GET /insights", s.insights)
 	mux.HandleFunc("GET /nodes", s.nodes)
+	// Addresses of the first preview, kept so bookmarks still lead somewhere.
+	mux.HandleFunc("GET /insights", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/images", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("GET /projects/{instance}/{id}", s.chooseProject)
 	mux.HandleFunc("GET /search-index", s.index)
 	mux.HandleFunc("GET /events", s.events)
+	if s.opt.Auth != nil {
+		mux.HandleFunc("GET /auth/sign-in", s.signIn)
+		mux.HandleFunc("GET /auth/sign-in/{instance}", s.signInWith)
+		mux.HandleFunc("GET /auth/callback/{instance}", s.signInDone)
+		mux.HandleFunc("POST /auth/sign-out", s.signOut)
+	}
 	// Any other address gets the console's own page, not a bare text 404.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) { s.notFound(w, r, "page") })
 }
@@ -169,8 +215,23 @@ func cacheFor(h http.Handler) http.Handler {
 // render executes the whole page before sending it, so a template error
 // is a 500 and never half a page with a 200.
 func (s *Server) render(w http.ResponseWriter, page string, status int, data any) {
+	if s.opt.Assets != nil {
+		// Working on the pages: what is on disk now.
+		tmpl, assets, err := parsePages(s.files)
+		if err != nil {
+			s.log.Error("templates", "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.tmplMu.Lock()
+		s.tmpl, s.assets = tmpl, assets
+		s.tmplMu.Unlock()
+	}
+	s.tmplMu.Lock()
+	t := s.tmpl[page]
+	s.tmplMu.Unlock()
 	var buf bytes.Buffer
-	if err := s.tmpl[page].ExecuteTemplate(&buf, page, data); err != nil {
+	if err := t.ExecuteTemplate(&buf, page, data); err != nil {
 		s.log.Error("render", "page", page, "err", err)
 		http.Error(w, "the console could not render this page", http.StatusInternalServerError)
 		return
@@ -187,19 +248,23 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 
 // Shell is what every page's frame needs.
 type Shell struct {
-	Nav  string // pipes, insights, nodes
-	Live string // what changes update the page: "all", a pipeline key, or ""
+	Nav string // overview, builds, images, nodes
+	// Live is what changes update the page: a pipeline key, "project:" and
+	// a project key, or "". A page on a project only says that something
+	// is new (Notify); a pipeline's page updates itself.
+	Live   string
+	Notify bool
 	// LiveNodes: the page also shows the daemons' live state (connections,
 	// inspections, running builds) and updates when it changes.
 	LiveNodes bool
 	Title     string
 	Project   store.Project
 	Projects  []store.Project
-	Warn      string // a warning dot on Build nodes
-	Count     int    // pipelines in the list
-	List      *ListView
-	Split     bool   // the page has the pipeline list beside it
-	Has       string // what the pane shows beside the list: none, pipe, job
+	Warn      string // a warning dot on Nodes
+	// Viewer is the person signed in; nil without sign-in.
+	Viewer *auth.Viewer
+	// NoProjects: the person signed in may see no project here.
+	NoProjects bool
 }
 
 // NotFound is the page for an address with nothing behind it.
@@ -221,11 +286,12 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {
 // shell resolves the project the pages show: the request's, the one chosen
 // before, or the most recently built.
 func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
-	sh := Shell{Nav: nav, Live: live}
+	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r)}
 	ps, err := s.store.Projects(r.Context())
 	if err != nil {
 		return sh, err
 	}
+	ps = s.readable(r, ps)
 	sh.Projects = ps
 	want := r.URL.Query().Get("project")
 	if want == "" {
@@ -241,6 +307,10 @@ func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 	if sh.Project.ID == 0 && len(ps) > 0 {
 		sh.Project = ps[0]
 	}
+	if len(ps) == 0 && sh.Viewer != nil && !sh.Viewer.Admin {
+		// Nothing to see: every query of the pages finds nothing.
+		sh.Project.ProjectKey, sh.NoProjects = nothing, true
+	}
 	if s.opt.Live != nil {
 		for _, d := range s.opt.Live.Daemons() {
 			if !d.Connected {
@@ -251,230 +321,78 @@ func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 	return sh, nil
 }
 
+// projectPage is the shell of a page about the chosen project: it says
+// when the project has new builds, at most every 30 seconds.
+func (s *Server) projectPage(r *http.Request, nav string) (Shell, error) {
+	sh, err := s.shell(r, nav, "")
+	if err == nil && sh.Project.ID != 0 && !sh.NoProjects {
+		sh.Live, sh.Notify = "project:"+sh.Project.String(), true
+	}
+	return sh, err
+}
+
+// pinProject makes the shell show the project of what the page is about.
+func pinProject(sh *Shell, instance string, project uint64) {
+	for _, pr := range sh.Projects {
+		if pr.Instance == instance && pr.ID == project {
+			sh.Project = pr
+		}
+	}
+}
+
+var pagesOf = map[string]bool{"/": true, "/builds": true, "/images": true, "/nodes": true}
+
 func (s *Server) chooseProject(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseUint(r.PathValue("id"), 10, 64)
 	k := store.ProjectKey{Instance: r.PathValue("instance"), ID: id}
-	if _, ok := store.ParseProjectKey(k.String()); !ok {
+	if _, ok := store.ParseProjectKey(k.String()); !ok || !s.may(r, k.Instance, k.ID) {
 		s.notFound(w, r, "project")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: "project", Value: k.String(), Path: "/", MaxAge: 365 * 24 * 3600,
 		HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	to := r.URL.Query().Get("to")
-	if to != "/insights" && to != "/nodes" {
+	if !pagesOf[to] {
 		to = "/"
 	}
 	http.Redirect(w, r, to, http.StatusFound)
 }
 
-// ---- the list ----
-
-// ListView is the pipeline list beside the pages.
-type ListView struct {
-	Filter      string
-	FilterLabel string // a filter that is not one of the buttons
-	Filters     []FilterLink
-	Pipes       []ListPipe
-	Clear       string
-}
-
-// FilterLink is one of the list's filter buttons.
-type FilterLink struct {
-	Label, URL string
-	On         bool
-}
-
-// ListPipe is a pipeline in the list.
-type ListPipe struct {
-	Key, URL, Title, Short, SHA, When, Dur string
-	Open                                   bool
-	Jobs                                   []ListRow
-}
-
-// ListRow is a job in the list.
-type ListRow struct {
-	Key, URL, Name, Dur string
-	Cat                 Cat
-	Open                bool
-	Retried             bool // a later attempt of the job followed
-	// Elapsed: seconds a running job has run; the page counts on from it.
-	Elapsed int
-}
-
-// withFilter keeps the list's filter on a link.
-func withFilter(u, f string) string {
-	if f == "" {
-		return u
+// api returns the GitLab reader and whose token it reads with for r; nil
+// when the console has no token to read with.
+func (s *Server) api(r *http.Request) (*gitlab.Fetcher, gitlab.Credential) {
+	if s.opt.API == nil {
+		return nil, nil
 	}
-	return u + "?f=" + url.QueryEscape(f)
-}
-
-// listFor builds the list: the project's latest pipelines with their jobs
-// that built here, and the jobs running now. open is the key of the open
-// item ("p:<instance>/<id>" or "j:<instance>/<id>").
-func (s *Server) listFor(ctx context.Context, r *http.Request, sh *Shell, open, path string) (*ListView, error) {
-	f := r.URL.Query().Get("f")
-	lv := &ListView{Filter: f}
-	known := false
-	for _, x := range filters {
-		known = known || x.Key == f
-		lv.Filters = append(lv.Filters, FilterLink{Label: x.Label, URL: withFilter(path, x.Key), On: x.Key == f})
+	if s.opt.Auth != nil {
+		if v := viewer(r); v != nil {
+			return s.opt.API, v
+		}
+		return nil, nil
 	}
-	if !known {
-		lv.FilterLabel, lv.Clear = filterLabel(f), path
+	if s.opt.Token == nil {
+		return nil, nil
 	}
-	list, err := s.store.List(ctx, sh.Project.ProjectKey, 40)
-	if err != nil {
-		return nil, err
-	}
-	sh.Count = len(list)
-	running := map[string]store.Job{}
-	if s.opt.Running != nil {
-		for _, j := range s.opt.Running.Jobs() {
-			if sh.Project.ID != 0 && j.ProjectID != sh.Project.ID {
-				continue
-			}
-			running[fmt.Sprintf("%s/%d", j.Instance, j.JobID)] = j
-		}
-	}
-	seen := map[string]bool{}
-	byKey := map[string]int{}
-	for _, p := range list {
-		key := store.PipelineKey(p.Instance, p.ID)
-		lp := ListPipe{Key: "p:" + key, URL: withFilter("/pipelines/"+key, f), Title: p.CommitTitle, Short: "#" + shortID(p.ID),
-			SHA: short(p.SHA, 7), When: when(p.Created), Open: open == "p:"+key}
-		if lp.Title == "" {
-			lp.Title = "Pipeline #" + strconv.FormatUint(p.ID, 10)
-		}
-		if lp.When == "" {
-			lp.When = when(p.Started)
-		}
-		var start, end time.Time
-		retried := retriedOf(p.Jobs, func(j store.ListJob) (string, uint64) { return j.Name, j.ID })
-		for _, j := range p.Jobs {
-			jt := timesOf(j.JobInfo, j.Started, j.Completed)
-			if start.IsZero() || jt.Start.Before(start) {
-				start = jt.Start
-			}
-			if jt.End.After(end) {
-				end = jt.End
-			}
-			jk := fmt.Sprintf("%s/%d", j.Instance, j.ID)
-			c := catOf(j.Reason, j.Error, j.Built)
-			if _, ok := running[jk]; ok {
-				seen[jk] = true
-				// Its pod may outlive the job a little; GitLab knows better.
-				if !store.Finished(j.Status) {
-					c = cats["running"]
-				}
-			}
-			if !passes(f, c) {
-				continue
-			}
-			row := ListRow{Key: "j:" + jk, URL: withFilter(fmt.Sprintf("/builds/%d", j.BuildID), f), Name: j.Name,
-				Dur: duration(jt.Total), Cat: c, Open: open == "j:"+jk, Retried: retried[j.ID]}
-			if c.Key == "running" && !jt.Start.IsZero() {
-				row.Elapsed = int(s.now().Sub(jt.Start).Seconds())
-				row.Dur = duration(time.Duration(row.Elapsed) * time.Second)
-			}
-			lp.Jobs = append(lp.Jobs, row)
-		}
-		if !end.IsZero() {
-			lp.Dur = duration(end.Sub(start))
-		}
-		byKey[key] = len(lv.Pipes)
-		lv.Pipes = append(lv.Pipes, lp)
-	}
-	// Running jobs without a build yet.
-	var fresh []ListPipe
-	for jk, j := range running {
-		if seen[jk] || !passes(f, cats["running"]) {
-			continue
-		}
-		row := ListRow{Key: "j:" + jk, URL: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.JobID), Name: j.Name, Cat: cats["running"],
-			Open: open == "j:"+jk}
-		if !j.StartedAt.IsZero() {
-			row.Elapsed = int(s.now().Sub(j.StartedAt).Seconds())
-			row.Dur = duration(time.Duration(row.Elapsed) * time.Second)
-		}
-		pk := store.PipelineKey(j.Instance, j.PipelineID)
-		if i, ok := byKey[pk]; ok {
-			lv.Pipes[i].Jobs = append(lv.Pipes[i].Jobs, row)
-			continue
-		}
-		found := false
-		for i := range fresh {
-			if fresh[i].Key == "p:"+pk {
-				fresh[i].Jobs = append(fresh[i].Jobs, row)
-				found = true
-			}
-		}
-		if !found {
-			title := j.CommitTitle
-			if title == "" {
-				title = "Pipeline #" + strconv.FormatUint(j.PipelineID, 10)
-			}
-			fresh = append(fresh, ListPipe{Key: "p:" + pk, URL: "/pipelines/" + pk, Title: title, Short: "#" + shortID(j.PipelineID),
-				SHA: short(j.SHA, 7), When: when(j.PipelineCreatedAt), Dur: "running", Open: open == "p:"+pk, Jobs: []ListRow{row}})
-		}
-	}
-	lv.Pipes = append(fresh, lv.Pipes...)
-	if f != "" {
-		kept := lv.Pipes[:0]
-		for _, p := range lv.Pipes {
-			if len(p.Jobs) > 0 {
-				kept = append(kept, p)
-			}
-		}
-		lv.Pipes = kept
-	}
-	return lv, nil
-}
-
-// neighbours returns the jobs before and after open in the list.
-func (lv *ListView) neighbours(open string) (prev, next string) {
-	var rows []ListRow
-	for _, p := range lv.Pipes {
-		rows = append(rows, p.Jobs...)
-	}
-	for i, r := range rows {
-		if r.Key == open {
-			if i > 0 {
-				prev = rows[i-1].URL
-			}
-			if i+1 < len(rows) {
-				next = rows[i+1].URL
-			}
-		}
-	}
-	return prev, next
-}
-
-// pipeNeighbours returns the newer and older pipelines around open.
-func (lv *ListView) pipeNeighbours(open string) (newer, older string) {
-	for i, p := range lv.Pipes {
-		if p.Key == open {
-			if i > 0 {
-				newer = lv.Pipes[i-1].URL
-			}
-			if i+1 < len(lv.Pipes) {
-				older = lv.Pipes[i+1].URL
-			}
-		}
-	}
-	return newer, older
+	return s.opt.API, s.opt.Token
 }
 
 // ensureAPI reads a pipeline's jobs from GitLab when that is due, waiting
 // briefly; it says whether it asked.
-func (s *Server) ensureAPI(p *store.Pipeline) bool {
-	if p == nil || s.opt.API == nil || p.ProjectID == 0 {
+func (s *Server) ensureAPI(r *http.Request, p *store.Pipeline) bool {
+	api, cred := s.api(r)
+	if p == nil || api == nil || p.ProjectID == 0 {
 		return false
 	}
-	if store.Finished(p.Status) && !p.APIAt.IsZero() {
-		return false
+	status := p.Status
+	if store.Finished(status) && !p.APIAt.IsZero() {
+		// Over, as GitLab last said, unless a job ran since (a manual job
+		// was run, a job retried).
+		if !p.Activity.After(p.APIAt) {
+			return false
+		}
+		status = ""
 	}
-	s.opt.API.Ensure(p.Instance, p.ProjectID, p.ID, p.Status, p.APIAt, s.APIWait)
+	api.Ensure(cred, p.Instance, p.ProjectID, p.ID, status, p.APIAt, s.APIWait)
 	return true
 }
 
@@ -508,16 +426,14 @@ func projInitial(path string) string {
 var funcs = template.FuncMap{
 	"mul":      func(a, b int) int { return a * b },
 	"join":     strings.Join,
-	"research": researchFor,
-	"critL": func(r WFRow) string {
-		l, _ := barSpan(r)
-		return strconv.FormatFloat(l, 'f', 2, 64)
+	"projName": projName,
+	"statuses": func() []Status {
+		out := make([]Status, len(statusKeys))
+		for i, k := range statusKeys {
+			out[i] = statuses[k]
+		}
+		return out
 	},
-	"critW": func(r WFRow) string {
-		l, rr := barSpan(r)
-		return strconv.FormatFloat(rr-l, 'f', 2, 64)
-	},
-	"projName":    projName,
 	"projNS":      projNS,
 	"projInitial": projInitial,
 	"dur":         dur,
@@ -547,18 +463,4 @@ func short(s string, n int) string {
 		return s
 	}
 	return s[:n]
-}
-
-// barSpan is where a row's bars begin and end, percent of the axis.
-func barSpan(r WFRow) (float64, float64) {
-	lo, hi := 100.0, 0.0
-	for _, b := range r.Bars {
-		l, _ := strconv.ParseFloat(b.L, 64)
-		w, _ := strconv.ParseFloat(b.W, 64)
-		lo, hi = min(lo, l), max(hi, l+w)
-	}
-	if hi < lo {
-		return 0, 0
-	}
-	return lo, hi
 }

@@ -7,11 +7,8 @@ package podwatch
 
 import (
 	"context"
-	"fmt"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -67,11 +64,30 @@ func Job(pod *corev1.Pod, gitlabURLs []string) (store.Job, bool) {
 }
 
 // Handlers are called for job pods: Job when a pod is first seen and again
-// when it is scheduled (its node becomes known), Gone when it is deleted,
-// which is when its job ended.
+// when it is scheduled (its node becomes known); Gone when the runner
+// starts deleting it, which is about when its job ended (at), and again
+// when it is gone. A pod never says how its job ended: GitLab does.
 type Handlers struct {
 	Job  func(context.Context, store.Job)
-	Gone func(context.Context, store.Job)
+	Gone func(ctx context.Context, j store.Job, at time.Time)
+}
+
+// endedAt is when deleting a pod was asked for: its deletion deadline less
+// its grace period. A pod's deletion takes that long (and longer for the
+// runner's cleanup), so the end of its job is the request, not the pod's
+// disappearance.
+func endedAt(p *corev1.Pod) (time.Time, bool) {
+	if p.DeletionTimestamp == nil {
+		return time.Time{}, false
+	}
+	t := p.DeletionTimestamp.Time
+	if g := p.DeletionGracePeriodSeconds; g != nil && *g > 0 {
+		t = t.Add(-time.Duration(*g) * time.Second)
+	}
+	if now := time.Now(); t.After(now) {
+		t = now
+	}
+	return t, true
 }
 
 // Watch calls h for every job pod in namespace until ctx ends.
@@ -88,16 +104,39 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 			fn(ctx, j)
 		}
 	}
+	gone := func(pod *corev1.Pod) {
+		if h.Gone == nil {
+			return
+		}
+		at, ok := endedAt(pod)
+		if !ok {
+			at = time.Now()
+		}
+		if j, ok := Job(pod, gitlabURLs); ok {
+			h.Gone(ctx, j, at)
+		}
+	}
 	_, err := pods.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
 			if p, ok := obj.(*corev1.Pod); ok {
 				call(h.Job, p)
+				// Seen for the first time while being deleted (the
+				// console restarted): its job is over.
+				if p.DeletionTimestamp != nil {
+					gone(p)
+				}
 			}
 		},
 		UpdateFunc: func(old, cur any) {
 			o, ok1 := old.(*corev1.Pod)
 			c, ok2 := cur.(*corev1.Pod)
-			if ok1 && ok2 && o.Spec.NodeName != c.Spec.NodeName {
+			if !ok1 || !ok2 {
+				return
+			}
+			switch {
+			case c.DeletionTimestamp != nil && o.DeletionTimestamp == nil:
+				gone(c)
+			case o.Spec.NodeName != c.Spec.NodeName:
 				call(h.Job, c)
 			}
 		},
@@ -106,7 +145,7 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 				obj = d.Obj
 			}
 			if p, ok := obj.(*corev1.Pod); ok {
-				call(h.Gone, p)
+				gone(p)
 			}
 		},
 	})
@@ -117,48 +156,6 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 	<-ctx.Done()
 	factory.Shutdown()
 	return nil
-}
-
-// Running is the jobs whose pods exist now: the jobs in progress.
-type Running struct {
-	mu   sync.Mutex
-	jobs map[string]store.Job
-}
-
-func runningKey(j store.Job) string { return fmt.Sprintf("%s/%d", j.Instance, j.JobID) }
-
-// Set records a job pod (again, with what it says now).
-func (r *Running) Set(j store.Job) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.jobs == nil {
-		r.jobs = map[string]store.Job{}
-	}
-	r.jobs[runningKey(j)] = j
-}
-
-// Remove forgets a job whose pod is gone.
-func (r *Running) Remove(j store.Job) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.jobs, runningKey(j))
-}
-
-// Jobs returns the running jobs, the earliest started first.
-func (r *Running) Jobs() []store.Job {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]store.Job, 0, len(r.jobs))
-	for _, j := range r.jobs {
-		out = append(out, j)
-	}
-	sort.Slice(out, func(a, b int) bool {
-		if !out[a].StartedAt.Equal(out[b].StartedAt) {
-			return out[a].StartedAt.Before(out[b].StartedAt)
-		}
-		return out[a].JobID < out[b].JobID
-	})
-	return out
 }
 
 func number(s string) uint64 {

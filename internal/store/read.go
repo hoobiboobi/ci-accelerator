@@ -26,12 +26,15 @@ type Stored struct {
 	Reason     history.Reason
 	// Saved is the build time its cached and received steps saved.
 	Saved time.Duration
+	// Via is who decided the reason after the build was stored (see
+	// SettleElsewhere); empty: BuildKit's records alone.
+	Via string
 }
 
 const buildColumns = `b.id, b.generation, d.name, b.ref, b.attribution, b.instance, b.pipeline_id, b.job_id,
 	b.target, b.build_args, b.started_at, b.completed_at, b.error, b.context_bytes, b.images,
 	b.reason_kind, b.reason_step, b.reason_old, b.reason_new, b.reason_arg, b.reason_paths,
-	(SELECT ref FROM builds x WHERE x.id = b.reason_by), b.saved_ms`
+	(SELECT ref FROM builds x WHERE x.id = b.reason_by), b.saved_ms, b.reason_via`
 
 // Previous returns the latest build of the same project and target that
 // started before b, restored for FirstRebuild; nil when there is none.
@@ -161,7 +164,7 @@ func (s *Store) scanBuilds(ctx context.Context, rows *sql.Rows) ([]*Stored, erro
 		)
 		if err := rows.Scan(&st.ID, &st.Generation, &b.Daemon, &b.Ref, &attribution, &instance, &pipeline, &job,
 			&b.Target, &args, &started, &completed, &b.Error, &b.ContextBytes, &images,
-			&kind, &rstep, &st.Reason.Old, &st.Reason.New, &st.Reason.Arg, &paths, &by, &saved); err != nil {
+			&kind, &rstep, &st.Reason.Old, &st.Reason.New, &st.Reason.Arg, &paths, &by, &saved, &st.Via); err != nil {
 			rows.Close()
 			return nil, err
 		}

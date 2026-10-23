@@ -131,6 +131,13 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		}
 	}
 	paths, _ := json.Marshal(nonNil(r.Paths))
+	var built, builtMs int64
+	for _, st := range b.Steps {
+		if st.State == history.Built && !strings.HasPrefix(st.Name, "FROM ") {
+			built++
+			builtMs += st.Duration().Milliseconds()
+		}
+	}
 	saved, err := s.timeSaved(ctx, tx, b.Build, instance, project)
 	if err != nil {
 		return 0, err
@@ -140,8 +147,8 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO builds (daemon_id, ref, generation, attribution, instance, pipeline_id, job_id, project_id,
 			target, dockerfile_id, build_args, started_at, completed_at, error, context_bytes, images,
-			reason_kind, reason_step, reason_old, reason_new, reason_arg, reason_paths, reason_by, saved_ms, output_day)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			reason_kind, reason_step, reason_old, reason_new, reason_arg, reason_paths, reason_by, saved_ms, output_day, built, built_ms)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (ref, daemon_id) DO UPDATE SET generation = excluded.generation,
 			attribution = excluded.attribution, instance = excluded.instance, pipeline_id = excluded.pipeline_id,
 			job_id = excluded.job_id, project_id = COALESCE(excluded.project_id, builds.project_id),
@@ -150,13 +157,14 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			context_bytes = excluded.context_bytes, images = excluded.images,
 			reason_kind = excluded.reason_kind, reason_step = excluded.reason_step, reason_old = excluded.reason_old,
 			reason_new = excluded.reason_new, reason_arg = excluded.reason_arg, reason_paths = excluded.reason_paths,
-			reason_by = excluded.reason_by, saved_ms = excluded.saved_ms,
-			output_day = COALESCE(excluded.output_day, builds.output_day)
+			reason_by = excluded.reason_by, reason_via = '', saved_ms = excluded.saved_ms,
+			output_day = COALESCE(excluded.output_day, builds.output_day),
+			built = excluded.built, built_ms = excluded.built_ms
 		WHERE excluded.generation >= builds.generation
 		RETURNING id`,
 		daemon, b.Ref, b.Generation, attributions[a.State], instance, pipeline, job, project,
 		b.Target, dockerfile, string(argsJSON), b.Started.UnixMilli(), nullTime(b.Completed), b.Error, b.ContextBytes, string(images),
-		string(r.Kind), reasonStep, r.Old, r.New, r.Arg, string(paths), reasonBy, saved.Milliseconds(), outDay,
+		string(r.Kind), reasonStep, r.Old, r.New, r.Arg, string(paths), reasonBy, saved.Milliseconds(), outDay, built, builtMs,
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A newer generation is stored already.
@@ -199,6 +207,12 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO steps (build_id, idx, key, name, identity, state, start_ms, dur_ms, lines,
 			received_from, error, output_len) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, i, st.Key, name, ident, states[st.State], start, dur, formatLines(st.Lines), from, st.Error, len(st.Output)); err != nil {
+			return 0, err
+		}
+	}
+	if project.Valid {
+		if _, err := tx.ExecContext(ctx, "UPDATE projects SET last_at = max(COALESCE(last_at, 0), ?) WHERE instance = ? AND project_id = ?",
+			b.Started.UnixMilli(), instance, project); err != nil {
 			return 0, err
 		}
 	}
@@ -267,7 +281,7 @@ func (s *Store) SetReason(ctx context.Context, ref, daemon string, r history.Rea
 	paths, _ := json.Marshal(nonNil(r.Paths))
 	var instance, pipeline sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
-		UPDATE builds SET reason_kind = ?, reason_old = ?, reason_new = ?, reason_arg = ?, reason_paths = ?,
+		UPDATE builds SET reason_kind = ?, reason_old = ?, reason_new = ?, reason_arg = ?, reason_paths = ?, reason_via = '',
 			reason_step = (SELECT idx FROM steps WHERE build_id = builds.id AND key = ? ORDER BY idx LIMIT 1),
 			reason_by = (SELECT id FROM builds b WHERE b.ref = ? LIMIT 1)
 		WHERE ref = ? AND daemon_id = (SELECT id FROM daemons WHERE name = ?)
@@ -317,27 +331,33 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 	}
 	if pipeline.Valid {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO pipelines (instance, pipeline_id, project_id, ref, sha, source, created_at,
-			commit_title, commit_author, mr_iid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			commit_title, commit_author, mr_iid, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (instance, pipeline_id) DO UPDATE SET project_id = COALESCE(excluded.project_id, pipelines.project_id),
 				ref = excluded.ref, sha = excluded.sha, source = excluded.source,
 				created_at = COALESCE(excluded.created_at, pipelines.created_at), commit_title = excluded.commit_title,
 				commit_author = excluded.commit_author, mr_iid = COALESCE(excluded.mr_iid, pipelines.mr_iid)`,
 			instance, pipeline, project, j.Ref, j.SHA, j.Source, nullTime(j.PipelineCreatedAt),
-			j.CommitTitle, j.CommitAuthor, nullUint(j.MergeRequestIID)); err != nil {
+			j.CommitTitle, j.CommitAuthor, nullUint(j.MergeRequestIID), s.opts.Now().UnixMilli()); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs (instance, job_id, pipeline_id, project_id, name, stage, url, started_at, node)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs (instance, job_id, pipeline_id, project_id, name, stage, url, started_at, node, seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (instance, job_id) DO UPDATE SET pipeline_id = COALESCE(excluded.pipeline_id, jobs.pipeline_id),
 			project_id = COALESCE(excluded.project_id, jobs.project_id), name = excluded.name, stage = excluded.stage,
 			url = excluded.url, started_at = COALESCE(excluded.started_at, jobs.started_at), node = excluded.node`,
-		instance, j.JobID, pipeline, project, j.Name, j.Stage, j.URL, nullTime(j.StartedAt), j.Node); err != nil {
+		instance, j.JobID, pipeline, project, j.Name, j.Stage, j.URL, nullTime(j.StartedAt), j.Node, s.opts.Now().UnixMilli()); err != nil {
 		return err
 	}
 	if project.Valid {
 		if _, err := tx.ExecContext(ctx, "UPDATE builds SET project_id = ? WHERE instance = ? AND job_id = ? AND project_id IS NULL",
 			project, instance, j.JobID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE projects SET last_at = max(COALESCE(last_at, 0),
+			COALESCE((SELECT max(started_at) FROM builds WHERE instance = ?1 AND job_id = ?2), 0))
+			WHERE instance = ?1 AND project_id = ?3 AND EXISTS (SELECT 1 FROM builds WHERE instance = ?1 AND job_id = ?2)`,
+			instance, j.JobID, project); err != nil {
 			return err
 		}
 	}

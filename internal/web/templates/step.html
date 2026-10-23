@@ -24,7 +24,6 @@
     {{if ge .Prev 0}}<a class="btn" href="/builds/{{.BuildID}}/steps/{{.Prev}}" data-dstep="{{.Prev}}">{{icon "chevU" 13}}Previous step</a>{{end}}
     {{if ge .Next 0}}<a class="btn" href="/builds/{{.BuildID}}/steps/{{.Next}}" data-dstep="{{.Next}}">{{icon "chevD" 13}}Next step</a>{{end}}
     {{if .HasDockerfile}}<a class="btn" href="/builds/{{.BuildID}}#dockerfile" data-goto-tab="dockerfile">Dockerfile view</a>{{end}}
-    <a class="btn" href="/builds/{{.BuildID}}#timeline" data-goto-tab="timeline">Job timeline</a>
   </div>
 </div>
 {{end}}

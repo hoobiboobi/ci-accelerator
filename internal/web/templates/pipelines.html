@@ -1,0 +1,40 @@
+{{define "pipelines"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div><div class="titlerow"><h1 class="t" tabindex="-1">Pipelines</h1></div></header>
+  <form class="filters" method="get" action="/pipelines" data-autosubmit>
+    <label><span>Branch</span><select name="branch" id="pBranch"><option value="">All branches</option>{{range .Branches}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+    {{if .CanMine}}<label class="chk"><input type="checkbox" name="mine" value="1" id="pMine" {{if .Mine}}checked{{end}}><span>Mine</span></label>{{end}}
+    <button class="btn" type="submit">Apply</button>
+    <span class="pg-key" aria-hidden="true"><span><i class="q"></i>waiting for a runner</span><span><i class="jw-job"></i>job</span><span><i class="st-cached"></i>image from cache</span><span><i class="st-change"></i>image rebuilt: change</span><span><i class="st-farm"></i>rebuilt: build farm</span><span><i class="st-unclear"></i>rebuilt: unclear</span><span><i class="jw-failed"></i>failed</span></span>
+  </form>
+  {{if .NoAPI}}<p class="muted note0">How long jobs waited for a runner comes from GitLab: {{if .Viewer}}it could not be read{{else}}give the console a GitLab token, or sign in{{end}}.</p>{{end}}
+  <div class="pcards">
+  {{range .Cards}}
+  <article class="pcard">
+    <a class="pc-head" href="{{.URL}}">
+      <span class="pstate ps-{{.State.Key}}">{{icon .State.Icon 12}}{{.State.Label}}</span>
+      <span class="pc-title">{{.Title}}</span>
+      <span class="pc-dur">{{if .Dur}}{{.Dur}}{{else}}—{{end}}</span>
+      <span class="pc-meta">{{with .Ref}}<span>{{.}}</span>{{end}}{{with .SHA}}<span class="mono">{{.}}</span>{{end}}{{with .Who}}<span>{{.}}</span>{{end}}<span>{{.When}}</span></span>
+    </a>
+    <div class="pc-facts">
+      <span><b>{{.Jobs}}</b> job{{if ne .Jobs 1}}s{{end}}{{if .NotRun}} · {{.NotRun}} did not run{{end}}</span>
+      {{if .Waited}}<span title="from GitLab: how long each job was pending before a runner took it">waiting for a runner: usually <b>{{.Waited}}</b>, longest <b>{{.Longest}}</b> <span class="muted">({{.LongJ}})</span>{{if .WaitedLong}} · <b>{{.WaitedLong}}</b> job{{if ne .WaitedLong 1}}s{{end}} over 10 s{{end}}</span>{{end}}
+      {{with .Images}}<span>{{.}}</span>{{end}}
+    </div>
+    {{if .Lanes}}
+    <div class="pg">
+      <div class="pg-ax"><span class="pg-st"></span><span class="pg-tk">{{range .Ticks}}<span style="left: {{.L}}%">{{.Label}}</span>{{end}}</span></div>
+      {{range .Lanes}}<div class="pg-lane n{{.Rows}}"><span class="pg-st" title="{{.Stage}}">{{.Stage}}</span><span class="pg-tr">{{range .Jobs}}{{if .QW}}<i class="q r{{.Row}}" style="left: {{.QL}}%; width: {{.QW}}%"></i>{{end}}<a class="j r{{.Row}} {{.Class}}" href="{{.URL}}" style="left: {{.L}}%; width: {{.W}}%" title="{{.Title}}" aria-label="{{.Title}}"></a>{{end}}</span></div>
+      {{end}}
+    </div>
+    {{end}}
+  </article>
+  {{else}}
+  <div class="empty"><b>No pipeline here yet.</b><p>{{if .Newer}}No older pipelines.{{else}}A pipeline shows up when one of its jobs runs on the box's runners.{{end}}</p></div>
+  {{end}}
+  </div>
+  <nav class="pager" aria-label="Pages">{{if .Newer}}<a class="btn" href="/pipelines{{with .Branch}}?branch={{.}}{{end}}">Newest</a>{{end}}{{with .Older}}<a class="btn" href="{{.}}">Older {{icon "chev" 13}}</a>{{end}}</nav>
+</div>
+{{end}}
