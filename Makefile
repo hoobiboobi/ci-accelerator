@@ -6,6 +6,7 @@ CHARTS := charts/buildkit
 # The console chart needs its own required values.
 CONSOLE := charts/console
 CONSOLE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set jobs.namespace=ci-jobs
+CONSOLE_SIGN_IN_SET := --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["root"]}]'
 CONSOLE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1
 # Extra values files every chart check also renders with.
 CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
@@ -216,12 +217,13 @@ lint: $(SHELLCHECK) deps ## helm lint --strict (default and example values), cha
 	@echo "==> lint $(CONSOLE)"
 	@cmp -s LICENSE $(CONSOLE)/LICENSE || { echo "$(CONSOLE)/LICENSE differs from LICENSE"; exit 1; }
 	@$(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET) >/dev/null || { $(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET); exit 1; }
+	@$(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET) $(CONSOLE_SIGN_IN_SET) >/dev/null || { $(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET) $(CONSOLE_SIGN_IN_SET); exit 1; }
 	@echo "==> lint $(UMBRELLA)"
 	@cmp -s LICENSE $(UMBRELLA)/LICENSE || { echo "$(UMBRELLA)/LICENSE differs from LICENSE"; exit 1; }
 	@$(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml >/dev/null \
 		|| { $(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml; exit 1; }
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -247,7 +249,16 @@ $(NODE):
 
 .PHONY: ui-test
 ui-test: $(NODE) ## Browser checks of the console's pages on its fixtures (needs Chrome; CHROME=<path> to pick one)
-	@UI_TEST=1 NODE=$(NODE) $(GO_RUN) test -count=1 -v -run '^TestUI$$' -timeout 15m ./internal/web/
+	@UI_TEST=1 NODE=$(NODE) $(GO_RUN) test -count=1 -v -run '^TestUI(SignedIn)?$$' -timeout 15m ./internal/web/
+
+.PHONY: ui-shots
+ui-shots: $(NODE) ## Screenshots of the console's pages on its fixtures at 1400 and 390 px into .ui-shots/ (open its index.html)
+	@rm -rf .ui-shots && UI_TEST=1 UI_SHOTS=$(CURDIR)/.ui-shots NODE=$(NODE) $(GO_RUN) test -count=1 -run '^TestUI$$' -timeout 15m ./internal/web/ && \
+		echo "==> .ui-shots/TestUI/index.html"
+
+.PHONY: console-dev
+console-dev: ## The console on its fixtures at CONSOLE_DEV (127.0.0.1:8095), pages read from internal/web on every request
+	@CONSOLE_DEV=$${CONSOLE_DEV:-127.0.0.1:8095} $(GO_RUN) test -count=1 -v -run '^TestDevServer$$' -timeout 0 ./internal/web/
 
 .PHONY: go-test
 go-test: ## Go: gofmt, go vet and the tests of internal/ (history model fixtures included)
@@ -274,6 +285,9 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		echo "==> kubeconform $(CONSOLE) k8s $$k"; \
 		$(HELM) template test $(CONSOLE) --kube-version $$k -n ci-accelerator $(CONSOLE_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
+		echo "==> kubeconform $(CONSOLE) k8s $$k sign-in"; \
+		$(HELM) template test $(CONSOLE) --kube-version $$k -n ci-accelerator $(CONSOLE_SET) $(CONSOLE_SIGN_IN_SET) \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
 		echo "==> kubeconform $(CONSOLE) k8s $$k cert-manager"; \
 		$(HELM) template test $(CONSOLE) --kube-version $$k -n ci-accelerator $(CONSOLE_CERT_MANAGER_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
@@ -287,12 +301,17 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
 			-f $(UMBRELLA)/tests/values/required.yaml \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
+		echo "==> kubeconform $(UMBRELLA) k8s $$k runner cache and tiers"; \
+		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
+			-f $(UMBRELLA)/tests/values/required.yaml -f $(UMBRELLA)/tests/values/tiers.yaml \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 		echo "==> kubeconform $(UMBRELLA) k8s $$k console"; \
 		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
 			-f $(UMBRELLA)/tests/values/required.yaml -f $(UMBRELLA)/tests/values/console.yaml \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 	done
 	@test/runner-config-parity.sh $(HELM) $(RUNNER_CHART)
+	@test/e2e-matrix.sh
 
 .PHONY: template
 template: ## Render every chart with default values (plus the required ones) to stdout
@@ -316,6 +335,12 @@ kind-down: ## Delete the kind cluster
 .PHONY: e2e
 e2e: ## End-to-end checks on the kind cluster (KEEP=1 keeps resources, SCENARIOS=... selects)
 	@test/e2e/run.sh
+
+.PHONY: e2e-copy
+e2e-copy: ## The e2e on a copy of the tree taken now, so the tree can change while it runs (SCENARIOS=... selects)
+	@d=$$(mktemp -d "$${TMPDIR:-/tmp}/ci-accelerator-e2e.XXXXXX"); \
+		rsync -a --exclude .git --exclude .tools ./ "$$d/" && ln -s "$(CURDIR)/.tools" "$$d/.tools" && \
+		echo "==> e2e on a copy in $$d" && $(MAKE) -C "$$d" e2e; rc=$$?; rm -rf "$$d"; exit $$rc
 
 .PHONY: e2e-clean
 e2e-clean: ## Remove what an interrupted or KEEP=1 e2e run left behind

@@ -91,6 +91,9 @@ UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
+# An S3 store for the runner cache (MinIO publishes no images any more):
+# SeaweedFS 4.48 (2026-09-28), keys and bucket from env, no setup.
+S3_IMAGE=docker.io/chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
 # Every client call: the client certificate, and the Service name for the
 # server certificate check also when a call goes to a pod IP.
 TLS=(--tlsdir /certs --tlsservername "$SVC_HOST")
@@ -992,7 +995,7 @@ s_box() {
   ensure_ns "$BOX_NS" privileged
   ensure_fake_gitlab "$BOX_NS" || return
   make -C "$ROOT" deps >"$LOGS/box-deps.log" 2>&1 || { fail "make deps (see $LOGS/box-deps.log)"; return; }
-  make -C "$ROOT" console-image >"$LOGS/box-console-image.log" 2>&1 \
+  make -C "$ROOT" console-image CONSOLE_IMAGE=ci-accelerator-console:e2e >"$LOGS/box-console-image.log" 2>&1 \
     || { fail "build the console image (see $LOGS/box-console-image.log)"; return; }
   arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
   local extra=(-f "$ROOT/test/e2e/box-console-values.yaml")
@@ -1081,7 +1084,10 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
   box_settle
   box_ui
+  box_cache
+  box_signin
   hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the box"
+  kc -n "$BOX_NS" delete secret e2e-console-oauth e2e-console-session --ignore-not-found >/dev/null 2>&1
   check "uninstall removes the jobs namespace" \
     eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'
   check "uninstall keeps the console's store" quiet kc -n "$BOX_NS" get pvc "$BOX_REL-console-data"
@@ -1113,6 +1119,152 @@ box_ui() {
   fi
   check "the console's pages pass the browser checks ($(tail -n 1 "$LOGS/box-ui.log" | sed 's/^# //'))" [ "$ok" = 1 ]
   [ "$ok" = 1 ] || grep '^FAIL' "$LOGS/box-ui.log" | head -n 10 | while read -r l; do info "$l"; done
+}
+
+# box_cache: GitLab's cache: in S3 (SeaweedFS in the e2e namespace) for the
+# box's runner and a runner tier, turned on by an upgrade: a job misses and
+# uploads, the next finds it, and a job on the tier finds it too (one
+# folder per release and GitLab); the console is told the folder and lists
+# it.
+box_cache() {
+  local s3="s3.$NS.svc:8333" inst id1 out
+  inst=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)
+  kc -n "$NS" apply -f - >/dev/null <<EOF_S3
+apiVersion: v1
+kind: Pod
+metadata: {name: s3, labels: {app: s3}}
+spec:
+  # No S3_PORT=tcp://... from the Service: SeaweedFS reads it as its flag.
+  enableServiceLinks: false
+  tolerations: [{key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}]
+  securityContext: {runAsNonRoot: true, runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: seaweedfs
+      image: $S3_IMAGE
+      args: [mini, -dir=/data]
+      env:
+        - {name: AWS_ACCESS_KEY_ID, value: e2ecacheaccess}
+        - {name: AWS_SECRET_ACCESS_KEY, value: e2ecachesecret123}
+        - {name: S3_BUCKET, value: runner-cache}
+      ports: [{containerPort: 8333}]
+      # The bucket exists a moment after the health check says ready.
+      readinessProbe:
+        exec: {command: [sh, -c, 'curl -fsS -o /dev/null -I --aws-sigv4 aws:amz:us-east-1:s3 -u "\$AWS_ACCESS_KEY_ID:\$AWS_SECRET_ACCESS_KEY" http://127.0.0.1:8333/\$S3_BUCKET']}
+        periodSeconds: 2
+        timeoutSeconds: 5
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: data, mountPath: /data}, {name: tmp, mountPath: /tmp}]
+  volumes: [{name: data, emptyDir: {}}, {name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: s3}
+spec:
+  selector: {app: s3}
+  ports: [{port: 8333, targetPort: 8333}]
+EOF_S3
+  kc -n "$NS" wait --for=condition=Ready pod/s3 --timeout=300s >/dev/null || { fail "the S3 store for the cache is not ready"; return; }
+  kc -n "$BOX_NS" create secret generic e2e-runner-cache --from-literal=accesskey=e2ecacheaccess --from-literal=secretkey=e2ecachesecret123 \
+    --dry-run=client -o yaml | kc apply -f - >/dev/null
+  kc -n "$BOX_NS" create secret generic e2e-runner-tier --from-literal=runner-token=glrt-e2e-tier-deploy --dry-run=client -o yaml | kc apply -f - >/dev/null
+  local cache='{"secretName":"e2e-runner-cache","s3":{"server":"'"$s3"'","bucket":"runner-cache","region":"us-east-1","insecure":true,"pathStyle":true}}'
+  hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" --reuse-values \
+    --set-json "gitlab-runner.runners.cache=$cache" \
+    --set-json 'runnerTiers={"deploy":{"nodes":"build","concurrent":2,"token":{"existingSecret":"e2e-runner-tier"},"resources":{"requests":{"cpu":"50m","memory":"64Mi"},"limits":{"memory":"512Mi"}},"cache":'"$cache"',"manager":{"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"}]}}}' \
+    --set console.caches.every=15s --wait --timeout 6m >"$LOGS/box-cache-upgrade.log" 2>&1 \
+    || { fail "turn on the runner cache and a tier (see $LOGS/box-cache-upgrade.log)"; return; }
+  check "the tier's runner pod is ready" eventually 60 eval '[ "$(kc -n "$BOX_NS" get deploy "$BOX_REL-runner-deploy" -o jsonpath={.status.readyReplicas})" = 1 ]'
+  # A job with cache: keyword, as GitLab sends it.
+  cache_spec() {
+    python3 - "$IMAGE" "$1" <<'PY'
+import json, sys
+spec = {"image": sys.argv[1], "pipeline_id": 790, "cache": [{"key": "e2e-cache", "untracked": False, "policy": "pull-push", "paths": ["cached"], "when": "on_success"}],
+        "script": ['if [ -f cached/stamp ]; then echo "CACHE_HIT $(cat cached/stamp)"; else echo CACHE_MISS; mkdir -p cached; echo "job $CI_JOB_ID" > cached/stamp; fi']}
+if sys.argv[2]:
+    spec["runner"] = sys.argv[2]
+print(json.dumps(spec))
+PY
+  }
+  JOB_SPEC=$(cache_spec "")
+  run_job cache-1 "$BOX_JOBS_NS"
+  # shellcheck disable=SC2034 # read by the eval'd checks below
+  id1=$(job_id cache-1)
+  check "a job with cache: misses and uploads to S3 (box/<GitLab>/project/<id>/<key>)" \
+    eval 'job_printed cache-1 CACHE_MISS && grep -q "Uploading cache.zip to http://$s3/runner-cache/$BOX_REL/$inst/project/1/e2e-cache" "$LOGS/job-cache-1.trace" && grep -q "^Created cache" "$LOGS/job-cache-1.trace"'
+  run_job cache-2 "$BOX_JOBS_NS"
+  check "the next job finds the cache, with its size in the log" \
+    eval 'job_printed cache-2 "CACHE_HIT job $id1" && grep -q "^Successfully extracted cache" "$LOGS/job-cache-2.trace" && grep -qE "Downloading cache [0-9.]+ ?[kKMG]?B/" "$LOGS/job-cache-2.trace"'
+  JOB_SPEC=$(cache_spec glrt-e2e-tier-deploy)
+  run_job cache-tier "$BOX_JOBS_NS"
+  check "a job on the tier runs on the tier's runner and finds the same cache" \
+    eval 'grep -q "on $BOX_REL-deploy" "$LOGS/job-cache-tier.trace" && job_printed cache-tier "CACHE_HIT job $id1"'
+  out=$(kc -n "$NS" exec s3 -- sh -c 'curl -s --aws-sigv4 aws:amz:us-east-1:s3 -u "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" "http://127.0.0.1:8333/runner-cache?list-type=2"' 2>/dev/null)
+  check "the bucket holds one archive for the project, shared by both runners" \
+    test "$(printf '%s' "$out" | grep -o "<Key>$BOX_REL/$inst/project/1/e2e-cache</Key>" | wc -l | tr -d ' ')" = 1
+  check "the console is told the folder and lists it" \
+    eventually 120 eval 'kc -n "$BOX_NS" logs deploy/"$BOX_REL-console" 2>/dev/null | grep "\"cache listed\"" | grep -q "\"store\":\"$s3/runner-cache/$BOX_REL/$inst\",\"objects\":1"'
+  JOB_SPEC=$(job_spec 778)
+}
+
+# box_signin: the console with sign-in through the stand-in GitLab, turned
+# on by an upgrade. The test plays the browser: it brings GitLab's answer
+# (a code naming a person) to the console's callback itself.
+box_signin() {
+  local port=${E2E_SIGNIN_PORT:-18432} pf inst url alice bob
+  url="http://localhost:$port"
+  inst=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)
+  kc -n "$BOX_NS" create secret generic e2e-console-oauth --from-literal=client-id=e2e-console \
+    --from-literal=client-secret=e2e-console-secret --dry-run=client -o yaml | kc apply -f - >/dev/null
+  kc -n "$BOX_NS" create secret generic e2e-console-session --from-literal=key="$(head -c 32 /dev/urandom | base64)" \
+    --dry-run=client -o yaml | kc apply -f - >/dev/null
+  hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" --reuse-values --set "global.console.url=$url" \
+    --set console.signIn.enabled=true --set console.signIn.sessionKey.existingSecret=e2e-console-session \
+    --set-json 'console.signIn.gitlab=[{"existingSecret":"e2e-console-oauth","admins":["root"]}]' \
+    --wait --timeout 5m >"$LOGS/box-signin-upgrade.log" 2>&1 \
+    || { kc -n "$BOX_NS" logs deploy/"$BOX_REL-console" --all-containers >"$LOGS/box-signin-console.log" 2>&1
+         kc -n "$BOX_NS" describe pods -l ci-accelerator.io/component=console >"$LOGS/box-signin-console-pods.txt" 2>&1
+         fail "turn on the console's sign-in (see $LOGS/box-signin-upgrade.log, box-signin-console.log)"; return; }
+  check "the install notes give the OAuth application's redirect URI" \
+    grep -q "fake-gitlab.$NS.svc/: $url/auth/callback/$inst" "$LOGS/box-signin-upgrade.log"
+  kc -n "$BOX_NS" port-forward "svc/$BOX_REL-console" "$port:8080" >"$LOGS/box-signin-port-forward.log" 2>&1 &
+  pf=$!
+  eventually 30 quiet curl -fsS "$url/healthz" || { fail "sign-in: no port-forward to the console"; kill "$pf" 2>/dev/null; return; }
+  check "with sign-in, a page sends to sign in" \
+    test "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$url/")" = "302 $url/auth/sign-in?to=%2F"
+  check "with sign-in, data needs a session" test "$(curl -s -o /dev/null -w '%{http_code}' "$url/search-index")" = 401
+  # sign_in <person>: the session cookie, after the console's round trip
+  # through the stand-in GitLab (code exchange, the person's account).
+  sign_in() {
+    local h login state
+    h=$(curl -s -o /dev/null -D - "$url/auth/sign-in/$inst?to=/" | tr -d '\r')
+    login=$(printf '%s\n' "$h" | sed -n 's/^[Ss]et-[Cc]ookie: \(__Host-ci-login=[^;]*\).*/\1/p')
+    state=$(printf '%s\n' "$h" | sed -n 's/^[Ll]ocation: .*[?&]state=\([^&]*\).*/\1/p')
+    curl -s -o /dev/null -D - -H "Cookie: $login" "$url/auth/callback/$inst?code=$1&state=$state" | tr -d '\r' \
+      | sed -n 's/^[Ss]et-[Cc]ookie: \(__Host-ci-session=[^;]*\).*/\1/p'
+  }
+  alice=$(sign_in alice)
+  bob=$(sign_in bob)
+  check "people sign in through GitLab (PKCE, state, code exchange)" test -n "$alice" -a -n "$bob"
+  curl -s -H "Cookie: $alice" "$url/" >"$LOGS/box-signin-alice.html"
+  check "the sidebar names who is signed in" grep -q '@alice' "$LOGS/box-signin-alice.html"
+  check "alice, whose token reads the project's jobs, opens the job's pipeline" \
+    test "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $alice" "$url/pipelines/$inst/778")" = 200
+  curl -s -H "Cookie: $bob" "$url/" >"$LOGS/box-signin-bob.html"
+  check "bob, whose token does not, sees no project and is told why" \
+    eval 'grep -q "No project you can read builds here" "$LOGS/box-signin-bob.html" && ! grep -q "/pipelines/$inst/" "$LOGS/box-signin-bob.html"'
+  check "bob gets not found for that pipeline" \
+    test "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $bob" "$url/pipelines/$inst/778")" = 404
+  check "the JSON API answers admins only" \
+    test "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $alice" "$url/api/v1/builds")" = 403
+  check "a sign-out posted from another site is refused" \
+    test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Cookie: $alice" -H 'Origin: https://evil.example' -H 'Sec-Fetch-Site: cross-site' "$url/auth/sign-out")" = 403
+  check "signing out" \
+    test "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -X POST -H "Cookie: $alice" -H "Origin: $url" -H 'Sec-Fetch-Site: same-origin' "$url/auth/sign-out")" = "303 $url/auth/sign-in?e=out"
+  check "signing out revokes the token at GitLab" \
+    eval 'kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://fake-gitlab.$NS.svc/e2e/revoked" 2>/dev/null | grep -q "at-alice-"'
+  check "the session ends with it" test "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: $alice" "$url/")" = 302
+  kill "$pf" 2>/dev/null
+  wait "$pf" 2>/dev/null
 }
 
 # settle_job <pipeline> <job> <node> <files ConfigMap>: a CI job pod as the
