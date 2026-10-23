@@ -36,3 +36,9 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0030](0030-console-store.md) | Console store: SQLite, a content-addressed step graph, daily output files |
 | [0031](0031-console-packaging.md) | Console packaging: one pod, its own certificate, the runner's URL once |
 | [0032](0032-console-pages-and-live-data.md) | Console pages: the agreed design, live data, a GitLab token for now |
+| [0033](0033-console-jobs-without-builds.md) | Console: GitLab says how jobs went; pipelines without builds (superseded by 0037) |
+| [0034](0034-console-sign-in.md) | Console: sign-in through GitLab, inside the console |
+| [0035](0035-runner-cache-and-tiers.md) | Runner cache in S3, and runner tiers rendered by the box |
+| [0036](0036-infrastructure-runs-in-the-console.md) | Terraform, OpenTofu and Terragrunt runs in the console (superseded by 0037) |
+| [0037](0037-console-builds-only.md) | Console v2: image builds only, four sections, five outcomes |
+| [0038](0038-files-or-node-from-gitlab.md) | Files or node: settled with GitLab's comparison of two commits |

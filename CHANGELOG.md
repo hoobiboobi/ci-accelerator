@@ -9,6 +9,12 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+- **Runner configuration.** The box's runner TOML is now one template for
+  every runner. Without a cache it renders exactly as before (the runner
+  does not restart). With `--reuse-values` the main runner keeps the TOML
+  of the release it was installed with, so `gitlab-runner.runners.cache`
+  takes effect only with `--reset-then-reuse-values`.
+
 - **Trace ids.** Every CI job now gets its own trace instead of sharing one
   per pipeline. Trace ids have a new layout:
   - `01` + 3 bytes from the GitLab URL;
@@ -49,27 +55,57 @@ workflow copies them into the GitHub release.
 - `charts/console` and the box's `console.enabled` (preview, off by
   default): one pod that reads every daemon's build history and the CI job
   pods into SQLite and serves read-only pages and a JSON API on a
-  ClusterIP Service (ADR-0032):
-  - the pipeline list beside every page, with each job's verdict, jobs in
-    progress, and filters for rebuilt and node-related jobs;
-  - a pipeline: its time and the job that set it, the jobs' timeline, why
-    each took its time, a waterfall from pipeline to step, the Dockerfile
-    with one chip per job;
-  - a build: the verdict, where the job's time went, BuildKit's time
-    against the target's usual, its steps, Dockerfile and timeline, the
-    previous build of the target step by step;
-  - a step: source lines, output and history;
-  - project insights and build nodes (each daemon's builds, running
-    builds, cache by kind, cache policies);
-  - search (Ctrl+K), keyboard shortcuts, light and dark themes, live
-    updates.
+  ClusterIP Service. It answers one question: why an image build was slow
+  or not cached, and whether the change or the build farm caused it
+  (ADR-0037):
+  - Overview: rebuild reasons grouped and ranked by the build time they
+    cost;
+  - Pipelines: each pipeline with its jobs by stage on a time axis, how
+    long each waited for a runner and ran (from GitLab: read for the
+    pipelines on the page, once when finished), the usual and longest
+    wait; a pipeline opens into every job, each image build into its
+    stages and steps;
+  - Builds: every image build, filtered by branch, outcome, image or your
+    own, optionally grouped by pipeline;
+  - Images: cache rate, usual and slowest build time, the steps that
+    rebuild most and why, over 24 hours, 7 or 30 days, and builds per
+    week by outcome over the last year;
+  - Nodes: each daemon's builds, running builds, cache by kind, cache
+    policies, the runner cache bucket per project;
+  - a build: one sentence, what changed since the previous build of the
+    image, its steps on a list, a timeline and its Dockerfile; a step:
+    source lines, output and history; a pipeline: why its images were
+    rebuilt and a timeline of every job (from GitLab, or from the job pods
+    without a token), each image build opening into its stages and
+    steps.
 
-  The pages work without JavaScript. With a GitLab token
-  (`console.gitlab.token.existingSecret`), they also show the time before
-  and after each build and jobs that ran elsewhere; GitLab is asked only
-  while a page shows a pipeline. With `global.console.url`, every job
-  prints the link to its page. No sign-in yet: keep it inside the cluster.
-  Its image is not published yet; `make console-image` builds it for kind.
+  Five outcomes everywhere: from cache, your change, build farm, unclear,
+  failed. A rebuild whose cache was on another node is settled with
+  GitLab's comparison of the two builds' commits (ADR-0038): the files
+  its step copies changed (your change) or did not (build farm); it stays
+  unclear only without a GitLab token or sign-in. Search (Ctrl+K), keyboard shortcuts, light and dark themes, live
+  updates; the pages work without JavaScript. Builds are kept 30 days
+  (`console.retention.days`); each image's daily figures (builds by
+  outcome, build times) are kept a year. With `global.console.url`, every job prints
+  the link to its build. Without sign-in, keep it inside the cluster. Its
+  image is not published yet; `make console-image` builds it for kind.
+- S3 cache for GitLab's `cache:` keyword (`gitlab-runner.runners.cache`;
+  ADR-0035, docs/runner-cache.md): one folder per release and GitLab in
+  any S3-compatible bucket, shared by every runner of the box; job logs
+  show each cache's size.
+- Runner tiers (`runnerTiers`): more runners next to the main one, any
+  number, each its own pod with its own GitLab runner (tags), job size,
+  placement (build nodes or any node) and S3 cache. The install notes say
+  what to create in GitLab.
+- Sign-in through GitLab for the console (`console.signIn`, off by
+  default; ADR-0034): each person signs in with a GitLab the runners serve
+  and sees the projects whose jobs GitLab lets them read; GitLab is read
+  with their own token. It needs the console's address
+  (`global.console.url`), a Secret with a session key and, per GitLab, an
+  OAuth application (confidential, scopes `openid read_api`; the install
+  notes print its redirect URI). Admins (GitLab usernames) also see builds
+  of no known project and the JSON API. Sign-out revokes the session's
+  token at GitLab.
 - Job pods carry the job's data from GitLab's CI variables as annotations
   under `ci-accelerator.io/`: pipeline source and creation time, project
   path, job stage and start time, commit title and author, merge request.
@@ -83,7 +119,8 @@ workflow copies them into the GitHub release.
   to 64 KiB. Tested on recorded builds (`test/history/generate.sh`) by
   `make go-test`.
 - Checks for contributors: `make go-test` (Go) and `make ui-test`, the
-  console's pages in headless Chrome (`test/ui`), both in the checks
+  console's pages in headless Chrome (`test/ui`), without and with
+  sign-in (then also the sign-in page and signing out), both in the checks
   workflow; the e2e box scenario runs the browser checks against the box's
   console.
 

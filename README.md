@@ -64,13 +64,23 @@ Numbers from the production setup this project is derived from:
 - **Metrics and traces** pushed by the daemons to a bundled VictoriaMetrics
   and VictoriaTraces. You can switch these off and send to your own OTLP
   backend.
-- **The console (preview, off by default: `console.enabled=true`):** pages
-  that explain each build. A job's page says why it was rebuilt (the
-  Dockerfile, a build argument, the base image, the files it copies, or
-  only the node it landed on) and where its time went. Every job's log can
-  link to it (`global.console.url`). It also has a pipeline timeline,
-  project insights and a view of the build nodes. It has no sign-in yet:
-  keep it inside the cluster (`kubectl port-forward`).
+- **Runner cache and tiers:** GitLab's `cache:` in any S3-compatible
+  bucket, and more runners (tiers) with their own tags, job size,
+  placement and cache, each its own pod
+  ([docs/runner-cache.md](docs/runner-cache.md)).
+- **The console (preview, off by default: `console.enabled=true`):** why
+  an image build was slow or not cached, and whether your change or the
+  build farm caused it. Five sections: Overview (rebuild reasons ranked by
+  the build time they cost), Pipelines (each pipeline's jobs on a time
+  axis: how long each waited for a runner and ran), Builds (every image build, filtered by
+  branch, outcome, image or your own), Images (cache rate and build time
+  per image over 7 days to a year) and Nodes. A build's page starts with one
+  sentence, then what changed since the previous build of the image and
+  its steps. Every job's log can link to it (`global.console.url`). Jobs
+  that build no image stay in GitLab. With
+  sign-in through GitLab (`console.signIn`), each person sees the projects
+  whose jobs GitLab lets them read; without it, keep it inside the cluster
+  (`kubectl port-forward`).
 
 Each part is usable on its own:
 

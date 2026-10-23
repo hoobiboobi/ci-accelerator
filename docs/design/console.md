@@ -1,5 +1,9 @@
 # Console (v0.2): design draft
 
+> The pages described here were replaced by the builds-only console of
+> [ADR-0037](../adr/0037-console-builds-only.md). The data model, store and
+> reasons below still apply.
+
 Status: **draft, reviewed**. Nothing here is implemented yet. The answers
 from the review are listed at the end; sign-in, the GitLab API and the
 kept build data are decided in
@@ -45,8 +49,10 @@ project list for browsing.
 
 One row per pipeline, newest first: pipeline number, branch, project,
 commit title, how many builds ran and how many rebuilt something, start
-time. A filter per project comes with sign-in, which decides what a user
-may see.
+time. Pipelines whose jobs built no image are listed too, with each job's
+status as GitLab tells it; a "With builds" filter hides their jobs
+([ADR-0033](../adr/0033-console-jobs-without-builds.md)). A filter per
+project comes with sign-in, which decides what a user may see.
 
 ### A pipeline
 
@@ -62,13 +68,18 @@ Each row has the job name, its duration and one status:
 | **Failed** | The build failed | The failing step, its command and exit code, the last log lines |
 
 Jobs that run no build (tests outside BuildKit, deploy scripts) are listed
-with their duration only. Jobs that ran on other runners are not visible.
-The page says so: "Jobs run by this installation".
+with GitLab's status (passed, failed, canceled, running, waiting for a
+runner or earlier jobs, manual, skipped) and their time; without a token
+the console does not know how they ended and says so. A pipeline with no
+build at all has its own summary instead of build figures: jobs by status,
+time waiting for runners, the slowest job. Jobs that ran on other runners
+appear when GitLab is read.
 
 Two more tabs show the pipeline as a whole:
-- **Timeline:** every job's build on one time axis, its steps coloured by
-  result; the build that ended last (it sets the pipeline's build time)
-  is outlined;
+- **Timeline:** every job on one time axis, with the time it waited for a
+  runner (GitLab's `queued_duration`), a build's steps coloured by result;
+  the job that ended last (it sets the pipeline's time) is outlined, and
+  none is while GitLab says the pipeline goes on;
 - **Dockerfile:** the Dockerfile with one column per job, so a line shows
   which jobs built it, took it from cache or waited for another job.
 
@@ -100,6 +111,11 @@ For each build the page shows:
 The time before and after the build (runner, checkout, script) comes from
 GitLab's API when the console has a token, from the job pod otherwise
 (ADR-0032).
+
+A job that built no image has a simpler page: what GitLab says it did,
+where its time went (waiting for a runner, running), its facts (stage,
+runner, node, times), its runs in the project's earlier pipelines, and the
+end of its log, read from GitLab when the reader asks (secrets masked).
 
 Each step is labelled:
 - **cached**;
@@ -194,7 +210,8 @@ pipeline: 47 s of repeated work in three small pipelines.
 | Source | What it gives | Reliability |
 |---|---|---|
 | BuildKit build history, per daemon (`ListenBuildHistory`, content API) | Every build: steps, cached flags, timings, errors, base images, pushed image; provenance with the build definition, Dockerfile lines and resource usage; the build's trace | Events for every build. Kept only up to `[history]` limits (48 h / 50 records by default): the collector must keep up. The trace is attached up to 3 s after the build |
-| Job pods in the jobs namespace (watch) | Job id, name, ref, commit, URL, project id and name, pipeline id (our annotation), start and end | Pods are deleted when the job ends: missed if the collector is down during the job |
+| Job pods in the jobs namespace (watch) | Job id, name, ref, commit, URL, project id and name, pipeline id (our annotation), start, and "running now"; the end is when the pod's deletion is asked | A pod never knows how its job ended, does not exist while the job waits, and outlives it: never a source of status ([ADR-0033](../adr/0033-console-jobs-without-builds.md)) |
+| GitLab's API, with a token | Every job of a pipeline: status, queue time, start, end, runner; a job's log when asked | Read while a page shows the pipeline: a running one every 20 s at most, a finished one again only when a job of it ran since |
 | The build's trace id | GitLab instance, pipeline and job of every build ([ADR-0028](../adr/0028-one-trace-per-job.md)) | Always present in a record when the runner hook ran |
 | OTLP backend (VictoriaTraces), optional | The client's spans with `ci.*` attributes, also when the history missed them | Only when the bundled storage or a compatible backend is on |
 
@@ -202,11 +219,13 @@ Job pods carry, as annotations, the CI variables a page needs: job name and
 stage, commit title and author, ref, merge request, pipeline source, job
 start and pipeline creation. They need no token.
 
-The GitLab API is used only while a page is open and only as the signed-in
-user: one request per pipeline for jobs on other runners, the final status
-and queue time. Finished pipelines are cached; nothing polls GitLab in the
-background. A page renders without it when GitLab is unreachable or
-rate-limited.
+The GitLab API is used only while a page is open (with sign-in, as the
+signed-in user; for now with one token): one request per pipeline for its
+jobs' status and times, again every 20 s while it runs and a page shows it.
+A finished pipeline is read again only when a job of it ran after GitLab's
+last answer (a manual job, a retry); nothing polls GitLab otherwise. A page
+renders without it when GitLab is unreachable or rate-limited. The console
+is never reachable from GitLab: no webhooks.
 
 A build whose record has no trace id of our scheme (a job that set its own
 `TRACEPARENT`, or a client other than a runner job) is kept as
@@ -251,7 +270,7 @@ fixture in the collector's tests.
                                   ▼
                        console: read-only HTTP UI + /api/v1
                                   ▼
-                       oauth2-proxy or basic auth (user-provided)
+                       sign-in through GitLab, in the console (ADR-0034)
 ```
 
 - **One Go binary** with two roles: collector and web. Deployed by a new
@@ -272,8 +291,9 @@ fixture in the collector's tests.
   daemons once. It goes into the upgrade notes ([ADR-0027](../adr/0027-upgrades-and-branches.md)).
 - **Sign-in through GitLab.** A user sees a project's builds only when
   GitLab lets them read that project's jobs. This is checked as that user
-  and cached for a few minutes. An administrator can also sign in with
-  basic auth. The console is read-only and has no users or roles of its own.
+  and cached for a few minutes. Administrators are GitLab usernames named
+  in the configuration ([ADR-0034](../adr/0034-console-sign-in.md)). The
+  console is read-only and has no users or roles of its own.
 - **Disk usage** of each daemon's cache directory comes from a small sidecar
   in the daemon pod; BuildKit's API does not report it.
 - **Web stack:** Go `html/template` and `go:embed`, server-rendered SVG, a
