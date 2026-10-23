@@ -29,30 +29,16 @@ func TestPages(t *testing.T) {
 		}
 		ids[b.Ref] = id
 	}
-	ps, err := s.Pipelines(ctx, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pipelines := map[uint64]Pipeline{}
-	for _, p := range ps {
-		pipelines[p.ID] = p
-	}
 	// Pipeline 104 ran three jobs at once (api, worker, test).
-	p104 := pipelines[104]
+	inst := bs[0].Attribution.Instance
+	p104, err := s.PipelineInfo(ctx, inst, 104)
+	if err != nil || p104 == nil {
+		t.Fatalf("pipeline 104: %v", err)
+	}
 	if p104.Builds != 3 || p104.ProjectPath != "example/app" || p104.CommitTitle != "a change" || p104.Started.IsZero() || p104.Rebuilt == 0 {
 		t.Errorf("pipeline 104: %+v", p104)
 	}
-	if len(ps) < 8 || ps[0].Started.Before(ps[len(ps)-1].Started) {
-		t.Errorf("%d pipelines, newest first expected", len(ps))
-	}
-	pl, jobs, builds, err := s.PipelinePage(ctx, p104.Instance, 104)
-	if err != nil || pl == nil || len(jobs) != 3 || len(builds) != 3 {
-		t.Fatalf("pipeline page: %+v, %d jobs, %d builds, %v", pl, len(jobs), len(builds), err)
-	}
-	if pl.Rebuilt != p104.Rebuilt || pl.Builds != p104.Builds {
-		t.Errorf("pipeline page counts %d/%d, list %d/%d", pl.Rebuilt, pl.Builds, p104.Rebuilt, p104.Builds)
-	}
-	if pl, _, _, err := s.PipelinePage(ctx, p104.Instance, 999); pl != nil || err != nil {
+	if pl, err := s.PipelineInfo(ctx, inst, 999); pl != nil || err != nil {
 		t.Errorf("unknown pipeline: %+v, %v", pl, err)
 	}
 

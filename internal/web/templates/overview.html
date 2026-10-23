@@ -1,0 +1,22 @@
+{{define "overview"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">Overview</h1>
+      <nav class="seg" aria-label="Window"><a href="/" {{if eq .Window "24h"}}aria-current="true"{{end}}>24 hours</a><a href="/?window=7d" {{if eq .Window "7d"}}aria-current="true"{{end}}>7 days</a></nav></div></header>
+  {{if .NoProjects}}
+  <div class="callout neutral">{{icon "info" 16}}<div><b class="k">No project you can read builds here</b>The console shows the builds of projects whose jobs GitLab lets you read.</div></div>
+  {{else if .Empty}}
+  <div class="empty"><b>No image builds in {{.WindowLabel}}.</b><p>A job that runs <code>buildctl</code> against the box's daemons shows up here when its build ends. Its log carries a link to its page.</p></div>
+  {{else}}
+  <p class="lead"><b>{{.Builds}}</b> image build{{if ne .Builds 1}}s{{end}} in {{.WindowLabel}}, <b>{{.Cached}}%</b> fully from the cache.{{if ne .Cached 100}} Rebuilds took <b>{{.Lost}}</b> of build time{{if .NotCode}}; <b>{{.NotCode}}%</b> of it was not caused by the code{{end}}.{{end}}{{if .Running}} {{.Running}} running now.{{end}}</p>
+  {{if .Reasons}}
+  <section class="box" aria-labelledby="naT"><div class="boxh"><h2 class="h" id="naT">Why images were rebuilt</h2><span class="muted">most build time first</span></div>
+    <div class="rlist">{{range .Reasons}}<a class="rrow" href="{{.URL}}"><span class="rs">{{template "status" .Status}}</span><span class="rt">{{.Text}}</span><span class="ri muted">{{join .Images ", "}}{{if .More}} +{{.More}}{{end}} · last at {{.Last}}</span><span class="rn">{{.N}} build{{if ne .N 1}}s{{end}}</span><span class="rl">{{dur .Lost}}</span></a>{{end}}</div>
+    {{with .MoreReasons}}<a class="more" href="/builds?outcome=rebuilt">{{.}} — all rebuilt builds</a>{{end}}
+  </section>
+  {{end}}
+  {{end}}
+  {{if not (or .NoProjects .Empty)}}<p class="muted">Cache rate and build times per image: <a class="link" href="/images{{if eq .Window "7d"}}?window=7d{{end}}">Images</a>.</p>{{end}}
+</div>
+{{end}}

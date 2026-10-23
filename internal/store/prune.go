@@ -6,12 +6,17 @@ import (
 )
 
 // Prune deletes what is past retention: builds (with their steps) older
-// than Keep, step definitions and Dockerfiles no build has used since,
+// than Keep once their days are in the images' daily figures (Rollup),
+// daily figures older than KeepDays, step definitions and Dockerfiles no build has used since,
 // jobs and pipelines of that age, and output files older than KeepOutput
 // days. Builds go in small batches so the writer is never held for long.
 // It returns the number of builds deleted.
 func (s *Store) Prune(ctx context.Context) (int64, error) {
 	now := s.opts.Now()
+	if err := s.Rollup(ctx); err != nil {
+		// Builds stay until their days are summed up.
+		return 0, err
+	}
 	cutoff := now.Add(-s.opts.Keep).UnixMilli()
 	var deleted int64
 	for {
@@ -27,11 +32,21 @@ func (s *Store) Prune(ctx context.Context) (int64, error) {
 		}
 	}
 	var errs []error
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM image_days WHERE day < ?", dayOf(now)-int64(s.opts.KeepDays)); err != nil {
+		errs = append(errs, err)
+	}
 	for _, q := range []string{
 		"DELETE FROM step_defs WHERE last_seen < ?",
 		"DELETE FROM dockerfiles WHERE last_seen < ? AND NOT EXISTS (SELECT 1 FROM builds WHERE dockerfile_id = dockerfiles.id)",
-		"DELETE FROM jobs WHERE started_at < ?",
-		"DELETE FROM pipelines WHERE created_at < ?",
+		// A job by the earliest time known of it, else when the console
+		// first heard of it (a manual job never started has no other).
+		"DELETE FROM jobs WHERE COALESCE(started_at, queued_at, finished_at, seen_at) < ?",
+		// A pipeline by its creation, else its jobs' start, else when the
+		// console first heard of it; never while builds of it stay.
+		`DELETE FROM pipelines WHERE COALESCE(created_at,
+				(SELECT MIN(COALESCE(j.started_at, j.queued_at)) FROM jobs j WHERE j.instance = pipelines.instance AND j.pipeline_id = pipelines.pipeline_id),
+				seen_at) < ?
+			AND NOT EXISTS (SELECT 1 FROM builds b WHERE b.instance = pipelines.instance AND b.pipeline_id = pipelines.pipeline_id)`,
 	} {
 		if _, err := s.db.ExecContext(ctx, q, cutoff); err != nil {
 			errs = append(errs, err)

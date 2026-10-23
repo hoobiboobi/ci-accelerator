@@ -16,13 +16,13 @@
       <a class="brand" href="/" aria-label="ci-accelerator home"><span class="mark"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 11.5 7 4l2.5 5L13 4.5"/></svg></span><span class="brand-name">ci-accelerator</span></a>
       <button class="iconbtn" id="collapseBtn" type="button" aria-label="Collapse sidebar ([)" aria-expanded="true">{{icon "side" 15}}</button>
     </div>
-    {{with .Project}}{{if .ID}}
+    {{if not .NoProjects}}{{with .Project}}{{if .ID}}
     <button class="sbtn projsw" id="projBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="projMenu">
       <span class="av" aria-hidden="true">{{projInitial .Path}}</span>
       <span class="lbl"><span>{{projName .Path .ID}}</span><small>{{projNS .Path}}</small></span>
       <span class="lbl chevw">{{icon "chevD" 13}}</span>
     </button>
-    {{end}}{{end}}
+    {{end}}{{end}}{{end}}
     <div class="projmenu" id="projMenu" hidden>
       <div class="hint">Project</div>
       {{$cur := .Project}}{{range .Projects}}<a class="sbtn" href="/projects/{{.Instance}}/{{.ID}}" aria-current="{{if eq .ID $cur.ID}}true{{else}}false{{end}}">{{if eq .ID $cur.ID}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span></a>{{end}}
@@ -30,15 +30,22 @@
     </div>
     <button class="sbtn search" id="searchBtn" type="button" aria-label="Search or jump to (Ctrl+K)">{{icon "search" 15}}<span class="lbl">Search or jump to…</span><kbd id="kbdK">⌘K</kbd></button>
     <nav class="navgrp nav" aria-label="Main">
-      <a class="sbtn" href="/" {{if eq .Nav "pipes"}}aria-current="page"{{end}}>{{icon "pipes" 15}}<span class="lbl">Pipelines</span>{{if .Count}}<span class="count">{{.Count}}</span>{{end}}</a>
-      <a class="sbtn" href="/insights" {{if eq .Nav "insights"}}aria-current="page"{{end}}>{{icon "insights" 15}}<span class="lbl">Project insights</span></a>
-      <a class="sbtn" href="/nodes" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 15}}<span class="lbl">Build nodes</span>{{with .Warn}}<span class="wdot" role="img" aria-label="{{.}}" title="{{.}}"></span>{{end}}</a>
+      <a class="sbtn" href="/" {{if eq .Nav "overview"}}aria-current="page"{{end}}>{{icon "overview" 15}}<span class="lbl">Overview</span></a>
+      <a class="sbtn" href="/pipelines" {{if eq .Nav "pipelines"}}aria-current="page"{{end}}>{{icon "pipes" 15}}<span class="lbl">Pipelines</span></a>
+      <a class="sbtn" href="/builds" {{if eq .Nav "builds"}}aria-current="page"{{end}}>{{icon "builds" 15}}<span class="lbl">Builds</span></a>
+      <a class="sbtn" href="/images" {{if eq .Nav "images"}}aria-current="page"{{end}}>{{icon "images" 15}}<span class="lbl">Images</span></a>
+      <a class="sbtn" href="/nodes" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 15}}<span class="lbl">Nodes</span>{{with .Warn}}<span class="wdot" role="img" aria-label="{{.}}" title="{{.}}"></span>{{end}}</a>
     </nav>
     <div class="side-foot">
       <p class="side-live" id="live" role="status" hidden></p>
       <button class="sbtn" id="themeBtn" type="button" aria-label="Toggle theme (t)"><span class="th-dark">{{icon "moon" 15}}<span class="lbl">Dark theme</span></span><span class="th-light">{{icon "sun" 15}}<span class="lbl">Light theme</span></span><kbd>t</kbd></button>
       <button class="sbtn" id="helpBtn" type="button" aria-label="Keyboard shortcuts (?)">{{icon "kbd" 15}}<span class="lbl">Shortcuts</span><kbd>?</kbd></button>
-      <div class="side-note">Preview · no sign-in yet: keep the console inside the cluster.</div>
+      {{with .Viewer}}
+      <div class="who" title="{{if .Name}}{{.Name}} · {{end}}@{{.Username}} on {{.Host}}"><span class="av" aria-hidden="true">{{projInitial .Username}}</span><span class="lbl"><span>{{if .Name}}{{.Name}}{{else}}{{.Username}}{{end}}</span><small>@{{.Username}} · {{.Host}}{{if .Admin}} · admin{{end}}</small></span></div>
+      <form class="signout" method="post" action="/auth/sign-out"><button class="sbtn" type="submit" aria-label="Sign out">{{icon "out" 15}}<span class="lbl">Sign out</span></button></form>
+      {{else}}
+      <div class="side-note">Preview · sign-in is off: keep the console inside the cluster.</div>
+      {{end}}
     </div>
   </aside>
   <div class="main" id="mainwrap">
@@ -47,29 +54,25 @@
       <span class="proj">{{with .Project}}{{.Path}}{{end}}</span>
       <button class="iconbtn" id="mTheme" type="button" aria-label="Toggle theme">{{icon "moon" 15}}</button>
     </header>
-    <div id="main" {{with .Live}}data-live="{{.}}"{{end}}{{if .LiveNodes}} data-live-nodes="true"{{end}}>
-    {{if .Split}}
-    <div class="split" data-has="{{.Has}}">
-      {{template "list" .List}}
-      <section class="pane" aria-label="Details">{{template "content" .}}</section>
-    </div>
-    {{else}}
+    <div id="main" {{with .Live}}data-live="{{.}}"{{end}}{{if .Notify}} data-live-notify="true"{{end}}{{if .LiveNodes}} data-live-nodes="true"{{end}}>
+    <div class="newdata" id="newdata" role="status" hidden><span>New builds since this page loaded.</span><button class="btn" type="button" id="newdataBtn">Show</button></div>
     {{template "content" .}}
-    {{end}}
     </div>
   </div>
 </div>
 <nav class="bbar" id="bbar" aria-label="Main">
-  <a href="/" {{if eq .Nav "pipes"}}aria-current="page"{{end}}>{{icon "pipes" 18}}Pipelines</a>
-  <a href="/insights" {{if eq .Nav "insights"}}aria-current="page"{{end}}>{{icon "insights" 18}}Insights</a>
+  <a href="/" {{if eq .Nav "overview"}}aria-current="page"{{end}}>{{icon "overview" 18}}Overview</a>
+  <a href="/pipelines" {{if eq .Nav "pipelines"}}aria-current="page"{{end}}>{{icon "pipes" 18}}Pipelines</a>
+  <a href="/builds" {{if eq .Nav "builds"}}aria-current="page"{{end}}>{{icon "builds" 18}}Builds</a>
+  <a href="/images" {{if eq .Nav "images"}}aria-current="page"{{end}}>{{icon "images" 18}}Images</a>
   <a href="/nodes" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 18}}Nodes</a>
   <button type="button" id="bSearch" aria-label="Search">{{icon "search" 18}}Search</button>
 </nav>
 <div class="scrim" id="scrim" hidden></div>
 <div class="dlg" id="pal" role="dialog" aria-modal="true" aria-label="Search" hidden>
-  <div class="pal-in">{{icon "search" 16}}<input id="palQ" type="text" role="combobox" aria-expanded="true" aria-controls="palL" aria-autocomplete="list" aria-label="Search jobs, pipelines and pages" placeholder="Search jobs, pipelines, commits, pages…" autocomplete="off" spellcheck="false"><kbd>esc</kbd></div>
+  <div class="pal-in">{{icon "search" 16}}<input id="palQ" type="text" role="combobox" aria-expanded="true" aria-controls="palL" aria-autocomplete="list" aria-label="Search images, pipelines and pages" placeholder="Search images, pipelines, commits, pages…" autocomplete="off" spellcheck="false"><kbd>esc</kbd></div>
   <div class="pal-l" id="palL" role="listbox" aria-label="Results"></div>
-  <div class="pal-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span><span class="pal-try">Try a job name, a commit, “node”, “theme”</span></div>
+  <div class="pal-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span><span class="pal-try">Try an image, a commit, “node”, “theme”</span></div>
 </div>
 <div class="dlg" id="help" role="dialog" aria-modal="true" aria-labelledby="helpT" hidden>
   <div class="help">
@@ -77,9 +80,9 @@
     <h3>Anywhere</h3>
     <dl><dt>Search or jump to</dt><dd><kbd>⌘</kbd> <kbd>K</kbd></dd><dt>Search (alternative)</dt><dd><kbd>/</kbd></dd><dt>This overlay</dt><dd><kbd>?</kbd></dd><dt>Toggle theme</dt><dd><kbd>t</kbd></dd><dt>Collapse sidebar</dt><dd><kbd>[</kbd></dd></dl>
     <h3>Go to</h3>
-    <dl><dt>Pipelines</dt><dd><kbd>g</kbd> <kbd>p</kbd></dd><dt>Project insights</dt><dd><kbd>g</kbd> <kbd>i</kbd></dd><dt>Build nodes</dt><dd><kbd>g</kbd> <kbd>n</kbd></dd></dl>
-    <h3>List and detail</h3>
-    <dl><dt>Next / previous job</dt><dd><kbd>j</kbd> <kbd>k</kbd></dd><dt>Back (job → pipeline → list)</dt><dd><kbd>esc</kbd></dd><dt>Expand / fold all stages</dt><dd><kbd>e</kbd></dd><dt>Copy trace id of this build</dt><dd><kbd>c</kbd></dd><dt>Move between Dockerfile lines</dt><dd><kbd>↑</kbd> <kbd>↓</kbd></dd><dt>Open a step's output and history</dt><dd><kbd>↵</kbd></dd></dl>
+    <dl><dt>Overview</dt><dd><kbd>g</kbd> <kbd>o</kbd></dd><dt>Pipelines</dt><dd><kbd>g</kbd> <kbd>p</kbd></dd><dt>Builds</dt><dd><kbd>g</kbd> <kbd>b</kbd></dd><dt>Images</dt><dd><kbd>g</kbd> <kbd>i</kbd></dd><dt>Nodes</dt><dd><kbd>g</kbd> <kbd>n</kbd></dd></dl>
+    <h3>A build</h3>
+    <dl><dt>Back to its pipeline</dt><dd><kbd>esc</kbd></dd><dt>Expand / fold all stages</dt><dd><kbd>e</kbd></dd><dt>Copy the trace id</dt><dd><kbd>c</kbd></dd><dt>Move between Dockerfile lines</dt><dd><kbd>↑</kbd> <kbd>↓</kbd></dd><dt>Open a step's output and history</dt><dd><kbd>↵</kbd></dd></dl>
   </div>
 </div>
 <div class="pop" id="pop" role="tooltip" hidden></div>

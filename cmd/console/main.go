@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,14 +20,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/api"
+	"github.com/hoobiboobi/ci-accelerator/internal/auth"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/podwatch"
+	"github.com/hoobiboobi/ci-accelerator/internal/runnercache"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 	"github.com/hoobiboobi/ci-accelerator/internal/web"
 )
@@ -39,7 +44,10 @@ func (l *list) Set(v string) error { *l = append(*l, v); return nil }
 type config struct {
 	data, discover, tlsDir, serverName, listen string
 	jobsNamespace, kubeconfig, kubeContext     string
-	gitlabTokenFile, release                   string
+	gitlabTokenFile, release, signIn           string
+	caches, namespace                          string
+	devAssets                                  string
+	cacheEvery                                 time.Duration
 	daemons, gitlabURLs                        []string
 	keepDays, keepOutputDays                   int
 }
@@ -59,7 +67,12 @@ func main() {
 	flag.StringVar(&c.listen, "listen", ":8080", "address of the pages, the API and the health check")
 	flag.StringVar(&c.gitlabTokenFile, "gitlab-token-file", "", "file with a GitLab token that can read the projects' jobs; empty: no job times from GitLab")
 	flag.StringVar(&c.release, "release", "", "name of the installation, shown on the nodes page")
-	flag.IntVar(&c.keepDays, "keep-days", 90, "days builds are kept")
+	flag.StringVar(&c.devAssets, "dev-assets", "", "directory with templates/ and static/ (internal/web) read for every page instead of the built-in ones; for working on the pages")
+	flag.StringVar(&c.caches, "caches", "", "JSON file listing the S3 folders the runners keep GitLab's cache: in (sizes per project on the nodes page); empty: none")
+	flag.StringVar(&c.namespace, "namespace", os.Getenv("POD_NAMESPACE"), "namespace of the Secrets with the caches' keys (default $POD_NAMESPACE)")
+	flag.DurationVar(&c.cacheEvery, "cache-every", 10*time.Minute, "how often the caches are listed")
+	flag.StringVar(&c.signIn, "sign-in", "", "JSON file configuring sign-in through GitLab; empty: no sign-in (keep the console inside the cluster)")
+	flag.IntVar(&c.keepDays, "keep-days", 30, "days builds are kept")
 	flag.IntVar(&c.keepOutputDays, "keep-output-days", 7, "days step output is kept")
 	flag.Parse()
 	c.daemons = daemons
@@ -121,19 +134,50 @@ func run(c config, log *slog.Logger) error {
 		Resolve: func(ctx context.Context) ([]string, error) { return resolve(ctx, c) },
 	}
 	col.OnLiveChange(func() { st.Announce("") })
-	running := &podwatch.Running{}
-	if c.jobsNamespace != "" {
-		if err := watchJobs(ctx, c, st, col, running, log); err != nil {
+	var kube kubernetes.Interface
+	if c.jobsNamespace != "" || c.caches != "" {
+		if kube, err = kubeClient(c); err != nil {
 			return err
 		}
 	}
-	opt := web.Options{Live: col, Running: running, Release: c.release}
+	if c.jobsNamespace != "" {
+		watchJobs(ctx, c, kube, st, col, log)
+	}
+	if c.caches != "" {
+		if _, err := loadCaches(c.caches); err != nil {
+			return err
+		}
+		if c.namespace == "" {
+			return errors.New("-caches needs -namespace (or $POD_NAMESPACE): where the Secrets with the keys are")
+		}
+		go scanCaches(ctx, c, kube, st, log)
+	}
+	opt := web.Options{Live: col, Release: c.release}
+	if c.devAssets != "" {
+		opt.Assets = os.DirFS(c.devAssets)
+	}
+	var signIn *auth.Auth
+	if c.signIn != "" {
+		if c.gitlabTokenFile != "" {
+			return errors.New("-gitlab-token-file and -sign-in exclude each other: with sign-in GitLab is read with each person's own token")
+		}
+		client := gitlab.New(c.gitlabURLs)
+		if signIn, err = loadSignIn(c.signIn, c.gitlabURLs, st, client, log); err != nil {
+			return err
+		}
+		opt.Auth = signIn
+		opt.API = &gitlab.Fetcher{Client: client, Store: st, Log: log}
+		for _, ch := range signIn.Instances() {
+			log.Info("sign-in through GitLab", "gitlab", ch.Host, "redirect_uri", signIn.RedirectURL(ch.Instance))
+		}
+	}
 	if c.gitlabTokenFile != "" {
 		token, err := os.ReadFile(c.gitlabTokenFile)
 		if err != nil {
 			return err
 		}
-		opt.API = &gitlab.Fetcher{Client: gitlab.New(c.gitlabURLs, strings.TrimSpace(string(token))), Store: st, Log: log}
+		opt.API = &gitlab.Fetcher{Client: gitlab.New(c.gitlabURLs), Store: st, Log: log}
+		opt.Token = gitlab.Token(strings.TrimSpace(string(token)))
 	}
 	pages, err := web.New(st, log, opt)
 	if err != nil {
@@ -144,14 +188,14 @@ func run(c config, log *slog.Logger) error {
 	mux.Handle("GET /healthz", apiRoutes)
 	mux.Handle("GET /api/", apiRoutes)
 	pages.Register(mux)
-	srv := &http.Server{Addr: c.listen, Handler: web.Secure(mux), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: c.listen, Handler: web.Secure(pages.Gate(mux)), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http", "err", err)
 			stop()
 		}
 	}()
-	go prune(ctx, st, log)
+	go prune(ctx, st, signIn, log)
 	sup.Run(ctx)
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -180,25 +224,24 @@ func resolve(ctx context.Context, c config) ([]string, error) {
 	return out, nil
 }
 
-// watchJobs reads the CI jobs from their pods into the store.
-func watchJobs(ctx context.Context, c config, st *store.Store, col *collector.Collector, running *podwatch.Running, log *slog.Logger) error {
-	// In a pod: the service account. Outside: $KUBECONFIG or
-	// ~/.kube/config, or the file given.
+// kubeClient connects to the cluster: in a pod, with the service account;
+// outside, with $KUBECONFIG or ~/.kube/config, or the file given.
+func kubeClient(c config) (kubernetes.Interface, error) {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	rules.ExplicitPath = c.kubeconfig
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules,
 		&clientcmd.ConfigOverrides{CurrentContext: c.kubeContext}).ClientConfig()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	client, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return err
-	}
+	return kubernetes.NewForConfig(cfg)
+}
+
+// watchJobs reads the CI jobs from their pods into the store.
+func watchJobs(ctx context.Context, c config, client kubernetes.Interface, st *store.Store, col *collector.Collector, log *slog.Logger) {
 	go func() {
 		err := podwatch.Watch(ctx, client, c.jobsNamespace, c.gitlabURLs, podwatch.Handlers{
 			Job: func(ctx context.Context, j store.Job) {
-				running.Set(j)
 				if err := st.SaveJob(ctx, j); err != nil {
 					log.Warn("job not stored", "job", j.JobID, "err", err)
 					return
@@ -207,29 +250,115 @@ func watchJobs(ctx context.Context, c config, st *store.Store, col *collector.Co
 					log.Warn("job's builds not compared", "job", j.JobID, "err", err)
 				}
 			},
-			Gone: func(ctx context.Context, j store.Job) {
-				running.Remove(j)
-				if err := st.JobEnded(ctx, j.Instance, j.JobID, time.Now()); err != nil {
+			Gone: func(ctx context.Context, j store.Job, at time.Time) {
+				if err := st.JobEnded(ctx, j.Instance, j.JobID, at); err != nil {
 					log.Warn("job end not stored", "job", j.JobID, "err", err)
 				}
-				// The job is no longer running, whether or not the store changed.
-				st.Announce(store.PipelineKey(j.Instance, j.PipelineID))
 			},
 		})
 		if err != nil {
 			log.Error("watching job pods", "err", err)
 		}
 	}()
-	return nil
 }
 
-// prune applies retention once an hour.
-func prune(ctx context.Context, st *store.Store, log *slog.Logger) {
+// loadCaches reads the list of cache stores (the chart writes it); the
+// same folder listed twice is listed once.
+func loadCaches(path string) ([]runnercache.Store, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var list []runnercache.Store
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&list); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	seen := map[string]bool{}
+	var out []runnercache.Store
+	for _, s := range list {
+		if s.Server == "" || s.Bucket == "" || s.Secret == "" {
+			return nil, fmt.Errorf("%s: a cache store needs server, bucket and secret", path)
+		}
+		if !seen[s.ID()] {
+			seen[s.ID()] = true
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// scanCaches lists every store now and then. The list of stores and their
+// keys are read each time: a mounted ConfigMap follows its changes, and a
+// rotated key is used without a restart.
+func scanCaches(ctx context.Context, c config, kube kubernetes.Interface, st *store.Store, log *slog.Logger) {
+	for {
+		stores, err := loadCaches(c.caches)
+		if err != nil {
+			log.Warn("cache stores not read", "err", err)
+		}
+		for _, s := range stores {
+			sctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			scan, err := scanCache(sctx, s, c.namespace, kube)
+			cancel()
+			if ctx.Err() != nil {
+				return
+			}
+			objs := make([]store.CacheObject, len(scan.Objects))
+			for i, o := range scan.Objects {
+				objs[i] = store.CacheObject{ProjectID: o.ProjectID, Key: o.Key, Bytes: o.Bytes, Modified: o.Modified}
+			}
+			if err != nil {
+				log.Warn("cache not listed", "store", s.ID(), "err", err)
+			} else {
+				var bytes int64
+				for _, o := range objs {
+					bytes += o.Bytes
+				}
+				log.Info("cache listed", "store", s.ID(), "objects", len(objs), "bytes", bytes)
+			}
+			if err := st.ReplaceCacheScan(ctx, s.ID(), s.Instance, time.Now(), objs, scan.Lifecycle, err); err != nil {
+				log.Warn("cache listing not stored", "store", s.ID(), "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(c.cacheEvery):
+		}
+	}
+}
+
+func scanCache(ctx context.Context, s runnercache.Store, ns string, kube kubernetes.Interface) (runnercache.Scan, error) {
+	sec, err := kube.CoreV1().Secrets(ns).Get(ctx, s.Secret, metav1.GetOptions{})
+	if err != nil {
+		return runnercache.Scan{}, fmt.Errorf("the keys (Secret %s): %w", s.Secret, err)
+	}
+	ak, sk := strings.TrimSpace(string(sec.Data["accesskey"])), strings.TrimSpace(string(sec.Data["secretkey"]))
+	if ak == "" || sk == "" {
+		return runnercache.Scan{}, fmt.Errorf("Secret %s has no accesskey or secretkey", s.Secret)
+	}
+	keys := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		return aws.Credentials{AccessKeyID: ak, SecretAccessKey: sk, Source: "secret " + s.Secret}, nil
+	})
+	return runnercache.Lister{Store: s, Keys: keys}.Scan(ctx, time.Now())
+}
+
+// prune applies retention once an hour, and ends idle sessions.
+func prune(ctx context.Context, st *store.Store, signIn *auth.Auth, log *slog.Logger) {
 	for {
 		if n, err := st.Prune(ctx); err != nil {
 			log.Warn("retention", "err", err)
 		} else if n > 0 {
 			log.Info("retention", "builds_deleted", n)
+		}
+		if signIn != nil {
+			if n, err := signIn.Prune(ctx); err != nil {
+				log.Warn("sessions", "err", err)
+			} else if n > 0 {
+				log.Info("sessions", "idle_ended", n)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -237,4 +366,62 @@ func prune(ctx context.Context, st *store.Store, log *slog.Logger) {
 		case <-time.After(time.Hour):
 		}
 	}
+}
+
+// signInFile is the sign-in configuration the chart writes. Secrets are
+// named by file (mounted Secrets), never written into it. A GitLab without
+// a URL is the console's only GitLab (the runner's, from GITLAB_URLS).
+type signInFile struct {
+	URL            string `json:"url"`
+	SessionKeyFile string `json:"sessionKeyFile"`
+	GitLab         []struct {
+		URL          string   `json:"url"`
+		ClientIDFile string   `json:"clientIdFile"`
+		SecretFile   string   `json:"secretFile"`
+		Admins       []string `json:"admins"`
+	} `json:"gitlab"`
+}
+
+func loadSignIn(path string, urls []string, st *store.Store, client *gitlab.Client, log *slog.Logger) (*auth.Auth, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var f signInFile
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&f); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	read := func(name string) (string, error) {
+		b, err := os.ReadFile(name)
+		return strings.TrimSpace(string(b)), err
+	}
+	keyText, err := os.ReadFile(f.SessionKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("session key: %w", err)
+	}
+	key, err := auth.ParseKey(keyText)
+	if err != nil {
+		return nil, err
+	}
+	cfg := auth.Config{PublicURL: f.URL, Key: key}
+	for _, g := range f.GitLab {
+		if g.URL == "" {
+			if len(urls) != 1 || len(f.GitLab) != 1 {
+				return nil, errors.New("sign-in: name each GitLab's url: the console serves several")
+			}
+			g.URL = urls[0]
+		}
+		id, err := read(g.ClientIDFile)
+		if err != nil {
+			return nil, fmt.Errorf("%s: OAuth application id: %w", g.URL, err)
+		}
+		secret, err := read(g.SecretFile)
+		if err != nil {
+			return nil, fmt.Errorf("%s: OAuth application secret: %w", g.URL, err)
+		}
+		cfg.Instances = append(cfg.Instances, auth.Instance{URL: g.URL, ClientID: id, Secret: secret, Admins: g.Admins})
+	}
+	return auth.New(cfg, st, client, log)
 }

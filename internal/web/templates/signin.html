@@ -1,0 +1,23 @@
+{{define "signin"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in · ci-accelerator</title>
+<link rel="icon" href="{{asset "favicon.svg"}}" type="image/svg+xml">
+<link rel="stylesheet" href="{{asset "console.css"}}">
+<script src="{{asset "theme.js"}}"></script>
+</head>
+<body class="signin-page">
+<main class="signin" aria-labelledby="signinT">
+  <div class="signin-brand"><span class="mark"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 11.5 7 4l2.5 5L13 4.5"/></svg></span>ci-accelerator</div>
+  <h1 id="signinT">Sign in to the console</h1>
+  <p>The console reads GitLab with your account. You see the builds and jobs of the projects whose jobs you can read in GitLab.</p>
+  {{with .Message}}<div class="callout {{if $.Bad}}warn{{else}}neutral{{end}}" role="status">{{icon "info" 15 "i"}}<div>{{.}}</div></div>{{end}}
+  <div class="signin-choices">
+    {{range .Choices}}<a class="btn signin-btn" href="{{.URL}}">Sign in with GitLab <span class="muted">{{.Host}}</span></a>{{end}}
+  </div>
+  <p class="signin-note">GitLab asks whether the console may read its API for you (scope <code>read_api</code>). Signing out ends this session and revokes its access; GitLab's Applications settings list and revoke all of it.</p>
+</main>
+</body>
+</html>{{end}}

@@ -1,0 +1,124 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"time"
+
+	"github.com/hoobiboobi/ci-accelerator/internal/history"
+)
+
+// Elsewhere is a build whose first rebuilt step's cache was on another
+// daemon, where it is not known whether its files changed: the commit it
+// built and the commit of the image's previous build.
+type Elsewhere struct {
+	ID      int64
+	Started time.Time
+	SHA     string // this build's commit; empty when not known
+	PrevSHA string // the previous build's; empty when not known
+	Paths   []string
+}
+
+// Elsewhere returns a project's builds since t whose reason is
+// CacheElsewhere and that nothing has settled yet, newest first.
+func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, limit int) ([]Elsewhere, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.started_at, COALESCE(p.sha, ''), b.reason_paths,
+			COALESCE((SELECT p2.sha FROM builds b2 INDEXED BY builds_target
+				JOIN pipelines p2 ON p2.instance = b2.instance AND p2.pipeline_id = b2.pipeline_id
+				WHERE b2.instance = b.instance AND b2.project_id = b.project_id AND b2.target = b.target
+					AND b2.started_at < b.started_at AND b2.completed_at IS NOT NULL
+				ORDER BY b2.started_at DESC LIMIT 1), '')
+		FROM builds b INDEXED BY builds_elsewhere
+		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
+		WHERE b.instance = ? AND b.project_id = ? AND b.started_at >= ?
+			AND b.reason_kind = 'cache-elsewhere' AND b.reason_via = ''
+		ORDER BY b.started_at DESC LIMIT ?`,
+		nullInstance(p.Instance), nullUint(p.ID), since.UnixMilli(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Elsewhere
+	for rows.Next() {
+		var (
+			e       Elsewhere
+			started int64
+			paths   string
+		)
+		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.PrevSHA); err != nil {
+			return nil, err
+		}
+		e.Started = time.UnixMilli(started).UTC()
+		_ = json.Unmarshal([]byte(paths), &e.Paths)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// Settled is what became of an Elsewhere build: FilesChanged (Paths are
+// the changed files it copies), OtherNode, or still CacheElsewhere when
+// nothing could tell; Via says who decided it.
+type Settled struct {
+	ID    int64
+	Kind  history.ReasonKind
+	Paths []string
+	Via   string
+}
+
+// SettleElsewhere stores what became of Elsewhere builds and sums their
+// finished days up again. A build stored again since keeps its new reason.
+func (s *Store) SettleElsewhere(ctx context.Context, settled []Settled) error {
+	if len(settled) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	days := map[int64]bool{}
+	var keys []string
+	for _, st := range settled {
+		var (
+			kind  = string(st.Kind)
+			paths sql.NullString
+		)
+		if st.Kind == history.FilesChanged {
+			b, _ := json.Marshal(nonNil(st.Paths))
+			paths = sql.NullString{String: string(b), Valid: true}
+		}
+		var started int64
+		var instance, pipeline sql.NullInt64
+		err := tx.QueryRowContext(ctx, `UPDATE builds SET reason_kind = ?, reason_via = ?,
+				reason_paths = COALESCE(?, reason_paths)
+			WHERE id = ? AND reason_kind = 'cache-elsewhere' AND reason_via = ''
+			RETURNING started_at, instance, pipeline_id`, kind, st.Via, paths, st.ID).Scan(&started, &instance, &pipeline)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		days[started/dayMs] = true
+		if instance.Valid && pipeline.Valid {
+			keys = append(keys, pipelineKey(instance, pipeline))
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	for _, k := range keys {
+		s.changed(k)
+	}
+	today := dayOf(s.opts.Now())
+	floor := dayOf(s.opts.Now().Add(-s.opts.Keep)) + 1
+	for d := range days {
+		if d < today && d >= floor {
+			if err := s.rollupDays(ctx, d, d+1); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

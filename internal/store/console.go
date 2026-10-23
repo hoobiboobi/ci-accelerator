@@ -20,6 +20,8 @@ type APIJob struct {
 	WebURL, Runner            string
 	Queued, Started, Finished time.Time
 	Duration, Waited          time.Duration
+	AllowFailure              bool   // its failure does not fail the pipeline
+	User                      string // who started it (GitLab username)
 }
 
 // APIPipeline is a pipeline and its jobs as GitLab's API describes them.
@@ -57,11 +59,12 @@ func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) error {
 	}
 	defer tx.Rollback()
 	project := nullUint(p.ProjectID)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO pipelines (instance, pipeline_id, project_id, status, web_url, api_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+	seen := s.opts.Now().UnixMilli()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO pipelines (instance, pipeline_id, project_id, status, web_url, api_at, seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (instance, pipeline_id) DO UPDATE SET project_id = COALESCE(pipelines.project_id, excluded.project_id),
 			status = excluded.status, web_url = excluded.web_url, api_at = excluded.api_at`,
-		instance, nullUint(p.ID), project, p.Status, p.WebURL, p.Read.UnixMilli()); err != nil {
+		instance, nullUint(p.ID), project, p.Status, p.WebURL, p.Read.UnixMilli(), seen); err != nil {
 		return err
 	}
 	for _, j := range p.Jobs {
@@ -69,8 +72,8 @@ func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) error {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO jobs (instance, job_id, pipeline_id, project_id, name, stage, url,
-			started_at, status, queued_at, finished_at, duration_ms, queued_ms, runner)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			started_at, status, queued_at, finished_at, duration_ms, queued_ms, runner, seen_at, allow_failure, started_by)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (instance, job_id) DO UPDATE SET
 				pipeline_id = COALESCE(jobs.pipeline_id, excluded.pipeline_id),
 				project_id = COALESCE(jobs.project_id, excluded.project_id),
@@ -79,9 +82,11 @@ func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) error {
 				url = CASE WHEN jobs.url = '' THEN excluded.url ELSE jobs.url END,
 				started_at = COALESCE(excluded.started_at, jobs.started_at),
 				status = excluded.status, queued_at = excluded.queued_at, finished_at = excluded.finished_at,
-				duration_ms = excluded.duration_ms, queued_ms = excluded.queued_ms, runner = excluded.runner`,
+				duration_ms = excluded.duration_ms, queued_ms = excluded.queued_ms, runner = excluded.runner,
+				allow_failure = excluded.allow_failure,
+				started_by = CASE WHEN excluded.started_by = '' THEN jobs.started_by ELSE excluded.started_by END`,
 			instance, j.ID, nullUint(p.ID), project, j.Name, j.Stage, j.WebURL, nullTime(j.Started), j.Status,
-			nullTime(j.Queued), nullTime(j.Finished), nullDuration(j.Duration), nullDuration(j.Waited), j.Runner); err != nil {
+			nullTime(j.Queued), nullTime(j.Finished), nullDuration(j.Duration), nullDuration(j.Waited), j.Runner, seen, j.AllowFailure, j.User); err != nil {
 			return err
 		}
 	}
@@ -118,19 +123,14 @@ func ParseProjectKey(s string) (ProjectKey, bool) {
 // Project is a project with builds here.
 type Project struct {
 	ProjectKey
-	Path      string
-	Builds    int
-	Pipelines int
-	Last      time.Time
+	Path string
+	Last time.Time
 }
 
 // Projects returns the projects with builds, the most recently built first.
 func (s *Store) Projects(ctx context.Context) ([]Project, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT b.instance, b.project_id, COALESCE(pr.path, ''), count(*), count(DISTINCT b.pipeline_id), max(b.started_at)
-		FROM builds b LEFT JOIN projects pr ON pr.instance = b.instance AND pr.project_id = b.project_id
-		WHERE b.project_id IS NOT NULL
-		GROUP BY b.instance, b.project_id ORDER BY max(b.started_at) DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT instance, project_id, path, last_at FROM projects
+		WHERE last_at IS NOT NULL ORDER BY last_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func (s *Store) Projects(ctx context.Context) ([]Project, error) {
 			instance int64
 			last     sql.NullInt64
 		)
-		if err := rows.Scan(&instance, &p.ID, &p.Path, &p.Builds, &p.Pipelines, &last); err != nil {
+		if err := rows.Scan(&instance, &p.ID, &p.Path, &last); err != nil {
 			return nil, err
 		}
 		p.Instance, p.Last = fmt.Sprintf("%06x", instance), msTime(last)
@@ -151,137 +151,22 @@ func (s *Store) Projects(ctx context.Context) ([]Project, error) {
 	return out, rows.Err()
 }
 
-// ListJob is one job of a pipeline in the console's pipeline list: its
-// last build, with what the list needs to say about it.
-type ListJob struct {
-	JobInfo
-	BuildID int64
-	Builds  int
-	Target  string
-	Daemon  string
-	Reason  history.ReasonKind
-	// Error is BuildKit's error of a failed build of the job: of the last
-	// one that failed, or else of the last canceled one.
-	Error     string
-	Built     int // steps executed other than resolving an image
-	Started   time.Time
-	Completed time.Time
-}
-
-// ListPipeline is a pipeline with its jobs that built here.
-type ListPipeline struct {
-	Pipeline
-	Jobs []ListJob
-}
-
-// List returns the latest pipelines with builds, newest first, with the
-// jobs that built in them. A zero project lists every project.
-func (s *Store) List(ctx context.Context, project ProjectKey, limit int) ([]ListPipeline, error) {
-	where, args := "", []any{}
-	if project.ID != 0 {
-		where, args = "AND b.instance = ? AND b.project_id = ?", []any{nullInstance(project.Instance), project.ID}
-	}
-	ps, err := s.pipelines(ctx, where, append(args, limit)...)
-	if err != nil {
+// Job returns one job, or nil when it is not stored.
+func (s *Store) Job(ctx context.Context, instance string, id uint64) (*JobInfo, error) {
+	js, err := s.jobs(ctx, "WHERE instance = ? AND job_id = ?", nullInstance(instance), nullUint(id))
+	if err != nil || len(js) == 0 {
 		return nil, err
 	}
-	out := make([]ListPipeline, 0, len(ps))
-	for _, p := range ps {
-		jobs, err := s.ListJobs(ctx, p.Instance, p.ID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, ListPipeline{Pipeline: p, Jobs: jobs})
-	}
-	return out, nil
-}
-
-// ListJobs returns a pipeline's jobs with their last build each, in the
-// order their builds started.
-func (s *Store) ListJobs(ctx context.Context, instance string, pipeline uint64) ([]ListJob, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT b.id, b.job_id, b.target, d.name, b.reason_kind, b.error, b.started_at, b.completed_at,
-			(SELECT count(*) FROM steps s LEFT JOIN step_defs sd ON sd.identity = s.identity
-				WHERE s.build_id = b.id AND s.state = 1 AND COALESCE(s.name, sd.name) NOT LIKE 'FROM %')
-		FROM builds b JOIN daemons d ON d.id = b.daemon_id
-		WHERE b.instance = ? AND b.pipeline_id = ? AND b.job_id IS NOT NULL
-		ORDER BY b.started_at, b.id`, nullInstance(instance), nullUint(pipeline))
-	if err != nil {
-		return nil, err
-	}
-	byJob := map[uint64]*ListJob{}
-	var order []uint64
-	for rows.Next() {
-		var (
-			j                  ListJob
-			job                uint64
-			reason             string
-			started, completed sql.NullInt64
-		)
-		if err := rows.Scan(&j.BuildID, &job, &j.Target, &j.Daemon, &reason, &j.Error, &started, &completed, &j.Built); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		j.Reason, j.Started, j.Completed = history.ReasonKind(reason), msTime(started), msTime(completed)
-		if prev := byJob[job]; prev != nil {
-			// A job with several builds shows its last, and a failure
-			// of any of them.
-			j.Builds = prev.Builds
-			if j.Error == "" || (prev.Error != "" && !strings.Contains(prev.Error, "context canceled")) {
-				j.Error = prev.Error
-			}
-		} else {
-			order = append(order, job)
-		}
-		j.Builds++
-		j.ID = job
-		byJob[job] = &j
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	infos, err := s.jobs(ctx, "WHERE instance = ? AND pipeline_id = ?", nullInstance(instance), nullUint(pipeline))
-	if err != nil {
-		return nil, err
-	}
-	for _, info := range infos {
-		if j := byJob[info.ID]; j != nil {
-			j.JobInfo = info
-		}
-	}
-	out := make([]ListJob, 0, len(order))
-	for _, id := range order {
-		j := byJob[id]
-		if j.Instance == "" {
-			j.Instance, j.PipelineID = instance, pipeline
-		}
-		out = append(out, *j)
-	}
-	return out, nil
+	return &js[0], nil
 }
 
 // PipelineJobs returns every job of a pipeline the console knows, from its
 // pods or from GitLab's API, in the order they started.
 func (s *Store) PipelineJobs(ctx context.Context, instance string, pipeline uint64) ([]JobInfo, error) {
-	return s.jobs(ctx, "WHERE instance = ? AND pipeline_id = ? ORDER BY COALESCE(started_at, queued_at), job_id",
+	// GitLab queues every job of a pipeline when it creates it: jobs that
+	// never started (skipped, canceled while waiting, manual) come last.
+	return s.jobs(ctx, "WHERE instance = ? AND pipeline_id = ? ORDER BY started_at IS NULL, started_at, queued_at, job_id",
 		nullInstance(instance), nullUint(pipeline))
-}
-
-// ProjectBuilds returns a project's latest builds with their steps,
-// oldest first.
-func (s *Store) ProjectBuilds(ctx context.Context, project ProjectKey, limit int) ([]*Stored, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+buildColumns+` FROM builds b JOIN daemons d ON d.id = b.daemon_id
-		WHERE b.instance = ? AND b.project_id = ? ORDER BY b.started_at DESC, b.id DESC LIMIT ?`,
-		nullInstance(project.Instance), project.ID, limit)
-	if err != nil {
-		return nil, err
-	}
-	out, err := s.scanBuilds(ctx, rows)
-	if err != nil {
-		return nil, err
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Build.Started.Before(out[j].Build.Started) })
-	return out, nil
 }
 
 // Usual is the median time BuildKit took for the last builds of the same
@@ -320,11 +205,11 @@ type DaemonCount struct {
 	Last      time.Time
 }
 
-// DaemonCounts returns, per daemon name, its stored builds.
-func (s *Store) DaemonCounts(ctx context.Context) (map[string]DaemonCount, error) {
+// DaemonCounts returns, per daemon name, its builds started since t.
+func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]DaemonCount, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT d.name, count(b.id),
 			COALESCE(sum(b.reason_kind = 'other-node'), 0), COALESCE(sum(b.reason_kind = 'cache-elsewhere'), 0), max(b.started_at)
-		FROM daemons d LEFT JOIN builds b ON b.daemon_id = d.id GROUP BY d.name`)
+		FROM daemons d LEFT JOIN builds b ON b.daemon_id = d.id AND b.started_at >= ? GROUP BY d.name`, since.UnixMilli())
 	if err != nil {
 		return nil, err
 	}
@@ -367,3 +252,18 @@ func (s *Store) JobEnded(ctx context.Context, instance string, job uint64, at ti
 // Announce tells subscribers about changes the store does not hold, such
 // as builds that started; key "" means nothing in particular.
 func (s *Store) Announce(keys ...string) { s.changed(keys...) }
+
+// PipelineProject returns the project of a pipeline as the store knows it
+// (from GitLab, its jobs or its builds), 0 when it does not.
+func (s *Store) PipelineProject(ctx context.Context, instance string, pipeline uint64) (uint64, error) {
+	var project sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(
+		(SELECT project_id FROM pipelines WHERE instance = ?1 AND pipeline_id = ?2),
+		(SELECT project_id FROM jobs WHERE instance = ?1 AND pipeline_id = ?2 AND project_id IS NOT NULL LIMIT 1),
+		(SELECT project_id FROM builds WHERE instance = ?1 AND pipeline_id = ?2 AND project_id IS NOT NULL LIMIT 1))`,
+		nullInstance(instance), pipeline).Scan(&project)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return uint64(project.Int64), err
+}

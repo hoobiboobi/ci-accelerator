@@ -77,6 +77,7 @@ func TestWatchSeesJobPods(t *testing.T) {
 	client := fake.NewClientset()
 	var mu sync.Mutex
 	var seen, gone []store.Job
+	var goneAt []time.Time
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -86,9 +87,9 @@ func TestWatchSeesJobPods(t *testing.T) {
 				seen = append(seen, j)
 				mu.Unlock()
 			},
-			Gone: func(_ context.Context, j store.Job) {
+			Gone: func(_ context.Context, j store.Job, at time.Time) {
 				mu.Lock()
-				gone = append(gone, j)
+				gone, goneAt = append(gone, j), append(goneAt, at)
 				mu.Unlock()
 			},
 		})
@@ -122,46 +123,48 @@ func TestWatchSeesJobPods(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
+	waitGone := func(n int) {
+		t.Helper()
+		for i := 0; i < 300; i++ {
+			mu.Lock()
+			got := len(gone)
+			mu.Unlock()
+			if got >= n {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("%d gone, want %d", len(gone), n)
+	}
+	// The runner deletes the pod with a 30 s grace period: the job ended
+	// when it asked, not when the pod is finally gone.
+	asked := time.Now().Add(-2 * time.Second).Truncate(time.Second)
+	grace := int64(30)
+	p.DeletionTimestamp = &metav1.Time{Time: asked.Add(30 * time.Second)}
+	p.DeletionGracePeriodSeconds = &grace
+	if _, err := client.CoreV1().Pods("jobs").Update(ctx, p, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitGone(1)
 	if err := client.CoreV1().Pods("jobs").Delete(ctx, p.Name, metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 300; i++ {
-		mu.Lock()
-		n := len(gone)
-		mu.Unlock()
-		if n > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	waitGone(2)
+	// The console restarts while a pod is being deleted: seen and gone.
+	q := pod("runner-def", "node-1", jobAnnotations())
+	q.DeletionTimestamp, q.DeletionGracePeriodSeconds = &metav1.Time{Time: asked.Add(30 * time.Second)}, &grace
+	if _, err := client.CoreV1().Pods("jobs").Create(ctx, q, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
 	}
+	waitGone(3)
 	cancel()
 	<-done
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 2 || seen[0].Node != "" || seen[1].Node != "node-2" || seen[1].JobID != 17298723831 {
+	if len(seen) != 3 || seen[0].Node != "" || seen[1].Node != "node-2" || seen[1].JobID != 17298723831 {
 		t.Errorf("jobs seen: %+v", seen)
 	}
-	if len(gone) != 1 || gone[0].JobID != 17298723831 {
-		t.Errorf("jobs gone: %+v", gone)
-	}
-}
-
-func TestRunning(t *testing.T) {
-	var r Running
-	t0 := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
-	a := store.Job{Instance: "abcdef", JobID: 2, StartedAt: t0.Add(time.Minute)}
-	b := store.Job{Instance: "abcdef", JobID: 1, StartedAt: t0}
-	r.Set(a)
-	r.Set(b)
-	a.Node = "n1"
-	r.Set(a)
-	jobs := r.Jobs()
-	if len(jobs) != 2 || jobs[0].JobID != 1 || jobs[1].Node != "n1" {
-		t.Fatalf("%+v", jobs)
-	}
-	r.Remove(b)
-	r.Remove(store.Job{Instance: "fedcba", JobID: 2})
-	if jobs := r.Jobs(); len(jobs) != 1 || jobs[0].JobID != 2 {
-		t.Errorf("%+v", jobs)
+	if len(gone) != 3 || gone[0].JobID != 17298723831 || !goneAt[0].Equal(asked) || !goneAt[2].Equal(asked) {
+		t.Errorf("jobs gone: %+v at %v, want the deletion asked at %v", gone, goneAt, asked)
 	}
 }
