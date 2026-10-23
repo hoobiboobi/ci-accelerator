@@ -1,0 +1,64 @@
+# scripts/quickstart.sh on a clean Ubuntu machine (the runner itself): k3s,
+# cert-manager and this tree's box, two CI jobs through the real runner
+# against the e2e's fake GitLab, the console, then --uninstall.
+name: quickstart
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ["wip/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quickstart:
+    name: quickstart on one node
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI_HELM_VERSION: v4.3.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools
+          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.0-${{ hashFiles('Makefile') }}
+
+      - name: The charts of this tree, with their dependencies
+        run: |
+          make ci-tools
+          echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
+          PATH="$PWD/.tools/bin:$PATH" make deps
+
+      - name: The console image of this tree
+        run: |
+          docker build -f cmd/console/Dockerfile -t ci-accelerator-console:quickstart .
+          docker save -o "$RUNNER_TEMP/console.tar" ci-accelerator-console:quickstart
+
+      # The installer expects a machine without Docker (its iptables rules
+      # can break the pods' network).
+      - name: Stop Docker
+        run: sudo systemctl stop docker.socket docker
+
+      - name: Install, build, look, uninstall
+        env:
+          QUICKSTART_LOGS: ${{ runner.temp }}/quickstart-logs
+        run: sudo --preserve-env=QUICKSTART_LOGS test/quickstart/run.sh "$RUNNER_TEMP/console.tar"
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: quickstart-logs
+          path: ${{ runner.temp }}/quickstart-logs
+          retention-days: 7

@@ -92,6 +92,31 @@ Each part is usable on its own:
 
 ## Quickstart
 
+### Try it on one machine
+
+To look at it before a real deployment, one clean Linux machine is enough:
+Ubuntu 24.04 or Debian 13, amd64 or arm64, 4 CPUs, 8 GB of memory and 40
+GB of free disk, without Docker or Kubernetes. First create a runner in
+GitLab and copy its token (`glrt-...`). Then run:
+
+```sh
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+sudo RUNNER_TOKEN=glrt-... bash quickstart.sh --gitlab-url https://gitlab.example.com/
+```
+
+`quickstart.sh` installs the following, each pinned and checked against
+its sha256:
+- k3s, with the machine as its only node and build node;
+- Helm and cert-manager;
+- the box, with the build console.
+
+It prints the job to add to `.gitlab-ci.yml` and the SSH tunnel to the
+console. `--gitlab-token-file` gives the console a GitLab token with
+`read_api`, so it shows how long jobs waited for a runner. `sudo bash
+quickstart.sh --uninstall` removes everything again. It is not meant for
+production: one node, no high availability, and the console has no sign-in.
+
 ### Requirements
 
 - **Kubernetes 1.34 or newer.** Same-node routing (`PreferSameNode`) needs
