@@ -209,7 +209,8 @@ limit on build nodes.
   and that the daemons' NetworkPolicy admits the console pod. Daemons that
   are gone after a rollout disappear from the page by themselves.
 - **No runner or checkout time, no jobs of other runners.** Those come from
-  GitLab's API. Give the console a token that can read the projects' jobs
+  GitLab's API. Sign in through GitLab (`console.signIn`), or without
+  sign-in give the console a token that can read the projects' jobs
   (`console.gitlab.token.existingSecret`). The console calls GitLab only
   while a page shows a pipeline, and waits while GitLab rate-limits. The
   build-nodes page shows the last API error.
@@ -222,6 +223,23 @@ limit on build nodes.
   with your own runner add `CI_ACCELERATOR_CONSOLE_URL` to the runner's
   `environment` and the hook lines from
   `integrations/gitlab-runner/values.yaml`.
+- **GitLab says "The redirect URI included is not valid".** The OAuth
+  application must list the console's callback exactly:
+  `<console address>/auth/callback/<id>`, where the id is the first six hex
+  digits of the SHA-256 of the GitLab URL as the runner has it (trailing
+  slash included). The install notes and the console's log
+  (`grep redirect_uri`) print it.
+- **Signing in does not ask for consent again after signing out.** GitLab
+  skips its consent screen while the console holds any token of yours (a
+  session in another browser). Signing out revokes only that session's
+  token; revoking the application in GitLab (Preferences > Applications)
+  withdraws all of them.
+- **Signed in, but every page sends you back to sign in.** The session
+  cookie is Secure: the console's address must be https, or
+  `http://localhost` with a port-forward in a browser that keeps Secure
+  cookies on localhost (Chrome and Firefox do).
+- **Someone removed from a project still sees it.** GitLab's answer on a
+  project is kept for 10 minutes (a refusal for 90 seconds).
 
 ## Helm
 

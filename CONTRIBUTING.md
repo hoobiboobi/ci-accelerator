@@ -30,8 +30,18 @@ make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kub
 make go-test                  # Go: gofmt, go vet, go test (any Go >= 1.21 fetches the pinned toolchain)
 make ui-test                  # the console's pages in headless Chrome (pinned Node; needs Chrome), ~2 min
 make kind-up                  # a local kind cluster with three build nodes
-make e2e                      # end-to-end on kind, ~15 min; SCENARIOS="upgrade cache" runs a subset
+make e2e                      # end-to-end on kind, ~15-25 min; SCENARIOS="upgrade cache" runs a subset
+make e2e-copy                 # the same on a copy of the tree taken now: keep editing while it runs
 ```
+
+Working on the console's pages:
+
+```sh
+make console-dev              # the console on its fixtures at 127.0.0.1:8095; templates, CSS and JS are read from internal/web on every request
+make ui-shots                 # screenshots of every kind of page at 1400 and 390 px: .ui-shots/TestUI/index.html
+```
+
+On GitHub the e2e runs in four parallel groups (one kind cluster each) on pull requests to `main` and on pushes of `wip/*` branches; `test/e2e-matrix.sh` (part of `make validate`) fails when a scenario is in no group.
 
 - **Tests for every change.** A change to a template needs a unit test in `charts/*/tests`. A change in behaviour needs an end-to-end check in `test/e2e/run.sh`. A change to the console's pages or script needs to pass `make ui-test` (test/ui), and an interaction it adds belongs there.
 - **Make sure a new check can fail.** Break the code it guards and see it go red before you trust it.
