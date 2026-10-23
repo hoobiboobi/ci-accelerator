@@ -1,0 +1,71 @@
+{{- /* The runners' cache folders for the console: the main runner's and
+every tier's, each once, and read access to the Secrets with their keys
+(consoleSecretName when given: keys that may only read). */}}
+{{- if dig "console" "enabled" false .Values.AsMap }}
+{{- $runner := index .Values "gitlab-runner" }}
+{{- $instance := sha256sum (toString $runner.gitlabUrl) | trunc 6 }}
+{{- $blocks := list (dig "runners" "cache" (dict) $runner) }}
+{{- range $name, $tier := (default (dict) .Values.runnerTiers) }}
+{{- $blocks = append $blocks (default (dict) (default (dict) $tier).cache) }}
+{{- end }}
+{{- $stores := list }}
+{{- $seen := dict }}
+{{- $secrets := list }}
+{{- range $blocks }}
+{{- $s3 := default (dict) .s3 }}
+{{- if $s3.server }}
+{{- $path := trimAll "/" (default (printf "%s/%s" $.Release.Name $instance) .path) }}
+{{- $id := printf "%s/%s/%s" $s3.server $s3.bucket $path }}
+{{- if not (hasKey $seen $id) }}
+{{- $_ := set $seen $id true }}
+{{- $secret := default .secretName .consoleSecretName }}
+{{- $s := dict "server" $s3.server "bucket" $s3.bucket "region" (toString $s3.region) "path" $path "instance" $instance "secret" $secret }}
+{{- if $s3.insecure }}{{ $_ := set $s "insecure" true }}{{ end }}
+{{- if ne (toString (default "" $s3.pathStyle)) "" }}{{ $_ := set $s "pathStyle" (eq (toString $s3.pathStyle) "true") }}{{ end }}
+{{- $stores = append $stores $s }}
+{{- $secrets = append $secrets $secret }}
+{{- end }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-console-caches
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.labels" . | nindent 4 }}
+data:
+  caches.json: {{ toJson $stores | quote }}
+{{- if $secrets }}
+{{- $console := ternary .Release.Name (printf "%s-console" .Release.Name) (contains "console" .Release.Name) | trunc 63 | trimSuffix "-" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-console-caches
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: {{ toJson (uniq $secrets) }}
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-console-caches
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-console-caches
+subjects:
+  - kind: ServiceAccount
+    name: {{ $console }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

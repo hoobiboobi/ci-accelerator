@@ -49,5 +49,52 @@ buildctl command line is recorded, so never pass secrets as build args) and
 change or delete data. Do not expose it outside the cluster.
 {{- end }}
 
+{{- $cacheS3 := dig "runners" "cache" "s3" "server" "" (default (dict) $runner) }}
+{{- $tiers := default (dict) .Values.runnerTiers }}
+{{- if or $cacheS3 $tiers }}
+
+Runners:
+{{- if $runner.enabled }}
+  main runner: cache {{ if $cacheS3 }}S3 {{ $cacheS3 }}/{{ dig "runners" "cache" "s3" "bucket" "" $runner }}{{ else }}none (gitlab-runner.runners.cache){{ end }}
+{{- end }}
+{{- range $name, $tier := $tiers }}
+{{- $t := default (dict) $tier }}
+  tier {{ $name }}: pod {{ include "ci-accelerator.tierName" (dict "root" $ "name" $name) }}, jobs on {{ ternary "build nodes" "any node" (eq (default "any" $t.nodes) "build") }}, {{ default 4 $t.concurrent }} at once, cache {{ with dig "cache" "s3" "server" "" $t }}S3 {{ . }}/{{ dig "cache" "s3" "bucket" "" $t }}{{ else }}none{{ end }}
+    token from Secret {{ dig "token" "existingSecret" "" $t }} (key {{ dig "token" "key" "runner-token" $t }}): create the runner in GitLab
+    (Settings > CI/CD > Runners > New project runner, or a group or instance
+    runner) with the tags its jobs will use; jobs pick a tier by those tags.
+{{- end }}
+The runners never delete old caches: give each bucket a lifecycle rule
+(docs/runner-cache.md shows one), or it only grows.
+{{- end }}
+{{- /* Read with defaults: a values tree reused from 0.1.0 has no console. */}}
+{{- $console := default (dict) .Values.console }}
+{{- if $console.enabled }}
+{{- $svc := ternary .Release.Name (printf "%s-console" .Release.Name) (contains "console" .Release.Name) | trunc 63 | trimSuffix "-" }}
+
+The console (preview) explains each build.
+{{- if dig "signIn" "enabled" false $console }}
+{{- $u := trimSuffix "/" (default (dig "console" "url" "" (default (dict) .Values.global)) (dig "signIn" "url" "" $console)) }}
+People sign in through GitLab at {{ $u }}/ and see the projects whose jobs
+GitLab lets them read. Each OAuth application must list the redirect URI:
+{{- range dig "signIn" "gitlab" (list) $console }}
+{{- $gl := default $runner.gitlabUrl .url }}
+  {{ $gl }}: {{ $u }}/auth/callback/{{ $gl | sha256sum | trunc 6 }}
+{{- end }}
+{{- if hasPrefix "http://" $u }}
+{{ $u }} is this machine: reach the console with
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} {{ default "80" (regexFind "[0-9]+$" (urlParse $u).host) }}:8080
+{{- else }}
+The console serves plain HTTP on its ClusterIP Service {{ $svc }}: put it
+behind your Ingress or gateway with TLS for {{ $u }}.
+{{- end }}
+{{- else }}
+Sign-in is off (console.signIn): it shows everything to whoever reaches
+it, so keep it inside the cluster:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} 8080
+    then http://localhost:8080/
+{{- end }}
+{{- end }}
+
 Builds share the daemons' cache: a build's RUN steps can read and write what
 other builds left there. Use one installation per trust domain.

@@ -1,0 +1,49 @@
+suite: the runners' cache folders
+templates:
+  - caches.yaml
+  - deployment.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  - it: lists no folder and reads no Secret by default
+    asserts:
+      - hasDocuments: {count: 0}
+        template: caches.yaml
+      - notContains: {path: 'spec.template.spec.containers[0].args', content: "-caches=/caches/caches.json"}
+        template: deployment.yaml
+      - equal: {path: spec.template.spec.automountServiceAccountToken, value: false}
+        template: deployment.yaml
+  - it: writes the folders, with the GitLab's id, and may read only their Secrets
+    set:
+      caches.stores:
+        - {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1, path: /box/x/, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc, pathStyle: true}
+        - {server: "s3.example.com:9000", bucket: b, region: us-east-1, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc, insecure: true}
+    template: caches.yaml
+    asserts:
+      - equal:
+          path: data["caches.json"]
+          value: '[{"bucket":"ci-cache","instance":"051b90","path":"box/x","pathStyle":true,"region":"hel1","secret":"rc","server":"hel1.your-objectstorage.com"},{"bucket":"b","insecure":true,"instance":"051b90","path":"","region":"us-east-1","secret":"rc","server":"s3.example.com:9000"}]'
+        documentIndex: 0
+      - equal: {path: rules, value: [{apiGroups: [""], resources: [secrets], resourceNames: [rc], verbs: [get]}]}
+        documentIndex: 1
+  - it: passes the folders to the console, with its namespace and a token
+    set:
+      caches.fromConfigMap: '{{ .Release.Name }}-console-caches'
+    template: deployment.yaml
+    asserts:
+      - contains: {path: 'spec.template.spec.containers[0].args', content: "-caches=/caches/caches.json"}
+      - contains: {path: 'spec.template.spec.containers[0].args', content: "-cache-every=10m"}
+      - contains: {path: spec.template.spec.volumes, content: {name: caches, configMap: {name: c-console-caches}}}
+      - contains:
+          path: 'spec.template.spec.containers[0].env'
+          content: {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+      - equal: {path: spec.template.spec.automountServiceAccountToken, value: true}
+  - it: needs every field of a folder
+    set:
+      caches.stores: [{server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1, existingSecret: rc}]
+    template: deployment.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "caches.stores\\[0\\].gitlabUrl is needed"}

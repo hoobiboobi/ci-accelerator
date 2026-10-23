@@ -2,6 +2,8 @@
 {{- $jobs := include "console.jobsNamespace" . }}
 {{- $urlsFrom := include "console.urlsConfigMap" . }}
 {{- $token := dig "token" "existingSecret" "" .Values.gitlab }}
+{{- $signIn := include "console.signIn" . }}
+{{- $caches := include "console.cachesConfigMap" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,14 +25,21 @@ spec:
     metadata:
       labels:
         {{- include "console.podLabels" . | nindent 8 }}
-      {{- with .Values.podAnnotations }}
+      {{- if or .Values.podAnnotations $signIn }}
       annotations:
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $signIn }}
+        # The console reads its sign-in file at start.
+        ci-accelerator.io/sign-in-checksum: {{ include "console.signInConfig" . | sha256sum | trunc 16 }}
+        {{- end }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "console.fullname" . }}
-      # The token is needed only to watch the job pods.
-      automountServiceAccountToken: {{ ne $jobs "" }}
+      # The token is needed only to watch the job pods and read the
+      # caches' keys.
+      automountServiceAccountToken: {{ or (ne $jobs "") (ne $caches "") }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -66,13 +75,29 @@ spec:
             {{- if $token }}
             - -gitlab-token-file=/gitlab/token
             {{- end }}
-          {{- with $urlsFrom }}
+            {{- if $signIn }}
+            - -sign-in=/sign-in/config/sign-in.json
+            {{- end }}
+            {{- if $caches }}
+            - -caches=/caches/{{ .Values.caches.key }}
+            - -cache-every={{ default "10m" .Values.caches.every }}
+            {{- end }}
+          {{- if or $urlsFrom $caches }}
           env:
+            {{- with $urlsFrom }}
             - name: GITLAB_URLS
               valueFrom:
                 configMapKeyRef:
                   name: {{ . }}
                   key: {{ $.Values.gitlab.urlsFrom.key }}
+            {{- end }}
+            {{- if $caches }}
+            # Where the Secrets with the caches' keys are.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- end }}
           {{- end }}
           ports:
             - name: http
@@ -113,6 +138,24 @@ spec:
               mountPath: /gitlab
               readOnly: true
             {{- end }}
+            {{- if $caches }}
+            - name: caches
+              mountPath: /caches
+              readOnly: true
+            {{- end }}
+            {{- if $signIn }}
+            - name: sign-in
+              mountPath: /sign-in/config
+              readOnly: true
+            - name: sign-in-key
+              mountPath: /sign-in/key
+              readOnly: true
+            {{- range $i, $g := .Values.signIn.gitlab }}
+            - name: sign-in-gitlab-{{ $i }}
+              mountPath: /sign-in/gitlab-{{ $i }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -131,6 +174,34 @@ spec:
             items:
               - key: {{ dig "token" "key" "token" .Values.gitlab }}
                 path: token
+        {{- end }}
+        {{- if $caches }}
+        - name: caches
+          configMap:
+            name: {{ $caches }}
+        {{- end }}
+        {{- if $signIn }}
+        - name: sign-in
+          configMap:
+            name: {{ include "console.fullname" . }}-sign-in
+        - name: sign-in-key
+          secret:
+            secretName: {{ .Values.signIn.sessionKey.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ default "key" .Values.signIn.sessionKey.key }}
+                path: key
+        {{- range $i, $g := .Values.signIn.gitlab }}
+        - name: sign-in-gitlab-{{ $i }}
+          secret:
+            secretName: {{ $g.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: client-id
+                path: client-id
+              - key: client-secret
+                path: client-secret
+        {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -1,0 +1,134 @@
+suite: sign-in through GitLab
+templates:
+  - deployment.yaml
+  - signin-configmap.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+set:
+  signIn:
+    enabled: true
+    url: "https://ci.example.com/"
+    sessionKey: { existingSecret: console-session, key: key }
+    gitlab:
+      - url: "https://gitlab.example.com/"
+        existingSecret: console-oauth
+        admins: [alice]
+tests:
+  - it: is off by default and adds nothing to the pod
+    set:
+      signIn.enabled: false
+    asserts:
+      - notContains: { path: 'spec.template.spec.containers[0].args', content: "-sign-in=/sign-in/config/sign-in.json" }
+        template: deployment.yaml
+      - notExists: { path: spec.template.metadata.annotations }
+        template: deployment.yaml
+      - hasDocuments: { count: 0 }
+        template: signin-configmap.yaml
+  - it: writes the sign-in file with file names, never secrets
+    template: signin-configmap.yaml
+    asserts:
+      - equal:
+          path: data["sign-in.json"]
+          value: '{"gitlab":[{"admins":["alice"],"clientIdFile":"/sign-in/gitlab-0/client-id","secretFile":"/sign-in/gitlab-0/client-secret","url":"https://gitlab.example.com/"}],"sessionKeyFile":"/sign-in/key/key","url":"https://ci.example.com"}'
+  - it: mounts the session key and each OAuth application, and passes the file
+    template: deployment.yaml
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-sign-in=/sign-in/config/sign-in.json" }
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: sign-in-key, secret: { secretName: console-session, defaultMode: 0440, items: [{ key: key, path: key }] } }
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: sign-in-gitlab-0
+            secret: { secretName: console-oauth, defaultMode: 0440, items: [{ key: client-id, path: client-id }, { key: client-secret, path: client-secret }] }
+      - contains: { path: spec.template.spec.volumes, content: { name: sign-in, configMap: { name: c-console-sign-in } } }
+      - contains: { path: 'spec.template.spec.containers[0].volumeMounts', content: { name: sign-in-gitlab-0, mountPath: /sign-in/gitlab-0, readOnly: true } }
+      - matchRegex: { path: 'spec.template.metadata.annotations["ci-accelerator.io/sign-in-checksum"]', pattern: "^[0-9a-f]{16}$" }
+  - it: names the sign-in file's content on the pod (the console reads it at start)
+    template: deployment.yaml
+    asserts:
+      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/sign-in-checksum"]', value: b74e07231eaf304b }
+  - it: restarts the console when the admins change
+    template: deployment.yaml
+    set:
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: console-oauth, admins: [alice, bob] }]
+    asserts:
+      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/sign-in-checksum"]', value: e628f22fcf6d27e2 }
+  - it: takes the console's address from global.console.url
+    template: signin-configmap.yaml
+    set:
+      signIn.url: ""
+      global.console.url: "http://localhost:18081"
+    asserts:
+      - matchRegex: { path: 'data["sign-in.json"]', pattern: '"url":"http://localhost:18081"\}$' }
+  - it: may leave the GitLab's URL to the console when it serves one
+    template: signin-configmap.yaml
+    set:
+      signIn.gitlab: [{ existingSecret: o }]
+    asserts:
+      - matchRegex: { path: 'data["sign-in.json"]', pattern: '"url":""' }
+  - it: needs the console's address
+    template: deployment.yaml
+    set:
+      signIn.url: ""
+    asserts:
+      - failedTemplate: { errorPattern: "sign-in needs signIn.url" }
+  - it: needs https outside localhost
+    template: deployment.yaml
+    set:
+      signIn.url: "http://ci.example.com"
+    asserts:
+      - failedTemplate: { errorPattern: "must be https" }
+  - it: accepts http on a loopback address
+    template: deployment.yaml
+    set:
+      signIn.url: "http://127.0.0.1:18081"
+    asserts:
+      - notFailedTemplate: {}
+  - it: needs the session key
+    template: deployment.yaml
+    set:
+      signIn.sessionKey.existingSecret: ""
+    asserts:
+      - failedTemplate: { errorPattern: "signIn.sessionKey.existingSecret" }
+  - it: needs an OAuth application
+    template: deployment.yaml
+    set:
+      signIn.gitlab: []
+    asserts:
+      - failedTemplate: { errorPattern: "sign-in needs signIn.gitlab" }
+  - it: needs each application's Secret
+    template: deployment.yaml
+    set:
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: "" }]
+    asserts:
+      - failedTemplate: { errorPattern: "needs existingSecret" }
+  - it: needs a GitLab the console serves, exactly
+    template: deployment.yaml
+    set:
+      signIn.gitlab: [{ url: "https://gitlab.example.com", existingSecret: o }]
+    asserts:
+      - failedTemplate: { errorPattern: "is not one of gitlab.urls" }
+  - it: needs URLs with several GitLabs
+    template: deployment.yaml
+    set:
+      gitlab.urls: ["https://gitlab.example.com/", "https://gitlab.com/"]
+      signIn.gitlab: [{ existingSecret: o }, { url: "https://gitlab.com/", existingSecret: p }]
+    asserts:
+      - failedTemplate: { errorPattern: "each needs its url" }
+  - it: refuses a GitLab named twice
+    template: deployment.yaml
+    set:
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: o }, { url: "https://gitlab.example.com/", existingSecret: p }]
+    asserts:
+      - failedTemplate: { errorPattern: "names .* twice" }
+  - it: refuses the installation's token with sign-in
+    template: deployment.yaml
+    set:
+      gitlab.token.existingSecret: t
+    asserts:
+      - failedTemplate: { errorPattern: "exclude each other" }

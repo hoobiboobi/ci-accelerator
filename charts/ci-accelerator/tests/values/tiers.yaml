@@ -1,0 +1,20 @@
+# The box with an S3 cache on its main runner and two tiers (make validate).
+gitlab-runner:
+  runners:
+    cache:
+      secretName: runner-cache
+      s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+runnerTiers:
+  deploy:
+    token: {existingSecret: runner-deploy}
+    resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    cache:
+      secretName: runner-cache
+      s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+  heavy:
+    nodes: build
+    concurrent: 2
+    token: {existingSecret: runner-heavy}
+    resources: {requests: {cpu: "2", memory: 4Gi}, limits: {cpu: "4", memory: 8Gi}}
+    manager:
+      tolerations: [{key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}]

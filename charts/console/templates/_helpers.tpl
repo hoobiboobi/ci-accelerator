@@ -110,6 +110,49 @@ global.tls.issuerRef. The name is rendered with tpl. As YAML.
 {{- default (printf "%s-data" (include "console.fullname" .)) .Values.persistence.existingClaim }}
 {{- end }}
 
+{{- define "console.signIn" -}}
+{{- if dig "enabled" false (default (dict) .Values.signIn) }}true{{ end }}
+{{- end }}
+
+{{/*
+Where browsers reach the console: signIn.url, else global.console.url.
+*/}}
+{{- define "console.signInURL" -}}
+{{- $u := tpl (dig "url" "" (default (dict) .Values.signIn)) . }}
+{{- if not $u }}{{ $u = dig "console" "url" "" (default (dict) .Values.global) }}{{ end }}
+{{- trimSuffix "/" $u }}
+{{- end }}
+
+{{/*
+The console's sign-in file: names of the mounted Secrets' files, no secret.
+*/}}
+{{- define "console.signInConfig" -}}
+{{- $gl := list }}
+{{- range $i, $g := dig "gitlab" (list) (default (dict) .Values.signIn) }}
+{{- $gl = append $gl (dict "url" (default "" $g.url) "clientIdFile" (printf "/sign-in/gitlab-%d/client-id" $i) "secretFile" (printf "/sign-in/gitlab-%d/client-secret" $i) "admins" (default (list) $g.admins)) }}
+{{- end }}
+{{- toJson (dict "url" (include "console.signInURL" .) "sessionKeyFile" "/sign-in/key/key" "gitlab" $gl) }}
+{{- end }}
+
+{{/*
+The cache folders listed in caches.stores, as the console reads them.
+*/}}
+{{- define "console.cachesJson" -}}
+{{- $out := list }}
+{{- range (dig "stores" (list) (default (dict) .Values.caches)) }}
+{{- $s := dict "server" .server "bucket" .bucket "region" (default "" .region) "path" (trimAll "/" (default "" .path)) "instance" (sha256sum (toString .gitlabUrl) | trunc 6) "secret" .existingSecret }}
+{{- if .insecure }}{{ $_ := set $s "insecure" true }}{{ end }}
+{{- if hasKey . "pathStyle" }}{{ $_ := set $s "pathStyle" .pathStyle }}{{ end }}
+{{- $out = append $out $s }}
+{{- end }}
+{{- toJson $out }}
+{{- end }}
+
+{{- define "console.cachesConfigMap" -}}
+{{- $c := default (dict) .Values.caches }}
+{{- if $c.stores }}{{ include "console.fullname" . }}-caches{{ else }}{{ tpl (default "" $c.fromConfigMap) . }}{{ end }}
+{{- end }}
+
 {{/*
 Checks that fail the render with a message naming the value to set.
 */}}
@@ -126,6 +169,51 @@ Checks that fail the render with a message naming the value to set.
 {{- end }}
 {{- if and (not .Values.tls.existingSecret) (not (include "console.issuerRef" . | fromYaml).name) }}
 {{- fail "console: the client certificate needs tls.existingSecret, or an issuer in tls.certManager.issuerRef or global.tls.issuerRef (the daemons' CA)" }}
+{{- end }}
+{{- range $i, $c := (dig "stores" (list) (default (dict) .Values.caches)) }}
+{{- range $k := list "server" "bucket" "region" "gitlabUrl" "existingSecret" }}
+{{- if not (get $c $k) }}
+{{- fail (printf "console: caches.stores[%d].%s is needed" $i $k) }}
+{{- end }}
+{{- end }}
+{{- if regexMatch "^[a-z]+://|/" (toString $c.server) }}
+{{- fail (printf "console: caches.stores[%d].server is a host (and port), without https:// or a path" $i) }}
+{{- end }}
+{{- end }}
+{{- if include "console.signIn" . }}
+{{- $u := include "console.signInURL" . }}
+{{- if not $u }}
+{{- fail "console: sign-in needs signIn.url (or global.console.url): where browsers reach the console" }}
+{{- end }}
+{{- if not (regexMatch "^(https://[^/?#\\s]+|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?)(/[^?#\\s]*)?$" $u) }}
+{{- fail (printf "console: signIn.url must be https (plain http only on localhost, for a port-forward), got %q" $u) }}
+{{- end }}
+{{- if not (dig "sessionKey" "existingSecret" "" (default (dict) .Values.signIn)) }}
+{{- fail "console: sign-in needs signIn.sessionKey.existingSecret: a Secret with 32 random bytes in base64 (openssl rand -base64 32)" }}
+{{- end }}
+{{- $gl := dig "gitlab" (list) (default (dict) .Values.signIn) }}
+{{- if not $gl }}
+{{- fail "console: sign-in needs signIn.gitlab: the OAuth application of each GitLab (url, existingSecret)" }}
+{{- end }}
+{{- $seen := dict }}
+{{- range $gl }}
+{{- if not .existingSecret }}
+{{- fail (printf "console: signIn.gitlab %q needs existingSecret: a Secret with the OAuth application's client-id and client-secret" (default "" .url)) }}
+{{- end }}
+{{- if and (not .url) (gt (len $gl) 1) }}
+{{- fail "console: with several signIn.gitlab entries each needs its url, exactly as the runners have it" }}
+{{- end }}
+{{- if hasKey $seen (default "" .url) }}
+{{- fail (printf "console: signIn.gitlab names %q twice" (default "" .url)) }}
+{{- end }}
+{{- $_ := set $seen (default "" .url) true }}
+{{- if and .url $.Values.gitlab.urls (not (has .url $.Values.gitlab.urls)) }}
+{{- fail (printf "console: signIn.gitlab url %q is not one of gitlab.urls (they must match exactly)" .url) }}
+{{- end }}
+{{- end }}
+{{- if dig "token" "existingSecret" "" .Values.gitlab }}
+{{- fail "console: gitlab.token and sign-in exclude each other: with sign-in GitLab is read with each person's own token" }}
+{{- end }}
 {{- end }}
 {{- if or (lt (int .Values.retention.days) 1) (lt (int .Values.retention.outputDays) 1) (gt (int .Values.retention.outputDays) (int .Values.retention.days)) }}
 {{- fail "console: retention.days and retention.outputDays must be at least 1, and output kept no longer than builds" }}

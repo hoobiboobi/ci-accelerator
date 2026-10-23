@@ -125,6 +125,7 @@ running with no [[runners]] and takes no jobs). */}}
 {{- fail (printf "gitlab-runner.runners.config does not render to valid TOML: %s" (get $parsed "Error")) }}
 {{- end }}
 {{- end }}
+{{- include "ci-accelerator.checkTiers" . }}
 {{- include "ci-accelerator.preflightJobsNamespace" . }}
 {{- if and (dig "console" "enabled" false .Values.AsMap) (eq (toString .Values.buildkit.tls.source) "existingSecret") (not (dig "console" "tls" "existingSecret" "" .Values.AsMap)) }}
 {{- fail "console.enabled with buildkit.tls.source=existingSecret: give the console its own client certificate signed by the daemons' CA, console.tls.existingSecret (a Secret with ca.crt, tls.crt and tls.key in the release namespace)." }}
