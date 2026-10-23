@@ -30,10 +30,10 @@ func TestSessions(t *testing.T) {
 	if string(got.Token) != "sealed-2" || !got.Seen.Equal(t0.Add(time.Hour)) {
 		t.Fatalf("after update: %+v", got)
 	}
-	if n, err := s.DeleteIdleSessions(ctx, t0.Add(time.Hour)); err != nil || n != 0 {
+	if n, err := s.DeleteIdleSessions(ctx, t0.Add(time.Hour), t0.Add(-time.Hour)); err != nil || n != 0 {
 		t.Fatalf("a session seen at the bound is not idle: %d, %v", n, err)
 	}
-	if n, err := s.DeleteIdleSessions(ctx, t0.Add(2*time.Hour)); err != nil || n != 1 {
+	if n, err := s.DeleteIdleSessions(ctx, t0.Add(2*time.Hour), t0.Add(-time.Hour)); err != nil || n != 1 {
 		t.Fatalf("idle sessions deleted: %d, %v", n, err)
 	}
 	if err := s.SaveSession(ctx, a); err != nil {

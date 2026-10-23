@@ -62,6 +62,32 @@ func (s *Store) ReplaceCacheScan(ctx context.Context, store, instance string, at
 	return tx.Commit()
 }
 
+// KeepCacheStores forgets every store not in ids, with its archives: a
+// folder no longer configured is no longer shown.
+func (s *Store) KeepCacheStores(ctx context.Context, ids []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	in := "''"
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+		if i == 0 {
+			in = "?"
+		} else {
+			in += ", ?"
+		}
+	}
+	for _, table := range []string{"cache_objects", "cache_stores"} {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE store NOT IN ("+in+")", args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // ProjectCache returns a project's cache archives, largest first, and the
 // state of the stores that hold them (or of every store, when none does).
 func (s *Store) ProjectCache(ctx context.Context, p ProjectKey) ([]CacheObject, []CacheStore, error) {

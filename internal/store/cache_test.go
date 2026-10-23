@@ -42,3 +42,28 @@ func TestCacheScans(t *testing.T) {
 	}
 
 }
+
+// A folder no longer configured is forgotten with its archives.
+func TestKeepCacheStores(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 22, 20, 0, 0, 0, time.UTC)}
+	s := open(t, t.TempDir(), c)
+	p := ProjectKey{Instance: "051b90", ID: 42}
+	for _, id := range []string{"s3/a/x", "s3/b/y"} {
+		if err := s.ReplaceCacheScan(ctx, id, p.Instance, c.t, []CacheObject{{ProjectID: 42, Key: "k-" + id, Bytes: 1}}, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.KeepCacheStores(ctx, []string{"s3/b/y"}); err != nil {
+		t.Fatal(err)
+	}
+	objs, stores, err := s.ProjectCache(ctx, p)
+	if err != nil || len(objs) != 1 || objs[0].Store != "s3/b/y" || len(stores) != 1 || stores[0].ID != "s3/b/y" {
+		t.Errorf("after forgetting s3/a/x: %+v %+v %v", objs, stores, err)
+	}
+	if err := s.KeepCacheStores(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if objs, stores, _ := s.ProjectCache(ctx, p); len(objs)+len(stores) != 0 {
+		t.Errorf("with no store configured: %+v %+v", objs, stores)
+	}
+}

@@ -161,7 +161,7 @@ gitlab-runner:
 runnerTiers: {}
 
 # The console: reads every daemon's build history and the CI job pods, and
-# explains each build. Preview: off by default. Its Service is ClusterIP
+# explains each build. Off by default. Its Service is ClusterIP
 # only; without sign-in (console.signIn) it shows everything to whoever
 # reaches it. See charts/console for every value.
 console:

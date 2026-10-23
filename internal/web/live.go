@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -28,6 +29,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 	items := []indexItem{
 		{Kind: "Page", Label: "Overview", URL: "/", Icon: "overview"},
+		{Kind: "Page", Label: "Pipelines", URL: "/pipelines", Icon: "pipes"},
 		{Kind: "Page", Label: "Builds", URL: "/builds", Icon: "builds"},
 		{Kind: "Page", Label: "Images", URL: "/images", Icon: "images"},
 		{Kind: "Page", Label: "Nodes", URL: "/nodes", Icon: "nodes"},
@@ -38,7 +40,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, t := range targets {
-		items = append(items, indexItem{Kind: "Image", Label: orDefault(t), URL: "/images/" + imageKey(t), Icon: "images"})
+		items = append(items, indexItem{Kind: "Image", Label: orDefault(t), URL: "/images/" + url.PathEscape(imageKey(t)), Icon: "images"})
 	}
 	rows, err := s.store.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Limit: 500})
 	if err != nil {

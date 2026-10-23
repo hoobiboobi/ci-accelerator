@@ -6,6 +6,7 @@
 package gitlab
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -197,47 +198,66 @@ func (c *Client) get(ctx context.Context, cred Credential, u string) ([]apiJob, 
 
 // JobLog returns the end of a job's log, at most lines lines, as plain
 // text: terminal colours, GitLab's section markers and lines a progress
-// bar overwrote are taken out. Secrets are not masked here.
+// bar overwrote are taken out. Secrets are not masked here. The whole log
+// is read, but only its last TailBytes are kept.
 func (c *Client) JobLog(ctx context.Context, cred Credential, instance string, project, job uint64, lines int) (string, error) {
-	text, _, err := c.JobTrace(ctx, cred, instance, project, job)
-	if err != nil {
-		return "", err
-	}
-	return tail(text, lines), nil
-}
-
-// MaxTrace bounds how much of a job's log is read.
-const MaxTrace = 32 << 20
-
-// JobTrace returns a job's whole log as plain text (as JobLog cleans it),
-// and whether it was longer than MaxTrace (its start is then all there is).
-func (c *Client) JobTrace(ctx context.Context, cred Credential, instance string, project, job uint64) (string, bool, error) {
 	base := c.bases[instance]
 	if base == "" {
-		return "", false, fmt.Errorf("gitlab: unknown instance %s", instance)
+		return "", fmt.Errorf("gitlab: unknown instance %s", instance)
 	}
 	u := fmt.Sprintf("%s/projects/%d/jobs/%d/trace", base, project, job)
 	res, err := c.do(ctx, cred, u)
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusTooManyRequests {
-		return "", false, &RateLimited{Until: retryAfter(res.Header, time.Now())}
+		return "", &RateLimited{Until: retryAfter(res.Header, time.Now())}
 	}
 	if res.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, io.LimitReader(res.Body, 1<<16))
-		return "", false, fmt.Errorf("gitlab: %s: %s", redact(u), res.Status)
+		return "", fmt.Errorf("gitlab: %s: %s", redact(u), res.Status)
 	}
-	raw, err := io.ReadAll(io.LimitReader(res.Body, MaxTrace+1))
+	raw, err := readTail(io.LimitReader(res.Body, MaxTrace), TailBytes)
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
-	truncated := len(raw) > MaxTrace
-	if truncated {
-		raw = raw[:MaxTrace]
+	return tail(CleanLog(string(raw)), lines), nil
+}
+
+// MaxTrace bounds how much of a job's log is read; TailBytes, how much of
+// its end is kept.
+const (
+	MaxTrace  = 32 << 20
+	TailBytes = 1 << 20
+)
+
+// readTail reads r to its end and returns its last n bytes, starting at a
+// line: memory stays at n whatever the log's size.
+func readTail(r io.Reader, n int) ([]byte, error) {
+	buf := make([]byte, 0, 2*n)
+	chunk := make([]byte, 64<<10)
+	cut := false
+	for {
+		k, err := r.Read(chunk)
+		buf = append(buf, chunk[:k]...)
+		if len(buf) > n {
+			buf = append(buf[:0], buf[len(buf)-n:]...)
+			cut = true
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
-	return CleanLog(string(raw)), truncated, nil
+	if cut {
+		if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+			buf = buf[i+1:]
+		}
+	}
+	return buf, nil
 }
 
 // CanReadJobs asks GitLab whether cred may read a project's jobs: the jobs

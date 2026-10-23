@@ -102,6 +102,10 @@ func run(c config, log *slog.Logger) error {
 	if c.keepDays < 1 || c.keepOutputDays < 1 || c.keepOutputDays > c.keepDays {
 		return errors.New("-keep-days and -keep-output-days must be at least 1, output no longer than builds")
 	}
+	if c.caches != "" && c.cacheEvery < time.Minute {
+		// Listing a bucket is not free: every few seconds would be a loop.
+		return errors.New("-cache-every must be at least 1m")
+	}
 	if c.serverName == "" {
 		host, _, err := net.SplitHostPort(c.discover)
 		if err != nil {
@@ -297,6 +301,14 @@ func scanCaches(ctx context.Context, c config, kube kubernetes.Interface, st *st
 		stores, err := loadCaches(c.caches)
 		if err != nil {
 			log.Warn("cache stores not read", "err", err)
+		} else {
+			ids := make([]string, len(stores))
+			for i, s := range stores {
+				ids[i] = s.ID()
+			}
+			if err := st.KeepCacheStores(ctx, ids); err != nil {
+				log.Warn("old cache stores not forgotten", "err", err)
+			}
 		}
 		for _, s := range stores {
 			sctx, cancel := context.WithTimeout(ctx, 5*time.Minute)

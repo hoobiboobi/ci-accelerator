@@ -368,6 +368,14 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "The console has no GitLab token, or does not know this job.")
 		return
 	}
+	select {
+	case s.logs <- struct{}{}:
+		defer func() { <-s.logs }()
+	default:
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, "The console is reading other job logs; try again in a moment.")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	text, err := api.JobLog(ctx, cred, instance, j.ProjectID, id, 100)

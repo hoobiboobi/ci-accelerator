@@ -379,3 +379,19 @@ func TestRateLimitPerCredential(t *testing.T) {
 		t.Errorf("status until %v", until)
 	}
 }
+
+// readTail keeps the end of a log much larger than what it keeps, from
+// the start of a line.
+func TestReadTail(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 200000; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	out, err := readTail(strings.NewReader(b.String()), 4096)
+	if err != nil || len(out) > 4096 || !strings.HasPrefix(string(out), "line ") || !strings.HasSuffix(string(out), "line 199999\n") {
+		t.Fatalf("tail of %d bytes: %d bytes, %q...%q, %v", b.Len(), len(out), string(out[:min(20, len(out))]), string(out[max(0, len(out)-20):]), err)
+	}
+	if short, _ := readTail(strings.NewReader("a\nb\n"), 4096); string(short) != "a\nb\n" {
+		t.Errorf("a short log: %q", short)
+	}
+}

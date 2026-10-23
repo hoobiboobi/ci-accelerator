@@ -311,6 +311,30 @@ tests:
         documentIndex: 1
       - equal: {path: 'subjects[0].name', value: box-console}
         documentIndex: 2
+  # The binding names the console's ServiceAccount as the console chart
+  # names it.
+  - it: binds the console's ServiceAccount under a renamed console
+    set:
+      console.enabled: true
+      console.fullnameOverride: ci-console
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
+    template: console-caches.yaml
+    asserts:
+      - equal: {path: 'subjects[0].name', value: ci-console}
+        documentIndex: 2
+  - it: binds it under a console nameOverride
+    set:
+      console.enabled: true
+      console.nameOverride: ui
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
+    template: console-caches.yaml
+    asserts:
+      - equal: {path: 'subjects[0].name', value: box-ui}
+        documentIndex: 2
   - it: writes an empty list without caches
     set:
       console.enabled: true

@@ -56,7 +56,7 @@ The runners never delete old caches: give each bucket a lifecycle rule
 {{- if $console.enabled }}
 {{- $svc := ternary .Release.Name (printf "%s-console" .Release.Name) (contains "console" .Release.Name) | trunc 63 | trimSuffix "-" }}
 
-The console (preview) explains each build.
+The console explains each build.
 {{- if dig "signIn" "enabled" false $console }}
 {{- $u := trimSuffix "/" (default (dig "console" "url" "" (default (dict) .Values.global)) (dig "signIn" "url" "" $console)) }}
 People sign in through GitLab at {{ $u }}/ and see the projects whose jobs
@@ -77,6 +77,11 @@ Sign-in is off (console.signIn): it shows everything to whoever reaches
 it, so keep it inside the cluster:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} 8080
     then http://localhost:8080/
+{{- if not (dig "gitlab" "token" "existingSecret" "" $console) }}
+With a GitLab token that can read the projects' jobs
+(console.gitlab.token.existingSecret), it also shows how long jobs waited
+for a runner and settles "files or node" by comparing commits.
+{{- end }}
 {{- end }}
 {{- end }}
 
