@@ -102,9 +102,9 @@ func run(c config, log *slog.Logger) error {
 	if c.keepDays < 1 || c.keepOutputDays < 1 || c.keepOutputDays > c.keepDays {
 		return errors.New("-keep-days and -keep-output-days must be at least 1, output no longer than builds")
 	}
-	if c.caches != "" && c.cacheEvery < time.Minute {
-		// Listing a bucket is not free: every few seconds would be a loop.
-		return errors.New("-cache-every must be at least 1m")
+	if c.caches != "" && c.cacheEvery < 10*time.Second {
+		// Listing a bucket is not free: 0s would list it without pause.
+		return errors.New("-cache-every must be at least 10s")
 	}
 	if c.serverName == "" {
 		host, _, err := net.SplitHostPort(c.discover)

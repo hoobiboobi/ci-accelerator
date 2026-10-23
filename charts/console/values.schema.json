@@ -72,7 +72,7 @@
         },
         "fromConfigMap": { "type": "string" },
         "key": { "type": "string", "minLength": 1 },
-        "every": { "type": "string", "pattern": "^([1-9][0-9]*(m|h)|[6-9][0-9]s|[1-9][0-9]{2,}s)$", "description": "How often the bucket is listed: at least a minute (60s, 10m, 1h)." }
+        "every": { "type": "string", "pattern": "^([1-9][0-9]+s|[1-9][0-9]*(m|h))$", "description": "How often the bucket is listed: at least 10s (10m by default)." }
       }
     },
     "signIn": {
