@@ -62,9 +62,9 @@ KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb
 # Go for the console (internal/, cmd/). Locally any Go >= 1.21 fetches this
 # toolchain itself (GOTOOLCHAIN, verified against the Go checksum database);
 # CI downloads the archive below. Checksums from https://go.dev/dl/?mode=json.
-GO_VERSION := 1.27.1
-GO_SHA256_linux_amd64 := 63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
-GO_SHA256_linux_arm64 := 3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec
+GO_VERSION := 1.27.2
+GO_SHA256_linux_amd64 := ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
+GO_SHA256_linux_arm64 := 94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
 # Node for the browser checks (test/ui): LTS line 24, the newest release at
 # least two weeks old; sums from nodejs.org SHASUMS256.txt.
 NODE_VERSION := 24.21.0
