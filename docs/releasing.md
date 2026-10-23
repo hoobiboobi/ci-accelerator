@@ -8,16 +8,19 @@ How a version gets from `main` to users. The rules behind it (patch vs minor, up
 
 - **Patch or minor?** A patch is fixes only. A minor brings something new that is ready and on by default.
 - **Is `main` releasable?** Unfinished work must be switched off by default. If `main` already holds changes that should not ship in a patch, release the patch from a branch instead (see [A patch from a release branch](#a-patch-from-a-release-branch)).
-- **Pinned components.** Look at the releases and security advisories of everything that is pinned: BuildKit, cert-manager, the gitlab-runner chart and image, the tools in the Makefile, and the actions in the workflows. Bump what has a fix and is at least two weeks old.
+- **Pinned components.** Look at the releases and security advisories of everything that is pinned: BuildKit, cert-manager, the gitlab-runner chart and image, Go and the console's base images (`cmd/console/Dockerfile`), Node, the kind node image, the e2e images (`test/e2e/run.sh`), the tools in the Makefile, and the actions in the workflows. Bump what has a fix and is at least two weeks old.
 
 ## 2. The release pull request
 
 On a branch `release/v<v>`:
 
-1. Set the version in three places:
+1. Set the version in six places:
    - `version:` in `charts/buildkit/Chart.yaml`;
+   - `version:` and `appVersion:` in `charts/console/Chart.yaml` (the appVersion is the console image's tag, `v<appVersion>`);
    - `version:` in `charts/ci-accelerator/Chart.yaml`;
-   - the `buildkit` dependency's `version:` in `charts/ci-accelerator/Chart.yaml`.
+   - the `buildkit` and `console` dependencies' `version:` in `charts/ci-accelerator/Chart.yaml`.
+
+   Also update the status line and the `--version` of the quickstart in `README.md`.
 2. In `CHANGELOG.md`:
    - rename `## Unreleased` to `## <v> - <yyyy-mm-dd>`;
    - read its **Upgrade notes** as a user would, and make sure they say what to do;
@@ -39,8 +42,9 @@ git push origin v<v>
 
 Tags `v*` cannot be moved or deleted once pushed. The workflow:
 - runs the checks again;
-- packages both charts reproducibly and pushes them to `oci://ghcr.io/hoobiboobi/charts`;
-- signs them with cosign;
+- packages the three charts (ci-accelerator, buildkit, console) reproducibly and pushes them to `oci://ghcr.io/hoobiboobi/charts`;
+- builds the console image for amd64 and arm64 (`scripts/build-console-image.sh`, the same build the checks run on every pull request) and pushes it as `ghcr.io/hoobiboobi/ci-accelerator-console:v<v>`;
+- signs all four with cosign;
 - creates the GitHub release with the changelog entry, the archives, `SHA256SUMS` and the digests.
 
 ## 5. Verify as a user
@@ -51,19 +55,24 @@ Without registry credentials:
 export HELM_REGISTRY_CONFIG=$(mktemp -d)/registry.json
 helm pull oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <v>
 helm pull oci://ghcr.io/hoobiboobi/charts/buildkit --version <v>
-sha256sum ci-accelerator-<v>.tgz buildkit-<v>.tgz   # compare with SHA256SUMS of the release
-cosign verify ghcr.io/hoobiboobi/charts/ci-accelerator:<v> \
-  --certificate-identity https://github.com/hoobiboobi/ci-accelerator/.github/workflows/release.yml@refs/tags/v<v> \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+helm pull oci://ghcr.io/hoobiboobi/charts/console --version <v>
+sha256sum ci-accelerator-<v>.tgz buildkit-<v>.tgz console-<v>.tgz   # compare with SHA256SUMS of the release
+for ref in charts/ci-accelerator:<v> ci-accelerator-console:v<v>; do
+  cosign verify ghcr.io/hoobiboobi/$ref \
+    --certificate-identity https://github.com/hoobiboobi/ci-accelerator/.github/workflows/release.yml@refs/tags/v<v> \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+done
+docker pull ghcr.io/hoobiboobi/ci-accelerator-console:v<v>
 ```
 
-Then install the umbrella from the registry on a kind cluster and run a build, as the README quickstart does.
+A package pushed for the first time is private: make it public under the repository's Packages (`charts/console` and `ci-accelerator-console` came with 0.2.0). Then install the umbrella from the registry on a kind cluster with `console.enabled=true` and run a build, as the README quickstart does.
 
 ## 6. After the release
 
 Open a pull request that moves the upgrade test to the new release. In `test/e2e/run.sh`, set:
 - `UPGRADE_FROM=<v>`;
-- `UPGRADE_FROM_SHA256` and `UPGRADE_FROM_BUILDKIT_SHA256` to the two lines of the release's `SHA256SUMS`.
+- `UPGRADE_FROM_SHA256` and `UPGRADE_FROM_BUILDKIT_SHA256` to the ci-accelerator and buildkit lines of the release's `SHA256SUMS`;
+- `UPGRADE_ROLLOUT_EXPECTED` back to `0`, unless `main` already holds a change that restarts the daemons on purpose.
 
 From then on every change is tested against the version users have.
 

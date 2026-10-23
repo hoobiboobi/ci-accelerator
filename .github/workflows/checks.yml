@@ -70,6 +70,21 @@ jobs:
       - name: gofmt, go vet, go test
         run: make go-test
 
+  # The console's image builds for both platforms exactly as a release
+  # builds it (without pushing), so a release cannot fail there first.
+  image:
+    name: console image (amd64, arm64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Build
+        run: scripts/build-console-image.sh ci-accelerator-console:check check
+
   ui:
     name: browser checks
     runs-on: ubuntu-24.04

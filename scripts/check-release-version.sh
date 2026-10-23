@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Checks that a release tag matches the charts before anything is published:
-# both charts carry the tag's version, the umbrella depends on exactly that
-# buildkit version, and CHANGELOG.md has an entry with upgrade notes for it.
+# the three charts carry the tag's version, the umbrella depends on exactly
+# those buildkit and console versions, the console's appVersion (its image
+# tag, v<appVersion>) is the same, and CHANGELOG.md has an entry with
+# upgrade notes for it.
 # Prints the version on success.
 #
 #   scripts/check-release-version.sh v0.1.0
@@ -32,6 +34,11 @@ for sub in buildkit console; do
     echo "charts/ci-accelerator depends on $sub $dep, the tag says $version" >&2; fail=1
   fi
 done
+# The console chart's default image is the one this release builds.
+app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/console/Chart.yaml")
+if [ "$app" != "$version" ]; then
+  echo "charts/console/Chart.yaml has appVersion $app (its image tag), the tag says $version" >&2; fail=1
+fi
 # Every release says what an upgrade to it means.
 "$ROOT/scripts/changelog-section.sh" "$version" >/dev/null || fail=1
 [ "$fail" = 0 ] || exit 1

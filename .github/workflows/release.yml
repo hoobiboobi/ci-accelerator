@@ -1,5 +1,6 @@
-# Publishes both charts as OCI artifacts to ghcr.io when a version tag is
-# pushed:  git tag v0.1.0 && git push origin v0.1.0
+# Publishes the charts (ci-accelerator, buildkit, console) as OCI artifacts
+# and the console's image to ghcr.io when a version tag is pushed:
+#   git tag -a v0.2.0 && git push origin v0.2.0
 # The tag must match the charts' version (scripts/check-release-version.sh).
 # Tags with a pre-release part (v0.1.0-rc.1) become GitHub pre-releases.
 name: release
@@ -57,7 +58,7 @@ jobs:
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
           export SOURCE_DATE_EPOCH
           mkdir -p dist
-          helm package charts/buildkit charts/ci-accelerator -d dist
+          helm package charts/buildkit charts/console charts/ci-accelerator -d dist
           touch -d "@$SOURCE_DATE_EPOCH" dist/*.tgz
           # Names without the dist/ prefix, so `sha256sum -c SHA256SUMS` works
           # next to the downloaded release assets.
@@ -78,6 +79,18 @@ jobs:
             echo "${ref%:*}@$digest" >> dist/digests
           done
           cat dist/digests
+
+      # The console's image, the default of its chart (v<appVersion>), for
+      # amd64 and arm64: Go cross-compiles, so no emulation. Built by the
+      # BuildKit release the box's daemons run, pinned by digest.
+      - name: Console image
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          scripts/build-console-image.sh "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator-console:v$VERSION" push | tee -a dist/digests
 
       # Keyless signatures record the repository in Sigstore's public
       # transparency log, so only once the repository is public.
@@ -113,6 +126,7 @@ jobs:
             echo '```'
             echo
             echo "The daemons alone: \`oci://$CHARTS_REPO/buildkit --version $VERSION\`."
+            echo "The console alone: \`oci://$CHARTS_REPO/console --version $VERSION\`, image \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator-console:v$VERSION\`."
             if [ "$PRIVATE" != "true" ]; then
               echo
               echo "## Verify"
