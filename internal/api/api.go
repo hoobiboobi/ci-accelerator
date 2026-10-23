@@ -1,11 +1,12 @@
 // Package api serves the console's read-only JSON API under /api/v1 and
-// its health check. It has no authentication of its own yet: until sign-in
-// through GitLab exists it must not be exposed beyond the cluster.
+// its health check. It has no authentication of its own: with sign-in the
+// console lets only admins reach it; without, it is as open as the pages.
 package api
 
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -54,7 +55,9 @@ func Handler(s Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.Ping(r.Context()); err != nil {
-			http.Error(w, "store: "+err.Error(), http.StatusServiceUnavailable)
+			// The cause goes to the console's log, not to whoever asks.
+			log.Printf("health check: store: %v", err)
+			http.Error(w, "store unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Write([]byte("ok\n"))

@@ -37,7 +37,15 @@ metadata:
 data:
   caches.json: {{ toJson $stores | quote }}
 {{- if $secrets }}
-{{- $console := ternary .Release.Name (printf "%s-console" .Release.Name) (contains "console" .Release.Name) | trunc 63 | trimSuffix "-" }}
+{{- /* The console's ServiceAccount: its full name, by the console chart's rule. */}}
+{{- $c := default (dict) .Values.console }}
+{{- $console := "" }}
+{{- if $c.fullnameOverride }}
+{{- $console = $c.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $n := default "console" $c.nameOverride }}
+{{- $console = ternary .Release.Name (printf "%s-%s" .Release.Name $n) (contains $n .Release.Name) | trunc 63 | trimSuffix "-" }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

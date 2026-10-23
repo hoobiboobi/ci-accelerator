@@ -59,11 +59,10 @@ func (s *Store) DeleteSession(ctx context.Context, id []byte) error {
 	return err
 }
 
-// DeleteIdleSessions removes the sessions not used since before and says
-// how many. Their tokens are not revoked: GitLab keeps the person's grant,
-// so signing in again needs no new consent.
-func (s *Store) DeleteIdleSessions(ctx context.Context, before time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE seen_at < ?`, before.UnixMilli())
+// DeleteIdleSessions removes the sessions not used since seenBefore or
+// begun before createdBefore, and says how many.
+func (s *Store) DeleteIdleSessions(ctx context.Context, seenBefore, createdBefore time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE seen_at < ? OR created_at < ?`, seenBefore.UnixMilli(), createdBefore.UnixMilli())
 	if err != nil {
 		return 0, err
 	}

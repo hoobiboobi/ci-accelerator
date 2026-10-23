@@ -33,20 +33,9 @@ var cats = map[string]Cat{
 	"files":    {"files", "Files changed", "files", "built", "v_files"},
 	"node":     {"node", "Other node — not your change", "other node", "node", "v_node"},
 	"unknown":  {"unknown", "Files or node — unclear", "unclear", "unknown", "v_unknown"},
-	"evicted":  {"unknown", "Not in the cache", "evicted", "unknown", "v_unknown"},
+	"evicted":  {"node", "Not in the cache", "evicted", "node", "v_node"},
 	"failed":   {"failed", "Failed", "failed", "failed", "warn"},
 	"canceled": {"canceled", "Canceled", "canceled", "first", "x"},
-	"running":  {"running", "Running", "running", "first", "clock"},
-	"nobuild":  {"none", "No build on this box", "no build", "first", "job"},
-	// Jobs that built no image, by what GitLab says of them.
-	"passed":  {"passed", "Passed", "passed", "first", "check"},
-	"allowed": {"allowed", "Allowed to fail", "allowed to fail", "unknown", "warn"},
-	// A plan with -detailed-exitcode ends with code 2 when it finds changes.
-	"changes": {"changes", "Changes found", "changes found", "unknown", "warn"},
-	"waiting": {"waiting", "Waiting", "waiting", "first", "clock"},
-	"manual":  {"manual", "Manual", "manual", "first", "job"},
-	"skipped": {"skipped", "Skipped", "skipped", "first", "job"},
-	"done":    {"done", "Finished", "finished", "first", "job"},
 }
 
 // canceled says whether a build or step error is a cancellation (the job
@@ -91,7 +80,6 @@ func catOf(kind history.ReasonKind, buildErr string, built int) Cat {
 
 var icons = map[string]string{
 	"pipes":      `<path d="M2.5 4h11M2.5 8h11M2.5 12h7"/>`,
-	"insights":   `<path d="M2.5 13.5h11M4.5 11V8M8 11V4M11.5 11V6.5"/>`,
 	"nodes":      `<rect x="2.5" y="2.5" width="11" height="4.5" rx="1.2"/><rect x="2.5" y="9" width="11" height="4.5" rx="1.2"/><path d="M5 4.75h.01M5 11.25h.01"/>`,
 	"search":     `<circle cx="7" cy="7" r="4.3"/><path d="m10.3 10.3 3.2 3.2"/>`,
 	"sun":        `<circle cx="8" cy="8" r="2.8"/><path d="M8 1.8v1.4M8 12.8v1.4M1.8 8h1.4M12.8 8h1.4M3.6 3.6l1 1M11.4 11.4l1 1M3.6 12.4l1-1M11.4 4.6l1-1"/>`,
@@ -106,10 +94,8 @@ var icons = map[string]string{
 	"copy":       `<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.8c0-.7-.6-1.3-1.3-1.3H3.8c-.7 0-1.3.6-1.3 1.3v5.4c0 .7.6 1.3 1.3 1.3h1.7"/>`,
 	"x":          `<path d="m4 4 8 8M12 4l-8 8"/>`,
 	"check":      `<path d="m3.5 8.4 2.8 2.8 6.2-6.4"/>`,
-	"lock":       `<rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>`,
 	"out":        `<path d="M9 3H3.5v10H9M6.5 8h7m0 0-2.4-2.4M13.5 8l-2.4 2.4"/>`,
 	"log":        `<path d="M3 3.5h10v9H3z"/><path d="M5.5 6.5 7 8l-1.5 1.5M8.5 9.5h2"/>`,
-	"filter":     `<path d="M2.5 4h11M4.5 8h7M6.5 12h3"/>`,
 	"pipe":       `<circle cx="3.5" cy="8" r="1.6"/><circle cx="12.5" cy="8" r="1.6"/><path d="M5.1 8h5.8"/>`,
 	"job":        `<rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M5 6.5h6M5 9.5h3.5"/>`,
 	"warn":       `<path d="M8 2.2 14.2 13H1.8Z"/><path d="M8 6.5v3M8 11.3h.01"/>`,
@@ -126,10 +112,8 @@ var icons = map[string]string{
 	"s_image":    `<rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/>`,
 	"up":         `<path d="M8 13V3.5m0 0L4.5 7M8 3.5 11.5 7"/>`,
 	"clock":      `<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/>`,
-	"dfile":      `<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h2.5"/>`,
 	"tl":         `<path d="M2.5 4h6M4.5 8h7M7 12h6.5"/>`,
 	"steps":      `<path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"/>`,
-	"sum":        `<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 10.5V8M8 10.5V5.5M11 10.5V7"/>`,
 	"overview":   `<rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/>`,
 	"builds":     `<path d="M2.5 4h11M2.5 8h11M2.5 12h11"/>`,
 	"images":     `<path d="M8 2.2 13.5 5v6L8 13.8 2.5 11V5Z"/><path d="M2.5 5 8 7.8 13.5 5M8 7.8v6"/>`,

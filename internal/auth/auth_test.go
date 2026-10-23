@@ -626,3 +626,28 @@ func TestSignInAgainEndsTheOldSession(t *testing.T) {
 		t.Errorf("the old session's token is not revoked at GitLab: %v", e.gl.revoked)
 	}
 }
+
+// A session used every day still ends 30 days after sign-in: then GitLab
+// is asked again who this is and what they may read.
+func TestMaxAge(t *testing.T) {
+	e := setup(t)
+	cookie, _ := e.signIn(t, "alice", "/")
+	for day := 1; day <= 29; day++ {
+		e.clock.add(24 * time.Hour)
+		if v := e.load(t, cookie); v == nil {
+			t.Fatalf("ended on day %d, used every day", day)
+		}
+	}
+	e.clock.add(24*time.Hour + time.Minute)
+	if v := e.load(t, cookie); v != nil {
+		t.Error("kept past 30 days after sign-in")
+	}
+	e.signIn(t, "alice", "/")
+	e.clock.add(29 * 24 * time.Hour)
+	e.signIn(t, "alice", "/")
+	e.clock.add(2 * 24 * time.Hour)
+	// The first is 31 days old; the second, 2 days and unused, stays.
+	if n, err := e.a.Prune(context.Background()); err != nil || n != 1 {
+		t.Errorf("pruned %d, %v", n, err)
+	}
+}

@@ -34,18 +34,21 @@ gitlab:
   urlsFrom:
     configMap: ""
     key: urls
-  # A token that can read the projects' jobs (read_api), for job times and
-  # jobs of other runners on the pages: a Secret's key. Read only while a
-  # page shows a pipeline, once per finished pipeline. Without it, job
-  # times come from the job pods. Not with sign-in: GitLab is then read
-  # with each person's own token.
+  # A token that can read the projects' jobs (read_api): a Secret's key.
+  # The console reads with it the pipelines' jobs (how long each waited for
+  # a runner and ran, jobs of other runners) while its pages are in use,
+  # once per finished pipeline; GitLab's comparison of two commits, which
+  # settles "files or node"; and the end of a job's log on request. Without
+  # it, job times come from the job pods and "files or node" stays unclear.
+  # Not with sign-in: GitLab is then read with each person's own token.
   token:
     existingSecret: ""
     key: token
 
 # The runners' S3 cache (GitLab's cache: keyword): the console lists its
-# folders now and then and shows each project's caches in its insights,
-# with how often jobs found them (from their logs). Either the folders
+# folders now and then and shows each project's cache size and key count
+# on the Nodes page, with a warning when the bucket has no lifecycle rule
+# (the runners never delete a cache). Either the folders
 # here (a Secret with the keys accesskey and secretkey per folder; keys
 # that may only read are enough), or a ConfigMap with them as JSON (the
 # box writes one). The console may read only the Secrets named here.

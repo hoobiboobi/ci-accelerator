@@ -318,10 +318,6 @@ func TestNotFoundAndBadPaths(t *testing.T) {
 	if p := get(t, ts, "/builds/99999?x="+url.QueryEscape(evil)); p.status != http.StatusNotFound {
 		t.Errorf("unknown build with a query: %d", p.status)
 	}
-	// The first preview's insights page moved.
-	if p := get(t, ts, "/insights"); p.status != http.StatusMovedPermanently || p.header.Get("Location") != "/images" {
-		t.Errorf("/insights: %d %q", p.status, p.header.Get("Location"))
-	}
 }
 
 func TestStaticFilesAreVersioned(t *testing.T) {
@@ -970,7 +966,7 @@ func TestJobWithTwoBuilds(t *testing.T) {
 	keys, byPipe := pipelines(t, st)
 	bs := byPipe[keys[0]]
 	if len(bs) < 2 {
-		t.Skip("fixture pipeline with one build")
+		t.Fatal("the fixtures lost the case this test needs: a pipeline whose job ran two builds")
 	}
 	a, err := st.BuildPage(ctx, bs[0].ID)
 	if err != nil {
@@ -1120,5 +1116,35 @@ func TestPipelinesPage(t *testing.T) {
 	pp := get(t, ts, "/pipelines/"+keys[0])
 	if !strings.Contains(pp.body, "waited 4.0 s") || !strings.Contains(pp.body, `class="pstate ps-passed"`) {
 		t.Error("the pipeline page does not show the runner wait or the pipeline's status")
+	}
+}
+
+// Small things the pre-release review found: no directory listing of the
+// static files, the project switcher stays in its section, and the search
+// knows every section.
+func TestReviewFixes(t *testing.T) {
+	ts, _, _ := console(t)
+	if p := get(t, ts, "/static/"); p.status != http.StatusNotFound {
+		t.Errorf("/static/ answered %d: a listing of the static files", p.status)
+	}
+	if p := get(t, ts, "/pipelines"); !regexp.MustCompile(`href="/projects/[0-9a-f]+/\d+\?to=(/|%2f)pipelines"`).MatchString(p.body) {
+		t.Error("the project switcher on the pipelines page leaves the section")
+	}
+	m := regexp.MustCompile(`href="(/projects/[0-9a-f]+/\d+)\?to=`).FindStringSubmatch(get(t, ts, "/pipelines").body)
+	if m != nil {
+		c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		res, err := c.Get(ts.URL + m[1] + "?to=%2fpipelines")
+		if err != nil || res.Header.Get("Location") != "/pipelines" {
+			t.Errorf("switching project from the pipelines page: %v %v", err, res.Header.Get("Location"))
+		} else {
+			res.Body.Close()
+		}
+	}
+	if p := get(t, ts, "/"); strings.Contains(p.body, `?to=`) {
+		t.Error("the project switcher on the overview names a page")
+	}
+	idx := get(t, ts, "/search-index")
+	if !strings.Contains(idx.body, `"url":"/pipelines"`) {
+		t.Errorf("the search lacks the pipelines section: %.200s", idx.body)
 	}
 }

@@ -143,7 +143,7 @@ func fetch(t *testing.T, c *http.Client, ts *httptest.Server, method, path strin
 func TestSignInRequired(t *testing.T) {
 	ts, _, ids, _, browser := signedIn(t)
 	nobody := browser("")
-	for path, want := range map[string]int{"/": 302, "/pipelines/abcdef/1": 302, "/insights": 302,
+	for path, want := range map[string]int{"/": 302, "/pipelines/abcdef/1": 302, "/images": 302,
 		"/events": 401, "/search-index": 401, "/jobs/abcdef/1/log": 401, "/api/v1/builds": 401,
 		"/healthz": 200, "/static/console.css": 200} {
 		p := fetch(t, nobody, ts, "GET", path, nil)
@@ -160,8 +160,8 @@ func TestSignInRequired(t *testing.T) {
 	}
 	// One GitLab: the sign-in page goes straight there; with a message it
 	// shows itself.
-	if p := fetch(t, nobody, ts, "GET", "/auth/sign-in?to=/insights", nil); p.status != 302 || !strings.HasPrefix(p.header.Get("Location"), "/auth/sign-in/") ||
-		!strings.Contains(p.header.Get("Location"), "to=%2Finsights") {
+	if p := fetch(t, nobody, ts, "GET", "/auth/sign-in?to=/images", nil); p.status != 302 || !strings.HasPrefix(p.header.Get("Location"), "/auth/sign-in/") ||
+		!strings.Contains(p.header.Get("Location"), "to=%2Fimages") {
 		t.Errorf("sign-in with one GitLab: %d %q", p.status, p.header.Get("Location"))
 	}
 	p := fetch(t, nobody, ts, "GET", "/auth/sign-in?e=denied&to=//evil.example", nil)

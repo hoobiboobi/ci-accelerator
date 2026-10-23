@@ -25,7 +25,7 @@
     {{end}}{{end}}{{end}}
     <div class="projmenu" id="projMenu" hidden>
       <div class="hint">Project</div>
-      {{$cur := .Project}}{{range .Projects}}<a class="sbtn" href="/projects/{{.Instance}}/{{.ID}}" aria-current="{{if eq .ID $cur.ID}}true{{else}}false{{end}}">{{if eq .ID $cur.ID}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span></a>{{end}}
+      {{$cur := .Project}}{{range .Projects}}<a class="sbtn" href="/projects/{{.Instance}}/{{.ID}}{{with navPage $.Nav}}?to={{.}}{{end}}" aria-current="{{if eq .ID $cur.ID}}true{{else}}false{{end}}">{{if eq .ID $cur.ID}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span></a>{{end}}
       <div class="hint">{{if gt (len .Projects) 1}}The project filters every page.{{else}}One project on this box. With more, this filters every page.{{end}}</div>
     </div>
     <button class="sbtn search" id="searchBtn" type="button" aria-label="Search or jump to (Ctrl+K)">{{icon "search" 15}}<span class="lbl">Search or jump to…</span><kbd id="kbdK">⌘K</kbd></button>

@@ -62,6 +62,8 @@ type Server struct {
 	assets map[string]string // static file -> its URL with a content version
 	// Open event streams, bounded: each holds a connection.
 	streams chan struct{}
+	// Job logs being read from GitLab, bounded: each streams a whole log.
+	logs chan struct{}
 	// Heartbeat keeps idle streams open through proxies.
 	Heartbeat time.Duration
 	// APIWait is how long a page waits for GitLab's API.
@@ -80,6 +82,9 @@ type Server struct {
 
 // MaxStreams bounds the open live-update streams.
 const MaxStreams = 256
+
+// MaxLogReads bounds the job logs read from GitLab at once.
+const MaxLogReads = 4
 
 // The templates of each page besides the layout and the shared parts.
 var pageFiles = map[string][]string{
@@ -102,7 +107,7 @@ var pageFiles = map[string][]string{
 // error, caught by the tests.
 func New(s *store.Store, log *slog.Logger, opt Options) (*Server, error) {
 	srv := &Server{store: s, opt: opt, log: log, files: files,
-		streams: make(chan struct{}, MaxStreams), Heartbeat: 25 * time.Second, APIWait: 700 * time.Millisecond, now: time.Now}
+		streams: make(chan struct{}, MaxStreams), logs: make(chan struct{}, MaxLogReads), Heartbeat: 25 * time.Second, APIWait: 700 * time.Millisecond, now: time.Now}
 	if opt.Assets != nil {
 		srv.files = opt.Assets
 	}
@@ -161,10 +166,6 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /builds/{id}", s.build)
 	mux.HandleFunc("GET /builds/{id}/steps/{step}", s.step)
 	mux.HandleFunc("GET /nodes", s.nodes)
-	// Addresses of the first preview, kept so bookmarks still lead somewhere.
-	mux.HandleFunc("GET /insights", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/images", http.StatusMovedPermanently)
-	})
 	mux.HandleFunc("GET /projects/{instance}/{id}", s.chooseProject)
 	mux.HandleFunc("GET /search-index", s.index)
 	mux.HandleFunc("GET /events", s.events)
@@ -203,6 +204,11 @@ func Secure(h http.Handler) http.Handler {
 // otherwise.
 func cacheFor(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Files only: no listing of the directory.
+		if r.URL.Path == "" || strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Query().Get("v") != "" {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
@@ -340,7 +346,16 @@ func pinProject(sh *Shell, instance string, project uint64) {
 	}
 }
 
-var pagesOf = map[string]bool{"/": true, "/builds": true, "/images": true, "/nodes": true}
+var pagesOf = map[string]bool{"/": true, "/pipelines": true, "/builds": true, "/images": true, "/nodes": true}
+
+// navPage is the address of a section, for the project switcher to stay in it.
+func navPage(nav string) string {
+	switch nav {
+	case "pipelines", "builds", "images", "nodes":
+		return "/" + nav
+	}
+	return ""
+}
 
 func (s *Server) chooseProject(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseUint(r.PathValue("id"), 10, 64)
@@ -349,8 +364,9 @@ func (s *Server) chooseProject(w http.ResponseWriter, r *http.Request) {
 		s.notFound(w, r, "project")
 		return
 	}
+	// Secure where the console is reached over https: always with sign-in.
 	http.SetCookie(w, &http.Cookie{Name: "project", Value: k.String(), Path: "/", MaxAge: 365 * 24 * 3600,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		Secure: s.opt.Auth != nil || r.TLS != nil, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	to := r.URL.Query().Get("to")
 	if !pagesOf[to] {
 		to = "/"
@@ -427,6 +443,7 @@ var funcs = template.FuncMap{
 	"mul":      func(a, b int) int { return a * b },
 	"join":     strings.Join,
 	"projName": projName,
+	"navPage":  navPage,
 	"statuses": func() []Status {
 		out := make([]Status, len(statusKeys))
 		for i, k := range statusKeys {

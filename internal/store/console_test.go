@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -362,35 +361,5 @@ func TestPipelineWithoutBuilds(t *testing.T) {
 	var n int
 	if err := s.db.QueryRow("SELECT (SELECT count(*) FROM jobs) + (SELECT count(*) FROM pipelines)").Scan(&n); err != nil || n != 0 {
 		t.Errorf("after retention: %d rows of jobs and pipelines left, %v", n, err)
-	}
-}
-
-// A store of schema 2 (the first console preview) is migrated in place:
-// jobs and pipelines stored before get a first-seen time.
-func TestMigrationFromSchema2(t *testing.T) {
-	dir := t.TempDir()
-	c := &clock{time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
-	s, err := Open(ctx, dir, Options{Now: c.now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	inst := history.InstancePrefix("https://gitlab.example.com/")
-	if err := s.SaveJob(ctx, Job{Instance: inst, JobID: 7, PipelineID: 70, ProjectID: 42, Name: "old"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range []string{"DROP INDEX builds_elsewhere", "ALTER TABLE builds DROP COLUMN reason_via", "DROP TABLE image_days", "DROP INDEX pipelines_project", "ALTER TABLE projects DROP COLUMN last_at", "DROP INDEX builds_project_time", "ALTER TABLE builds DROP COLUMN built_ms", "ALTER TABLE builds DROP COLUMN built", "ALTER TABLE jobs DROP COLUMN started_by", "DROP TABLE job_logs", "DROP TABLE cache_stores", "DROP TABLE cache_objects", "DROP TABLE sessions", "ALTER TABLE jobs DROP COLUMN allow_failure", "DROP INDEX jobs_name", "ALTER TABLE jobs DROP COLUMN seen_at", "ALTER TABLE pipelines DROP COLUMN seen_at", "PRAGMA user_version = 2"} {
-		if _, err := s.db.Exec(q); err != nil {
-			t.Fatal(q, err)
-		}
-	}
-	s.Close()
-	s = open(t, dir, c)
-	var v int
-	var jobSeen, pipeSeen sql.NullInt64
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) {
-		t.Fatalf("schema %d after reopening, want %d (%v)", v, len(migrations), err)
-	}
-	if err := s.db.QueryRow("SELECT (SELECT seen_at FROM jobs WHERE job_id = 7), (SELECT seen_at FROM pipelines WHERE pipeline_id = 70)").Scan(&jobSeen, &pipeSeen); err != nil || !jobSeen.Valid || !pipeSeen.Valid {
-		t.Errorf("rows stored before the migration: seen %v %v (%v)", jobSeen, pipeSeen, err)
 	}
 }

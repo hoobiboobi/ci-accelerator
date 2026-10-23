@@ -70,6 +70,9 @@ type Config struct {
 	Key []byte
 	// Idle ends a session not used for that long (default 7 days).
 	Idle time.Duration
+	// MaxAge ends a session that long after sign-in, used or not (default
+	// 30 days): then GitLab is asked again.
+	MaxAge time.Duration
 	// Allow and Deny are how long GitLab's answer on a project is kept
 	// (default 10 minutes and 90 seconds).
 	Allow, Deny time.Duration
@@ -125,6 +128,9 @@ func ParseKey(b []byte) ([]byte, error) {
 // New checks cfg. client must know every instance's URL: the console
 // reads GitLab with it.
 func New(cfg Config, st *store.Store, client *gitlab.Client, log *slog.Logger) (*Auth, error) {
+	if cfg.MaxAge == 0 {
+		cfg.MaxAge = 30 * 24 * time.Hour
+	}
 	if cfg.Idle == 0 {
 		cfg.Idle = 7 * 24 * time.Hour
 	}
@@ -456,7 +462,7 @@ func (a *Auth) Load(w http.ResponseWriter, r *http.Request) (*Viewer, error) {
 	}
 	now := a.cfg.Now()
 	in := a.insts[x.Instance]
-	if in == nil || now.Sub(x.Seen) > a.cfg.Idle {
+	if in == nil || now.Sub(x.Seen) > a.cfg.Idle || now.Sub(x.Created) > a.cfg.MaxAge {
 		return nil, a.store.DeleteSession(r.Context(), id)
 	}
 	if _, err := a.openTokens(id, x.Instance, x.Token); err != nil {
@@ -532,7 +538,7 @@ func (a *Auth) revoke(ctx context.Context, in *inst, token string) error {
 
 // Prune ends the sessions idle for longer than the idle time.
 func (a *Auth) Prune(ctx context.Context) (int64, error) {
-	return a.store.DeleteIdleSessions(ctx, a.cfg.Now().Add(-a.cfg.Idle))
+	return a.store.DeleteIdleSessions(ctx, a.cfg.Now().Add(-a.cfg.Idle), a.cfg.Now().Add(-a.cfg.MaxAge))
 }
 
 // ---- the viewer's token ----

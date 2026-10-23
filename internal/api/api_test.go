@@ -77,7 +77,7 @@ func TestHealth(t *testing.T) {
 		t.Errorf("healthy: %d", w.Code)
 	}
 	f.down = true
-	if w := get(t, Handler(f), "/healthz"); w.Code != http.StatusServiceUnavailable {
-		t.Errorf("store down: %d", w.Code)
+	if w := get(t, Handler(f), "/healthz"); w.Code != http.StatusServiceUnavailable || w.Body.String() != "store unavailable\n" {
+		t.Errorf("store down: %d %q (the cause belongs in the log)", w.Code, w.Body.String())
 	}
 }

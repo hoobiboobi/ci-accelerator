@@ -30,15 +30,15 @@ look at it:
 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "console.fullname" . }} {{ .Values.service.port }}
 
-then open http://localhost:{{ .Values.service.port }}/ (why images were rebuilt,
-builds, images, build nodes) or
-http://localhost:{{ .Values.service.port }}/api/v1/builds?limit=10.
+then open http://localhost:{{ .Values.service.port }}/ (Overview, Pipelines, Builds,
+Images, Nodes) or http://localhost:{{ .Values.service.port }}/api/v1/builds?limit=10.
 {{- end }}
 {{- if and (not (dig "token" "existingSecret" "" .Values.gitlab)) (not (include "console.signIn" .)) }}
 
 With a GitLab token that can read the projects' jobs
-(gitlab.token.existingSecret), a build's page also shows the end of its
-job's log on request.
+(gitlab.token.existingSecret), the console also shows how long jobs waited
+for a runner, settles "files or node" by comparing commits, and shows the
+end of a job's log on request.
 {{- end }}
 
 The store is on the PersistentVolumeClaim {{ include "console.pvcName" . }}

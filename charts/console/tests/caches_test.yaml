@@ -41,6 +41,21 @@ tests:
           path: 'spec.template.spec.containers[0].env'
           content: {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
       - equal: {path: spec.template.spec.automountServiceAccountToken, value: true}
+  # Listing a bucket every few seconds would be a loop.
+  - it: refuses to list the folders more often than once a minute
+    set:
+      caches.fromConfigMap: x
+      caches.every: 30s
+    template: deployment.yaml
+    asserts:
+      - failedTemplate: {}
+  - it: takes a minute or more
+    set:
+      caches.fromConfigMap: x
+      caches.every: 90s
+    template: deployment.yaml
+    asserts:
+      - contains: {path: 'spec.template.spec.containers[0].args', content: "-cache-every=90s"}
   - it: needs every field of a folder
     set:
       caches.stores: [{server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1, existingSecret: rc}]
