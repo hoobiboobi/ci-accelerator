@@ -44,11 +44,6 @@ SHELLCHECK_SHA256_linux_amd64  := b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e
 # written for; make validate renders it with the fragment.
 RUNNER_CHART_VERSION := 0.93.0
 RUNNER_CHART_SHA256  := a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
-# Metrics and traces storage of the umbrella chart.
-VM_CHART_VERSION := 0.48.0
-VM_CHART_SHA256  := 51d26125182388a734f5d9dc65086811436a67d5aede08fde5f2a4247b532381
-VT_CHART_VERSION := 0.1.11
-VT_CHART_SHA256  := 59471db9c6e053fc740b1ad0eb6365dc872bba3f0c9e06f5780ddde9655c9e88
 
 # Helm, kind and kubectl for CI runners (Linux), where nothing is installed:
 # `make ci-tools CI_HELM_VERSION=v3.22.0` puts them into .tools/bin.
@@ -93,9 +88,6 @@ export HELM_DATA_HOME HELM_PLUGINS
 KUBECONFORM := $(TOOLS)/kubeconform-$(KUBECONFORM_VERSION)/kubeconform
 SHELLCHECK  := $(TOOLS)/shellcheck-v$(SHELLCHECK_VERSION)/shellcheck
 RUNNER_CHART := $(TOOLS)/charts/gitlab-runner-$(RUNNER_CHART_VERSION).tgz
-VM_CHART     := $(TOOLS)/charts/victoria-metrics-single-$(VM_CHART_VERSION).tgz
-VT_CHART     := $(TOOLS)/charts/victoria-traces-single-$(VT_CHART_VERSION).tgz
-VICTORIA_RELEASES := https://github.com/VictoriaMetrics/helm-charts/releases/download
 CI_BIN      := $(TOOLS)/bin
 CI_HELM     := $(TOOLS)/helm-$(CI_HELM_VERSION)/helm
 CI_KIND     := $(TOOLS)/kind-$(KIND_VERSION)/kind
@@ -131,7 +123,7 @@ define fetch
 endef
 
 .PHONY: tools
-tools: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) $(KUBECONFORM) $(SHELLCHECK) $(RUNNER_CHART) $(VM_CHART) $(VT_CHART) ## Install the pinned test tools and charts into .tools/
+tools: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) $(KUBECONFORM) $(SHELLCHECK) $(RUNNER_CHART) ## Install the pinned test tools and charts into .tools/
 
 # Installed from a verified, extracted copy: works on Helm 3 and 4 and needs
 # no signature flags.
@@ -150,12 +142,6 @@ $(KUBECONFORM):
 
 $(RUNNER_CHART):
 	$(call fetch,https://gitlab-charts.s3.amazonaws.com/gitlab-runner-$(RUNNER_CHART_VERSION).tgz,$@,$(RUNNER_CHART_SHA256))
-
-$(VM_CHART):
-	$(call fetch,$(VICTORIA_RELEASES)/victoria-metrics-single-$(VM_CHART_VERSION)/victoria-metrics-single-$(VM_CHART_VERSION).tgz,$@,$(VM_CHART_SHA256))
-
-$(VT_CHART):
-	$(call fetch,$(VICTORIA_RELEASES)/victoria-traces-single-$(VT_CHART_VERSION)/victoria-traces-single-$(VT_CHART_VERSION).tgz,$@,$(VT_CHART_SHA256))
 
 .PHONY: ci-tools
 ci-tools: $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) $(CI_GO) ## CI only (Linux): pinned helm (CI_HELM_VERSION), kind, kubectl and Go into .tools/bin
@@ -196,11 +182,11 @@ $(SHELLCHECK):
 UMBRELLA := charts/ci-accelerator
 
 .PHONY: deps
-deps: $(RUNNER_CHART) $(VM_CHART) $(VT_CHART) ## Vendor the umbrella chart's dependencies into charts/ci-accelerator/charts/
+deps: $(RUNNER_CHART) ## Vendor the umbrella chart's dependencies into charts/ci-accelerator/charts/
 	@mkdir -p $(UMBRELLA)/charts && rm -f $(UMBRELLA)/charts/*.tgz
 	@$(HELM) package charts/buildkit -d $(UMBRELLA)/charts >/dev/null
 	@$(HELM) package $(CONSOLE) -d $(UMBRELLA)/charts >/dev/null
-	@cp $(RUNNER_CHART) $(VM_CHART) $(VT_CHART) $(UMBRELLA)/charts/
+	@cp $(RUNNER_CHART) $(UMBRELLA)/charts/
 
 .PHONY: lint
 lint: $(SHELLCHECK) deps ## helm lint --strict (default and example values), chart LICENSE copies, shellcheck

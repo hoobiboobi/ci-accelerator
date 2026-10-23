@@ -8,7 +8,7 @@ How a version gets from `main` to users. The rules behind it (patch vs minor, up
 
 - **Patch or minor?** A patch is fixes only. A minor brings something new that is ready and on by default.
 - **Is `main` releasable?** Unfinished work must be switched off by default. If `main` already holds changes that should not ship in a patch, release the patch from a branch instead (see [A patch from a release branch](#a-patch-from-a-release-branch)).
-- **Pinned components.** Look at the releases and security advisories of everything that is pinned: BuildKit, cert-manager, the gitlab-runner chart and image, VictoriaMetrics, VictoriaTraces, the tools in the Makefile, and the actions in the workflows. Bump what has a fix and is at least two weeks old.
+- **Pinned components.** Look at the releases and security advisories of everything that is pinned: BuildKit, cert-manager, the gitlab-runner chart and image, the tools in the Makefile, and the actions in the workflows. Bump what has a fix and is at least two weeks old.
 
 ## 2. The release pull request
 

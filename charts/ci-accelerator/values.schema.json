@@ -8,8 +8,6 @@
     "jobsNamespace",
     "buildkit",
     "gitlab-runner",
-    "victoria-metrics-single",
-    "victoria-traces-single",
     "preflight"
   ],
   "properties": {
@@ -96,26 +94,12 @@
       }
     },
     "victoria-metrics-single": {
-      "type": "object",
-      "required": [
-        "enabled"
-      ],
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        }
-      }
+      "description": "Removed in 0.2.0: the box no longer installs it. Ignored; the install notes warn while it is set.",
+      "type": ["object", "null"]
     },
     "victoria-traces-single": {
-      "type": "object",
-      "required": [
-        "enabled"
-      ],
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        }
-      }
+      "description": "Removed in 0.2.0: the box no longer installs it. Ignored; the install notes warn while it is set.",
+      "type": ["object", "null"]
     },
     "runnerTiers": {
       "type": "object",

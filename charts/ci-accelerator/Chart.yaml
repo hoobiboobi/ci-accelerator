@@ -37,11 +37,3 @@ dependencies:
     version: 0.93.0
     repository: https://charts.gitlab.io
     condition: gitlab-runner.enabled
-  - name: victoria-metrics-single
-    version: 0.48.0
-    repository: https://victoriametrics.github.io/helm-charts/
-    condition: victoria-metrics-single.enabled
-  - name: victoria-traces-single
-    version: 0.1.11
-    repository: https://victoriametrics.github.io/helm-charts/
-    condition: victoria-traces-single.enabled

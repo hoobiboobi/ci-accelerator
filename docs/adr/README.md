@@ -23,8 +23,8 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0017](0017-cert-manager-prerequisite.md) | cert-manager is a prerequisite, never a subchart |
 | [0018](0018-otlp-only.md) | Metrics and traces only via OTLP push |
 | [0019](0019-network-policy.md) | A NetworkPolicy for daemons and builds; no per-step network |
-| [0020](0020-bundled-observability.md) | Bundled metrics and traces storage |
-| [0021](0021-observability-access.md) | Builds can reach the observability data (accepted for v0.1) |
+| [0020](0020-bundled-observability.md) | Bundled metrics and traces storage (superseded by 0039) |
+| [0021](0021-observability-access.md) | Builds can reach the observability data (accepted for v0.1; ended by 0039) |
 | [0022](0022-license.md) | Apache License 2.0 |
 | [0023](0023-values-compatibility.md) | Values compatibility from 0.1.0 on |
 | [0024](0024-github-actions-ci.md) | CI on GitHub Actions with the same make targets |
@@ -42,3 +42,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0036](0036-infrastructure-runs-in-the-console.md) | Terraform, OpenTofu and Terragrunt runs in the console (superseded by 0037) |
 | [0037](0037-console-builds-only.md) | Console v2: image builds only, four sections, five outcomes |
 | [0038](0038-files-or-node-from-gitlab.md) | Files or node: settled with GitLab's comparison of two commits |
+| [0039](0039-no-bundled-observability.md) | No bundled metrics and traces storage |

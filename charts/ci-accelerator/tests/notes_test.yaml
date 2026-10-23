@@ -23,30 +23,20 @@ tests:
       - matchRegexRaw:
           pattern: 'No runner is installed: configure yours with integrations/gitlab-runner/values.yaml\n\(BUILDKIT_REMOTE_ADDR=tcp://box-buildkit.ci-accelerator.svc:1234\)'
 
-  - it: shows how to look at metrics and traces and warns who can reach them
+  - it: says nothing about metrics storage by default
     asserts:
-      - matchRegexRaw:
-          pattern: 'port-forward svc/box-victoria-metrics-single-server 8428'
-      - matchRegexRaw:
-          pattern: 'port-forward svc/box-vt-single-server 10428'
-      - matchRegexRaw:
-          pattern: 'Builds can reach this storage: they can read other projects'' traces'
-      - matchRegexRaw:
-          pattern: 'traces/01051b90\$\(printf ''%012x%012x'' <pipeline> <job>\)'
-      - matchRegexRaw:
-          pattern: '"resource_attr:ci.pipeline.id":"<pipeline>" \| uniq by \(trace_id, "resource_attr:ci.job.id"\)'
+      - notMatchRegexRaw:
+          pattern: Victoria
 
-  - it: says nothing about storage that is switched off
+  - it: warns that the storage of 0.1.0 is gone when its values remain
     set:
-      victoria-metrics-single.enabled: false
-      victoria-traces-single.enabled: false
-      buildkit.otel.metricsEndpoint: ""
-      buildkit.otel.tracesEndpoint: ""
+      victoria-metrics-single.enabled: true
+      buildkit.otel.metricsEndpoint: 'http://{{ include "ci-accelerator.vmService" . }}.{{ .Release.Namespace }}.svc:8428/opentelemetry/v1/metrics'
     asserts:
-      - notMatchRegexRaw:
-          pattern: port-forward
-      - notMatchRegexRaw:
-          pattern: Metrics and traces of the daemons
+      - matchRegexRaw:
+          pattern: 'WARNING: VictoriaMetrics and VictoriaTraces are no longer part of the box'
+      - matchRegexRaw:
+          pattern: 'set them to ""'
 
   - it: says the console without sign-in stays inside the cluster
     set:
