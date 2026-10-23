@@ -1,10 +1,11 @@
 # e2e-only: the box's console, from the image `make console-image` loads
-# into kind, on the control-plane node like the storage.
+# into kind (tag e2e: a run never replaces the :dev image of a local
+# install), on the control-plane node like the storage.
 console:
   enabled: true
   image:
     repository: ci-accelerator-console
-    tag: dev
+    tag: e2e
     pullPolicy: Never
   persistence:
     size: 1Gi

@@ -75,3 +75,7 @@ kind-certs/
 !charts/**/templates/**
 !charts/**/tests/**
 !test/e2e/fixtures/**
+
+# --- build outputs ---
+/console
+/.ui-shots/

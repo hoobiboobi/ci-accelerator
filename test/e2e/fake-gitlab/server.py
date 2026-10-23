@@ -9,21 +9,39 @@ Runner side (gitlab-runner 19.4, network/gitlab.go):
   PUT    /api/v4/jobs/<id>           final state (200)
   DELETE /api/v4/runners...          unregister on shutdown (204)
 
+Console sign-in (OAuth application e2e-console / e2e-console-secret; the
+test plays the browser and brings the code itself, a code names a person):
+  POST   /oauth/token                authorization_code and refresh_token grants
+  POST   /oauth/revoke               recorded
+  GET    /api/v4/user                the token's person (alice, bob, root)
+  GET    /api/v4/projects/<id>/jobs  200 for alice and root, 404 for others
+  GET    /api/v4/projects/<id>/pipelines/<id>/jobs   [] for alice and root
 Test side:
-  POST   /e2e/jobs                   {"image": ..., "script": [...], "pipeline_id": n} -> {"id": n}
+  POST   /e2e/jobs                   {"image": ..., "script": [...], "pipeline_id": n,
+                                      "cache": [...] (as GitLab sends it), "runner": token} -> {"id": n}
+                                     A job with "runner" goes only to the runner with that token,
+                                     one without it to any other.
   GET    /e2e/jobs/<id>              {"state": ..., "trace": ...}
+  GET    /e2e/revoked                tokens revoked so far
 
 Not GitLab: no git, artifacts, cache or services. Python stdlib only.
 """
 
+import base64
 import json
 import re
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOCK = threading.Lock()
 QUEUE = []  # job ids waiting for a runner
 JOBS = {}  # id -> {"spec": ..., "state": ..., "trace": ...}
+TOKENS = {}  # live access token -> person
+REFRESH = {}  # live refresh token -> access token it came with
+REVOKED = []
+PEOPLE = {"alice": 7, "bob": 8, "root": 1}
+READERS = {"alice", "root"}  # may read every project's jobs
 
 
 def job_payload(job_id, spec, host):
@@ -55,6 +73,7 @@ def job_payload(job_id, spec, host):
             {"key": "CI_COMMIT_AUTHOR", "value": "E2E Author <e2e@example.com>", "public": True},
         ],
         "steps": [{"name": "script", "script": spec["script"], "timeout": timeout, "when": "on_success", "allow_failure": False}],
+        "cache": spec.get("cache", []),
         "image": {"name": spec["image"]},
         "features": {"trace_sections": True},
     }
@@ -78,13 +97,61 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(n) if n else b""
 
+    def _issue(self, person):
+        n = len(TOKENS) + len(REVOKED) + len(REFRESH) + 1
+        access, refresh = "at-%s-%d" % (person, n), "rt-%s-%d" % (person, n)
+        TOKENS[access], REFRESH[refresh] = person, access
+        return {"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 7200,
+                "scope": "openid read_api", "created_at": 0}
+
+    def _oauth(self, body):
+        if self.headers.get("Authorization") != "Basic " + base64.b64encode(b"e2e-console:e2e-console-secret").decode():
+            return self._send(401, {"error": "invalid_client"})
+        form = dict(urllib.parse.parse_qsl(body.decode()))
+        with LOCK:
+            if self.path == "/oauth/revoke":
+                tok = form.get("token", "")
+                REVOKED.append(tok)
+                TOKENS.pop(tok, None)
+                for r in [r for r, a in REFRESH.items() if a == tok]:
+                    del REFRESH[r]
+                return self._send(200, {})
+            if form.get("grant_type") == "authorization_code":
+                person = form.get("code", "").split(":")[0]
+                if person not in PEOPLE or not form.get("code_verifier"):
+                    return self._send(400, {"error": "invalid_grant"})
+                return self._send(200, self._issue(person))
+            if form.get("grant_type") == "refresh_token":
+                old = REFRESH.pop(form.get("refresh_token", ""), None)
+                person = TOKENS.pop(old, None) if old else None
+                if not person:
+                    return self._send(400, {"error": "invalid_grant"})
+                return self._send(200, self._issue(person))
+        return self._send(400, {"error": "unsupported_grant_type"})
+
+    def _person(self):
+        auth = self.headers.get("Authorization", "")
+        with LOCK:
+            return TOKENS.get(auth[len("Bearer "):]) if auth.startswith("Bearer ") else None
+
     def do_POST(self):
         body = self._body()
+        if self.path in ("/oauth/token", "/oauth/revoke"):
+            return self._oauth(body)
         if self.path == "/api/v4/runners/verify":
-            return self._send(200, {"id": 1, "token": "verified", "token_expires_at": None})
+            # A runner keeps the token it has (as with authentication tokens).
+            token = (json.loads(body or b"{}") or {}).get("token", "")
+            return self._send(200, {"id": 1, "token": token, "token_expires_at": None})
         if self.path == "/api/v4/jobs/request":
+            token = (json.loads(body or b"{}") or {}).get("token", "")
             with LOCK:
-                job_id = QUEUE.pop(0) if QUEUE else None
+                job_id = None
+                for queued in QUEUE:
+                    wanted = JOBS[queued]["spec"].get("runner")
+                    if wanted == token or (wanted is None and not token.startswith("glrt-e2e-tier")):
+                        job_id = queued
+                        QUEUE.remove(queued)
+                        break
                 if job_id is not None:
                     JOBS[job_id]["state"] = "running"
                     return self._send(201, job_payload(job_id, JOBS[job_id]["spec"], self.headers.get("Host", "fake-gitlab")))
@@ -135,6 +202,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, job)
         if self.path == "/healthz":
             return self._send(200, {"ok": True})
+        if self.path == "/e2e/revoked":
+            with LOCK:
+                return self._send(200, list(REVOKED))
+        path = self.path.split("?")[0]
+        if path == "/api/v4/user" or path.startswith("/api/v4/projects/"):
+            person = self._person()
+            if not person:
+                return self._send(401, {"message": "401 Unauthorized"})
+            if path == "/api/v4/user":
+                return self._send(200, {"id": PEOPLE[person], "username": person, "name": person.title()})
+            if person not in READERS:
+                return self._send(404, {"message": "404 Project Not Found"})
+            if re.match(r"^/api/v4/projects/\d+/(jobs|pipelines/\d+/jobs)$", path):
+                return self._send(200, [])
         return self._send(404, {"message": "not faked: GET " + self.path})
 
     def log_message(self, fmt, *args):

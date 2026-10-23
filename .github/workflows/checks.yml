@@ -5,7 +5,7 @@ name: checks
 
 on:
   push:
-    branches: [main]
+    branches: [main, "wip/**"]
   pull_request:
   workflow_dispatch:
 
