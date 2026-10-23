@@ -40,9 +40,15 @@ workflow copies them into the GitHub release.
   its new `pod_annotations` block. Job pods now carry the commit author's
   name and e-mail address, readable by whoever can read pods in the jobs
   namespace.
-- **Console (preview, off).** The box gains a `console` subchart, off by
-  default (`console.enabled`). Its daemons' NetworkPolicy gains one ingress
-  rule for console pods of the release namespace.
+- **The console is on by default.** The box gains a `console` subchart
+  (`console.enabled`, true): one Deployment and a 10 GiB volume from the
+  default StorageClass (`console.persistence.*`), a client certificate from
+  the daemons' CA, a Role that reads the pods of the jobs namespace, and
+  one ingress rule on the daemons' NetworkPolicy. A cluster without a
+  default StorageClass needs `console.persistence.storageClass` or
+  `console.enabled=false`, or the install waits for the volume. With
+  `--reuse-values` an upgrade keeps it off (the old values have no such
+  key); `--reset-then-reuse-values` turns it on.
 - **The daemons restart once.** Every daemon now carries its node as a
   worker label (`ci-accelerator.io/node`), and keeps 1000 build records
   (48 h) for the console instead of buildkit's 50 (`config.history`, in

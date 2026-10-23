@@ -161,11 +161,12 @@ gitlab-runner:
 runnerTiers: {}
 
 # The console: reads every daemon's build history and the CI job pods, and
-# explains each build. Off by default. Its Service is ClusterIP
-# only; without sign-in (console.signIn) it shows everything to whoever
-# reaches it. See charts/console for every value.
+# explains each build. On by default (false keeps it off): it needs a
+# volume (the default StorageClass, or console.persistence.*). Its Service
+# is ClusterIP only; without sign-in (console.signIn) it shows everything
+# to whoever reaches it. See charts/console for every value.
 console:
-  enabled: false
+  enabled: true
   # The runner's GitLab URL, from a ConfigMap this chart writes.
   gitlab:
     urlsFrom:

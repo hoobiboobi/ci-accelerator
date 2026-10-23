@@ -15,10 +15,17 @@ capabilities:
   apiVersions:
     - cert-manager.io/v1
 tests:
-  # A disabled subchart's templates are not rendered at all (helm-unittest
-  # cannot select them), so the default shows in this chart's own ConfigMap.
-  - it: is off by default
+  # On by default since 0.2.0; console.enabled=false keeps it off. A
+  # disabled subchart's templates are not rendered at all (helm-unittest
+  # cannot select them), so this chart's own ConfigMap shows it.
+  - it: is on by default
     template: console-gitlab.yaml
+    asserts:
+      - hasDocuments: { count: 1 }
+  - it: stays off with console.enabled=false
+    template: console-gitlab.yaml
+    set:
+      console.enabled: false
     asserts:
       - hasDocuments: { count: 0 }
 

@@ -70,7 +70,7 @@ Numbers from the production setup this project is derived from:
   bucket, and more runners (tiers) with their own tags, job size,
   placement and cache, each its own pod
   ([docs/runner-cache.md](docs/runner-cache.md)).
-- **The console (optional, off by default: `console.enabled=true`):** why
+- **The console (on by default; `console.enabled=false` leaves it out):** why
   an image build was slow or not cached, and whether your change or the
   build farm caused it. Five sections:
   - Overview: rebuild reasons, ranked by the build time they cost;
@@ -148,9 +148,9 @@ production: one node, no high availability, and the console has no sign-in.
     --namespace cert-manager --create-namespace --set crds.enabled=true
   ```
 
-- **A default StorageClass,** if you enable the console: it keeps its
-  history on a volume (or set `console.persistence.storageClass` or
-  `console.persistence.existingClaim`).
+- **A default StorageClass,** for the console's volume (or set
+  `console.persistence.storageClass` or `console.persistence.existingClaim`,
+  or leave the console out with `console.enabled=false`).
 - **A CNI that enforces NetworkPolicy** (Calico, Cilium, kindnet, ...).
   Without one, the daemons accept connections from any namespace and builds
   can reach cloud instance metadata; mutual TLS still applies.
@@ -229,8 +229,9 @@ A reusable CI component that does this is planned.
 
 ### The console
 
-The console is off by default. To switch it on with a GitLab token, put a
-token with `read_api` into a Secret and add values like these:
+The console is on by default. Give it a GitLab token with `read_api` for
+the runner's wait times and the commit comparisons: put the token into a
+Secret and add values like these:
 
 ```sh
 kubectl -n ci-accelerator create secret generic console-gitlab-token --from-literal=token=glpat-...
@@ -241,7 +242,6 @@ global:
   console:
     url: https://ci-console.example.com   # optional: every job's log links to its page
 console:
-  enabled: true
   gitlab:
     token:
       existingSecret: console-gitlab-token
