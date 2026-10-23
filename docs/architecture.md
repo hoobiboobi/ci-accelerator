@@ -165,6 +165,31 @@ Each daemon names itself in two ways:
   An unset variable gives an empty value; a commit title reaches the pod as
   text, never expanded.
 
+## The console
+
+The console (`console.enabled`, off by default) is one pod in the box
+namespace. It only reads; nothing it does changes a build.
+
+- **Build history from the daemons.** It finds the daemons through the
+  headless Service and reads each one's build history over the daemons'
+  TLS port (1234), with a client certificate of its own from the daemons'
+  CA. The daemons' NetworkPolicy has an ingress rule that admits pods
+  labelled `ci-accelerator.io/component: console`.
+- **Job data from the job pods.** A Role in the jobs namespace lets it get,
+  list and watch pods. The pods' annotations tie each build to its
+  pipeline, job, project and commit; the trace id ties the build record to
+  the job.
+- **GitLab's API, outbound and on demand.** With a token or with sign-in,
+  it reads a pipeline's jobs while someone looks at pipelines, compares two
+  commits to settle "files or node", and reads the end of a job's log when
+  someone asks for it. It waits when GitLab rate-limits. GitLab never needs
+  to reach the console: there are no webhooks, and with sign-in the browser
+  carries the redirects.
+- **Its store** is SQLite on a ReadWriteOnce volume (one replica,
+  `Recreate`). Builds are kept in full for 30 days (`retention.days`);
+  each image's daily figures (builds by outcome, build times) for a year;
+  step output for 7 days. The volume is kept when the release is removed.
+
 ## Rollouts and restarts
 
 **What restarts the daemons.** The pod template changes, so every daemon

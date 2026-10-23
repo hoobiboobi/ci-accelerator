@@ -4,7 +4,8 @@
 > [ADR-0037](../adr/0037-console-builds-only.md). The data model, store and
 > reasons below still apply.
 
-Status: **draft, reviewed**. Nothing here is implemented yet. The answers
+Status: **draft, reviewed**, then implemented, and later replaced as the
+note above says. The text below is the draft as it was. The answers
 from the review are listed at the end; sign-in, the GitLab API and the
 kept build data are decided in
 [ADR-0029](../adr/0029-console-gitlab-and-build-data.md).
@@ -283,7 +284,8 @@ fixture in the collector's tests.
   "received from", the Dockerfile text with each step's lines, and each
   step's output (capped per step, known secret formats masked). The trace
   blob, the largest part, is read only for its trace id.
-- **Retention:** derived data 90 days by default, step output 7 days
+- **Retention:** derived data 90 days by default (30 days since
+  ADR-0037), step output 7 days
   (both configurable).
 - **The history must outlive collector downtime.** With the console
   enabled, the chart raises the daemons' `[history]` limits (proposal:
@@ -404,7 +406,8 @@ not in v0.2.
 ### Retention and migrations
 
 - **Daily:**
-  - delete builds older than 90 days in small batches (steps go with them);
+  - delete builds older than 90 days (30 since ADR-0037) in small batches
+    (steps go with them);
   - delete Dockerfiles and step definitions not seen within that time;
   - return free pages to the file system (`auto_vacuum = INCREMENTAL`);
   - delete output files older than 7 days.
@@ -452,7 +455,8 @@ not in v0.2.
 
 ## Decisions from the review
 
-1. **Retention:** derived data is kept 90 days by default (configurable).
+1. **Retention:** derived data is kept 90 days by default (configurable;
+   30 days since ADR-0037).
    Log excerpts of failed builds are kept 7 days.
 2. **History limits:** raising the daemons' `[history]` limits when the
    console is enabled is accepted (proposal: 2000 records / 7 days). The

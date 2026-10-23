@@ -1,4 +1,4 @@
-# 0037. Console v2: image builds only, four sections, five outcomes
+# 0037. Console v2: image builds only, five sections, five outcomes
 
 Date: 2026-10-23
 
@@ -9,7 +9,7 @@ The console grew pages for every job of a pipeline, the runner cache per job, an
 ## Decision
 
 - **One question:** why was this image build slow or not cached: the change or the build farm? Jobs without an image build get no pages; they appear only as grey bars on the pipeline's timeline, which shows every job in the order they ran (the author's choice after the first version dropped it: it shows which jobs wait for which). Terraform, OpenTofu and Terragrunt views (ADR-0036) and per-job runner cache views (ADR-0033) are dropped. The Nodes page keeps the bucket's size per project and the lifecycle warning. The S3 cache and runner tiers in the charts stay.
-- **Four sections:**
+- **Five sections:**
   - **Overview:** rebuild reasons grouped like error fingerprints and ranked by the build time they cost. (A strip of each image's last 30 builds was dropped from it: without its legend nobody could read it; it stays on the Images page.)
   - **Pipelines** (added after the author's review the same day): each pipeline's jobs by stage on a time axis, with the time each waited for a runner (GitLab's `queued_duration`) and ran; a pipeline opens into its full timeline, each image build into stages and steps.
   - **Builds:** every image build of every branch, newest first. Filters for branch, outcome, image and "mine" live in the URL; rows can be grouped by pipeline; pages are cursor-based.

@@ -19,6 +19,8 @@ runner end to end. See "What the e2e proves" below.
 | Small jobs | 50m CPU / 64Mi requested, 512Mi memory limit: the build runs in the daemon |
 | Isolation | Jobs run in their own namespace (`runners.jobNamespace`, Pod Security `baseline` is enough), without a Kubernetes API token |
 | Least privilege | The runner gets only the permissions the Kubernetes executor needs in the jobs namespace, not the chart's default `*` on core resources |
+| Console link (optional) | With `CI_ACCELERATOR_CONSOLE_URL` in `environment` (commented out in `values.yaml`), the `pre_build_script` prints the job's page in the console into the job's log |
+| S3 cache (optional) | A commented `[runners.cache]` block for GitLab's `cache:` keyword in S3-compatible storage; see [docs/runner-cache.md](../../docs/runner-cache.md) for the bucket, its layout and a lifecycle rule |
 | Traces | A `pre_build_script` exports `TRACEPARENT` (one trace per job, its id derived from the pipeline and job ids) and `OTEL_RESOURCE_ATTRIBUTES` (pipeline, job, project) in every job, without changes to `.gitlab-ci.yml`; job pods get `ci-accelerator.io/` annotations with the job's data from GitLab's CI variables (pipeline, project path, stage, start time, commit title and author, merge request) |
 
 A job then builds with:
@@ -50,6 +52,11 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build ...
      `<release>-buildkit`, or the release name if it already contains
      "buildkit";
    - `kubernetes.io/arch` for arm64 build nodes.
+   - Optional: the console's address (`CI_ACCELERATOR_CONSOLE_URL` in
+     `environment`), so every job prints the link to its page.
+   - Optional: the S3 cache. Uncomment `cache.secretName` and add the
+     `[runners.cache]` block from the comments to `config`
+     ([docs/runner-cache.md](../../docs/runner-cache.md)).
 5. Install:
 
    ```sh

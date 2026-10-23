@@ -70,19 +70,29 @@ Numbers from the production setup this project is derived from:
   bucket, and more runners (tiers) with their own tags, job size,
   placement and cache, each its own pod
   ([docs/runner-cache.md](docs/runner-cache.md)).
-- **The console (preview, off by default: `console.enabled=true`):** why
+- **The console (optional, off by default: `console.enabled=true`):** why
   an image build was slow or not cached, and whether your change or the
-  build farm caused it. Five sections: Overview (rebuild reasons ranked by
-  the build time they cost), Pipelines (each pipeline's jobs on a time
-  axis: how long each waited for a runner and ran), Builds (every image build, filtered by
-  branch, outcome, image or your own), Images (cache rate and build time
-  per image over 7 days to a year) and Nodes. A build's page starts with one
-  sentence, then what changed since the previous build of the image and
-  its steps. Every job's log can link to it (`global.console.url`). Jobs
-  that build no image stay in GitLab. With
-  sign-in through GitLab (`console.signIn`), each person sees the projects
-  whose jobs GitLab lets them read; without it, keep it inside the cluster
-  (`kubectl port-forward`).
+  build farm caused it. Five sections:
+  - Overview: rebuild reasons, ranked by the build time they cost;
+  - Pipelines: each pipeline's jobs by stage on a time axis, with how long
+    each waited for a runner and ran. A pipeline opens into a waterfall of
+    every job, and its image builds into stages and steps;
+  - Builds: every image build, filtered by branch, outcome, image or your
+    own, and grouped by pipeline if you like;
+  - Images: cache rate and build time per image over 24 hours or 7 days;
+    one image's page goes back 24 hours, 7 days, 30 days or a year;
+  - Nodes: each daemon's builds and running builds, its cache by kind and
+    its GC policies, and the runners' S3 cache per project, with a warning
+    when the bucket has no lifecycle rule.
+
+  Every build gets one of five outcomes: from cache, your change, build
+  farm, unclear or failed. A build's page starts with one sentence, then
+  what changed since the previous build of the image, then its steps.
+  Every job's log can link to its page (`global.console.url`). Jobs that
+  build no image stay in GitLab. With sign-in through GitLab
+  (`console.signIn`), each person sees the projects whose jobs GitLab lets
+  them read; without it, keep it inside the cluster (`kubectl
+  port-forward`).
 
 Each part is usable on its own:
 
@@ -217,6 +227,60 @@ pipeline. More in [docs/dockerfile-guide.md](docs/dockerfile-guide.md).
 
 A reusable CI component that does this is planned.
 
+### The console
+
+The console is off by default. To switch it on with a GitLab token, put a
+token with `read_api` into a Secret and add values like these:
+
+```sh
+kubectl -n ci-accelerator create secret generic console-gitlab-token --from-literal=token=glpat-...
+```
+
+```yaml
+global:
+  console:
+    url: https://ci-console.example.com   # optional: every job's log links to its page
+console:
+  enabled: true
+  gitlab:
+    token:
+      existingSecret: console-gitlab-token
+```
+
+- **Reaching it:** the console has a ClusterIP Service only. Use
+  `kubectl port-forward` (the install notes print it), or your own Ingress
+  with its own authentication.
+- **The token** gives the console how long jobs waited for a runner, the
+  commit comparisons that settle "files or node", and the end of a job's
+  log on request. Without it the console still works, without those.
+
+**Sign-in through GitLab** replaces the shared token: each person signs in
+and sees the projects whose jobs GitLab lets them read.
+
+1. Serve the console over https at the root of its host (no sub-path), and
+   set `global.console.url` to that address.
+2. Create a Secret with a session key:
+   `kubectl -n ci-accelerator create secret generic console-session --from-literal=key=$(openssl rand -base64 32)`.
+3. In GitLab, create an OAuth application (User or Group Settings >
+   Applications): confidential, scopes `openid` and `read_api`, redirect
+   URI `<global.console.url>/auth/callback/<id>`. The install notes print
+   the exact URI. Put its id and secret into a Secret with the keys
+   `client-id` and `client-secret`.
+4. Set:
+
+   ```yaml
+   console:
+     signIn:
+       enabled: true
+       sessionKey: { existingSecret: console-session }
+       gitlab:
+         - existingSecret: console-gitlab-oauth   # client-id, client-secret
+           admins: [alice]                        # GitLab usernames who see everything
+   ```
+
+A `gitlab` entry without `url` is the runner's GitLab. Every key is in
+[charts/console/values.yaml](charts/console/values.yaml).
+
 ### Sending metrics and traces to your backend
 
 The box keeps no metrics or traces. To keep them, point the daemons at your
@@ -328,6 +392,27 @@ one installation between teams.
   has led to node hangs (dying cgroups). This is under investigation, not
   solved.
 
+**The console.**
+- **Without sign-in it is open.** Every page, `/search-index`, `/events`
+  and `/api/v1` answer whoever reaches the Service. The Service is ClusterIP
+  only: use `kubectl port-forward`, or an Ingress with its own
+  authentication.
+- **A configured token is shared.** Without sign-in, anyone who reaches
+  the console can read the last 100 lines of a job's log through the
+  installation's GitLab token.
+- **It stores build data.** Step output is kept 7 days, masked on a best
+  effort basis: known token formats, passwords in URLs, bearer tokens and
+  the values of build arguments with secret-like names. Dockerfiles are
+  kept too. The API returns stored build arguments, with secret-named ones
+  masked.
+- **Job pods carry the commit author's name and email** as annotations,
+  and the console stores them.
+- **One replica.** SQLite on a ReadWriteOnce volume (never NFS), with the
+  `Recreate` strategy: every upgrade stops the console briefly. There is no
+  built-in backup.
+- **Without sign-in and without a token** the console shows no runner wait
+  times and cannot compare commits, so "files or node" stays "unclear".
+
 **Scope.**
 - **GitLab only.** GitHub Actions support (through Actions Runner
   Controller) is planned.
@@ -342,7 +427,7 @@ Every check is a `make` target. The same targets are meant for CI.
 make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kubeconform (k8s 1.34 and 1.37)
 make go-test ui-test          # Go tests; the console's pages in headless Chrome
 make kind-up                  # local kind cluster (examples/kind)
-make e2e                      # ~13 min end-to-end on kind
+make e2e                      # end-to-end on kind
 ```
 
 - **The e2e** installs releases of its own and covers:
@@ -353,7 +438,16 @@ make e2e                      # ~13 min end-to-end on kind
   - mutual TLS, including a RUN step that tries to drive its own daemon;
   - the NetworkPolicy;
   - OTLP export;
-  - the whole box.
+  - the whole box, with the console;
+  - an in-place upgrade from the last published release.
+
+  On GitHub it runs in four parallel groups, each on its own kind cluster,
+  in about 11-12 minutes.
+- **The console's pages** are checked in headless Chrome: on test data by
+  `make ui-test`, and against the real console in the e2e's box scenario.
+- **The quickstart** is checked on a clean Ubuntu machine:
+  `test/quickstart/run.sh` runs `quickstart.sh`, two CI jobs and the
+  console, then uninstalls (`.github/workflows/quickstart.yml`).
 - **CI jobs in the e2e** come from a real gitlab-runner talking to a
   stand-in for the GitLab API. The box has also been tested by hand against
   gitlab.com.
@@ -371,12 +465,14 @@ make e2e                      # ~13 min end-to-end on kind
 | `charts/ci-accelerator` | The box (umbrella chart) |
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
-| `charts/console` | The console (preview), usable on its own |
+| `charts/console` | The console, usable and published on its own (`oci://ghcr.io/hoobiboobi/charts/console`) |
 | `cmd/console`, `internal/` | Go: the console (build history to builds and reasons, store, collector, pages) |
 | `scripts/buildkit-certs.sh` | CA and certificates for `charts/buildkit` without cert-manager (`tls.source=existingSecret`) |
 | `docs/architecture.md` | How the parts fit together: build path, cache, certificates, telemetry, rollouts |
 | `docs/troubleshooting.md` | Symptoms and fixes, runbooks |
 | `docs/dockerfile-guide.md` | Writing Dockerfiles that stay cached |
+| `docs/runner-cache.md` | The runners' S3 cache and runner tiers |
+| `docs/design/console.md` | The console's first design draft (historical) |
 | `docs/adr` | Architecture decision records: why the charts are the way they are |
 | `examples/kind` | Local cluster for development |
 | `test/` | End-to-end checks and helpers |

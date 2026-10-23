@@ -2,6 +2,8 @@
 
 Date: 2026-10-20
 
+Status: the image (`ghcr.io/hoobiboobi/ci-accelerator-console`) and the console chart (`oci://ghcr.io/hoobiboobi/charts/console`) are published with every release from 0.2.0 on. The preview ended with [ADR-0037](0037-console-builds-only.md).
+
 ## Context
 
 The console (ADR-0029, ADR-0030) has to run next to the daemons:
