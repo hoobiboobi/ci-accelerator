@@ -125,7 +125,8 @@ workflow copies them into the GitHub release.
   (`global.console.url`), a Secret with a session key and, per GitLab, an
   OAuth application (confidential, scopes `openid read_api`; the install
   notes print its redirect URI). Admins (GitLab usernames) also see builds
-  of no known project and the JSON API. Sign-out revokes the session's
+  of no known project and the JSON API. Sessions end after 7 days unused
+  and 30 days after sign-in at the latest; sign-out revokes the session's
   token at GitLab.
 - Job pods carry the job's data from GitLab's CI variables as annotations
   under `ci-accelerator.io/`: pipeline source and creation time, project

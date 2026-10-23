@@ -40,6 +40,6 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0034](0034-console-sign-in.md) | Console: sign-in through GitLab, inside the console |
 | [0035](0035-runner-cache-and-tiers.md) | Runner cache in S3, and runner tiers rendered by the box |
 | [0036](0036-infrastructure-runs-in-the-console.md) | Terraform, OpenTofu and Terragrunt runs in the console (superseded by 0037) |
-| [0037](0037-console-builds-only.md) | Console v2: image builds only, four sections, five outcomes |
+| [0037](0037-console-builds-only.md) | Console v2: image builds only, five sections, five outcomes |
 | [0038](0038-files-or-node-from-gitlab.md) | Files or node: settled with GitLab's comparison of two commits |
 | [0039](0039-no-bundled-observability.md) | No bundled metrics and traces storage |

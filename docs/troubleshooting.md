@@ -197,7 +197,7 @@ limit on build nodes.
   a replacement that implements `PreferSameNode`. Others balance across
   nodes silently: caches stay cold and builds still work.
 
-## The console (preview)
+## The console
 
 - **No pipelines on the pages.** The console lists builds of CI jobs it can
   attribute: the job pods must carry the runner's annotations (the box's
@@ -212,13 +212,29 @@ limit on build nodes.
   GitLab's API. Sign in through GitLab (`console.signIn`), or without
   sign-in give the console a token that can read the projects' jobs
   (`console.gitlab.token.existingSecret`). The console calls GitLab only
-  while a page shows a pipeline, and waits while GitLab rate-limits. The
-  build-nodes page shows the last API error.
+  while its pages are in use:
+  - the pipelines list and a pipeline's page read the pipelines' jobs
+    (finished pipelines once);
+  - pages of a project start a background pass, at most every 30 seconds,
+    that compares commits for its "files or node" builds;
+  - a build's page settles its own build;
+  - a job's page reads the end of its log when you ask for it.
+
+  It waits while GitLab rate-limits. The build-nodes page shows the last
+  API error.
 - **"Files or node — unclear".** The step copies files, and the job ran on
-  a node that had not built the target last. The records cannot tell which
-  it was; another job of the same pipeline on the target's previous node
-  settles it. Fewer, larger build nodes, or pinning a project to one node,
-  make it rare.
+  a node that had not built the image last. The console settles it with
+  GitLab's comparison of the two builds' commits. It stays unclear when:
+  - the console has no GitLab token and no sign-in;
+  - a commit is not known (the job pod's annotations were missing);
+  - GitLab's comparison failed or was cut short (too large or too slow).
+
+  Fewer, larger build nodes, or pinning a project to one node, make the
+  case rare.
+- **Signed in, but the console says "No project you can read builds
+  here".** GitLab does not let that person read the project's jobs
+  (Reporter or more, or public pipelines). GitLab's answer is cached, see
+  below.
 - **Jobs do not print the console's link.** Set `global.console.url`, or
   with your own runner add `CI_ACCELERATOR_CONSOLE_URL` to the runner's
   `environment` and the hook lines from
