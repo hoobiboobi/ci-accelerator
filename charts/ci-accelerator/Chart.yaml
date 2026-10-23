@@ -5,7 +5,7 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.1.0
+version: 0.2.0-rc.1
 # The buildkit release the daemons run.
 appVersion: "v0.33.1"
 kubeVersion: ">=1.34.0-0"
@@ -27,10 +27,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.1.0
+    version: 0.2.0-rc.1
     repository: file://../buildkit
   - name: console
-    version: 0.1.0
+    version: 0.2.0-rc.1
     repository: file://../console
     condition: console.enabled
   - name: gitlab-runner
