@@ -47,6 +47,11 @@ func SecretArg(name string) bool {
 	return secretArgName.MatchString(name)
 }
 
+// MaskSecrets hides the known secret formats (tokens, keys, passwords in
+// URLs, bearer tokens) in text that did not come from a build, such as a
+// CI job's log.
+func MaskSecrets(s string) string { return mask(s, nil) }
+
 // mask hides known secret formats and the values of secret build arguments.
 // It is best effort: BuildKit does not know which output is secret.
 func mask(s string, args map[string]string) string {
