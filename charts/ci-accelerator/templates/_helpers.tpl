@@ -34,10 +34,10 @@ The daemons' headless Service, by the buildkit subchart's rule.
 {{- end }}
 
 {{/*
-Service names of the VictoriaMetrics and VictoriaTraces subcharts, by their
-common chart's rule: the full name is <release>-<name> (or the release name
-when it contains the name), and the Service is "<full name>-server" cut to
-63 characters (name overrides are refused below).
+Service names of the VictoriaMetrics and VictoriaTraces subcharts the box
+had until 0.1.0. The box no longer has them; these stay because the OTLP
+endpoints of 0.1.0's values name them, and `helm upgrade --reuse-values`
+renders those values (NOTES then says the endpoints lead nowhere).
 */}}
 {{- define "ci-accelerator.vmService" -}}
 {{- $full := ternary .Release.Name (printf "%s-victoria-metrics-single" .Release.Name) (contains "victoria-metrics-single" .Release.Name) | trunc 63 | trimSuffix "-" }}
@@ -132,18 +132,6 @@ running with no [[runners]] and takes no jobs). */}}
 {{- end }}
 {{- if or .Values.buildkit.fullnameOverride .Values.buildkit.nameOverride }}
 {{- fail "buildkit.fullnameOverride and buildkit.nameOverride are not supported in this chart: the runner configuration derives the daemons' address from the release name." }}
-{{- end }}
-{{- $vm := index .Values "victoria-metrics-single" }}
-{{- $vt := index .Values "victoria-traces-single" }}
-{{- if or $vm.fullnameOverride $vm.nameOverride $vt.fullnameOverride (ne (toString (default "vt-single" $vt.nameOverride)) "vt-single") }}
-{{- fail "fullnameOverride and nameOverride of victoria-metrics-single and victoria-traces-single are not supported in this chart: the daemons' OTLP endpoints are derived from the release name." }}
-{{- end }}
-{{- /* The default endpoints name this release's storage. */}}
-{{- if and (not $vm.enabled) (contains "ci-accelerator.vmService" (toString .Values.buildkit.otel.metricsEndpoint)) }}
-{{- fail "victoria-metrics-single.enabled is false, but buildkit.otel.metricsEndpoint still points at it: set it to your OTLP metrics endpoint (e.g. http://collector:4318/v1/metrics) or to \"\"." }}
-{{- end }}
-{{- if and (not $vt.enabled) (contains "ci-accelerator.vtService" (toString .Values.buildkit.otel.tracesEndpoint)) }}
-{{- fail "victoria-traces-single.enabled is false, but buildkit.otel.tracesEndpoint still points at it: set it to your OTLP traces endpoint (e.g. http://collector:4318/v1/traces) or to \"\"." }}
 {{- end }}
 {{- end }}
 

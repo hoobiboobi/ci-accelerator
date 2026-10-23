@@ -4,9 +4,11 @@ A self-hosted fast CI runner for GitLab, on your own Kubernetes cluster.
 
 You give it a GitLab URL and a runner token. You get a runner whose jobs
 build container images on persistent BuildKit daemons with a warm, shared
-cache, plus metrics and traces for every build. Hosted services such as
-Depot, Namespace or Docker Build Cloud do this for you; this project does it
-on hardware you already run.
+cache, and a build console that tells why a build was slow or missed the
+cache. The daemons can also push their metrics and traces over OTLP to a
+backend you already run. Hosted services such as Depot, Namespace or Docker
+Build Cloud do this for you; this project does it on hardware you already
+run.
 
 > **Status:** v0.1.0 is released: signed charts on ghcr.io, installed as in
 > the [Quickstart](#quickstart). `main` also holds unreleased work, listed
@@ -43,9 +45,9 @@ Numbers from the production setup this project is derived from:
                                               │  buildctl, mutual TLS
                                               ▼
                      buildkit daemon on the same node ── local cache
-                                              │  OTLP
-                                              ▼
-                              VictoriaMetrics + VictoriaTraces
+                                              │
+                                              ├── build history ──► console (optional)
+                                              └── OTLP ───────────► your backend: metrics, traces (optional)
 ```
 
 - **BuildKit daemons:** a DaemonSet on the nodes labelled
@@ -61,9 +63,9 @@ Numbers from the production setup this project is derived from:
   daemon.
 - **A NetworkPolicy:** daemons accept connections only from the jobs
   namespace, and builds cannot reach cloud instance metadata.
-- **Metrics and traces** pushed by the daemons to a bundled VictoriaMetrics
-  and VictoriaTraces. You can switch these off and send to your own OTLP
-  backend.
+- **Metrics and traces over OTLP (optional):** the daemons push them to
+  your own backend (`buildkit.otel.*`). The box stores none of it; build
+  times and cache answers are in the console.
 - **Runner cache and tiers:** GitLab's `cache:` in any S3-compatible
   bucket, and more runners (tiers) with their own tags, job size,
   placement and cache, each its own pod
@@ -95,8 +97,8 @@ Each part is usable on its own:
 - **Kubernetes 1.34 or newer.** Same-node routing (`PreferSameNode`) needs
   kube-proxy 1.34+ or a proxy that implements it.
 - **Build nodes:** one or more, labelled and tainted. Daemons and job pods
-  run only there. The runner manager and the metrics and traces storage run
-  on the other nodes: keep at least one node without the taint (or see
+  run only there. The runner manager (and the console, if enabled) run on
+  the other nodes: keep at least one node without the taint (or see
   [troubleshooting](docs/troubleshooting.md#the-runner) for tolerations).
 
   ```sh
@@ -111,7 +113,9 @@ Each part is usable on its own:
     --namespace cert-manager --create-namespace --set crds.enabled=true
   ```
 
-- **A default StorageClass,** for the metrics and traces volumes.
+- **A default StorageClass,** if you enable the console: it keeps its
+  history on a volume (or set `console.persistence.storageClass` or
+  `console.persistence.existingClaim`).
 - **A CNI that enforces NetworkPolicy** (Calico, Cilium, kindnet, ...).
   Without one, the daemons accept connections from any namespace and builds
   can reach cloud instance metadata; mutual TLS still applies.
@@ -188,24 +192,33 @@ pipeline. More in [docs/dockerfile-guide.md](docs/dockerfile-guide.md).
 
 A reusable CI component that does this is planned.
 
-### Looking at builds
+### Sending metrics and traces to your backend
 
-```sh
-kubectl -n ci-accelerator port-forward svc/ci-accelerator-victoria-metrics-single-server 8428
-# http://localhost:8428/vmui — e.g. sum(sum_over_time(buildkit.builds[1h])) by (k8s.node.name)
-kubectl -n ci-accelerator port-forward svc/ci-accelerator-vt-single-server 10428
-# http://localhost:10428/select/vmui — traces of service buildkitd
+The box keeps no metrics or traces. To keep them, point the daemons at your
+own OTLP backend, such as an OpenTelemetry Collector. The endpoints are
+full URLs, one per signal:
+
+```yaml
+buildkit:
+  otel:
+    metricsEndpoint: http://otel-collector.observability.svc:4318/v1/metrics
+    tracesEndpoint: http://otel-collector.observability.svc:4318/v1/traces
+    protocol: http/protobuf   # the default; or grpc
 ```
 
-The metric counters arrive as deltas: aggregate them with `sum_over_time`,
-not `rate`.
+- **Empty endpoints** (the default) send nothing.
+- **Every metric and span names its daemon** with `k8s.pod.name` and
+  `k8s.node.name`.
+- **BuildKit's counters are deltas** per push interval. Sum them over
+  time, or convert them in your collector if your backend expects
+  cumulative counters.
 
-Every job on the runner gets its own trace without changes to
+Every job on the runner gets its own trace id without changes to
 `.gitlab-ci.yml`. The runner sets `TRACEPARENT` before the job's script.
 The trace id is derived from the pipeline and job ids, and every span
-carries `ci.pipeline.id`, `ci.job.id` and `ci.project.path`. The install
-notes print the commands that open a job's trace and list a pipeline's
-jobs.
+carries `ci.pipeline.id`, `ci.job.id` and `ci.project.path`. The console
+uses the trace id to tie each build to its pipeline and job, so this needs
+no trace backend.
 
 ## Upgrading
 
@@ -221,6 +234,15 @@ helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --ver
 defaults for everything else. The end-to-end tests upgrade the previous
 release this way before every change is merged
 ([ADR-0027](docs/adr/0027-upgrades-and-branches.md)).
+
+**From 0.1.0:** the box no longer installs VictoriaMetrics and
+VictoriaTraces. Helm removes them on upgrade, but their volumes stay until
+you delete them
+([troubleshooting](docs/troubleshooting.md#after-upgrading-from-010)).
+Endpoint values reused from 0.1.0 with `--reuse-values` point at the
+removed Services: use `--reset-then-reuse-values`, or set
+`buildkit.otel.metricsEndpoint` and `tracesEndpoint` to `""` or to your
+backend.
 
 ## Limitations
 
@@ -238,10 +260,10 @@ one installation between teams.
   allows. List your cluster CIDRs in
   `buildkit.networkPolicy.egress.clusterCIDRs` to keep builds out of
   in-cluster services. Blocking the API server reliably depends on the CNI.
-- **Builds can reach the bundled metrics and traces storage.** They can
-  read other projects' traces, add data and delete data. The buildctl
-  command line is recorded in traces, so **never pass secrets as build
-  args**; use `--secret`.
+- **Trace data is untrusted.** Any build (a RUN step) can write spans
+  through BuildKit, so traces in your backend are input from builds. The
+  buildctl command line, build-arg values included, is recorded in traces:
+  **never pass secrets as build args**; use `--secret`.
 - **Client certificates:** any certificate from the installation's CA is
   accepted. By default cert-manager lets namespace editors request
   certificates from any ClusterIssuer; on a shared cluster restrict that,
@@ -258,7 +280,7 @@ one installation between teams.
   rollout empties it. Use `hostPath` on a dedicated disk in production.
 - **What uninstall leaves behind:**
   - with hostPath: the cache on the nodes;
-  - the metrics and traces volumes;
+  - the console's volume, if the console was enabled;
   - the CA key in cert-manager's namespace.
 
 **Operations.**
@@ -286,10 +308,6 @@ one installation between teams.
   Controller) is planned.
 - **No CI component yet.** Registry pushes are configured by hand (see
   above).
-- **VictoriaTraces is a 0.x release.**
-- **The bundled VictoriaMetrics v1.153.0 has a cross-site scripting issue
-  in its web UI** (vmui), fixed in v1.154.0. The UI is not exposed by the
-  chart; open it only through `kubectl port-forward`.
 
 ## Testing
 

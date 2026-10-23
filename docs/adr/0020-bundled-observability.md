@@ -2,6 +2,8 @@
 
 Date: 2026-10-18
 
+Status: superseded by [ADR-0039](0039-no-bundled-observability.md): the box no longer installs the storage.
+
 ## Context
 
 The product promises build metrics and traces out of the box, without making Grafana or a monitoring stack part of it.

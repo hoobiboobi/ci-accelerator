@@ -1,11 +1,7 @@
 suite: observability
 templates:
-  - validate.yaml
   - charts/buildkit/templates/daemonset.yaml
   - charts/buildkit/templates/networkpolicy.yaml
-  - charts/victoria-metrics-single/templates/server.yaml
-  - charts/victoria-traces-single/templates/server.yaml
-  - charts/victoria-metrics-single/templates/service.yaml
 values:
   - values/required.yaml
 release:
@@ -15,132 +11,51 @@ capabilities:
   apiVersions:
     - cert-manager.io/v1
 tests:
-  # The endpoints must name the Services the Victoria charts create.
-  - it: points the daemons' OTLP exporters at this release's storage
+  # The box keeps no metrics or traces: the daemons send them only where
+  # the user points them.
+  - it: sends no metrics or traces by default
     template: charts/buildkit/templates/daemonset.yaml
     asserts:
-      - contains:
+      - notContains:
           path: spec.template.spec.containers[0].env
-          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://box-victoria-metrics-single-server.ci-accelerator.svc:8428/opentelemetry/v1/metrics"}
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content: {name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, value: "http://box-vt-single-server.ci-accelerator.svc:10428/insert/opentelemetry/v1/traces"}
-
-  - it: follows the Victoria name rule for release names that contain the chart name
-    template: charts/buildkit/templates/daemonset.yaml
-    release:
-      name: vt-single-victoria-metrics-single
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://vt-single-victoria-metrics-single-server.ci-accelerator.svc:8428/opentelemetry/v1/metrics"}
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content: {name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, value: "http://vt-single-victoria-metrics-single-server.ci-accelerator.svc:10428/insert/opentelemetry/v1/traces"}
-
-  # The Victoria charts cut "<full name>-server" to 63 characters.
-  - it: follows the Victoria name rule for long release names
-    template: charts/buildkit/templates/daemonset.yaml
-    release:
-      name: a-very-long-release-name-for-testing-x
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://a-very-long-release-name-for-testing-x-victoria-metrics-single.ci-accelerator.svc:8428/opentelemetry/v1/metrics"}
-
-  - it: names the VictoriaMetrics Service the endpoint points at, for long release names
-    template: charts/victoria-metrics-single/templates/service.yaml
-    release:
-      name: a-very-long-release-name-for-testing-x
-    asserts:
-      - equal:
-          path: metadata.name
-          value: a-very-long-release-name-for-testing-x-victoria-metrics-single
-
-  - it: keeps the storage reachable from the daemons when cluster CIDRs are blocked
-    template: charts/buildkit/templates/networkpolicy.yaml
-    asserts:
-      - equal:
-          path: spec.egress[2]
-          value:
-            to:
-              - podSelector:
-                  matchLabels:
-                    app.kubernetes.io/instance: box
-                  matchExpressions:
-                    - key: app.kubernetes.io/name
-                      operator: In
-                      values: [victoria-metrics-single, vt-single]
-            ports:
-              - {port: 8428, protocol: TCP}
-              - {port: 10428, protocol: TCP}
-
-  # The NetworkPolicy above selects these labels.
-  - it: runs VictoriaMetrics with the selected labels, the pinned image and no API token
-    template: charts/victoria-metrics-single/templates/server.yaml
-    asserts:
-      - equal:
-          path: spec.template.metadata.labels["app.kubernetes.io/name"]
-          value: victoria-metrics-single
-      - equal:
-          path: spec.template.spec.containers[0].image
-          value: victoriametrics/victoria-metrics:v1.153.0@sha256:5eff7af5341e401471002f58d106d399e614a62f3d240f2dbc21901e49eed5dd
-      - equal:
-          path: spec.template.spec.automountServiceAccountToken
-          value: false
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: --retentionPeriod=30d
-
-  - it: runs VictoriaTraces v0.12.0 with the selected labels
-    template: charts/victoria-traces-single/templates/server.yaml
-    asserts:
-      - equal:
-          path: spec.template.metadata.labels["app.kubernetes.io/name"]
-          value: vt-single
-      - equal:
-          path: spec.template.spec.containers[0].image
-          value: victoriametrics/victoria-traces:v0.12.0@sha256:80919fcc85cc6dd87f598d20ccf42d0ab1120de8f25d4dcf08c5ea2515a496ba
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: --retentionPeriod=14d
-
-  - it: refuses a switched-off VictoriaMetrics that the daemons still point at
-    template: validate.yaml
-    set:
-      victoria-metrics-single.enabled: false
-    asserts:
-      - failedTemplate:
-          errorPattern: 'victoria-metrics-single.enabled is false, but buildkit.otel.metricsEndpoint still points at it'
-
-  - it: refuses a switched-off VictoriaTraces that the daemons still point at
-    template: validate.yaml
-    set:
-      victoria-traces-single.enabled: false
-    asserts:
-      - failedTemplate:
-          errorPattern: 'victoria-traces-single.enabled is false, but buildkit.otel.tracesEndpoint still points at it'
-
-  - it: accepts own OTLP backends instead of the bundled storage
-    template: charts/buildkit/templates/daemonset.yaml
-    set:
-      victoria-metrics-single.enabled: false
-      victoria-traces-single.enabled: false
-      buildkit.otel.metricsEndpoint: http://collector.monitoring:4318/v1/metrics
-      buildkit.otel.tracesEndpoint: ""
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].env
-          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://collector.monitoring:4318/v1/metrics"}
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT}
+          any: true
       - notContains:
           path: spec.template.spec.containers[0].env
           content: {name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT}
           any: true
 
-  - it: refuses Victoria name overrides the endpoints cannot follow
-    template: validate.yaml
+  - it: sends them to the user's OTLP backend
+    template: charts/buildkit/templates/daemonset.yaml
     set:
-      victoria-traces-single.nameOverride: traces
+      buildkit.otel.metricsEndpoint: http://collector.obs:4318/v1/metrics
+      buildkit.otel.tracesEndpoint: http://collector.obs:4318/v1/traces
     asserts:
-      - failedTemplate:
-          errorPattern: 'fullnameOverride and nameOverride of victoria-metrics-single and victoria-traces-single are not supported'
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://collector.obs:4318/v1/metrics"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, value: "http://collector.obs:4318/v1/traces"}
+
+  # helm upgrade --reuse-values from 0.1.0 brings its storage endpoints and
+  # values along: they still render (the install notes say they lead
+  # nowhere).
+  - it: renders the values of 0.1.0
+    template: charts/buildkit/templates/daemonset.yaml
+    set:
+      buildkit.otel.metricsEndpoint: 'http://{{ include "ci-accelerator.vmService" . }}.{{ .Release.Namespace }}.svc:8428/opentelemetry/v1/metrics'
+      buildkit.otel.tracesEndpoint: 'http://{{ include "ci-accelerator.vtService" . }}.{{ .Release.Namespace }}.svc:10428/insert/opentelemetry/v1/traces'
+      victoria-metrics-single.enabled: true
+      victoria-traces-single.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, value: "http://box-victoria-metrics-single-server.ci-accelerator.svc:8428/opentelemetry/v1/metrics"}
+
+  - it: lets the daemons reach no storage of the release any more
+    template: charts/buildkit/templates/networkpolicy.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.egress[2]
+          pattern: victoria

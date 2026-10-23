@@ -300,20 +300,17 @@ config:
 # the daemon's network and could reach it.
 otel:
   # -- Full OTLP URL for metrics (with the path, e.g.
-  # http://<victoria-metrics>:8428/opentelemetry/v1/metrics). Empty: no
-  # metrics are pushed. Both endpoints are rendered with tpl, so a parent
+  # http://otel-collector:4318/v1/metrics). Empty: no metrics are pushed. Both endpoints are rendered with tpl, so a parent
   # chart can build them from the release name.
   metricsEndpoint: ""
   # -- Full OTLP URL for traces (e.g.
-  # http://<victoria-traces>:10428/insert/opentelemetry/v1/traces). Empty:
-  # no traces are exported. CI jobs join a build to their own trace by
+  # http://otel-collector:4318/v1/traces). Empty: no traces are exported. CI jobs join a build to their own trace by
   # setting TRACEPARENT for buildctl.
   tracesEndpoint: ""
-  # -- http/protobuf (VictoriaMetrics and VictoriaTraces accept only this
-  # over HTTP) or grpc.
+  # -- http/protobuf (what most OTLP receivers accept over HTTP) or grpc.
   protocol: http/protobuf
   # -- Seconds between metric pushes. Counters are deltas per interval:
-  # query them with sum_over_time, not rate.
+  # sum them over time (or convert them to cumulative in a collector).
   metricsIntervalSeconds: 60
   # -- More resource attributes for every metric and span. The chart always
   # adds k8s.namespace.name, k8s.pod.name and k8s.node.name, so each series

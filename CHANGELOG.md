@@ -9,6 +9,17 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+- **VictoriaMetrics and VictoriaTraces are no longer part of the box**
+  (ADR-0039):
+  - The upgrade removes their StatefulSets. Their volumes stay; delete
+    them by hand once you no longer need the data
+    (`kubectl -n <namespace> get pvc | grep -e victoria-metrics-single -e vt-single`).
+  - To keep metrics and traces, run your own OTLP backend and set
+    `buildkit.otel.metricsEndpoint` and `tracesEndpoint`. With
+    `--reuse-values` the old endpoints point at the removed Services:
+    upgrade with `--reset-then-reuse-values`, or set them to your backend
+    or `""`. The install notes warn while old values remain.
+  - The daemons restart when their endpoints change.
 - **Runner configuration.** The box's runner TOML is now one template for
   every runner. Without a cache it renders exactly as before (the runner
   does not restart). With `--reuse-values` the main runner keeps the TOML
@@ -45,6 +56,10 @@ workflow copies them into the GitHub release.
 
 ### Changed
 
+- The box installs no metrics and traces storage (ADR-0039). The daemons
+  push over OTLP only to an endpoint you set (`buildkit.otel.*`), none by
+  default. Builds can no longer reach the box's observability data,
+  because there is none.
 - One trace per CI job (ADR-0028). With one trace per pipeline, BuildKit
   attached the spans of every concurrent job of a pipeline to each of its
   build records. Job ids beyond 2^32 (gitlab.com) now fit, and ids that

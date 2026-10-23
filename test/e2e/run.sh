@@ -1032,35 +1032,9 @@ s_box() {
   node=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["items"][0]["spec"]["nodeName"])' "$LOGS/job-box.pod.json" 2>/dev/null)
   check "the box's job pod landed on a build node (${node:-none})" \
     eval 'case " $BUILD_NODES " in *" $node "*) true ;; *) false ;; esac'
-  # The daemons push to the box's own storage.
-  box_metrics() {
-    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
-      "http://$BOX_REL-victoria-metrics-single-server.$BOX_NS.svc:8428/api/v1/series?match%5B%5D=%7B__name__%3D%22buildkit.builds%22%7D" 2>/dev/null \
-      | grep -q "\"k8s.namespace.name\":\"$BOX_NS\""
-  }
-  check "the box's VictoriaMetrics receives the daemons' build metrics" eventually 30 box_metrics
-  box_traces() {
-    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
-      "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/jaeger/api/services" 2>/dev/null | grep -q '"buildkitd"'
-  }
-  check "the box's VictoriaTraces receives the daemons' spans" eventually 30 box_traces
-  # Found from the pipeline and job ids alone: the runner derives the trace id.
+  # The job's trace id, from the pipeline and job ids alone: the runner
+  # derives it, and the console ties the build record to the job with it.
   box_tid=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 778 "$(job_id box)" | cut -d- -f2)
-  box_pipeline_trace() {
-    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
-      "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/jaeger/api/traces/$box_tid" 2>/dev/null >"$LOGS/box-trace.json"
-    grep -q '"serviceName":"buildctl"' "$LOGS/box-trace.json" && grep -q '"serviceName":"buildkitd"' "$LOGS/box-trace.json"
-  }
-  check "the job's trace ($box_tid) holds its buildctl and daemon spans" eventually 30 box_pipeline_trace
-  # A pipeline's jobs are found by its attribute, as the install notes show.
-  local logsql
-  logsql=$(python3 -c 'import urllib.parse; print(urllib.parse.urlencode({"query": "\"resource_attr:ci.pipeline.id\":\"778\" | uniq by (trace_id, \"resource_attr:ci.job.id\")", "start": "1d"}))')
-  box_pipeline_jobs() {
-    kc -n "$JOBS_NS" exec client-build -- wget -qO- \
-      "http://$BOX_REL-vt-single-server.$BOX_NS.svc:10428/select/logsql/query?$logsql" 2>/dev/null >"$LOGS/box-pipeline-jobs.json"
-    grep -q "\"trace_id\":\"$box_tid\"" "$LOGS/box-pipeline-jobs.json"
-  }
-  check "pipeline 778's jobs and their trace ids are found by the ci.pipeline.id attribute" eventually 30 box_pipeline_jobs
   # The console reads the daemons' history and the job pod: the build is
   # attributed to the job, and compared (a first build), which needs the
   # project from the pod.
@@ -1384,7 +1358,7 @@ s_upgrade() {
       -a "$(sha256 "$old_bk" | awk '{print $1}')" = "$UPGRADE_FROM_BUILDKIT_SHA256"
   docker exec "$BUILD_NODE" mkdir -p "$state" || { fail "mkdir $state on $BUILD_NODE"; return; }
   # One daemon, on the node whose cache the jobs must find again.
-  args=(-f "$ROOT/test/e2e/box-values.yaml"
+  args=(-f "$ROOT/test/e2e/box-values.yaml" -f "$ROOT/test/e2e/box-values-0.1.yaml"
     --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token
     --set "global.jobs.namespace=$UPG_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$UPG_JOBS_NS"
     --set "global.jobs.architecture=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')"
@@ -1416,7 +1390,14 @@ s_upgrade() {
     check "the upgrade does not restart the daemons (generation $gen0 -> $gen1; on purpose: UPGRADE_ROLLOUT_EXPECTED=1 and upgrade notes)" \
       test "$gen0" = "$gen1" -a "$uids0" = "$uids1"
   fi
+  # 0.1.0 ran VictoriaMetrics and VictoriaTraces; this tree does not: the
+  # upgrade removes them and keeps their volumes (the upgrade notes say so).
   hc get manifest "$UPG_REL" -n "$UPG_NS" --revision 1 >"$LOGS/upgrade-manifest-old.yaml" 2>/dev/null
+  if grep -q 'name: victoria-metrics-single' "$LOGS/upgrade-manifest-old.yaml"; then
+    check "the upgrade removes the old release's metrics and traces storage" \
+      eval '! kc -n "$UPG_NS" get statefulset,deployment -o name 2>/dev/null | grep -q "victoria\|vt-single"'
+    check "and keeps its volumes" eval 'kc -n "$UPG_NS" get pvc -o name | grep -q "victoria\|vt-single"'
+  fi
   hc get manifest "$UPG_REL" -n "$UPG_NS" >"$LOGS/upgrade-manifest-new.yaml" 2>/dev/null
   info "manifest diff $UPGRADE_FROM -> this tree: $(diff "$LOGS/upgrade-manifest-old.yaml" "$LOGS/upgrade-manifest-new.yaml" | grep -c '^[<>]') lines ($LOGS/upgrade-manifest-*.yaml)"
   run_job upgrade-after "$UPG_JOBS_NS"
@@ -1432,7 +1413,13 @@ s_upgrade() {
     fail "helm upgrade --reset-then-reuse-values (see $LOGS/upgrade-reset.log)"
   fi
   gen2=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
-  check "--reset-then-reuse-values after --reuse-values changes nothing (generation $gen1 -> $gen2)" test "$gen1" = "$gen2"
+  if [ "$UPGRADE_ROLLOUT_EXPECTED" = 1 ]; then
+    info "--reset-then-reuse-values: generation $gen1 -> $gen2 (this tree's defaults differ on purpose)"
+  else
+    check "--reset-then-reuse-values after --reuse-values changes nothing (generation $gen1 -> $gen2)" test "$gen1" = "$gen2"
+  fi
+  check "with this tree's defaults the daemons send no metrics to the removed storage" \
+    eval '! kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o yaml | grep -q "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"' 
 
   if hc rollback "$UPG_REL" 1 -n "$UPG_NS" --wait --timeout 8m >"$LOGS/upgrade-rollback.log" 2>&1; then
     pass "helm rollback to $UPGRADE_FROM"

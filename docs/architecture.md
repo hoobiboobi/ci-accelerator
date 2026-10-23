@@ -14,9 +14,9 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
  │ Service <release>-buildkit :1234 (PreferSameNode) ◄─┼──────┤   /certs: client certificate       │
  │ Service <release>-buildkit-headless                 │ mTLS └────────────────────────────────────┘
  │ DaemonSet <release>-buildkit (one per build node)   │
- │   state: hostPath or emptyDir  ── OTLP ──┐          │      namespace cert-manager
- │ VictoriaMetrics single  ◄────────────────┤          │      ┌────────────────────────────────────┐
- │ VictoriaTraces          ◄────────────────┘          │      │ the release's CA (Secret, Issuer)  │
+ │   state: hostPath or emptyDir                       │      namespace cert-manager
+ │   OTLP to your backend (optional)                   │      ┌────────────────────────────────────┐
+ │ Deployment <release>-console (optional)             │      │ the release's CA (Secret, Issuer)  │
  │ NetworkPolicy for the daemons                       │      └────────────────────────────────────┘
  └─────────────────────────────────────────────────────┘
 ```
@@ -26,7 +26,7 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 | buildkitd | DaemonSet on build nodes (`ci-accelerator.io/node-role=build`) | Privileged, rootful; one per node |
 | gitlab-runner manager | Box namespace, any non-build node | Polls GitLab, creates job pods |
 | CI job pods | Jobs namespace, build nodes | Thin clients: `buildctl` and the build context |
-| VictoriaMetrics, VictoriaTraces | Box namespace, any non-build node | Receive OTLP from the daemons |
+| Console (optional) | Box namespace, any non-build node | Reads the daemons' build history and the job pods |
 | CA, server and client certificates | cert-manager | The CA lives in cert-manager's namespace |
 
 The jobs namespace is separate because job pods run untrusted code and the
@@ -72,7 +72,8 @@ Each daemon names itself in two ways:
   ```
 
   prints `org.mobyproject.buildkit.worker.hostname: <daemon pod>`.
-- **In metrics and traces:** the labels `k8s.pod.name` and `k8s.node.name`.
+- **In metrics and traces** (when they are sent to a backend): the labels
+  `k8s.pod.name` and `k8s.node.name`.
 
 ## The cache
 
@@ -123,17 +124,19 @@ Each daemon names itself in two ways:
 ## Telemetry
 
 - **Pushed, not scraped.** The daemons push metrics and traces over OTLP
-  (http/protobuf) to the bundled VictoriaMetrics and VictoriaTraces, or to
-  your own backend. The daemon's debug HTTP server (`/metrics` next to pprof
-  and cache endpoints) is never enabled.
+  (http/protobuf by default) to your own backend, when
+  `buildkit.otel.metricsEndpoint` and `tracesEndpoint` are set. Nothing is
+  stored in the box, and nothing is sent by default. The daemon's debug
+  HTTP server (`/metrics` next to pprof and cache endpoints) is never
+  enabled.
 - **Metrics.** BuildKit currently exports three:
   - `buildkit.builds` (by status);
   - `buildkit.builds.steps` (by kind: completed, cached, total, warnings);
   - `buildkit.build.duration`.
 
-  The counters are deltas per push interval, so query them with
-  `sum_over_time`, not `rate`. Cache size and GC activity are not exported
-  by BuildKit yet.
+  The counters are deltas per push interval: whatever stores them must sum
+  them over time, or convert them to cumulative counters first. Cache size
+  and GC activity are not exported by BuildKit yet.
 - **Traces.** The runner configuration has a `pre_build_script` that runs in
   every job right before its script and exports:
   - `TRACEPARENT`, one trace per job:
@@ -151,11 +154,13 @@ Each daemon names itself in two ways:
   One trace per job also keeps BuildKit's build history clean: it attaches
   every span of a build's trace id to the build's record, so a trace shared
   by concurrent jobs would end up in each of their records
-  ([ADR-0028](adr/0028-one-trace-per-job.md)). The job itself is not a span
-  yet: in the trace UI the builds hang under a missing parent. Job pods
-  also carry annotations under `ci-accelerator.io/` with job data from
-  GitLab's CI variables: pipeline id, source and creation time, project
-  path, job stage and start time, commit title and author, merge request.
+  ([ADR-0028](adr/0028-one-trace-per-job.md)). The console uses the trace
+  id to tie each build record to its pipeline and job; that needs no trace
+  storage. The job itself is not a span yet: in a trace viewer the builds
+  hang under a missing parent. Job pods also carry annotations under
+  `ci-accelerator.io/` with job data from GitLab's CI variables: pipeline
+  id, source and creation time, project path, job stage and start time,
+  commit title and author, merge request.
   The runner adds the job id, name, URL, ref, commit and project id itself.
   An unset variable gives an empty value; a commit title reaches the pod as
   text, never expanded.

@@ -23,30 +23,14 @@ certificate in BUILDKIT_TLS_DIR):
       - buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR"
           build --frontend dockerfile.v0 --local context=. --local dockerfile=.
 
-{{- $vm := index .Values "victoria-metrics-single" }}
-{{- $vt := index .Values "victoria-traces-single" }}
-{{- if or $vm.enabled $vt.enabled }}
+{{- $otel := .Values.buildkit.otel | default dict }}
+{{- if or (index .Values "victoria-metrics-single") (index .Values "victoria-traces-single") (contains "ci-accelerator.vmService" (toString $otel.metricsEndpoint)) (contains "ci-accelerator.vtService" (toString $otel.tracesEndpoint)) }}
 
-Metrics and traces of the daemons (OTLP push):
-{{- if $vm.enabled }}
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ci-accelerator.vmService" . }} 8428
-    then http://localhost:8428/vmui (counters are deltas: use sum_over_time)
-{{- end }}
-{{- if $vt.enabled }}
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ci-accelerator.vtService" . }} 10428
-    then http://localhost:10428/select/vmui
-{{- end }}
-{{- if and $vt.enabled $runner.enabled }}
-The runner gives every job its own trace. With the port-forward above,
-the trace of job <job> in pipeline <pipeline>:
-  curl -s http://localhost:10428/select/jaeger/api/traces/01{{ $runner.gitlabUrl | sha256sum | trunc 6 }}$(printf '%012x%012x' <pipeline> <job>)
-the jobs of pipeline <pipeline> and their trace ids:
-  curl -s http://localhost:10428/select/logsql/query --data-urlencode start=7d \
-    --data-urlencode 'query="resource_attr:ci.pipeline.id":"<pipeline>" | uniq by (trace_id, "resource_attr:ci.job.id")'
-{{- end }}
-Builds can reach this storage: they can read other projects' traces (the
-buildctl command line is recorded, so never pass secrets as build args) and
-change or delete data. Do not expose it outside the cluster.
+WARNING: VictoriaMetrics and VictoriaTraces are no longer part of the box
+(since 0.2.0). Their values do nothing; their volumes stay until you delete
+them. Point buildkit.otel.metricsEndpoint and tracesEndpoint at your own
+OTLP backend, or set them to "" (upgrade with --reset-then-reuse-values to
+drop the old defaults).
 {{- end }}
 
 {{- $cacheS3 := dig "runners" "cache" "s3" "server" "" (default (dict) $runner) }}

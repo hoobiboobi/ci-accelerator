@@ -8,16 +8,6 @@ gitlab-runner:
   checkInterval: 1
   concurrent: 2
 buildkit:
-  # Push often, so the scenario sees metrics within seconds.
+  # Push often, if an OTLP endpoint is set.
   otel:
     metricsIntervalSeconds: 10
-# The storage runs on the control-plane node too (with its default
-# persistent volumes from kind's local-path provisioner).
-victoria-metrics-single:
-  server:
-    tolerations:
-      - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
-victoria-traces-single:
-  server:
-    tolerations:
-      - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}

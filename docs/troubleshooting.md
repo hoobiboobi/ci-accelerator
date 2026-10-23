@@ -70,7 +70,7 @@ kubectl -n ci-accelerator get secret gitlab-runner-token \
 | Runner pod in `ContainerCreating`, event `FailedMount ... non-existent secret key: runner-registration-token` | The empty key is missing | `kubectl -n ci-accelerator patch secret gitlab-runner-token --type merge -p '{"data":{"runner-registration-token":""}}'` |
 | Log `Verifying runner... is not valid` | Wrong or placeholder token, or the runner was deleted in GitLab | Fix the Secret, then `kubectl -n ci-accelerator rollout restart deploy/ci-accelerator-gitlab-runner` (the token is read at start) |
 | The runner is online, jobs stay pending or run elsewhere | Tags: a runner with tags that does not run untagged jobs only takes jobs with matching `tags:`. On gitlab.com untagged jobs go to the shared runners, which have no `BUILDKIT_*` variables | Add `tags:` to the job, or allow untagged jobs on the runner |
-| Runner pod `Pending` (`Unschedulable`), `helm install --wait` times out on the runner Deployment; the same for the VictoriaMetrics/VictoriaTraces pods | Every node is a tainted build node: the runner manager and the storage do not tolerate the build-node taint | Keep one node without the taint, or add tolerations: `gitlab-runner.tolerations`, `victoria-metrics-single.server.tolerations`, `victoria-traces-single.server.tolerations` |
+| Runner pod `Pending` (`Unschedulable`), `helm install --wait` times out on the runner Deployment; the same for the console pod | Every node is a tainted build node: the runner manager and the console do not tolerate the build-node taint | Keep one node without the taint, or add tolerations: `gitlab-runner.tolerations`, `console.tolerations` |
 | Job pod `Pending` | It cannot go to a build node: missing toleration or node selector in a hand-made runner configuration | Use the configuration from the umbrella or `integrations/gitlab-runner` |
 | Job fails pulling `gitlab-runner-helper:x86_64-...` with `no match for platform` | arm64 build nodes, but the runner assumed amd64 | `global.jobs.architecture=arm64` (or `kubernetes.io/arch` in the fragment's node selector) |
 | Jobs rejected by Pod Security | The jobs namespace enforces `restricted` | Use `baseline` |
@@ -96,9 +96,9 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" debug worke
 ## Builds are slow or not cached
 
 1. **Which daemon built it?** The job's `debug workers -v` prints
-   `worker.hostname`; metrics and traces carry `k8s.pod.name`. The cache is
-   per daemon: a job on another node, or a fallback while its own daemon
-   was not ready, builds cold.
+   `worker.hostname`; metrics and traces sent to your backend carry
+   `k8s.pod.name`. The cache is per daemon: a job on another node, or a
+   fallback while its own daemon was not ready, builds cold.
 2. **Was the daemon restarted?** With `emptyDir`, every restart and every
    rollout empties the cache:
    ```sh
@@ -297,6 +297,22 @@ by itself.
 2. Set `buildkit.storage.type=hostPath` and `buildkit.storage.hostPath.path`.
 3. Upgrade. Every daemon restarts with an empty cache, one node at a time.
 
+### After upgrading from 0.1.0
+
+0.1.0 installed VictoriaMetrics and VictoriaTraces for metrics and traces.
+The upgrade removes them, but their volumes stay. Find them and delete
+them:
+
+```sh
+kubectl -n ci-accelerator get pvc | grep -e victoria-metrics-single -e vt-single
+kubectl -n ci-accelerator delete pvc <name> <name>
+```
+
+If the daemons still try to send to the removed Services, the upgrade
+reused the old endpoint values: upgrade again with
+`--reset-then-reuse-values`, or set `buildkit.otel.metricsEndpoint` and
+`tracesEndpoint` to `""` or to your own backend.
+
 ### Uninstall completely
 
 `helm uninstall` removes the release, including the jobs namespace and
@@ -304,11 +320,11 @@ every job pod in it. It leaves:
 
 - **with hostPath, the cache on each build node:** remove it as in step 2
   above;
-- **the metrics and traces volumes:**
+- **the console's volume,** if the console was enabled (it is kept on
+  purpose, with the console's history):
   ```sh
-  kubectl -n ci-accelerator delete pvc --all
+  kubectl -n ci-accelerator delete pvc ci-accelerator-console-data
   ```
-  Only do this if nothing else in that namespace uses PVCs.
 - **the certificate Secrets** (cert-manager keeps them when their
   Certificates are deleted):
   - the CA key in cert-manager's namespace:
@@ -328,7 +344,7 @@ are gone: a new daemon cannot take the locked state directory.
 
 - **Every worker in the example is a tainted build node.** Pods that are
   not build pods need a toleration for the control-plane node: the runner,
-  VictoriaMetrics, VictoriaTraces and cert-manager.
+  the console and cert-manager.
 - **A sleeping laptop pauses the Docker VM.** Long "hangs" in tests and a
   cert-manager restart with `clockHealth failed ... out of sync` follow a
   host sleep. Check `pmset -g log | grep -E ' Sleep | Wake '` before
