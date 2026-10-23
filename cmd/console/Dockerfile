@@ -1,7 +1,7 @@
 # The console image. Build from the repository root:
 #   docker buildx build -f cmd/console/Dockerfile .
 # Pure Go (no cgo): one static binary on a distroless base, non-root.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.1-trixie@sha256:8f58fd67ea075142d947a60e0caa4317746a55118d312f027793d382c7741734 AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.2-trixie@sha256:47667934874913a449b96faa7ef4777fa285d9ec29126ee80ed61c45b7cccf0e AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
