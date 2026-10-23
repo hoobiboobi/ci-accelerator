@@ -1,19 +1,44 @@
 The console reads the daemons behind {{ include "console.discover" . }}
 {{- with include "console.jobsNamespace" . }} and the CI job pods in {{ . }}{{ end }}.
 
-Its pages and API have no sign-in yet: keep it inside the cluster. To look
-at it:
+{{- if include "console.signIn" . }}
+{{- $u := include "console.signInURL" . }}
+
+People sign in through GitLab at {{ $u }}/ and see the projects whose jobs
+GitLab lets them read; the JSON API ({{ $u }}/api/v1/builds) answers the
+admins. Each GitLab's OAuth application must list this redirect URI:
+{{- range .Values.signIn.gitlab }}
+{{- if .url }}
+  {{ .url }}: {{ $u }}/auth/callback/{{ sha256sum .url | trunc 6 }}
+{{- else }}
+  the runners' GitLab: {{ $u }}/auth/callback/<id> (the console's log
+  prints it: kubectl -n {{ $.Release.Namespace }} logs deploy/{{ include "console.fullname" $ }} | grep redirect_uri)
+{{- end }}
+{{- end }}
+{{- if hasPrefix "http://" $u }}
+{{ $u }} is this machine: reach the console with
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "console.fullname" . }} {{ default "80" (regexFind "[0-9]+$" (urlParse $u).host) }}:{{ .Values.service.port }}
+{{- else }}
+The console itself serves plain HTTP on its ClusterIP Service: put it
+behind your Ingress or gateway with TLS for {{ $u }}.
+{{- end }}
+{{- else }}
+
+Sign-in is off: its pages and API show everything to whoever reaches them,
+so keep it inside the cluster (sign-in through GitLab: signIn.enabled). To
+look at it:
 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "console.fullname" . }} {{ .Values.service.port }}
 
-then open http://localhost:{{ .Values.service.port }}/ (pipelines, builds and why
-they rebuilt, project insights, build nodes) or
+then open http://localhost:{{ .Values.service.port }}/ (why images were rebuilt,
+builds, images, build nodes) or
 http://localhost:{{ .Values.service.port }}/api/v1/builds?limit=10.
-{{- if not (dig "token" "existingSecret" "" .Values.gitlab) }}
+{{- end }}
+{{- if and (not (dig "token" "existingSecret" "" .Values.gitlab)) (not (include "console.signIn" .)) }}
 
-Job times come from the job pods. With a GitLab token that can read the
-projects' jobs (gitlab.token.existingSecret), the pages also show the time
-before each build (runner and checkout) and jobs that ran elsewhere.
+With a GitLab token that can read the projects' jobs
+(gitlab.token.existingSecret), a build's page also shows the end of its
+job's log on request.
 {{- end }}
 
 The store is on the PersistentVolumeClaim {{ include "console.pvcName" . }}

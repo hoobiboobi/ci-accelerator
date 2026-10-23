@@ -83,3 +83,22 @@ tests:
       buildkit.tls.existingSecret: daemons-tls
     asserts:
       - failedTemplate: { errorPattern: "console.tls.existingSecret" }
+
+  # Sign-in: the console takes the box's address and the runner's GitLab
+  # (an entry without a url), so neither is written twice.
+  - it: passes sign-in to the console with the box's address
+    template: charts/console/templates/deployment.yaml
+    set:
+      console.enabled: true
+      global.console.url: https://ci.example.com
+      console.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o, admins: [alice] }] }
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-sign-in=/sign-in/config/sign-in.json" }
+      - notContains: { path: 'spec.template.spec.containers[0].args', content: "-gitlab-token-file=/gitlab/token" }
+  - it: needs the box's address for sign-in
+    template: charts/console/templates/deployment.yaml
+    set:
+      console.enabled: true
+      console.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
+    asserts:
+      - failedTemplate: { errorPattern: "sign-in needs signIn.url \\(or global.console.url\\)" }

@@ -1,0 +1,320 @@
+suite: runner S3 cache and runner tiers
+templates:
+  - runner-tiers.yaml
+  - console-caches.yaml
+  - validate.yaml
+  - charts/gitlab-runner/templates/configmap.yaml
+  - charts/gitlab-runner/templates/deployment.yaml
+  - charts/gitlab-runner/templates/secrets.yaml
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  # ---- the main runner ----
+  - it: has no S3 cache by default, and its jobs stay in the jobs namespace
+    asserts:
+      - notMatchRegex:
+          path: data["config.template.toml"]
+          pattern: 'runners\.cache|TRANSFER_METER_FREQUENCY'
+        template: charts/gitlab-runner/templates/configmap.yaml
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'namespace = "ci-accelerator-jobs"'
+        template: charts/gitlab-runner/templates/configmap.yaml
+      # The runner chart adds KUBERNETES_NAMESPACE (which wins over the TOML)
+      # unless its config text says "namespace =": the jobs would land in the
+      # release namespace.
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: KUBERNETES_NAMESPACE, value: "ci-accelerator"}
+        template: charts/gitlab-runner/templates/deployment.yaml
+
+  - it: writes the S3 cache into the main runner's TOML and mounts its keys
+    set:
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '\[runners\.cache\]\n    Type = "s3"\n    Path = "box/051b90"\n    Shared = true\n    MaxUploadedArchiveSize = 4831838208\n    \[runners\.cache\.s3\]\n      ServerAddress = "hel1\.your-objectstorage\.com"\n      BucketName = "ci-cache"\n      BucketLocation = "hel1"\n      Insecure = false'
+        template: charts/gitlab-runner/templates/configmap.yaml
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"TRANSFER_METER_FREQUENCY=5s"'
+        template: charts/gitlab-runner/templates/configmap.yaml
+      - notMatchRegex:
+          path: data["config.template.toml"]
+          pattern: 'AccessKey|SecretKey'
+        template: charts/gitlab-runner/templates/configmap.yaml
+      - contains:
+          path: spec.template.spec.volumes[?(@.name == "projected-secrets")].projected.sources
+          content: {secret: {name: runner-cache}}
+          any: true
+        template: charts/gitlab-runner/templates/deployment.yaml
+
+  - it: takes a cache path and path style when given
+    set:
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        path: shared/ci
+        s3: {server: "minio.storage.svc:9000", bucket: ci-cache, region: us-east-1, insecure: true, pathStyle: true}
+    template: charts/gitlab-runner/templates/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'Path = "shared/ci"[\s\S]*Insecure = true\n      PathStyle = true'
+
+  - it: refuses an incomplete S3 cache
+    set:
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        s3: {server: hel1.your-objectstorage.com, bucket: ci-cache}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "gitlab-runner.runners.cache.s3.region is needed"}
+
+  - it: refuses an S3 cache without its keys
+    set:
+      gitlab-runner.runners.cache:
+        s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "gitlab-runner.runners.cache.secretName: the Secret with the S3 keys"}
+
+  - it: refuses a URL where a host is expected
+    set:
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        s3: {server: "https://hel1.your-objectstorage.com", bucket: ci-cache, region: hel1}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "s3.server is a host"}
+
+  # ---- tiers ----
+  - it: renders no tier by default
+    template: runner-tiers.yaml
+    asserts:
+      - hasDocuments: {count: 0}
+
+  - it: renders a service account, configuration, role, binding and pod per tier
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+        heavy:
+          nodes: build
+          token: {existingSecret: runner-heavy}
+          resources: {requests: {cpu: "2", memory: 4Gi}, limits: {cpu: "4", memory: 8Gi}}
+    template: runner-tiers.yaml
+    asserts:
+      - hasDocuments: {count: 10}
+      - equal: {path: kind, value: Deployment}
+        documentIndex: 4
+      - equal: {path: metadata.name, value: box-runner-deploy}
+        documentIndex: 4
+      - equal: {path: kind, value: Deployment}
+        documentIndex: 9
+      - equal: {path: metadata.name, value: box-runner-heavy}
+        documentIndex: 9
+      - equal: {path: metadata.namespace, value: ci-accelerator-jobs}
+        documentIndex: 2
+
+  - it: gives a tier's runner its URL, token variable, job size and the box's job settings
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          concurrent: 3
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 2Gi}}
+    template: runner-tiers.yaml
+    documentSelector: {path: kind, value: ConfigMap}
+    asserts:
+      - matchRegex:
+          path: data["config.toml"]
+          pattern: '^concurrent = 3\ncheck_interval = 3\nlisten_address = ":9252"\n\[\[runners\]\]\n  name = "box-deploy"\n  url = "https://gitlab\.example\.com/"\n  token = "\$\{RUNNER_TOKEN\}"\n  executor = "kubernetes"\n  limit = 3\n  request_concurrency = 2\n'
+      - matchRegex:
+          path: data["config.toml"]
+          pattern: 'cpu_request = "250m"\n    cpu_limit = "1"\n    memory_request = "512Mi"\n    memory_limit = "2Gi"'
+      - matchRegex:
+          path: data["config.toml"]
+          pattern: 'BUILDKIT_REMOTE_ADDR=tcp://box-buildkit\.ci-accelerator\.svc:1234[\s\S]*export TRACEPARENT[\s\S]*namespace = "ci-accelerator-jobs"[\s\S]*"ci-accelerator\.io/pipeline-id" = "\$CI_PIPELINE_ID"[\s\S]*name = "box-buildkit-client"'
+      - notMatchRegex:
+          path: data["config.toml"]
+          pattern: 'glrt-|AccessKey|SecretKey'
+
+  - it: puts a tier's jobs on any node of the jobs' architecture by default, on build nodes when asked
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: runner-tiers.yaml
+    documentSelector: {path: kind, value: ConfigMap}
+    asserts:
+      - matchRegex:
+          path: data["config.toml"]
+          pattern: '\[runners\.kubernetes\.node_selector\]\n      "kubernetes\.io/arch" = "amd64"\n    \[runners\.kubernetes\.node_tolerations\]\n    \[runners\.kubernetes\.pod_labels\]'
+
+  - it: puts a build tier's jobs next to the daemons
+    set:
+      runnerTiers:
+        heavy:
+          nodes: build
+          token: {existingSecret: runner-heavy}
+          resources: {requests: {cpu: "2", memory: 4Gi}, limits: {memory: 8Gi}}
+    template: runner-tiers.yaml
+    documentSelector: {path: kind, value: ConfigMap}
+    asserts:
+      - matchRegex:
+          path: data["config.toml"]
+          pattern: '"ci-accelerator\.io/node-role" = "build"'
+      - matchRegex:
+          path: data["config.toml"]
+          pattern: '\[runners\.kubernetes\.node_tolerations\]\n      "ci-accelerator\.io/node-role=build" = "NoSchedule"'
+
+  - it: runs a tier's runner from Secrets only, stops it gently and watches its health
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+          cache:
+            secretName: cache-deploy
+            s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+    template: runner-tiers.yaml
+    documentSelector: {path: kind, value: Deployment}
+    asserts:
+      - equal: {path: 'spec.template.spec.containers[0].image', value: "registry.gitlab.com/gitlab-org/gitlab-runner:alpine-v19.4.1"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: RUNNER_TOKEN, valueFrom: {secretKeyRef: {name: runner-deploy, key: runner-token}}}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: AWS_ACCESS_KEY_ID, valueFrom: {secretKeyRef: {name: cache-deploy, key: accesskey}}}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: AWS_SECRET_ACCESS_KEY, valueFrom: {secretKeyRef: {name: cache-deploy, key: secretkey}}}
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.exec.command
+          value: ["/bin/sh", "-c", "kill -QUIT 1; while kill -0 1 2>/dev/null; do sleep 2; done"]
+      - equal: {path: 'spec.template.spec.containers[0].readinessProbe.httpGet.path', value: /health/ready}
+      - equal: {path: 'spec.template.spec.terminationGracePeriodSeconds', value: 3600}
+      - equal: {path: 'spec.template.spec.securityContext.runAsNonRoot', value: true}
+      - equal: {path: 'spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem', value: true}
+      - matchRegex: {path: 'spec.template.metadata.annotations["ci-accelerator.io/config-checksum"]', pattern: '^[0-9a-f]{16}$'}
+      - equal: {path: 'spec.selector.matchLabels["ci-accelerator.io/runner-tier"]', value: deploy}
+
+  - it: gives a tier's runner the main runner's rules in the jobs namespace
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: runner-tiers.yaml
+    documentSelector: {path: kind, value: Role}
+    asserts:
+      - contains:
+          path: rules
+          content: {apiGroups: [""], resources: [pods], verbs: [create, delete, get, list, watch]}
+      - notContains:
+          path: rules
+          content: {apiGroups: ["*"], resources: ["*"], verbs: ["*"]}
+
+  - it: refuses a tier name Kubernetes cannot use
+    set:
+      runnerTiers:
+        Deploy_1:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "is not a valid tier name"}
+
+  - it: refuses a tier without its token Secret
+    set:
+      runnerTiers:
+        deploy:
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "runnerTiers.deploy.token.existingSecret"}
+
+  - it: refuses a tier without an explicit job size
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m}}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "runnerTiers.deploy.resources.requests.memory is needed"}
+
+  - it: refuses an unknown placement
+    set:
+      runnerTiers:
+        deploy:
+          nodes: gpu
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "runnerTiers.deploy.nodes must be any"}
+
+  - it: refuses an incomplete tier cache
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+          cache: {s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "runnerTiers.deploy.cache.secretName"}
+
+  # ---- the console's view of the caches ----
+  - it: tells the console each cache folder once, and lets it read only their keys
+    set:
+      console.enabled: true
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        consoleSecretName: runner-cache-read
+        s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+          cache:
+            secretName: runner-cache
+            consoleSecretName: runner-cache-read
+            s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+        other:
+          token: {existingSecret: runner-other}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+          cache:
+            secretName: other-keys
+            path: elsewhere
+            s3: {server: "minio.storage.svc:9000", bucket: other, region: us-east-1, insecure: true, pathStyle: true}
+    template: console-caches.yaml
+    asserts:
+      - equal:
+          path: data["caches.json"]
+          value: '[{"bucket":"ci-cache","instance":"051b90","path":"box/051b90","region":"hel1","secret":"runner-cache-read","server":"hel1.your-objectstorage.com"},{"bucket":"other","insecure":true,"instance":"051b90","path":"elsewhere","pathStyle":true,"region":"us-east-1","secret":"other-keys","server":"minio.storage.svc:9000"}]'
+        documentIndex: 0
+      - equal: {path: 'rules[0].resourceNames', value: [runner-cache-read, other-keys]}
+        documentIndex: 1
+      - equal: {path: 'subjects[0].name', value: box-console}
+        documentIndex: 2
+  - it: writes an empty list without caches
+    set:
+      console.enabled: true
+    template: console-caches.yaml
+    asserts:
+      - hasDocuments: {count: 1}
+      - equal: {path: 'data["caches.json"]', value: "[]"}

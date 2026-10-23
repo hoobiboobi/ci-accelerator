@@ -2,8 +2,9 @@
 # history and the CI jobs' pods into its own store (SQLite on a volume),
 # and serves its pages and a read-only JSON API on a ClusterIP Service.
 #
-# The pages and the API have no sign-in yet: do not expose them outside the
-# cluster.
+# Without sign-in (signIn.enabled false, the default) the pages and the API
+# show everything to whoever reaches them: do not expose them outside the
+# cluster. With it, each person signs in through GitLab.
 
 # The switch the box uses (console.enabled). It has a default here so that
 # `helm upgrade --reuse-values` from a box without the console keeps it
@@ -36,11 +37,64 @@ gitlab:
   # A token that can read the projects' jobs (read_api), for job times and
   # jobs of other runners on the pages: a Secret's key. Read only while a
   # page shows a pipeline, once per finished pipeline. Without it, job
-  # times come from the job pods. A stopgap until sign-in through GitLab,
-  # where each user's own token is used.
+  # times come from the job pods. Not with sign-in: GitLab is then read
+  # with each person's own token.
   token:
     existingSecret: ""
     key: token
+
+# The runners' S3 cache (GitLab's cache: keyword): the console lists its
+# folders now and then and shows each project's caches in its insights,
+# with how often jobs found them (from their logs). Either the folders
+# here (a Secret with the keys accesskey and secretkey per folder; keys
+# that may only read are enough), or a ConfigMap with them as JSON (the
+# box writes one). The console may read only the Secrets named here.
+caches:
+  stores: []
+  # - server: hel1.your-objectstorage.com   # host[:port]
+  #   bucket: ci-cache
+  #   region: hel1
+  #   path: ci-accelerator/993196           # the runners' cache Path
+  #   gitlabUrl: https://gitlab.com/         # exactly as the runners have it
+  #   existingSecret: runner-cache-read
+  #   insecure: false                        # true: plain http
+  #   pathStyle: true                        # default: path style except AWS
+  # Or the name of a ConfigMap whose key holds the list (fields server,
+  # bucket, region, path, instance, secret, insecure, pathStyle); the Role
+  # to read its Secrets is then the writer's to make. Rendered with tpl.
+  fromConfigMap: ""
+  key: caches.json
+  # How often the folders are listed.
+  every: 10m
+
+# Sign-in through GitLab. Each person signs in with a GitLab the runners
+# serve and sees the projects whose jobs GitLab lets them read (Reporter or
+# more, or public pipelines); GitLab is read with their own token. GitLab
+# never calls the console: the browser carries the redirects.
+signIn:
+  enabled: false
+  # Where browsers reach the console: https (an Ingress or a gateway you
+  # add), or http only on localhost (a port-forward). Default:
+  # global.console.url. Rendered with tpl.
+  url: ""
+  # A Secret holding 32 random bytes in base64 (openssl rand -base64 32);
+  # it seals each session's GitLab token. Changing it signs everyone out.
+  sessionKey:
+    existingSecret: ""
+    key: key
+  # One OAuth application per GitLab (User or Group Settings >
+  # Applications, or Admin > Applications on your own GitLab):
+  # confidential, scopes openid and read_api, redirect URI
+  # <url>/auth/callback/<id> (the NOTES and the console's log print it).
+  #   url: exactly as the runners have it; may be left empty when the
+  #        console serves one GitLab
+  #   existingSecret: a Secret with the keys client-id and client-secret
+  #   admins: GitLab usernames who see everything (builds of no known
+  #        project, the JSON API)
+  gitlab: []
+  # - url: https://gitlab.com/
+  #   existingSecret: console-gitlab-oauth
+  #   admins: [alice]
 
 daemons:
   # host:port of the BuildKit chart's headless Service; every address it
@@ -73,8 +127,10 @@ jobs:
     create: true
 
 retention:
-  # Days builds are kept.
-  days: 90
+  # Days builds are kept in full (steps, reasons). Each image's daily
+  # figures (builds by outcome, build times) are kept a year regardless. At 150 pipelines a day
+  # with 15 image builds each, a project takes about 0.25 GB per 30 days.
+  days: 30
   # Days the steps' output is kept.
   outputDays: 7
 

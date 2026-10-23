@@ -1,0 +1,191 @@
+{{- /*
+Runner tiers: one runner manager pod per tier, each with its own GitLab
+runner (token), job size, placement and S3 cache. The box renders them
+itself (the official runner image and its `run` command) so that tiers can
+be any in number and fail apart; the main runner stays the runner chart.
+*/}}
+{{- $runner := index .Values "gitlab-runner" }}
+{{- $jobsNs := .Values.global.jobs.namespace }}
+{{- $image := $runner.image }}
+{{- range $name, $tier := (default (dict) .Values.runnerTiers) }}
+{{- $tier = default (dict) $tier }}
+{{- $full := include "ci-accelerator.tierName" (dict "root" $ "name" $name) }}
+{{- $build := eq (default "any" $tier.nodes) "build" }}
+{{- $res := default (dict) $tier.resources }}
+{{- $job := dict "cpu_request" (dig "requests" "cpu" "" $res) "memory_request" (dig "requests" "memory" "" $res) "cpu_limit" (dig "limits" "cpu" "" $res) "memory_limit" (dig "limits" "memory" "" $res) }}
+{{- $concurrent := int (default 4 $tier.concurrent) }}
+{{- $cache := default (dict) $tier.cache }}
+{{- $s3 := default (dict) $cache.s3 }}
+{{- /* Two requests for jobs at a time: with one, a runner with a small
+limit waits on GitLab's long poll (the runner warns about it). */}}
+{{- $head := printf "name = %q\nurl = %q\ntoken = \"${RUNNER_TOKEN}\"\nexecutor = \"kubernetes\"\nlimit = %d\nrequest_concurrency = %d" (printf "%s-%s" $.Release.Name $name) $runner.gitlabUrl $concurrent (min $concurrent 2) }}
+{{- $toml := printf "concurrent = %d\ncheck_interval = 3\nlisten_address = \":9252\"\n%s" $concurrent (include "ci-accelerator.runnerToml" (dict "root" $ "gitlabUrl" $runner.gitlabUrl "head" $head "build" $build "job" $job "image" $tier.image "cache" $cache)) }}
+{{- $parsed := fromToml $toml }}
+{{- if hasKey $parsed "Error" }}
+{{- fail (printf "runnerTiers.%s does not render to valid TOML: %s" $name (get $parsed "Error")) }}
+{{- end }}
+{{- $manager := default (dict) $tier.manager }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $full }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.tierLabels" (dict "root" $ "name" $name) | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $full }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.tierLabels" (dict "root" $ "name" $name) | nindent 4 }}
+data:
+  # No secret here: the token comes from RUNNER_TOKEN, the S3 keys from
+  # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (both from Secrets).
+  config.toml: |
+    {{- $toml | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $full }}
+  namespace: {{ $jobsNs }}
+  labels:
+    {{- include "ci-accelerator.tierLabels" (dict "root" $ "name" $name) | nindent 4 }}
+rules:
+  {{- range $runner.rbac.rules }}
+  - apiGroups: {{ toJson (default (list "") .apiGroups) }}
+    resources: {{ toJson .resources }}
+    verbs: {{ toJson .verbs }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $full }}
+  namespace: {{ $jobsNs }}
+  labels:
+    {{- include "ci-accelerator.tierLabels" (dict "root" $ "name" $name) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $full }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $full }}
+    namespace: {{ $.Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.tierLabels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  replicas: 1
+  # The new manager polls while the old one finishes its jobs.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "ci-accelerator.tierSelector" (dict "root" $ "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ci-accelerator.tierSelector" (dict "root" $ "name" $name) | nindent 8 }}
+        app.kubernetes.io/part-of: ci-accelerator
+        ci-accelerator.io/component: runner
+      annotations:
+        # The runner reads its configuration at start.
+        ci-accelerator.io/config-checksum: {{ $toml | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: {{ $full }}
+      terminationGracePeriodSeconds: {{ int (default 3600 $tier.terminationGracePeriodSeconds) }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 65533
+        fsGroup: 65533
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          image: {{ printf "%s/%s:%s" (default "registry.gitlab.com" $image.registry) (default "gitlab-org/gitlab-runner" $image.image) $image.tag | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - mkdir -p /home/gitlab-runner/.gitlab-runner
+              && cp /config/config.toml /home/gitlab-runner/.gitlab-runner/config.toml
+              && exec /entrypoint run --config /home/gitlab-runner/.gitlab-runner/config.toml --working-directory /home/gitlab-runner
+          env:
+            - name: RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required (printf "runnerTiers.%s.token.existingSecret: the Secret with the tier's runner token (glrt-...)" $name) (dig "existingSecret" "" (default (dict) $tier.token)) }}
+                  key: {{ dig "key" "runner-token" (default (dict) $tier.token) }}
+            {{- if $s3.server }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: {{ $cache.secretName }}, key: accesskey}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ $cache.secretName }}, key: secretkey}
+            {{- end }}
+            # No cloud metadata service: the keys come from the Secret.
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+          ports:
+            - name: metrics
+              containerPort: 9252
+          readinessProbe:
+            httpGet: {path: /health/ready, port: metrics}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: {path: /metrics, port: metrics}
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          lifecycle:
+            # SIGQUIT lets running jobs finish (SIGTERM would abort them);
+            # the pod ends when the runner does, or at the grace period.
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "kill -QUIT 1; while kill -0 1 2>/dev/null; do sleep 2; done"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml (default (dict "requests" (dict "cpu" "10m" "memory" "64Mi") "limits" (dict "memory" "256Mi")) $manager.resources) | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: home
+              mountPath: /home/gitlab-runner
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $full }}
+        - name: home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      {{- with $manager.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $manager.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

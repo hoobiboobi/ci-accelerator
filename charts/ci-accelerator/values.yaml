@@ -34,7 +34,8 @@ global:
     architecture: amd64
   console:
     # -- The console's address as users reach it (https://...). When set,
-    # every job prints the link to its page in its log. Empty: no link.
+    # every job prints the link to its page in its log, and sign-in through
+    # GitLab (console.signIn) uses it. Empty: no link.
     url: ""
 
 # Install-time checks against the live cluster. Skipped by `helm template`
@@ -115,72 +116,30 @@ gitlab-runner:
     secret: ""
     # -- Keep equal to global.jobs.namespace.
     jobNamespace: ci-accelerator-jobs
+    # S3 cache for `cache:` in .gitlab-ci.yml (artifacts need nothing: GitLab
+    # keeps them). Off while s3.server is empty. For example:
+    #   cache:
+    #     secretName: runner-cache   # keys accesskey and secretkey
+    #     s3:
+    #       server: hel1.your-objectstorage.com
+    #       bucket: ci-cache
+    #       region: hel1
+    # Optional: s3.insecure (http), s3.pathStyle (true/false; default: path
+    # style except on AWS), path (default <release>/<GitLab id>: every runner
+    # of this release shares a project's caches), maxArchiveBytes (default
+    # 4.5 GiB). The runner never deletes caches: give the bucket a lifecycle
+    # rule (docs/runner-cache.md).
+    cache: {}
     # The same job settings as integrations/gitlab-runner/values.yaml, with
     # the names filled in from this release (make validate compares them).
-    # Rendered by the runner chart with tpl, which sees this chart's helpers.
-    config: |
-      [[runners]]
-        environment = [
-          "BUILDKIT_REMOTE_ADDR=tcp://{{ include "ci-accelerator.buildkitName" . }}.{{ .Release.Namespace }}.svc:1234",
-          "BUILDKIT_TLS_DIR=/certs",
-          {{- with dig "console" "url" "" .Values.global }}
-          "CI_ACCELERATOR_CONSOLE_URL={{ . }}",
-          {{- end }}
-        ]
-        # Every job gets its own trace, without changes to .gitlab-ci.yml:
-        # buildctl reads TRACEPARENT. trace-id = scheme 01, 3 bytes for this
-        # GitLab (from gitlabUrl), the pipeline id and the job id (6 bytes each);
-        # span-id = the job id. A job's trace is found from its ids, a pipeline's
-        # traces by the ci.pipeline.id attribute. Ids outside 1..2^48-1 or not
-        # numbers set nothing; a job's own TRACEPARENT is kept.
-        pre_build_script = '''
-        # ci-accelerator: one trace per job (scheme 01: GitLab, pipeline, job)
-        if [ -z "${TRACEPARENT:-}" ] && [ "${CI_PIPELINE_ID:-x}" -gt 0 ] 2>/dev/null && [ "${CI_JOB_ID:-x}" -gt 0 ] 2>/dev/null && [ "$CI_PIPELINE_ID" -le 281474976710655 ] && [ "$CI_JOB_ID" -le 281474976710655 ]; then
-          export TRACEPARENT="00-01{{ .Values.gitlabUrl | sha256sum | trunc 6 }}$(printf '%012x%012x' "$CI_PIPELINE_ID" "$CI_JOB_ID")-$(printf '%016x' "$CI_JOB_ID")-01"
-        fi
-        export OTEL_RESOURCE_ATTRIBUTES="${OTEL_RESOURCE_ATTRIBUTES:+$OTEL_RESOURCE_ATTRIBUTES,}ci.pipeline.id=${CI_PIPELINE_ID:-},ci.job.id=${CI_JOB_ID:-},ci.project.path=${CI_PROJECT_PATH:-}"
-        # ci-accelerator: this job's page in the console, when its address is set
-        if [ -n "${CI_ACCELERATOR_CONSOLE_URL:-}" ] && [ "${CI_JOB_ID:-x}" -gt 0 ] 2>/dev/null; then
-          echo "ci-accelerator: why this job's builds take their time: ${CI_ACCELERATOR_CONSOLE_URL%/}/jobs/{{ .Values.gitlabUrl | sha256sum | trunc 6 }}/$CI_JOB_ID"
-        fi
-        '''
-        [runners.kubernetes]
-          namespace = "{{ .Values.global.jobs.namespace }}"
-          image = "alpine:3.22"
-          pull_policy = "if-not-present"
-          cpu_request = "50m"
-          memory_request = "64Mi"
-          memory_limit = "512Mi"
-          helper_cpu_request = "10m"
-          helper_memory_request = "32Mi"
-          helper_memory_limit = "256Mi"
-          service_cpu_request = "10m"
-          service_memory_request = "32Mi"
-          automount_service_account_token = false
-          [runners.kubernetes.node_selector]
-          {{- with include "ci-accelerator.runnerNodeSelector" . | trim }}{{ . | nindent 6 }}{{ end }}
-          [runners.kubernetes.node_tolerations]
-          {{- with include "ci-accelerator.runnerTolerations" . | trim }}{{ . | nindent 6 }}{{ end }}
-          [runners.kubernetes.pod_labels]
-            "ci-accelerator.io/component" = "ci-job"
-          # Job data from GitLab's CI variables on the job pod, for tools that
-          # show builds by pipeline and job (the runner adds the job id, name,
-          # URL, ref, commit and project id itself). An unset variable gives an
-          # empty value; values are expanded once, never as templates.
-          [runners.kubernetes.pod_annotations]
-            "ci-accelerator.io/pipeline-id" = "$CI_PIPELINE_ID"
-            "ci-accelerator.io/pipeline-source" = "$CI_PIPELINE_SOURCE"
-            "ci-accelerator.io/pipeline-created-at" = "$CI_PIPELINE_CREATED_AT"
-            "ci-accelerator.io/project-path" = "$CI_PROJECT_PATH"
-            "ci-accelerator.io/job-stage" = "$CI_JOB_STAGE"
-            "ci-accelerator.io/job-started-at" = "$CI_JOB_STARTED_AT"
-            "ci-accelerator.io/commit-title" = "$CI_COMMIT_TITLE"
-            "ci-accelerator.io/commit-author" = "$CI_COMMIT_AUTHOR"
-            "ci-accelerator.io/merge-request-iid" = "$CI_MERGE_REQUEST_IID"
-          [[runners.kubernetes.volumes.secret]]
-            name = "{{ include "ci-accelerator.buildkitName" . }}-client"
-            mount_path = "/certs"
-            read_only = true
+    # One text for every runner of the box (templates/_runner.tpl): the same
+    # daemons, certificate, trace context, job data and placement. Rendered
+    # by the runner chart with tpl, which sees this chart's helpers; the
+    # runner's values are the root.
+    # The template comment keeps the words "namespace =" in this text: without
+    # them the runner chart sets KUBERNETES_NAMESPACE, which wins over the
+    # TOML and would put the jobs into the release namespace.
+    config: '{{/* namespace = global.jobs.namespace, set in the TOML */}}{{ include "ci-accelerator.runnerToml" (dict "root" . "gitlabUrl" .Values.gitlabUrl "build" true "cache" (default (dict) .Values.runners.cache)) }}'
   # The permissions the Kubernetes executor needs in the jobs namespace,
   # instead of the chart's default `*` on core resources.
   rbac:
@@ -240,9 +199,33 @@ victoria-traces-single:
     persistentVolume:
       size: 10Gi
 
+# More runners next to the main one, any number: each tier is its own runner
+# pod with its own GitLab runner, tags, job size, placement and S3 cache.
+# Create the runner in GitLab first (Settings > CI/CD > Runners, or the
+# API), with the tags its jobs will use, and put its token (glrt-...) into a
+# Secret. For example:
+#   runnerTiers:
+#     deploy:
+#       token:
+#         existingSecret: runner-deploy     # key runner-token
+#       resources:                          # each job's container
+#         requests: {cpu: 250m, memory: 512Mi}
+#         limits: {memory: 2Gi}
+#       nodes: any                          # any node, or build: next to a daemon
+#       concurrent: 4                       # jobs at once
+#       cache:                              # as gitlab-runner.runners.cache
+#         secretName: runner-cache-deploy
+#         s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+# Optional per tier: image (default job image, alpine:3.22), manager
+# (resources, nodeSelector, tolerations of the runner pod),
+# terminationGracePeriodSeconds (how long a rollout waits for running jobs,
+# default 3600).
+runnerTiers: {}
+
 # The console: reads every daemon's build history and the CI job pods, and
-# explains each build. Preview: off by default, no sign-in yet (its API is a
-# ClusterIP Service only). See charts/console for every value.
+# explains each build. Preview: off by default. Its Service is ClusterIP
+# only; without sign-in (console.signIn) it shows everything to whoever
+# reaches it. See charts/console for every value.
 console:
   enabled: false
   # The runner's GitLab URL, from a ConfigMap this chart writes.
@@ -260,3 +243,18 @@ console:
         name: '{{ include "ci-accelerator.issuerName" . }}'
   jobs:
     namespace: '{{ .Values.global.jobs.namespace }}'
+  # The runners' cache folders (the main runner's and the tiers'), written
+  # by this chart with read access to their keys' Secrets.
+  caches:
+    fromConfigMap: '{{ .Release.Name }}-console-caches'
+  # Sign-in through GitLab at global.console.url; each person sees the
+  # projects whose jobs GitLab lets them read. A GitLab entry without a url
+  # is the runner's. For example:
+  #   signIn:
+  #     enabled: true
+  #     sessionKey: { existingSecret: console-session }
+  #     gitlab:
+  #       - existingSecret: console-gitlab-oauth   # client-id, client-secret
+  #         admins: [alice]
+  signIn:
+    enabled: false

@@ -117,6 +117,67 @@
         }
       }
     },
+    "runnerTiers": {
+      "type": "object",
+      "description": "More runners next to the main one, one pod each, keyed by tier name.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "existingSecret": { "type": "string" },
+              "key": { "type": "string", "minLength": 1 }
+            }
+          },
+          "resources": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "requests": { "type": "object", "additionalProperties": false, "properties": { "cpu": { "type": ["string", "number"] }, "memory": { "type": "string" } } },
+              "limits": { "type": "object", "additionalProperties": false, "properties": { "cpu": { "type": ["string", "number"] }, "memory": { "type": "string" } } }
+            }
+          },
+          "nodes": { "type": "string", "description": "any or build (checked by the templates, with a hint)" },
+          "concurrent": { "type": "integer", "minimum": 1 },
+          "image": { "type": "string" },
+          "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+          "cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "S3 cache: off without s3.server. The Secret holds accesskey and secretkey.",
+          "properties": {
+            "secretName": { "type": "string" },
+            "consoleSecretName": { "type": "string", "description": "Keys the console reads the bucket with (default: secretName)." },
+            "path": { "type": "string" },
+            "maxArchiveBytes": { "type": "integer", "minimum": 1 },
+            "s3": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "server": { "type": "string" },
+                "bucket": { "type": "string" },
+                "region": { "type": "string" },
+                "insecure": { "type": "boolean" },
+                "pathStyle": { "type": ["boolean", "string"] }
+              }
+            }
+          }
+        },
+          "manager": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "resources": { "type": "object" },
+              "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+              "tolerations": { "type": "array", "items": { "type": "object" } }
+            }
+          }
+        }
+      }
+    },
     "preflight": {
       "type": "object",
       "additionalProperties": false,

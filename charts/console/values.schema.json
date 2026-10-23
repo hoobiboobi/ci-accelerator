@@ -48,6 +48,65 @@
         }
       }
     },
+    "caches": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The runners' S3 cache folders the console lists.",
+      "properties": {
+        "stores": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "server": { "type": "string" },
+              "bucket": { "type": "string" },
+              "region": { "type": "string" },
+              "path": { "type": "string" },
+              "gitlabUrl": { "type": "string", "pattern": "^https?://[^\\s,]+$" },
+              "existingSecret": { "type": "string" },
+              "insecure": { "type": "boolean" },
+              "pathStyle": { "type": "boolean" }
+            }
+          }
+        },
+        "fromConfigMap": { "type": "string" },
+        "key": { "type": "string", "minLength": 1 },
+        "every": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" }
+      }
+    },
+    "signIn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "url", "sessionKey", "gitlab"],
+      "description": "Sign-in through GitLab.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "url": { "type": "string", "description": "Where browsers reach the console; default global.console.url." },
+        "sessionKey": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["existingSecret", "key"],
+          "properties": {
+            "existingSecret": { "type": "string" },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        },
+        "gitlab": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["existingSecret"],
+            "properties": {
+              "url": { "type": "string", "pattern": "^(https?://[^\\s,]+)?$" },
+              "existingSecret": { "type": "string" },
+              "admins": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9_.][A-Za-z0-9_.-]*$" } }
+            }
+          }
+        }
+      }
+    },
     "daemons": {
       "type": "object",
       "additionalProperties": false,

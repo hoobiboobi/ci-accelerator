@@ -28,6 +28,23 @@ runners:
   # runner and the daemons. Its Pod Security level can be "baseline".
   # ADJUST.
   jobNamespace: ci-accelerator-jobs
+  # Optional S3 cache for `cache:` in .gitlab-ci.yml (the box does this with
+  # gitlab-runner.runners.cache). A Secret with the keys accesskey and
+  # secretkey, mounted by the chart:
+  # cache:
+  #   secretName: runner-cache
+  # then, at the end of config below (ADJUST the names):
+  #   [runners.cache]
+  #     Type = "s3"
+  #     Path = "ci-accelerator/<first 6 hex of sha256 of the GitLab URL>"
+  #     Shared = true
+  #     MaxUploadedArchiveSize = 4831838208
+  #     [runners.cache.s3]
+  #       ServerAddress = "hel1.your-objectstorage.com"
+  #       BucketName = "ci-cache"
+  #       BucketLocation = "hel1"
+  # and "TRANSFER_METER_FREQUENCY=5s" in environment, so job logs show the
+  # cache's size. See docs/runner-cache.md (lifecycle rule, layout).
   config: |
     [[runners]]
       # The contract with the CI component: where the daemons are and where
