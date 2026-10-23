@@ -8,10 +8,21 @@
 #
 #   sudo test/quickstart/run.sh /tmp/console.tar
 #
+# or a published release as a user gets it: quickstart.sh from the GitHub
+# release, checked against its SHA256SUMS, the charts and the console image
+# from the registry:
+#
+#   sudo test/quickstart/run.sh --release 0.2.0-rc.1
+#
 # Destroys whatever k3s it installed. Never run it on a machine you need.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-IMAGE_TAR=${1:?usage: $0 <console image tar>}
+IMAGE_TAR="" RELEASE=""
+case "${1:?usage: $0 <console image tar> | --release <version>}" in
+  --release) RELEASE=${2:?usage: $0 --release <version>} ;;
+  *) IMAGE_TAR=$1 ;;
+esac
+SCRIPT=$ROOT/scripts/quickstart.sh
 LOGS=${QUICKSTART_LOGS:-$(mktemp -d)}
 mkdir -p "$LOGS"
 NS=ci-accelerator
@@ -30,11 +41,22 @@ fake=$!
 trap 'kill "$fake" 2>/dev/null || true' EXIT
 for _ in $(seq 1 20); do curl -fs "${gitlab}healthz" >/dev/null && break; sleep 0.5; done
 
-echo "== install with scripts/quickstart.sh (GitLab $gitlab)"
+overrides=()
+if [ -n "$RELEASE" ]; then
+  # As the release notes say: download, check, run.
+  dl=https://github.com/hoobiboobi/ci-accelerator/releases/download/v$RELEASE
+  SCRIPT=$LOGS/quickstart.sh
+  curl -fsSL -o "$SCRIPT" "$dl/quickstart.sh"
+  curl -fsSL "$dl/SHA256SUMS" | grep ' quickstart.sh$' | (cd "$LOGS" && sha256sum -c --quiet -) \
+    || { fail "quickstart.sh of v$RELEASE matches the release's SHA256SUMS"; exit 1; }
+  pass "quickstart.sh of v$RELEASE matches the release's SHA256SUMS"
+else
+  overrides=(CI_ACCELERATOR_CHART="$ROOT/charts/ci-accelerator" CI_ACCELERATOR_CONSOLE_IMAGE_TAR="$IMAGE_TAR")
+fi
+echo "== install with ${RELEASE:+v$RELEASE }quickstart.sh (GitLab $gitlab)"
 t0=$(date +%s)
-if env RUNNER_TOKEN=glrt-quickstart-check CI_ACCELERATOR_CHART="$ROOT/charts/ci-accelerator" \
-    CI_ACCELERATOR_CONSOLE_IMAGE_TAR="$IMAGE_TAR" \
-    "$ROOT/scripts/quickstart.sh" --gitlab-url "$gitlab" --yes >"$LOGS/install.log" 2>&1; then
+if env RUNNER_TOKEN=glrt-quickstart-check ${overrides[@]+"${overrides[@]}"} \
+    bash "$SCRIPT" --gitlab-url "$gitlab" --yes >"$LOGS/install.log" 2>&1; then
   pass "quickstart.sh installs in $(( $(date +%s) - t0 ))s"
 else
   fail "quickstart.sh installs (see $LOGS/install.log)"; tail -30 "$LOGS/install.log"; exit 1
@@ -106,7 +128,7 @@ if [ "$FAILED" -gt 0 ]; then
 fi
 
 echo "== uninstall"
-if "$ROOT/scripts/quickstart.sh" --uninstall --yes >"$LOGS/uninstall.log" 2>&1; then
+if bash "$SCRIPT" --uninstall --yes >"$LOGS/uninstall.log" 2>&1; then
   pass "quickstart.sh --uninstall"
 else
   fail "quickstart.sh --uninstall (see $LOGS/uninstall.log)"
