@@ -67,6 +67,12 @@ workflow copies them into the GitHub release.
 
 ### Added
 
+- `quickstart.sh` (attached to every release): try the box on one clean
+  Linux machine. It installs k3s, Helm, cert-manager and the box with its
+  console, every download pinned and checked. `--uninstall` removes it
+  all. Checked on every pull request on a clean Ubuntu runner: it installs,
+  builds twice through the real runner (the second build cached), shows
+  the build in the console, and uninstalls.
 - `charts/console` and the box's `console.enabled` (preview, off by
   default): one pod that reads every daemon's build history and the CI job
   pods into SQLite and serves read-only pages and a JSON API on a

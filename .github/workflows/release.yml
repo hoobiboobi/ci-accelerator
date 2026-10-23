@@ -60,9 +60,10 @@ jobs:
           mkdir -p dist
           helm package charts/buildkit charts/console charts/ci-accelerator -d dist
           touch -d "@$SOURCE_DATE_EPOCH" dist/*.tgz
+          cp scripts/quickstart.sh dist/
           # Names without the dist/ prefix, so `sha256sum -c SHA256SUMS` works
           # next to the downloaded release assets.
-          (cd dist && sha256sum ./*.tgz | sed 's| \./| |' | tee SHA256SUMS)
+          (cd dist && sha256sum ./*.tgz ./quickstart.sh | sed 's| \./| |' | tee SHA256SUMS)
 
       - name: Push to ghcr.io
         env:
@@ -125,6 +126,14 @@ jobs:
             echo "helm install ci-accelerator oci://$CHARTS_REPO/ci-accelerator --version $VERSION ..."
             echo '```'
             echo
+            echo "To try it on one clean Linux machine (k3s, cert-manager and the box with its console):"
+            echo
+            echo '```sh'
+            echo "curl -fsSLO https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/quickstart.sh"
+            echo "curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/SHA256SUMS | grep quickstart.sh | sha256sum -c -"
+            echo "sudo RUNNER_TOKEN=glrt-... bash quickstart.sh --gitlab-url https://gitlab.example.com/"
+            echo '```'
+            echo
             echo "The daemons alone: \`oci://$CHARTS_REPO/buildkit --version $VERSION\`."
             echo "The console alone: \`oci://$CHARTS_REPO/console --version $VERSION\`, image \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator-console:v$VERSION\`."
             if [ "$PRIVATE" != "true" ]; then
@@ -146,6 +155,6 @@ jobs:
           } > dist/notes.md
           prerelease=()
           case "$VERSION" in *-*) prerelease=(--prerelease) ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/*.tgz dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.tgz dist/quickstart.sh dist/SHA256SUMS \
             --verify-tag --title "$GITHUB_REF_NAME" --notes "$(cat dist/notes.md)" --generate-notes \
             ${prerelease[@]+"${prerelease[@]}"}

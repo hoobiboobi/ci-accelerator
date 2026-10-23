@@ -39,6 +39,11 @@ app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/con
 if [ "$app" != "$version" ]; then
   echo "charts/console/Chart.yaml has appVersion $app (its image tag), the tag says $version" >&2; fail=1
 fi
+# The one-node installer installs this release.
+qs=$(awk -F= '/^VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")
+if [ "$qs" != "$version" ]; then
+  echo "scripts/quickstart.sh installs $qs, the tag says $version" >&2; fail=1
+fi
 # Every release says what an upgrade to it means.
 "$ROOT/scripts/changelog-section.sh" "$version" >/dev/null || fail=1
 [ "$fail" = 0 ] || exit 1
