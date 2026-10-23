@@ -1382,6 +1382,8 @@ s_upgrade() {
   else
     fail "helm upgrade --reuse-values from $UPGRADE_FROM (see $LOGS/upgrade-reuse.log)"; return
   fi
+  check "--reuse-values keeps the console off (the old values have no such key)" \
+    eval '! kc -n "$UPG_NS" get deploy "$UPG_REL-console" >/dev/null 2>&1' 
   gen1=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
   uids1=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
   if [ "$UPGRADE_ROLLOUT_EXPECTED" = 1 ]; then
@@ -1405,9 +1407,13 @@ s_upgrade() {
   check "the job after the upgrade finds the cache from before it" \
     eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-upgrade-after.trace" | grep -q "^#[0-9]* CACHED$"'
 
-  # The recommended way: this tree's defaults plus the user's values.
+  # The recommended way: this tree's defaults plus the user's values. The
+  # defaults turn the console on: from the image this tree builds, on the
+  # control-plane node (every kind worker is a tainted build node).
+  make -C "$ROOT" console-image CONSOLE_IMAGE=ci-accelerator-console:e2e >"$LOGS/upgrade-console-image.log" 2>&1 \
+    || { fail "build the console image (see $LOGS/upgrade-console-image.log)"; return; }
   if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values \
-      --wait --timeout 8m >"$LOGS/upgrade-reset.log" 2>&1; then
+      -f "$ROOT/test/e2e/box-console-values.yaml" --wait --timeout 8m >"$LOGS/upgrade-reset.log" 2>&1; then
     pass "helm upgrade --reset-then-reuse-values"
   else
     fail "helm upgrade --reset-then-reuse-values (see $LOGS/upgrade-reset.log)"
@@ -1418,6 +1424,8 @@ s_upgrade() {
   else
     check "--reset-then-reuse-values after --reuse-values changes nothing (generation $gen1 -> $gen2)" test "$gen1" = "$gen2"
   fi
+  check "with this tree's defaults the console runs" \
+    eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-console --timeout=60s >/dev/null'
   check "with this tree's defaults the daemons send no metrics to the removed storage" \
     eval '! kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o yaml | grep -q "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"' 
 

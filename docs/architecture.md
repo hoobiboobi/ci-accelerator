@@ -167,7 +167,7 @@ Each daemon names itself in two ways:
 
 ## The console
 
-The console (`console.enabled`, off by default) is one pod in the box
+The console (`console.enabled`, on by default) is one pod in the box
 namespace. It only reads; nothing it does changes a build.
 
 - **Build history from the daemons.** It finds the daemons through the
