@@ -9,6 +9,11 @@ on:
   push:
     branches: ["wip/**"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "A published release to check as a user gets it (e.g. 0.2.0-rc.1); empty: this tree"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -35,12 +40,14 @@ jobs:
           key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.0-${{ hashFiles('Makefile') }}
 
       - name: The charts of this tree, with their dependencies
+        if: ${{ !inputs.release }}
         run: |
           make ci-tools
           echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
           PATH="$PWD/.tools/bin:$PATH" make deps
 
       - name: The console image of this tree
+        if: ${{ !inputs.release }}
         run: |
           docker build -f cmd/console/Dockerfile -t ci-accelerator-console:quickstart .
           docker save -o "$RUNNER_TEMP/console.tar" ci-accelerator-console:quickstart
@@ -53,7 +60,13 @@ jobs:
       - name: Install, build, look, uninstall
         env:
           QUICKSTART_LOGS: ${{ runner.temp }}/quickstart-logs
-        run: sudo --preserve-env=QUICKSTART_LOGS test/quickstart/run.sh "$RUNNER_TEMP/console.tar"
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            sudo --preserve-env=QUICKSTART_LOGS test/quickstart/run.sh --release "$RELEASE"
+          else
+            sudo --preserve-env=QUICKSTART_LOGS test/quickstart/run.sh "$RUNNER_TEMP/console.tar"
+          fi
 
       - name: Upload logs
         if: failure()
