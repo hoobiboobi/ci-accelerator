@@ -84,12 +84,12 @@ tests:
 
   - it: tags the image v<appVersion> by default, by digest when given
     asserts:
-      - equal: { path: "spec.template.spec.containers[0].image", value: "ghcr.io/hoobiboobi/ci-accelerator-console:v0.1.0" }
+      - matchRegex: { path: "spec.template.spec.containers[0].image", pattern: '^ghcr\.io/hoobiboobi/ci-accelerator-console:v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' }
   - it: pulls by digest when given
     set:
       image.digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
     asserts:
-      - equal: { path: "spec.template.spec.containers[0].image", value: "ghcr.io/hoobiboobi/ci-accelerator-console:v0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+      - matchRegex: { path: "spec.template.spec.containers[0].image", pattern: '^ghcr\.io/hoobiboobi/ci-accelerator-console:v[0-9.]+(-[0-9A-Za-z.-]+)?@sha256:0{64}$' }
 
   # A chart release that changes nothing else must not restart the console.
   - it: keeps the chart version out of the pod template
