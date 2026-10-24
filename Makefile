@@ -173,6 +173,10 @@ $(ORAS):
 	$(call fetch,https://github.com/oras-project/oras/releases/download/v$(ORAS_VERSION)/oras_$(ORAS_VERSION)_$(OS)_$(ARCH).tar.gz,$(TOOLS)/dl/oras-$(ORAS_VERSION).tgz,$(ORAS_SHA256_$(OS)_$(ARCH)))
 	@mkdir -p $(dir $@) && tar -xzf $(TOOLS)/dl/oras-$(ORAS_VERSION).tgz -C $(dir $@) oras
 
+.PHONY: oras
+oras: $(ORAS) ## Install the pinned oras into .tools (the workflows log in to ghcr with it)
+	@echo "$(ORAS)"
+
 .PHONY: chart-docs chart-docs-check
 chart-docs: $(HELM_DOCS) ## Regenerate charts/*/README.md from Chart.yaml, values comments and README.md.gotmpl
 	@$(HELM_DOCS) --chart-search-root charts --log-level warning
