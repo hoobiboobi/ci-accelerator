@@ -39,6 +39,11 @@ app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/con
 if [ "$app" != "$version" ]; then
   echo "charts/console/Chart.yaml has appVersion $app (its image tag), the tag says $version" >&2; fail=1
 fi
+# The box's appVersion is its own version (the console's), not BuildKit's.
+box=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/ci-accelerator/Chart.yaml")
+if [ "$box" != "$version" ]; then
+  echo "charts/ci-accelerator/Chart.yaml has appVersion $box, the tag says $version" >&2; fail=1
+fi
 # The one-node installer installs this release.
 qs=$(awk -F= '/^VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")
 if [ "$qs" != "$version" ]; then

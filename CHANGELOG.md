@@ -9,6 +9,12 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 0.2.0 - 2026-10-24
+
+### Upgrade notes
+
 - **VictoriaMetrics and VictoriaTraces are no longer part of the box**
   (ADR-0039):
   - The upgrade removes their StatefulSets. Their volumes stay; delete
