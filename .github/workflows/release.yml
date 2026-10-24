@@ -64,22 +64,16 @@ jobs:
           # Names without the dist/ prefix, so `sha256sum -c SHA256SUMS` works
           # next to the downloaded release assets.
           (cd dist && sha256sum ./*.tgz ./quickstart.sh | sed 's| \./| |' | tee SHA256SUMS)
-
-      - name: Push to ghcr.io
-        env:
-          GH_ACTOR: ${{ github.actor }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "$GH_ACTOR" --password-stdin
+          # Every pushed artifact by digest, for signing and the release notes.
           : > dist/digests
-          for tgz in dist/*.tgz; do
-            out=$(helm push "$tgz" "oci://$CHARTS_REPO")
-            echo "$out"
-            ref=$(printf '%s\n' "$out" | awk '/^Pushed:/ {print $2}')
-            digest=$(printf '%s\n' "$out" | awk '/^Digest:/ {print $2}')
-            echo "${ref%:*}@$digest" >> dist/digests
-          done
-          cat dist/digests
+
+      # Keyless signatures record the repository in Sigstore's public
+      # transparency log, so only once the repository is public.
+      - name: Install cosign
+        if: ${{ !github.event.repository.private }}
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
 
       # The console's image, the default of its chart (v<appVersion>), for
       # amd64 and arm64: Go cross-compiles, so no emulation. Built by the
@@ -93,23 +87,26 @@ jobs:
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
           scripts/build-console-image.sh "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator-console:v$VERSION" push | tee -a dist/digests
 
-      - name: Artifact Hub repository metadata
+      - name: Push to ghcr.io
         env:
           GH_ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          oras=$(make -s oras)
-          printf '%s' "$GH_TOKEN" | "$oras" login ghcr.io -u "$GH_ACTOR" --password-stdin
-          make artifacthub-metadata CHARTS_REPO="$CHARTS_REPO"
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "$GH_ACTOR" --password-stdin
+          for tgz in dist/*.tgz; do
+            out=$(helm push "$tgz" "oci://$CHARTS_REPO")
+            echo "$out"
+            ref=$(printf '%s\n' "$out" | awk '/^Pushed:/ {print $2}')
+            digest=$(printf '%s\n' "$out" | awk '/^Digest:/ {print $2}')
+            echo "${ref%:*}@$digest" >> dist/digests
+          done
+          cat dist/digests
 
-      # Keyless signatures record the repository in Sigstore's public
-      # transparency log, so only once the repository is public.
-      - name: Install cosign
-        if: ${{ !github.event.repository.private }}
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: v3.1.3
-
+      # Right after the push: Artifact Hub checks a version's signature
+      # once, when it first indexes the version (every half hour), and
+      # never again for the same digest. 0.2.1 was indexed in the three
+      # minutes the image build used to take between push and signature
+      # and is shown there as unsigned for good.
       - name: Sign
         if: ${{ !github.event.repository.private }}
         env:
@@ -118,6 +115,15 @@ jobs:
         run: |
           printf '%s' "$GH_TOKEN" | cosign login ghcr.io -u "$GH_ACTOR" --password-stdin
           while read -r artifact; do cosign sign --yes "$artifact"; done < dist/digests
+
+      - name: Artifact Hub repository metadata
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          oras=$(make -s oras)
+          printf '%s' "$GH_TOKEN" | "$oras" login ghcr.io -u "$GH_ACTOR" --password-stdin
+          make artifacthub-metadata CHARTS_REPO="$CHARTS_REPO"
 
       - name: GitHub Release
         env:
