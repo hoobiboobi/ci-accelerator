@@ -347,11 +347,12 @@ every job pod in it. It leaves:
     ```sh
     kubectl -n cert-manager delete secret -l app.kubernetes.io/instance=ci-accelerator
     ```
-  - the daemons' certificate in the box namespace:
+  - the daemons' certificate and the console's client certificate in the
+    box namespace:
     ```sh
-    kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls
+    kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls ci-accelerator-console-client
     ```
-- **the token Secret and the box namespace you created.**
+- **the token Secrets and the box namespace you created.**
 
 Before reinstalling on the same hostPath, wait until the old daemon pods
 are gone: a new daemon cannot take the locked state directory.
