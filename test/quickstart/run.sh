@@ -89,7 +89,7 @@ echo "== a second run keeps values.yaml and the daemons"
 printf '# kept-by-the-user\n' >> /var/lib/ci-accelerator/values.yaml
 uid0=$(kc -n "$NS" get pods -l app.kubernetes.io/name=buildkit -o jsonpath='{.items[*].metadata.uid}')
 if env RUNNER_TOKEN=glrt-quickstart-check CI_ACCELERATOR_CHART="$ROOT/charts/ci-accelerator" \
-    CI_ACCELERATOR_CONSOLE_IMAGE_TAR="${1:-}" \
+    CI_ACCELERATOR_CONSOLE_IMAGE_TAR="$IMAGE_TAR" \
     "$ROOT/scripts/quickstart.sh" --gitlab-url "$gitlab" --yes >"$LOGS/install-again.log" 2>&1; then
   pass "quickstart.sh runs again"
 else
