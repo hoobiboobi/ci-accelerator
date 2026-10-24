@@ -1056,6 +1056,7 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
       grep -q 'class="dl step st-built' "$LOGS/box-console-page.html"
   }
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
+  box_console_policy
   box_settle
   box_ui
   box_cache
@@ -1306,6 +1307,40 @@ print(r.get("kind", "none"), "by" if r.get("by") else "-")' "$1"
 # built the target is blamed on the node only when another job of the same
 # pipeline found the step in the cache on its own node; when such a job had
 # to rebuild the step on its own node too, the files changed.
+# box_console_policy: the box's console admits other namespaces (the checks
+# above read it from $JOBS_NS) but not its own CI jobs or its daemons (RUN
+# steps share their network): without sign-in it shows every project.
+box_console_policy() {
+  local url="http://$BOX_REL-console.$BOX_NS.svc:8080/healthz"
+  kc -n "$BOX_JOBS_NS" delete pod np-probe --ignore-not-found --wait=true >/dev/null 2>&1
+  kc -n "$BOX_JOBS_NS" run np-probe --image="$IMAGE" --restart=Never \
+    --overrides="{\"spec\":{\"nodeName\":\"$BUILD_NODE\",\"terminationGracePeriodSeconds\":0,
+      \"containers\":[{\"name\":\"np-probe\",\"image\":\"$IMAGE\",\"command\":[\"sleep\",\"600\"],
+        \"securityContext\":{\"allowPrivilegeEscalation\":false}}]}}" >/dev/null 2>&1
+  kc -n "$BOX_JOBS_NS" wait --for=condition=Ready pod/np-probe --timeout=120s >/dev/null 2>&1 \
+    || { fail "start a pod in the box's jobs namespace"; return; }
+  # A positive control from the same pod: it resolves the console's name,
+  # so a timeout below is the policy, not a broken pod network.
+  check "a pod in the box's jobs namespace has a network (control)" \
+    quiet kc -n "$BOX_JOBS_NS" exec np-probe -- nslookup "$BOX_REL-console.$BOX_NS.svc.cluster.local"
+  check "a pod in the box's jobs namespace cannot reach the console" refused_console "$BOX_JOBS_NS" np-probe "" "$url"
+  kc -n "$BOX_JOBS_NS" delete pod np-probe --wait=false >/dev/null 2>&1
+  local daemon
+  daemon=$(kc -n "$BOX_NS" get pods -l app.kubernetes.io/instance="$BOX_REL",ci-accelerator.io/component=buildkit \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  check "a daemon (and so every RUN step) cannot reach the console" refused_console "$BOX_NS" "$daemon" buildkitd "$url"
+  check "a pod in another namespace reaches the console" \
+    quiet kc -n "$JOBS_NS" exec client-build -- wget -q -T 5 -O- "$url"
+}
+
+# refused_console <namespace> <pod> <container or ""> <url>: wget from that
+# pod gets no answer within 5 s.
+refused_console() {
+  [ -n "$2" ] || return 1
+  local c=(); [ -n "$3" ] && c=(-c "$3")
+  ! kc -n "$1" exec "$2" "${c[@]}" -- wget -q -T 5 -O- "$4" >/dev/null 2>&1
+}
+
 box_settle() {
   local a b
   a=$(echo "$BUILD_NODES" | awk '{print $1}'); b=$(echo "$BUILD_NODES" | awk '{print $2}')

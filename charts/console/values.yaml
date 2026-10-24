@@ -148,6 +148,26 @@ persistence:
 service:
   port: 8080
 
+# Who may connect to the console. CI jobs and their builds (RUN steps share
+# the daemons' network) run untrusted code in the same cluster, and without
+# sign-in the console shows every project to whoever reaches it. Needs a
+# CNI that enforces NetworkPolicy. kubectl port-forward keeps working.
+networkPolicy:
+  # -- Render a NetworkPolicy that admits connections from every namespace
+  # except this one, the jobs namespace and deniedNamespaces, and from pods
+  # of this namespace except deniedComponents. Only ingress is limited.
+  enabled: false
+  # -- More namespaces whose pods may not connect (the jobs namespace is
+  # always one when jobs.namespace is set). Rendered with tpl.
+  deniedNamespaces: []
+  # -- Pods of this namespace whose ci-accelerator.io/component label is one
+  # of these may not connect: the daemons, whose network every build shares.
+  deniedComponents:
+    - buildkit
+  # -- More NetworkPolicyPeer entries that may connect, e.g. an ipBlock with
+  # the node addresses when the Ingress controller runs on the host network.
+  extraFrom: []
+
 resources:
   requests:
     cpu: 50m

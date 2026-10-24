@@ -185,6 +185,12 @@ console:
         name: '{{ include "ci-accelerator.issuerName" . }}'
   jobs:
     namespace: '{{ .Values.global.jobs.namespace }}'
+  networkPolicy:
+    # -- Keep the box's CI jobs and builds away from the console: the jobs
+    # namespace and the daemons (RUN steps share their network) may not
+    # connect; Ingress controllers in other namespaces and port-forward
+    # still do. Needs a CNI that enforces NetworkPolicy; see charts/console.
+    enabled: true
   # The runners' cache folders (the main runner's and the tiers'), written
   # by this chart with read access to their keys' Secrets.
   caches:

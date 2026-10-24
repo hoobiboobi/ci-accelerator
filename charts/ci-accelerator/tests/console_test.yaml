@@ -5,6 +5,7 @@ templates:
   - charts/console/templates/deployment.yaml
   - charts/console/templates/certificate.yaml
   - charts/console/templates/rbac.yaml
+  - charts/console/templates/networkpolicy.yaml
   - charts/buildkit/templates/networkpolicy.yaml
 values:
   - values/required.yaml
@@ -109,3 +110,26 @@ tests:
       console.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
     asserts:
       - failedTemplate: { errorPattern: "sign-in needs signIn.url \\(or global.console.url\\)" }
+
+  # CI jobs and their builds may not reach the console (it shows every
+  # project without sign-in): the box turns the policy on, with its jobs
+  # namespace and its daemons kept out.
+  - it: keeps the box's jobs and builds away from the console
+    template: charts/console/templates/networkpolicy.yaml
+    asserts:
+      - hasDocuments: { count: 1 }
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator, ci-accelerator-jobs]
+      - equal:
+          path: spec.ingress[0].from[1].podSelector.matchExpressions[0].values
+          value: [buildkit]
+  - it: follows a renamed jobs namespace
+    template: charts/console/templates/networkpolicy.yaml
+    set:
+      global.jobs.namespace: ci-builds
+      gitlab-runner.runners.jobNamespace: ci-builds
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator, ci-builds]

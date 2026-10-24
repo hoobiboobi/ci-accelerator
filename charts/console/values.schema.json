@@ -173,6 +173,16 @@
       "required": ["port"],
       "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } }
     },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "deniedNamespaces": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "deniedComponents": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "extraFrom": { "type": "array", "items": { "type": "object" } }
+      }
+    },
     "resources": { "type": "object", "additionalProperties": false, "properties": { "limits": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "requests": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "claims": { "type": "array" } } },
     "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
     "tolerations": { "type": "array", "items": { "type": "object" } },

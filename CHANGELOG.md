@@ -9,7 +9,22 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- The box now creates a NetworkPolicy for the console
+  (`console.networkPolicy.enabled`, on by default). Pods of other
+  namespaces and `kubectl port-forward` keep reaching it; the box's jobs
+  namespace and its daemons do not. An Ingress controller on the host
+  network reaches pods from a node address: allow those addresses in
+  `console.networkPolicy.extraFrom`, or switch the policy off. The console
+  is not restarted.
+
+### Security
+
+- The console was reachable from the box's own CI jobs and from every
+  build (RUN steps share the daemons' network), and without sign-in it
+  shows every project's builds, Dockerfiles and step output. A
+  NetworkPolicy now keeps both out (found by an internal review). The
+  standalone console chart has the same policy, off by default
+  (`networkPolicy.enabled`).
 
 ### Fixed
 
