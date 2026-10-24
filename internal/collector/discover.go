@@ -34,13 +34,22 @@ func (s *Supervisor) Run(ctx context.Context) {
 	}
 	var wg sync.WaitGroup
 	running := map[string]context.CancelCauseFunc{}
-	tick := time.NewTicker(every)
-	defer tick.Stop()
+	fails := 0
 	for {
+		wait := every
 		addrs, err := s.Resolve(ctx)
 		if err != nil {
-			s.Log.Warn("cannot resolve the daemons", "err", err)
+			// Right after start the daemons' headless Service may have no
+			// DNS records yet: retry soon and complain only when it lasts.
+			fails++
+			if fails <= 3 {
+				s.Log.Info("daemons not resolvable yet", "err", err, "attempt", fails)
+				wait = min(every, time.Duration(fails)*time.Second)
+			} else {
+				s.Log.Warn("cannot resolve the daemons", "err", err, "attempts", fails)
+			}
 		} else {
+			fails = 0
 			seen := map[string]bool{}
 			for _, a := range addrs {
 				seen[a] = true
@@ -68,7 +77,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 			}
 			wg.Wait()
 			return
-		case <-tick.C:
+		case <-time.After(wait):
 		}
 	}
 }

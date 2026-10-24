@@ -606,7 +606,9 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 		if longest > 0 {
 			h = 6 + 86*float64(run.Duration)/float64(longest)
 		}
-		col := HistCol{URL: fmt.Sprintf("/builds/%d/steps/%d", run.BuildID, idx), Label: duration(run.Duration), SHA: short(run.SHA, 6),
+		// The same step sits at another index in a build with other steps
+		// (a Dockerfile that gained a step, a build that received steps).
+		col := HistCol{URL: fmt.Sprintf("/builds/%d/steps/%d", run.BuildID, run.Idx), Label: duration(run.Duration), SHA: short(run.SHA, 6),
 			State: string(run.State), H: strconv.FormatFloat(h, 'f', 1, 64), Cur: run.BuildID == id, Cached: run.State != history.Built}
 		if col.SHA == "" {
 			col.SHA = "#" + strconv.FormatInt(run.BuildID, 10)

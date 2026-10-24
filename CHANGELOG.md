@@ -53,8 +53,9 @@ workflow copies them into the GitHub release.
   worker label (`ci-accelerator.io/node`), and keeps 1000 build records
   (48 h) for the console instead of buildkit's 50 (`config.history`, in
   both charts). Both change the daemons' pod template: the upgrade rolls
-  the DaemonSet. With an `emptyDir` cache the
-  daemons start with an empty cache; plan the upgrade between busy hours.
+  the DaemonSet. With an `emptyDir` cache the daemons start with an empty
+  cache and an empty build history, so the console reports the next build
+  of every image as its first; plan the upgrade between busy hours.
 - **The runner hook** gains a line that prints the console's link when
   `global.console.url` is set (nothing otherwise). With your own runner,
   copy the new `pre_build_script` lines from
