@@ -3,6 +3,7 @@
   "title": "ci-accelerator chart values",
   "description": "Only this chart's own keys are typed; buildkit validates its block with its own schema, gitlab-runner's block is the upstream chart's.",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "global",
     "jobsNamespace",
@@ -11,14 +12,18 @@
     "preflight"
   ],
   "properties": {
+    "console": { "type": "object", "description": "The console subchart (charts/console validates it): enabled, image, persistence, signIn, ..." },
     "global": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "buildNodes",
         "tls",
         "jobs"
       ],
       "properties": {
+        "buildNodes": { "type": "object", "description": "Shared placement of the daemons and the job pods (charts/buildkit validates it)." },
+        "tls": { "type": "object", "description": "Shared cert-manager issuerRef (charts/buildkit validates it)." },
         "console": {
           "type": "object",
           "properties": {
@@ -154,7 +159,7 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "resources": { "type": "object" },
+              "resources": { "type": "object", "additionalProperties": false, "properties": { "limits": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "requests": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "claims": { "type": "array" } } },
               "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
               "tolerations": { "type": "array", "items": { "type": "object" } }
             }

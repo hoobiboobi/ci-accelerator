@@ -377,7 +377,7 @@
         "liveness": { "$ref": "#/definitions/probeWithGrace" }
       }
     },
-    "resources": { "type": "object" },
+    "resources": { "type": "object", "additionalProperties": false, "properties": { "limits": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "requests": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "claims": { "type": "array" } } },
     "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
     "preStopSleepSeconds": { "type": "integer", "minimum": 0 },
     "minReadySeconds": { "type": "integer", "minimum": 0 },
