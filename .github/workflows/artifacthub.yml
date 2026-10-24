@@ -27,6 +27,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHARTS_REPO: ghcr.io/${{ github.repository_owner }}/charts
         run: |
-          make .tools/oras-$(awk '/^ORAS_VERSION/ {print $3}' Makefile)/oras
-          printf '%s' "$GH_TOKEN" | .tools/oras-*/oras login ghcr.io -u "$GH_ACTOR" --password-stdin
+          oras=$(make -s oras)
+          printf '%s' "$GH_TOKEN" | "$oras" login ghcr.io -u "$GH_ACTOR" --password-stdin
           make artifacthub-metadata CHARTS_REPO="$CHARTS_REPO"
