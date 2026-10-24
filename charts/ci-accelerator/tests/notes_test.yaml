@@ -101,3 +101,17 @@ tests:
       - notFailedTemplate: {}
       - notMatchRegexRaw:
           pattern: 'The console explains'
+
+  - it: says where the cache lives while it is an emptyDir
+    asserts:
+      - matchRegexRaw:
+          pattern: 'The build cache is an emptyDir on each build node.s root disk: every rollout\nstarts with an empty cache\. For production, point the daemons at a dedicated\ndisk \(buildkit\.storage\.type=hostPath; README, "Where the cache lives"\)\.'
+
+  - it: is quiet about the cache on a dedicated disk
+    set:
+      buildkit.storage.type: hostPath
+      buildkit.storage.hostPath.path: /var/mnt/nvme/buildkit
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'The build cache is an emptyDir'
+

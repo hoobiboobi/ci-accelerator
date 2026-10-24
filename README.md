@@ -10,9 +10,8 @@ backend you already run. Hosted services such as Depot, Namespace or Docker
 Build Cloud do this for you; this project does it on hardware you already
 run.
 
-> **Status:** v0.2.0-rc.1 is the current pre-release (v0.1.0 the last
-> release): signed charts and the console image on ghcr.io, installed as in
-> the [Quickstart](#quickstart). `main` also holds unreleased work, listed
+> **Status:** v0.2.0 is released: signed charts and the console image on
+> ghcr.io, installed as in the [Quickstart](#quickstart). `main` also holds unreleased work, listed
 > under "Unreleased" in the [changelog](CHANGELOG.md).
 
 ## Why
@@ -113,8 +112,8 @@ it from a file (`--runner-token-file`), so it never sits on a command line
 where other users and the shell history see it. Then run:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0-rc.1/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0-rc.1/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
 ```
 
@@ -185,7 +184,7 @@ kubectl -n ci-accelerator create secret generic gitlab-runner-token \
 ### 3. Install
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.0-rc.1 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.0 \
   -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -197,10 +196,56 @@ The package contains its subcharts. From a clone instead: `make deps`, then
 values. The daemons alone: `oci://ghcr.io/hoobiboobi/charts/buildkit`.
 
 - **Defaults:** amd64 build nodes, jobs in namespace `ci-accelerator-jobs`
-  (created by the release).
+  (created by the release), the build cache in an `emptyDir` (see below).
 - **arm64 build nodes:** add `--set global.jobs.architecture=arm64`.
+- **Production:** pin the console image by digest with
+  `--set console.image.digest=sha256:...` (the release notes list it); the
+  daemons' image is pinned by digest already.
+- **GitOps:** [docs/gitops.md](docs/gitops.md) shows the same install as
+  a Flux `HelmRelease` and an Argo CD `Application`.
 
 The notes printed at the end show how to check that the runner registered.
+
+### Where the cache lives
+
+By default the daemons keep their cache in an `emptyDir` on the node's root
+disk: fine for a first look, but every rollout starts with an empty cache
+and the node's disk is shared with everything else. For production give
+each build node a dedicated disk and point the daemons at it:
+
+```yaml
+buildkit:
+  storage:
+    type: hostPath
+    hostPath:
+      path: /var/mnt/nvme/buildkit   # a directory on the mounted disk, created in advance
+  config:
+    gc:                              # absolute sizes on a dedicated disk (binary units: 1TB = 1 TiB)
+      maxUsedSpace: "2TB"
+      reservedSpace: "100GB"
+      minFreeSpace: "400GB"
+```
+
+- **The directory must exist** on the mounted disk (`type: Directory`, the
+  default): if the disk is not mounted, the daemon does not start instead
+  of filling the OS disk. One release per path per node; the cache stays
+  after `helm uninstall`.
+- **XFS.** The cache is millions of small files. ext4 fixes its number of
+  inodes at `mkfs` time and can run out of them (`df -i`) long before it
+  runs out of space; XFS allocates inodes as needed. ext4 also keeps 5% in
+  reserve for root, which buildkitd's free-space check counts and kubelet's
+  eviction does not; XFS has no such reserve, so `minFreeSpace` means what
+  `df` shows. XFS is what the production numbers above come from:
+
+  ```sh
+  mkfs.xfs -L buildkit /dev/nvme1n1            # ftype=1 (overlayfs needs it) is the default
+  mkdir -p /var/mnt/nvme && mount -o noatime /dev/nvme1n1 /var/mnt/nvme
+  mkdir -p /var/mnt/nvme/buildkit              # the hostPath
+  ```
+
+  With ext4, make more inodes (`mkfs.ext4 -i 8192`) and drop the reserve
+  (`tune2fs -m 0`).
+- **Sizing** and the reasons for headroom: [docs/troubleshooting.md](docs/troubleshooting.md#disk-inodes-and-processes).
 
 ### 4. A first build
 
@@ -327,7 +372,7 @@ reaches over https.
 
    ```sh
    sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.0/helm upgrade ci-accelerator \
-     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.0-rc.1 \
+     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.0 \
      -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait
    ```
 

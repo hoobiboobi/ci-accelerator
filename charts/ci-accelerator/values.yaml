@@ -1,6 +1,8 @@
 # The box: buildkit daemons on the build nodes and a gitlab-runner whose CI
 # jobs use them. Set gitlab-runner.gitlabUrl and gitlab-runner.runners.secret;
-# everything else has working defaults. cert-manager must be installed (the
+# everything else has working defaults. For production also say where the
+# cache lives (buildkit.storage: hostPath on a dedicated disk; the default
+# emptyDir is emptied by every rollout). cert-manager must be installed (the
 # daemons and jobs authenticate each other with certificates it issues).
 
 # Shared with the subcharts.

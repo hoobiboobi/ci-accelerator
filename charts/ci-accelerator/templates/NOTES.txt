@@ -96,5 +96,12 @@ projects GitLab lets them read; its redirect URI would be
 {{- end }}
 {{- end }}
 
+{{- if eq (dig "storage" "type" "emptyDir" (default (dict) .Values.buildkit)) "emptyDir" }}
+
+The build cache is an emptyDir on each build node's root disk: every rollout
+starts with an empty cache. For production, point the daemons at a dedicated
+disk (buildkit.storage.type=hostPath; README, "Where the cache lives").
+{{- end }}
+
 Builds share the daemons' cache: a build's RUN steps can read and write what
 other builds left there. Use one installation per trust domain.
