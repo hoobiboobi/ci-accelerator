@@ -1,0 +1,32 @@
+# Pushes the charts' Artifact Hub repository metadata (artifacthub/<chart>.yml)
+# to their OCI repositories on demand; the release does the same. Run it
+# after changing a repository id or an owner.
+name: artifacthub
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  metadata:
+    name: push repository metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Push artifacthub/<chart>.yml to ghcr.io
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHARTS_REPO: ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          make .tools/oras-$(awk '/^ORAS_VERSION/ {print $3}' Makefile)/oras
+          printf '%s' "$GH_TOKEN" | .tools/oras-*/oras login ghcr.io -u "$GH_ACTOR" --password-stdin
+          make artifacthub-metadata CHARTS_REPO="$CHARTS_REPO"

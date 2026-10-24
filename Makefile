@@ -183,14 +183,19 @@ chart-docs-check: $(HELM_DOCS) ## Fail when a chart README is out of date (make 
 		cmp -s $$c/README.md $$c/README.generated.md || { echo "$$c/README.md is out of date: run make chart-docs"; rc=1; }; \
 		rm -f $$c/README.generated.md; done; exit $$rc
 
-# Pushes artifacthub-repo.yml next to every published chart (the tag
-# artifacthub.io of its OCI repository), as Artifact Hub reads it.
+# Pushes each chart's Artifact Hub repository metadata (artifacthub/<chart>.yml:
+# its repository id and owners) to the tag artifacthub.io of its OCI
+# repository, as Artifact Hub reads it. The file must be named
+# artifacthub-repo.yml in the layer.
 .PHONY: artifacthub-metadata
-artifacthub-metadata: $(ORAS) ## Push artifacthub-repo.yml to every chart's OCI repository (CHARTS_REPO=ghcr.io/<owner>/charts)
+artifacthub-metadata: $(ORAS) ## Push artifacthub/<chart>.yml to every chart's OCI repository (CHARTS_REPO=ghcr.io/<owner>/charts)
 	@[ -n "$(CHARTS_REPO)" ] || { echo "set CHARTS_REPO=ghcr.io/<owner>/charts" >&2; exit 2; }
 	@for c in buildkit console ci-accelerator; do \
-		$(ORAS) push "$(CHARTS_REPO)/$$c:artifacthub.io" --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
-			artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml >/dev/null && echo "pushed $(CHARTS_REPO)/$$c:artifacthub.io"; done
+		rm -rf $(TOOLS)/artifacthub && mkdir -p $(TOOLS)/artifacthub && cp artifacthub/$$c.yml $(TOOLS)/artifacthub/artifacthub-repo.yml && \
+		(cd $(TOOLS)/artifacthub && $(ORAS) push "$(CHARTS_REPO)/$$c:artifacthub.io" \
+			--config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+			artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml >/dev/null) \
+			&& echo "pushed $(CHARTS_REPO)/$$c:artifacthub.io"; done
 
 $(GOVULNCHECK):
 	@mkdir -p $(dir $@)

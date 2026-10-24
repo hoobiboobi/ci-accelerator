@@ -1,0 +1,8 @@
+# Artifact Hub repository metadata for oci://ghcr.io/hoobiboobi/charts/buildkit,
+# pushed as the tag artifacthub.io of that repository (make artifacthub-metadata;
+# the release and the artifacthub workflow do it). repositoryID is the id
+# Artifact Hub shows for the repository: it makes the publisher verified.
+repositoryID: 2ed248ca-47fe-45cf-8b71-cf252a8c6437
+owners:
+  - name: Aleksei Bondarenko
+    email: standprojectmail@gmail.com

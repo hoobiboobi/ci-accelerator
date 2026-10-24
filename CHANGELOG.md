@@ -15,7 +15,8 @@ None.
 
 - Each chart carries a README (generated from its values comments) and
   Artifact Hub metadata: icon, images, links and the release's changes;
-  the release pushes `artifacthub-repo.yml` next to every chart.
+  the release pushes each chart's repository metadata (`artifacthub/`)
+  next to it. The charts are listed on Artifact Hub.
 
 ## 0.2.0 - 2026-10-24
 

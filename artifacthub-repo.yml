@@ -1,7 +1,0 @@
-# Artifact Hub repository metadata, pushed by the release to every chart's
-# OCI repository as the tag artifacthub.io (make artifacthub-metadata).
-# repositoryID: the id Artifact Hub shows for the repository once it is
-# added there (enables "verified publisher"); owners: who may claim it.
-owners:
-  - name: Aleksei Bondarenko
-    email: standprojectmail@gmail.com
