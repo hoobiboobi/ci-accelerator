@@ -6,7 +6,8 @@
 #   scripts/build-console-image.sh <image:tag> push    # a release
 #   scripts/build-console-image.sh <image:tag> check   # build only (CI)
 #
-# Prints <image>@<digest> after a push. With SCAN_TAR=<file> set, check
+# Prints <image>@<digest> after a push. The provenance attestation is
+# mode=min: builder and materials, not the whole CI event payload. With SCAN_TAR=<file> set, check
 # mode also writes the linux/amd64 image as a docker archive there (the
 # same build, from the builder's cache) for a vulnerability scan.
 set -euo pipefail
@@ -27,7 +28,7 @@ case "$mode" in
   check) output="type=image,name=$ref,push=false,rewrite-timestamp=true" ;;
   *) echo "mode must be push or check" >&2; exit 2 ;;
 esac
-docker buildx build --builder "$builder" -f "$ROOT/cmd/console/Dockerfile" \
+docker buildx build --builder "$builder" --provenance=mode=min -f "$ROOT/cmd/console/Dockerfile" \
   --platform linux/amd64,linux/arm64 \
   --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY:-hoobiboobi/ci-accelerator}" \
   --label "org.opencontainers.image.version=${ref##*:}" \
@@ -40,7 +41,7 @@ if [ "$mode" = push ]; then
 else
   echo "built ${ref%:*}@$digest (not pushed)" >&2
   if [ -n "${SCAN_TAR:-}" ]; then
-    docker buildx build --builder "$builder" -f "$ROOT/cmd/console/Dockerfile" --platform linux/amd64 \
+    docker buildx build --builder "$builder" --provenance=mode=min -f "$ROOT/cmd/console/Dockerfile" --platform linux/amd64 \
       --build-arg "VERSION=${ref##*:}" --build-arg "COMMIT=$COMMIT" \
       --output "type=docker,dest=$SCAN_TAR,name=$ref" "$ROOT" >&2
     echo "wrote $SCAN_TAR (linux/amd64)" >&2
