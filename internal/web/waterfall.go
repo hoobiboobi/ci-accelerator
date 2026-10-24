@@ -71,7 +71,75 @@ type wfJob struct {
 	BuildID int64
 	Views   []StepView
 	Link    string
-	Crit    bool
+	Stage   string
+	Crit    bool // on the critical path
+}
+
+// CritPath sums up the jobs that set the pipeline's time.
+type CritPath struct {
+	Names  []string
+	Waited time.Duration // for a runner, over the chain
+	Ran    time.Duration
+}
+
+// criticalPath marks the chain of jobs that set the pipeline's time: the
+// job that ended last; the job of an earlier stage whose end let it be
+// queued (GitLab starts a stage when the previous one is done, so the
+// gate is the job that ended last before this one began to wait); and so
+// on to the first stage. A job that began before the previous stage ended
+// (needs:) is not gated by it, and the chain ends there. Without GitLab's
+// wait times a job's queue time is its start.
+func criticalPath(jobs []wfJob) CritPath {
+	var cp CritPath
+	if len(jobs) == 0 {
+		return cp
+	}
+	// Stages in the order they began.
+	first := map[string]time.Time{}
+	for _, j := range jobs {
+		at := j.Times.Queued
+		if at.IsZero() {
+			at = j.Times.Start
+		}
+		if t, ok := first[j.Stage]; !ok || at.Before(t) {
+			first[j.Stage] = at
+		}
+	}
+	last := 0
+	for i, j := range jobs {
+		if j.Times.End.After(jobs[last].Times.End) {
+			last = i
+		}
+	}
+	const slack = 2 * time.Second // GitLab's own scheduling latency
+	cur := last
+	for cur >= 0 {
+		j := &jobs[cur]
+		j.Crit = true
+		cp.Names = append(cp.Names, j.Name)
+		queued := j.Times.Queued
+		if queued.IsZero() {
+			queued = j.Times.Start
+		} else {
+			cp.Waited += j.Times.Start.Sub(queued)
+		}
+		cp.Ran += j.Times.End.Sub(j.Times.Start)
+		gate := -1
+		for i, c := range jobs {
+			if c.Stage == j.Stage || !first[c.Stage].Before(first[j.Stage]) || c.Times.End.After(queued.Add(slack)) {
+				continue
+			}
+			if gate < 0 || c.Times.End.After(jobs[gate].Times.End) {
+				gate = i
+			}
+		}
+		cur = gate
+	}
+	// From the first stage to the last job.
+	for i, k := 0, len(cp.Names)-1; i < k; i, k = i+1, k-1 {
+		cp.Names[i], cp.Names[k] = cp.Names[k], cp.Names[i]
+	}
+	return cp
 }
 
 // waitedFor says how long a job waited for a runner, when GitLab said.
@@ -299,16 +367,22 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time, onlyOne bool) *Wa
 			}
 		}
 	}
-	// Rows of the job that sets the pipeline's time, for the critical path.
-	critJob := ""
+	// Rows of the jobs on the critical path.
+	crit := map[string]bool{}
 	for _, r := range w.Rows {
 		if r.Kind == "job" && r.Crit {
-			critJob = r.ID
+			crit[r.ID] = true
 		}
 	}
 	for i := range w.Rows {
 		id := w.Rows[i].ID
-		w.Rows[i].OnCrit = critJob != "" && (id == critJob || strings.HasPrefix(id, critJob+"."))
+		if crit[id] {
+			w.Rows[i].OnCrit = true
+			continue
+		}
+		if dot := strings.Index(id, "."); dot > 0 && crit[id[:dot]] {
+			w.Rows[i].OnCrit = true
+		}
 	}
 	// A label that would run off the right edge ends where its bars begin.
 	for i := range w.Rows {
