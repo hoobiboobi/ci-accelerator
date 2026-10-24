@@ -66,7 +66,7 @@ by digest: another tag with it would still run the appVersion image. */}}
 {{- else }}
 {{- /* cert-manager is a prerequisite, never installed by this chart. */}}
 {{- if not (.Capabilities.APIVersions.Has "cert-manager.io/v1") }}
-{{- fail "tls.source=certManager, but the cluster has no cert-manager (API cert-manager.io/v1). Install it first: helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.2 --namespace cert-manager --create-namespace --set crds.enabled=true -- or use tls.source=existingSecret (scripts/buildkit-certs.sh makes the certificates). Rendering offline (helm template)? Pass --api-versions cert-manager.io/v1." }}
+{{- fail "tls.source=certManager, but the cluster has no cert-manager (API cert-manager.io/v1). Install it first: helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.3 --namespace cert-manager --create-namespace --set crds.enabled=true -- or use tls.source=existingSecret (scripts/buildkit-certs.sh makes the certificates). Rendering offline (helm template)? Pass --api-versions cert-manager.io/v1." }}
 {{- end }}
 {{- $ref := $v.global.tls.issuerRef }}
 {{- if and $ref.name (eq $ref.kind "Issuer") }}

@@ -72,16 +72,16 @@ TRIVY_ARCH = $(subst amd64,64bit,$(subst arm64,ARM64,$(ARCH)))
 # Go for the console (internal/, cmd/). Locally any Go >= 1.21 fetches this
 # toolchain itself (GOTOOLCHAIN, verified against the Go checksum database);
 # CI downloads the archive below. Checksums from https://go.dev/dl/?mode=json.
-GO_VERSION := 1.27.2
-GO_SHA256_linux_amd64 := ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
-GO_SHA256_linux_arm64 := 94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
+GO_VERSION := 1.27.3
+GO_SHA256_linux_amd64 := 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+GO_SHA256_linux_arm64 := a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
 # Node for the browser checks (test/ui): LTS line 24, the newest release at
 # least two weeks old; sums from nodejs.org SHASUMS256.txt.
-NODE_VERSION := 24.21.0
-NODE_SHA256_linux_amd64  := fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6
-NODE_SHA256_linux_arm64  := 6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2
-NODE_SHA256_darwin_arm64 := 6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe
-NODE_SHA256_darwin_amd64 := 0ae5a24c24bb7d015cd816c5036b3f90f2945aa872fcf54e58da054753b3a299
+NODE_VERSION := 24.22.1
+NODE_SHA256_linux_amd64  := eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c
+NODE_SHA256_linux_arm64  := 33c37be234ba8bee041961047b19160f4d7d0f164e8e246f78bdd10feff148b3
+NODE_SHA256_darwin_arm64 := 89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7
+NODE_SHA256_darwin_amd64 := d132557e7ee2b85af08b0c8c34338e65c6430f2238d01f727728ef42dc83b035
 
 OS   := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')

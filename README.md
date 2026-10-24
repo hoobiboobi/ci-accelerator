@@ -149,7 +149,7 @@ is not meant for production: one node, no high availability.
 - **cert-manager:**
 
   ```sh
-  helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.2 \
+  helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.3 \
     --namespace cert-manager --create-namespace --set crds.enabled=true
   ```
 

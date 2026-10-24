@@ -2,7 +2,7 @@ module github.com/hoobiboobi/ci-accelerator
 
 go 1.26.8
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.8
