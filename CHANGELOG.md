@@ -11,6 +11,22 @@ workflow copies them into the GitHub release.
 
 None.
 
+## 0.2.1 - 2026-10-24
+
+### Upgrade notes
+
+None: no pod template changes; the daemons and the runner keep running.
+
+### Fixed
+
+- The pipeline timeline's "Critical path" toggle did nothing: the style it
+  relied on was missing. Rows off the path now fade and the path's job
+  names go bold.
+- `quickstart.sh` rewrote `/var/lib/ci-accelerator/values.yaml` on every
+  run, losing sign-in and other edits. The file is written on the first
+  install only; a later run keeps it, applies a newly given GitLab token
+  with `--set` and says how to keep it.
+
 ### Added
 
 - Each chart carries a README (generated from its values comments) and
