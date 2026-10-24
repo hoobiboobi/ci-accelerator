@@ -52,9 +52,25 @@ type config struct {
 	keepDays, keepOutputDays                   int
 }
 
+// version and commit are set at build time (-ldflags -X main.version=...);
+// "dev" is a build from a working tree.
+var (
+	version = "dev"
+	commit  = ""
+)
+
+// versionString is what the pages and -version show: "v0.2.0 (0921bbc)".
+func versionString() string {
+	if commit != "" {
+		return version + " (" + commit + ")"
+	}
+	return version
+}
+
 func main() {
 	var c config
 	var daemons, gitlabURLs list
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.StringVar(&c.data, "data", "/data", "directory of the store")
 	flag.StringVar(&c.discover, "discover", "", "headless Service host:port; every address it resolves to is a daemon")
 	flag.Var(&daemons, "daemon", "a daemon's address, tcp://host:port (repeatable; instead of -discover)")
@@ -75,6 +91,10 @@ func main() {
 	flag.IntVar(&c.keepDays, "keep-days", 30, "days builds are kept")
 	flag.IntVar(&c.keepOutputDays, "keep-output-days", 7, "days step output is kept")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("ci-accelerator console " + versionString())
+		return
+	}
 	c.daemons = daemons
 	c.gitlabURLs = append(gitlabURLs, split(os.Getenv("GITLAB_URLS"))...)
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
@@ -156,7 +176,7 @@ func run(c config, log *slog.Logger) error {
 		}
 		go scanCaches(ctx, c, kube, st, log)
 	}
-	opt := web.Options{Live: col, Release: c.release}
+	opt := web.Options{Live: col, Release: c.release, Version: versionString()}
 	if c.devAssets != "" {
 		opt.Assets = os.DirFS(c.devAssets)
 	}

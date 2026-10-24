@@ -45,6 +45,8 @@ type Options struct {
 	Auth *auth.Auth
 	// Release names the installation on the nodes page.
 	Release string
+	// Version of the console, shown at the bottom of the sidebar.
+	Version string
 	// Assets replaces the built-in templates and static files (a directory
 	// with templates/ and static/), read again for every page: for working
 	// on the pages without rebuilding the console.
@@ -267,6 +269,8 @@ type Shell struct {
 	Project   store.Project
 	Projects  []store.Project
 	Warn      string // a warning dot on Nodes
+	// Version of the console, at the bottom of the sidebar.
+	Version string
 	// Viewer is the person signed in; nil without sign-in.
 	Viewer *auth.Viewer
 	// NoProjects: the person signed in may see no project here.
@@ -292,7 +296,7 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {
 // shell resolves the project the pages show: the request's, the one chosen
 // before, or the most recently built.
 func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
-	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r)}
+	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r), Version: s.opt.Version}
 	ps, err := s.store.Projects(r.Context())
 	if err != nil {
 		return sh, err

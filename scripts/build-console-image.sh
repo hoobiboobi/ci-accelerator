@@ -20,6 +20,7 @@ docker buildx create --name "$builder" --driver docker-container --driver-opt "i
 trap 'docker buildx rm "$builder" >/dev/null 2>&1 || true' EXIT
 SOURCE_DATE_EPOCH=$(git -C "$ROOT" log -1 --format=%ct)
 export SOURCE_DATE_EPOCH
+COMMIT=$(git -C "$ROOT" rev-parse --short=12 HEAD)
 meta=$(mktemp)
 case "$mode" in
   push) output="type=image,name=$ref,push=true,rewrite-timestamp=true" ;;
@@ -30,6 +31,7 @@ docker buildx build --builder "$builder" -f "$ROOT/cmd/console/Dockerfile" \
   --platform linux/amd64,linux/arm64 \
   --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY:-hoobiboobi/ci-accelerator}" \
   --label "org.opencontainers.image.version=${ref##*:}" \
+  --build-arg "VERSION=${ref##*:}" --build-arg "COMMIT=$COMMIT" \
   --output "$output" --metadata-file "$meta" "$ROOT" >&2
 digest=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$meta")
 rm -f "$meta"
@@ -39,6 +41,7 @@ else
   echo "built ${ref%:*}@$digest (not pushed)" >&2
   if [ -n "${SCAN_TAR:-}" ]; then
     docker buildx build --builder "$builder" -f "$ROOT/cmd/console/Dockerfile" --platform linux/amd64 \
+      --build-arg "VERSION=${ref##*:}" --build-arg "COMMIT=$COMMIT" \
       --output "type=docker,dest=$SCAN_TAR,name=$ref" "$ROOT" >&2
     echo "wrote $SCAN_TAR (linux/amd64)" >&2
   fi

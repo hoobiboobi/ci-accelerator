@@ -46,6 +46,7 @@
       {{else}}
       <div class="side-note">Preview · sign-in is off: keep the console inside the cluster.</div>
       {{end}}
+      {{with .Version}}<div class="side-note side-ver" title="ci-accelerator console {{.}}">console {{.}}</div>{{end}}
     </div>
   </aside>
   <div class="main" id="mainwrap">
