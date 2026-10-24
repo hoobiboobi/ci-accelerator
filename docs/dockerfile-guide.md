@@ -229,3 +229,12 @@ buildctl ... build --local context=. --local dockerfile=docker --opt filename=Do
 - [ ] Base images are pinned by digest.
 - [ ] `--progress plain` shows `CACHED` for everything before the first
       changed file.
+
+## A test step must be able to fail
+
+A `RUN npm test` that cannot fail is a cached lie: BuildKit records it as
+done and every later build takes it from the cache. Seen on a Node
+monorepo: `node --test dist/` runs the *directory* as one empty, passing
+test (`ok 1 - dist`); the real test files never ran, and a broken test
+went green. Point the runner at the files (`node --test dist/*.test.js`),
+and break a test once on purpose to see the step go red.
