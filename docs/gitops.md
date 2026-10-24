@@ -35,7 +35,7 @@ spec:
   chart:
     spec:
       chart: ci-accelerator
-      version: 0.2.1
+      version: 0.2.2
       sourceRef: { kind: HelmRepository, name: ci-accelerator, namespace: flux-system }
   values:
     gitlab-runner:
@@ -65,7 +65,7 @@ the box namespace; the jobs namespace is created by the release.
 
 The same values in an `Application` with the OCI repository as its source
 (`repoURL: ghcr.io/hoobiboobi/charts`, `chart: ci-accelerator`,
-`targetRevision: 0.2.1`). Give cert-manager an earlier sync wave
+`targetRevision: 0.2.2`). Give cert-manager an earlier sync wave
 (`argocd.argoproj.io/sync-wave`) and let the box create the jobs namespace
 itself (no `CreateNamespace` needed for it; the box namespace you create
 with its label, or with `CreateNamespace=true` plus a `managedNamespaceMetadata`

@@ -1,12 +1,12 @@
 # console
 
-![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.1](https://img.shields.io/badge/AppVersion-0.2.1-informational?style=flat-square)
+![Version: 0.2.2](https://img.shields.io/badge/Version-0.2.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.2](https://img.shields.io/badge/AppVersion-0.2.2-informational?style=flat-square)
 
 Collects the build history of BuildKit daemons and the CI jobs around it, and explains every build: what came from cache, what came from another job, and why a step was rebuilt.
 
 Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator). The console reads every daemon's build history and the CI job pods into SQLite on its own volume and answers one question: why an image build was slow or not cached - the change or the build farm. It works in three levels: by itself (builds, steps, cache verdicts, the pipeline timeline), with a GitLab token (job results, runner waits, "files or node" by comparing commits), or with sign-in through GitLab (each person sees the projects GitLab lets them read). The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs it on by default; on its own it needs the daemons' CA for its client certificate (`tls`) and their headless Service (`daemons.discover`).
 
-The repository's [README, "The console"](https://github.com/hoobiboobi/ci-accelerator#the-console) explains the levels and the sign-in setup.
+[The console](https://ci-accelerator.io/docs/#the-console) in the documentation explains the levels and the sign-in setup.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
 # buildkit
 
-![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.33.1](https://img.shields.io/badge/AppVersion-v0.33.1-informational?style=flat-square)
+![Version: 0.2.2](https://img.shields.io/badge/Version-0.2.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.33.1](https://img.shields.io/badge/AppVersion-v0.33.1-informational?style=flat-square)
 
 Persistent BuildKit daemons as a shared build service for CI, with probe and garbage-collection defaults derived from a production setup.
 
@@ -11,7 +11,7 @@ helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version <versio
   -n ci-accelerator --set 'tls.client.namespaces={ci-jobs}'
 ```
 
-The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs this chart with a gitlab-runner and the console. How to use the daemons from a job, where the cache should live and what to watch: the repository's [README](https://github.com/hoobiboobi/ci-accelerator#readme), [docs/architecture.md](https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/architecture.md) and [docs/troubleshooting.md](https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/troubleshooting.md).
+The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs this chart with a gitlab-runner and the console. How to use the daemons from a job, where the cache should live and what to watch: the [documentation](https://ci-accelerator.io/docs/), [architecture](https://ci-accelerator.io/docs/architecture/) and [troubleshooting](https://ci-accelerator.io/docs/troubleshooting/).
 
 ## Requirements
 
