@@ -80,15 +80,15 @@ RUNNER_CHART_VERSION=0.93.0
 RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 # The last published release, which the upgrade scenario installs from the
 # registry and upgrades to this tree. Bump both with every release.
-UPGRADE_FROM=0.1.0
-UPGRADE_FROM_SHA256=a4b803333d2b9da608c276dbd3e7e9ea2077866c4b426441ce7935ef94506705
-UPGRADE_FROM_BUILDKIT_SHA256=b9ac1a09e431e943749a0ec17690300742cc9cf4a06d0faa8a6da14fa43e1657
+UPGRADE_FROM=0.2.0
+UPGRADE_FROM_SHA256=6c9c0e0d2150aa678c313330dc3a293b49b0ac66df70a257cd8408b827dc71f7
+UPGRADE_FROM_BUILDKIT_SHA256=263a87836d3a9b9d73b28764ac58b6cbbe1c287bf914841620f7adf9a8eccab9
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
 # then restarts every daemon; say so in the upgrade notes).
 # 0.2: the daemons carry their node as a worker label, and the box keeps
 # more build history; both change the pod template.
-UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # An S3 store for the runner cache (MinIO publishes no images any more):
@@ -1358,7 +1358,7 @@ s_upgrade() {
       -a "$(sha256 "$old_bk" | awk '{print $1}')" = "$UPGRADE_FROM_BUILDKIT_SHA256"
   docker exec "$BUILD_NODE" mkdir -p "$state" || { fail "mkdir $state on $BUILD_NODE"; return; }
   # One daemon, on the node whose cache the jobs must find again.
-  args=(-f "$ROOT/test/e2e/box-values.yaml" -f "$ROOT/test/e2e/box-values-0.1.yaml"
+  args=(-f "$ROOT/test/e2e/box-values.yaml" -f "$ROOT/test/e2e/box-values-old.yaml"
     --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token
     --set "global.jobs.namespace=$UPG_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$UPG_JOBS_NS"
     --set "global.jobs.architecture=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')"
@@ -1382,14 +1382,22 @@ s_upgrade() {
   else
     fail "helm upgrade --reuse-values from $UPGRADE_FROM (see $LOGS/upgrade-reuse.log)"; return
   fi
-  check "--reuse-values keeps the console off (the old values have no such key)" \
-    eval '! kc -n "$UPG_NS" get deploy "$UPG_REL-console" >/dev/null 2>&1' 
+  # --reuse-values keeps the old values tree: a console the old release
+  # had stays, one it did not know (0.1.x) stays off.
+  if [ -n "$(kc -n "$UPG_NS" get deploy "$UPG_REL-console" -o name --ignore-not-found 2>/dev/null)" ] \
+      && [ "$(hc get values "$UPG_REL" -n "$UPG_NS" --revision 1 -o json 2>/dev/null | grep -c '"console"')" -ge 0 ]; then
+    check "--reuse-values keeps the console the old release had" \
+      eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-console --timeout=60s >/dev/null'
+  else
+    check "--reuse-values keeps the console off (the old values have no such key)" \
+      eval '! kc -n "$UPG_NS" get deploy "$UPG_REL-console" >/dev/null 2>&1' 
+  fi
   gen1=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
   uids1=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
   if [ "$UPGRADE_ROLLOUT_EXPECTED" = 1 ]; then
     info "daemon rollout expected (UPGRADE_ROLLOUT_EXPECTED=1): generation $gen0 -> $gen1"
   else
-    check "the upgrade does not restart the daemons (generation $gen0 -> $gen1; on purpose: UPGRADE_ROLLOUT_EXPECTED=1 and upgrade notes)" \
+    check "the upgrade does not restart the daemons (generation $gen0 -> $gen1; a rollout on purpose needs UPGRADE_ROLLOUT_EXPECTED=1 and an upgrade note)" \
       test "$gen0" = "$gen1" -a "$uids0" = "$uids1"
   fi
   # 0.1.0 ran VictoriaMetrics and VictoriaTraces; this tree does not: the
