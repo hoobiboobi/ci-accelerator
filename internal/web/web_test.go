@@ -587,6 +587,22 @@ func TestJobPages(t *testing.T) {
 	if lg.status != 200 || *asked != "/api/v4/projects/42/jobs/9100002/trace" || strings.Contains(lg.body, "glpat-") || !strings.Contains(lg.body, "[masked]") {
 		t.Errorf("log: %d %q, asked %q", lg.status, lg.body, *asked)
 	}
+	// A job seen as a pod: its page says what the pod told (approximate),
+	// and the pipeline's timeline links the job to this page, not to GitLab.
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 9_100_003, PipelineID: pid, ProjectID: 42, Name: "unit-tests", Stage: "test",
+		Node: "node-b", StartedAt: testNow.Add(-5 * time.Minute), URL: "https://gitlab.example.com/p/-/jobs/9100003"}); err != nil {
+		t.Fatal(err)
+	}
+	j3 := get(t, ts, fmt.Sprintf("/jobs/%s/9100003", inst))
+	for _, want := range []string{"<dt>Result</dt><dd>unknown", "<dt>Stage</dt><dd>test</dd>", "<dt>Node</dt><dd><span class=\"mono\">node-b</span>", "(from the job pod: approximate)", `href="https://gitlab.example.com/p/-/jobs/9100003" target="_blank"`} {
+		if !strings.Contains(j3.body, want) {
+			t.Errorf("job page without GitLab facts lacks %q", want)
+		}
+	}
+	pp := get(t, ts, "/pipelines/"+keys[0])
+	if !strings.Contains(pp.body, `href="/jobs/`+inst+`/9100003"`) || strings.Contains(pp.body, `href="https://gitlab.example.com/p/-/jobs/9100003"`) {
+		t.Error("the timeline should link a job without a build to its console page, not to GitLab")
+	}
 }
 
 // An image's page: its builds over a window, the steps that rebuild most,

@@ -210,7 +210,7 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []sto
 		}
 		jt := jobTimes{Start: j.Started, End: end, Total: end.Sub(j.Started), Known: true}
 		jt.Queued = queuedAt(j, j.Started)
-		wjobs = append(wjobs, wfJob{Name: j.Name, Times: jt, Note: note, Link: webURL(j.URL)})
+		wjobs = append(wjobs, wfJob{Name: j.Name, Times: jt, Note: note, Link: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.ID)})
 		drawn++
 	}
 	if len(wjobs) == 0 {
@@ -298,6 +298,54 @@ type JobView struct {
 	PipeURL     string
 	PipeLabel   string
 	LogURL      string
+	// What the console knows: from GitLab when it has read the job, else
+	// from the job pod (Approx).
+	Result       string
+	Waited       string
+	Ran          string
+	Started      string
+	Finished     string
+	Runner       string
+	Node         string
+	StartedBy    string
+	AllowFailure bool
+	Approx       bool
+}
+
+// jobFacts fills the job page's facts from a stored job.
+func jobFacts(v *JobView, j *store.JobInfo, now time.Time) {
+	switch j.Status {
+	case "":
+		v.Result = "unknown: the console has not read this job from GitLab"
+	case "success":
+		v.Result = "passed"
+	case "failed":
+		v.Result = "failed"
+		if j.AllowFailure {
+			v.Result = "failed, allowed to fail"
+		}
+	default:
+		v.Result = j.Status
+	}
+	v.Approx = j.Status == ""
+	if j.Waited > 0 {
+		v.Waited = duration(j.Waited)
+	}
+	switch {
+	case j.Duration > 0:
+		v.Ran = duration(j.Duration)
+	case !j.Started.IsZero() && !j.Finished.IsZero():
+		v.Ran = duration(j.Finished.Sub(j.Started))
+	case !j.Started.IsZero() && !store.Finished(j.Status):
+		v.Ran = "running for " + duration(now.Sub(j.Started))
+	}
+	if !j.Started.IsZero() {
+		v.Started = when(j.Started)
+	}
+	if !j.Finished.IsZero() {
+		v.Finished = when(j.Finished)
+	}
+	v.Runner, v.Node, v.StartedBy, v.AllowFailure = j.Runner, j.Node, j.StartedBy, j.AllowFailure
 }
 
 func (s *Server) job(w http.ResponseWriter, r *http.Request) {
@@ -335,6 +383,7 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	}
 	pinProject(&sh, instance, j.ProjectID)
 	v := &JobView{Name: j.Name, Stage: j.Stage, GitLabURL: webURL(j.URL)}
+	jobFacts(v, j, s.now())
 	if j.PipelineID != 0 {
 		v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(instance, j.PipelineID), "#"+strconv.FormatUint(j.PipelineID, 10)
 	}
