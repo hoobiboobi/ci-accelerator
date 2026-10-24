@@ -1,0 +1,29 @@
+suite: values schema
+templates:
+  - templates/jobs-namespace.yaml
+tests:
+  - it: refuses a misspelled top-level key
+    set:
+      consol: { enabled: false }
+    asserts:
+      - failedTemplate:
+          errorPattern: "consol"
+  - it: refuses a misspelled key under global
+    set:
+      global.job: { namespace: elsewhere }
+    asserts:
+      - failedTemplate:
+          errorPattern: "job"
+  - it: refuses a misspelled resources key of the console
+    set:
+      console.resources: { limit: { cpu: 1 } }
+    asserts:
+      - failedTemplate:
+          errorPattern: "limit"
+  - it: still accepts the storage keys of 0.1.0 values
+    set:
+      victoria-metrics-single: { enabled: true }
+      victoria-traces-single: { enabled: false }
+    asserts:
+      - hasDocuments:
+          count: 1
