@@ -45,3 +45,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0039](0039-no-bundled-observability.md) | No bundled metrics and traces storage |
 | [0040](0040-vulnerability-checks.md) | Vulnerability checks in CI |
 | [0041](0041-security-patch-exception.md) | Security patches skip the two-weeks wait |
+| [0042](0042-gitlab-ci-component.md) | A GitLab CI component, included by URL from the release tag |

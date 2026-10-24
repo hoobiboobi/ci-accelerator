@@ -153,6 +153,16 @@ jobs:
             echo "sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/   # asks for the runner's token"
             echo '```'
             echo
+            echo "The GitLab CI component (a job that builds and pushes on the build farm; [ci/gitlab/README.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/ci/gitlab/README.md)):"
+            echo
+            echo '```yaml'
+            echo "include:"
+            echo "  - remote: https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/ci/gitlab/build.yml"
+            echo "    integrity: sha256-$(openssl dgst -sha256 -binary ci/gitlab/build.yml | base64)"
+            echo "    inputs:"
+            echo "      runner-tags: [your-runner-tag]"
+            echo '```'
+            echo
             echo "The daemons alone: \`oci://$CHARTS_REPO/buildkit --version $VERSION\`."
             echo "The console alone: \`oci://$CHARTS_REPO/console --version $VERSION\`, image \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator-console:v$VERSION\`."
             if [ "$PRIVATE" != "true" ]; then

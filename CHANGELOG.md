@@ -11,6 +11,16 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Added
+
+- A GitLab CI/CD component, `ci/gitlab/build.yml`: one job that builds an
+  image on the build farm and pushes it with the job token. Inputs for the
+  context, Dockerfile, target, platforms, build arguments, secrets (by CI/CD
+  variable name), images, provenance, a timeout and more; the digest goes to
+  later jobs as a dotenv report. Included by URL from the release's tag
+  with an integrity hash (any GitLab 17.9 or newer, also self-managed), or
+  copied into a project. The release notes print the include block.
+
 ## 0.2.2 - 2026-10-25
 
 ### Upgrade notes

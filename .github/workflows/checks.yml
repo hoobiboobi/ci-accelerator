@@ -91,6 +91,20 @@ jobs:
       - name: trivy over the built image
         run: make image-scan IMAGE_TAR="$RUNNER_TEMP/console.tar"
 
+  component:
+    name: GitLab CI component
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The job's script in its own image against a fake buildctl, and the
+      # README and the daemons' pin kept in step with the component.
+      - name: Component tests
+        run: make component-test
+
   ui:
     name: browser checks
     runs-on: ubuntu-24.04

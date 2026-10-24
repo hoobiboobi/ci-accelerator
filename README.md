@@ -249,33 +249,34 @@ buildkit:
 
 ### 4. A first build
 
-In a project with a `Dockerfile`:
+In a project with a `Dockerfile`, include the GitLab CI component: one job
+that builds on the build farm and pushes `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`
+with the job token. The release notes print this block with the file's
+hash:
 
 ```yaml
 # .gitlab-ci.yml
-build:
-  tags: [my-runner-tag]     # if the runner only takes tagged jobs
-  image: moby/buildkit:v0.33.1
-  script:
-    - buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR"
-        build --frontend dockerfile.v0 --local context=. --local dockerfile=.
-        --progress plain
+include:
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.0/ci/gitlab/build.yml
+    integrity: sha256-<from the release notes>
+    inputs:
+      runner-tags: [my-runner-tag]   # if the runner only takes tagged jobs
 ```
+
+Build arguments, secrets, several images, another Dockerfile, the digest
+for later jobs and GitLab without access to GitHub:
+[ci/gitlab/README.md](ci/gitlab/README.md).
 
 Add `.git` to `.dockerignore`. Every job has a fresh clone, so with `.git`
 in the build context, every step after `COPY . .` runs again in every
 pipeline. More in [docs/dockerfile-guide.md](docs/dockerfile-guide.md).
 
-**Pushing an image** is not wrapped yet:
-
-1. Write registry credentials to `$DOCKER_CONFIG/config.json`. For GitLab's
-   registry they come from `CI_REGISTRY`, `CI_REGISTRY_USER` and
-   `CI_REGISTRY_PASSWORD`.
-2. Run `unset DOCKER_AUTH_CONFIG`. buildctl reads that variable too, and a
-   read-only entry in it overrides the job's credentials.
-3. Add `--output type=image,name=$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA,push=true`.
-
-A reusable CI component that does this is planned.
+Without the component, call buildctl yourself: `buildctl --addr
+"$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build ...` in the
+`moby/buildkit` image. To push, write the registry credentials to
+`$DOCKER_CONFIG/config.json` and run `unset DOCKER_AUTH_CONFIG` first:
+buildctl reads that variable too, and a read-only entry in it overrides the
+job's credentials.
 
 ### The console
 
@@ -573,6 +574,7 @@ make e2e                      # end-to-end on kind
 | `charts/ci-accelerator` | The box (umbrella chart) |
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
+| `ci/gitlab` | GitLab CI component: a job that builds and pushes on the build farm |
 | `charts/console` | The console, usable and published on its own (`oci://ghcr.io/hoobiboobi/charts/console`) |
 | `cmd/console`, `internal/` | Go: the console (build history to builds and reasons, store, collector, pages) |
 | `scripts/quickstart.sh` | One clean Linux machine: k3s, cert-manager and the box (attached to every release) |
