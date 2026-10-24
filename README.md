@@ -10,7 +10,8 @@ backend you already run. Hosted services such as Depot, Namespace or Docker
 Build Cloud do this for you; this project does it on hardware you already
 run.
 
-> **Status:** v0.1.0 is released: signed charts on ghcr.io, installed as in
+> **Status:** v0.2.0-rc.1 is the current pre-release (v0.1.0 the last
+> release): signed charts and the console image on ghcr.io, installed as in
 > the [Quickstart](#quickstart). `main` also holds unreleased work, listed
 > under "Unreleased" in the [changelog](CHANGELOG.md).
 
@@ -107,16 +108,19 @@ Each part is usable on its own:
 To look at it before a real deployment, one clean Linux machine is enough:
 Ubuntu 24.04 or Debian 13, amd64 or arm64, 4 CPUs, 8 GB of memory and 40
 GB of free disk, without Docker or Kubernetes. First create a runner in
-GitLab and copy its token (`glrt-...`). Then run:
+GitLab and copy its token (`glrt-...`): the script asks for it, or reads
+it from a file (`--runner-token-file`), so it never sits on a command line
+where other users and the shell history see it. Then run:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
-sudo RUNNER_TOKEN=glrt-... bash quickstart.sh --gitlab-url https://gitlab.example.com/
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0-rc.1/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.0-rc.1/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
 ```
 
-`quickstart.sh` installs the following, each pinned and checked against
-its sha256:
+`quickstart.sh` installs the following; k3s, Helm, cert-manager and the
+chart are pinned and checked against their sha256 (the box's images come
+by tag, the daemons' by digest):
 - k3s, with the machine as its only node and build node;
 - Helm and cert-manager;
 - the box, with the build console.
@@ -180,7 +184,7 @@ kubectl -n ci-accelerator create secret generic gitlab-runner-token \
 ### 3. Install
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.1.0 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.0-rc.1 \
   -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
