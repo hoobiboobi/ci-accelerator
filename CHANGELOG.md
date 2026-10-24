@@ -81,6 +81,8 @@ workflow copies them into the GitHub release.
 
 ### Added
 
+- The console shows its version at the bottom of the sidebar and with
+  `console -version`: the image tag and the commit it was built from.
 - Vulnerability checks in CI: `govulncheck` over the console's code for both
   release targets and `trivy` over the built image on every pull request
   (`make vulncheck`, `make image-scan`), plus a weekly run against `main`

@@ -952,6 +952,16 @@ func TestStepHistoryLinksOpenTheSameStep(t *testing.T) {
 	}
 }
 
+// The console's version sits at the bottom of the sidebar on every page.
+func TestVersionInTheSidebar(t *testing.T) {
+	ts, _, _, _ := consoleWith(t, Options{Version: "v9.9.9 (abc123def456)"})
+	for _, path := range []string{"/", "/builds", "/nodes"} {
+		if p := get(t, ts, path); !strings.Contains(p.body, `<div class="side-note side-ver" title="ci-accelerator console v9.9.9 (abc123def456)">console v9.9.9 (abc123def456)</div>`) {
+			t.Errorf("%s: no version in the sidebar", path)
+		}
+	}
+}
+
 // A step's own page has the app shell and a way back; the panel the script
 // loads has neither.
 func TestStepPageAndPanel(t *testing.T) {

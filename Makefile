@@ -256,7 +256,7 @@ unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-un
 CONSOLE_IMAGE ?= ci-accelerator-console:dev
 .PHONY: console-image
 console-image: ## Build the console image for this machine's architecture and load it into kind
-	@docker buildx build -f cmd/console/Dockerfile -t $(CONSOLE_IMAGE) --load . >/dev/null
+	@docker buildx build -f cmd/console/Dockerfile -t $(CONSOLE_IMAGE) --build-arg VERSION=dev --build-arg COMMIT=$$(git rev-parse --short=12 HEAD) --load . >/dev/null
 	@kind load docker-image $(CONSOLE_IMAGE) --name $(KIND_CLUSTER) >/dev/null 2>&1
 	@echo "$(CONSOLE_IMAGE) loaded into kind cluster $(KIND_CLUSTER)"
 
