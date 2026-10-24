@@ -78,7 +78,8 @@ A package pushed for the first time is private: make it public under the reposit
 Open a pull request that moves the upgrade test to the new release. In `test/e2e/run.sh`, set:
 - `UPGRADE_FROM=<v>`;
 - `UPGRADE_FROM_SHA256` and `UPGRADE_FROM_BUILDKIT_SHA256` to the ci-accelerator and buildkit lines of the release's `SHA256SUMS`;
-- `UPGRADE_ROLLOUT_EXPECTED` back to `0`, unless `main` already holds a change that restarts the daemons on purpose.
+- `UPGRADE_ROLLOUT_EXPECTED` back to `0`, unless `main` already holds a change that restarts the daemons on purpose;
+- `test/e2e/box-values-old.yaml` to what the new release needs on kind (tolerations for what runs on the control-plane node, small volumes).
 
 From then on every change is tested against the version users have.
 
