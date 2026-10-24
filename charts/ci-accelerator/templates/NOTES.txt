@@ -77,10 +77,21 @@ Sign-in is off (console.signIn): it shows everything to whoever reaches
 it, so keep it inside the cluster:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} 8080
     then http://localhost:8080/
+{{- $cu := trimSuffix "/" (dig "console" "url" "" (default (dict) .Values.global)) }}
 {{- if not (dig "gitlab" "token" "existingSecret" "" $console) }}
-With a GitLab token that can read the projects' jobs
-(console.gitlab.token.existingSecret), it also shows how long jobs waited
-for a runner and settles "files or node" by comparing commits.
+Without GitLab access it shows image builds, their steps and cache
+verdicts, but no job results or runner waits. More (README, "The console"):
+  - a GitLab token with read_api (console.gitlab.token.existingSecret):
+    job results, runner waits, "files or node" by comparing commits;
+  - sign-in through GitLab (console.signIn): each person sees the projects
+    GitLab lets them read; the OAuth application's redirect URI is
+      {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
+{{- else }}
+With its GitLab token it also shows job results and runner waits and
+settles "files or node" by comparing commits. Sign-in through GitLab
+(console.signIn; README, "The console") would show each person only the
+projects GitLab lets them read; its redirect URI would be
+  {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
 {{- end }}
 {{- end }}
 {{- end }}
