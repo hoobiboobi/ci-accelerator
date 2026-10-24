@@ -11,6 +11,14 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Changed
+
+- The release workflow signs the charts right after pushing them, before
+  the console image is built. Artifact Hub checks a version's signature
+  only when it first indexes the version; 0.2.1 was indexed in the three
+  minutes between push and signature and is listed there as unsigned,
+  although `cosign verify` passes for every artifact of the release.
+
 ## 0.2.1 - 2026-10-24
 
 ### Upgrade notes
