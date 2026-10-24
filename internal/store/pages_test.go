@@ -78,6 +78,17 @@ func TestPages(t *testing.T) {
 	if built == 0 || cached == 0 || runs[0].Started.Before(runs[len(runs)-1].Started) {
 		t.Errorf("step history: %d runs, %d built, %d cached", len(runs), built, cached)
 	}
+	// Each run names the step's index in its own build: builds differ in
+	// their steps, so the same step sits at other indexes.
+	for _, r := range runs {
+		other, err := s.BuildPage(ctx, r.BuildID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Idx < 0 || r.Idx >= len(other.Build.Steps) || other.Build.Steps[r.Idx].Key != api.Steps[idx].Key {
+			t.Errorf("run in build %d: index %d does not name step %q (%d steps)", r.BuildID, r.Idx, api.Steps[idx].Key, len(other.Build.Steps))
+		}
+	}
 }
 
 func byRef(bs []*history.Build, target string, job uint64) *history.Build {

@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -871,6 +873,66 @@ func TestBuildPage(t *testing.T) {
 	}
 	if compared == 0 {
 		t.Error("no build page says what changed")
+	}
+}
+
+// Every link in a step's history opens that same step in the other build,
+// which may hold it at another index (a Dockerfile that gained a step, a
+// build that received steps from another one).
+func TestStepHistoryLinksOpenTheSameStep(t *testing.T) {
+	ts, st, ids := console(t)
+	// A later build of the newest image with one more step in front: every
+	// step of the earlier builds sits one index further here.
+	var newest *store.BuildPage
+	for _, id := range ids {
+		p, err := st.BuildPage(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if newest == nil || p.Build.Started.After(newest.Build.Started) {
+			newest = p
+		}
+	}
+	grown := *newest.Build
+	grown.Ref, grown.Started = "grownref", grown.Started.Add(time.Hour)
+	grown.Steps = append([]history.Step{{Key: "[extra 1/1]", Name: "RUN echo extra", State: history.Built}}, grown.Steps...)
+	gid, err := st.SaveBuild(ctx, store.Build{Build: &grown, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := append([]int64{gid}, slices.Collect(maps.Values(ids))...)
+	histLink := regexp.MustCompile(`<a href="(/builds/[0-9]+/steps/[0-9]+)" class="[^"]*" data-hist`)
+	command := regexp.MustCompile(`<h2 id="drT"[^>]*>([^<]*)</h2>`)
+	links, moved := 0, 0
+	for _, id := range all {
+		for i := 0; ; i++ {
+			panel := get(t, ts, fmt.Sprintf("/builds/%d/steps/%d?part=panel", id, i))
+			if panel.status == http.StatusNotFound {
+				break
+			}
+			want := command.FindStringSubmatch(panel.body)
+			for _, m := range histLink.FindAllStringSubmatch(panel.body, -1) {
+				links++
+				if !strings.HasSuffix(m[1], fmt.Sprintf("/steps/%d", i)) {
+					moved++
+				}
+				other := get(t, ts, m[1]+"?part=panel")
+				got := command.FindStringSubmatch(other.body)
+				if other.status != http.StatusOK || want == nil || got == nil {
+					t.Errorf("build %d step %d -> %s: %d, %q", id, i, m[1], other.status, got)
+					continue
+				}
+				// The fixtures rename one step for the escaping checks after
+				// its identity was computed; everywhere else the same
+				// identity means the same command.
+				if got[1] != want[1] && !strings.Contains(got[1]+want[1], "alert(1)") {
+					t.Errorf("build %d step %d -> %s: %q, not %q", id, i, m[1], got[1], want[1])
+				}
+			}
+		}
+	}
+	if links == 0 || moved == 0 {
+		t.Errorf("%d history links, %d to another index: the fixtures do not exercise this", links, moved)
 	}
 }
 

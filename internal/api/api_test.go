@@ -42,8 +42,9 @@ func TestBuilds(t *testing.T) {
 	t0 := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	b := &history.Build{Ref: "r1", Daemon: "d1", Target: "api", Started: t0, Completed: t0.Add(time.Minute),
 		Attribution: history.Attribution{State: history.Attributed, Instance: "abcdef", Pipeline: 7, Job: 70},
-		Steps:       []history.Step{{Key: "[a 1/2]", State: history.Cached}, {Key: "[a 2/2]", State: history.Built}}}
-	f := &fakeStore{builds: []*store.Stored{{ID: 1, Build: b, Reason: history.Reason{Kind: history.FilesChanged, Step: b.Steps[1], Paths: []string{"api"}}}}}
+		Steps: []history.Step{{Key: "[a 1/3]", Name: "FROM alpine:3.22", State: history.Built},
+			{Key: "[a 2/3]", State: history.Cached}, {Key: "[a 3/3]", State: history.Built}}}
+	f := &fakeStore{builds: []*store.Stored{{ID: 1, Build: b, Reason: history.Reason{Kind: history.FilesChanged, Step: b.Steps[2], Paths: []string{"api"}}}}}
 	h := Handler(f)
 	w := get(t, h, "/api/v1/builds?limit=5")
 	if w.Code != 200 || f.limit != 5 {
@@ -54,8 +55,9 @@ func TestBuilds(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.Builds[0]
-	if got.Job != 70 || got.Reason == nil || got.Reason.Kind != history.FilesChanged || got.Reason.Step != "[a 2/2]" ||
-		got.Steps["cached"] != 1 || got.Steps["built"] != 1 || got.Completed == nil {
+	// The base-image step is "image", as on the pages, not a step that ran.
+	if got.Job != 70 || got.Reason == nil || got.Reason.Kind != history.FilesChanged || got.Reason.Step != "[a 3/3]" ||
+		got.Steps["cached"] != 1 || got.Steps["built"] != 1 || got.Steps["image"] != 1 || got.Completed == nil {
 		t.Errorf("%+v", got)
 	}
 	for _, bad := range []string{"0", "1001", "x"} {

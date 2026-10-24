@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -99,11 +100,16 @@ func view(st *store.Stored) Build {
 		v.Completed = &c
 	}
 	for _, s := range b.Steps {
-		if s.Error != "" {
+		switch {
+		case s.Error != "":
 			v.Steps["failed"]++
-			continue
+		case strings.HasPrefix(s.Name, "FROM "):
+			// Resolving a base image: the pages do not count it as a step
+			// that ran either.
+			v.Steps["image"]++
+		default:
+			v.Steps[string(s.State)]++
 		}
-		v.Steps[string(s.State)]++
 	}
 	if r := st.Reason; r.Kind != "" {
 		v.Reason = &Reason{Kind: r.Kind, Step: r.Step.Key, Old: r.Old, New: r.New, Arg: r.Arg, Paths: r.Paths, By: r.By}

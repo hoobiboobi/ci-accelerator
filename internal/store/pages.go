@@ -81,6 +81,7 @@ type BuildPage struct {
 // StepRun is one build's run of a step identity, for its history.
 type StepRun struct {
 	BuildID  int64
+	Idx      int // the step's index in that build (builds differ in their steps)
 	Pipeline uint64
 	SHA      string
 	Daemon   string
@@ -267,7 +268,7 @@ func (s *Store) StepHistory(ctx context.Context, buildID int64, step int, limit 
 		WITH me AS (
 			SELECT s.identity, b.instance, b.project_id FROM steps s JOIN builds b ON b.id = s.build_id
 			WHERE s.build_id = ? AND s.idx = ? AND s.identity IS NOT NULL)
-		SELECT b.id, COALESCE(b.pipeline_id, 0), COALESCE(p.sha, ''), d.name, s.state, s.dur_ms, b.started_at + s.start_ms
+		SELECT b.id, s.idx, COALESCE(b.pipeline_id, 0), COALESCE(p.sha, ''), d.name, s.state, s.dur_ms, b.started_at + s.start_ms
 		FROM me JOIN steps s ON s.identity = me.identity
 		JOIN builds b ON b.id = s.build_id JOIN daemons d ON d.id = b.daemon_id
 		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
@@ -284,7 +285,7 @@ func (s *Store) StepHistory(ctx context.Context, buildID int64, step int, limit 
 			state        int
 			dur, started int64
 		)
-		if err := rows.Scan(&r.BuildID, &r.Pipeline, &r.SHA, &r.Daemon, &state, &dur, &started); err != nil {
+		if err := rows.Scan(&r.BuildID, &r.Idx, &r.Pipeline, &r.SHA, &r.Daemon, &state, &dur, &started); err != nil {
 			return nil, err
 		}
 		r.State, r.Duration, r.Started = stateNames[state], time.Duration(dur)*time.Millisecond, time.UnixMilli(started).UTC()
