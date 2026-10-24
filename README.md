@@ -10,9 +10,9 @@ backend you already run. Hosted services such as Depot, Namespace or Docker
 Build Cloud do this for you; this project does it on hardware you already
 run.
 
-> **Status:** v0.2.1 is released: signed charts and the console image on
-> ghcr.io, installed as in the [Quickstart](#quickstart). `main` also holds unreleased work, listed
-> under "Unreleased" in the [changelog](CHANGELOG.md).
+> **Status:** v0.2.2 is released: signed charts and the console image on
+> ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
+> the released version: [ci-accelerator.io](https://ci-accelerator.io/docs/).
 
 ## Why
 
@@ -112,8 +112,8 @@ it from a file (`--runner-token-file`), so it never sits on a command line
 where other users and the shell history see it. Then run:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.1/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.1/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.2/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.2.2/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
 ```
 
@@ -184,7 +184,7 @@ kubectl -n ci-accelerator create secret generic gitlab-runner-token \
 ### 3. Install
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.1 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.2 \
   -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -372,7 +372,7 @@ reaches over https.
 
    ```sh
    sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.0/helm upgrade ci-accelerator \
-     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.1 \
+     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.2 \
      -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait
    ```
 

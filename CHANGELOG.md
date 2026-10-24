@@ -9,6 +9,12 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 0.2.2 - 2026-10-25
+
+### Upgrade notes
+
 - The box now creates a NetworkPolicy for the console
   (`console.networkPolicy.enabled`, on by default). Pods of other
   namespaces and `kubectl port-forward` keep reaching it; the box's jobs
@@ -41,6 +47,9 @@ workflow copies them into the GitHub release.
 
 ### Changed
 
+- The charts' homepage and Artifact Hub links point to the website,
+  https://ci-accelerator.io, which renders the documentation of the
+  released version.
 - A final release's "Full changelog" link compares with the previous
   final release, so it covers its release candidates.
 - The release check also covers `docs/gitops.md`, the README's one-node

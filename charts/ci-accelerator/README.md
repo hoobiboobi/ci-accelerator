@@ -1,6 +1,6 @@
 # ci-accelerator
 
-![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.1](https://img.shields.io/badge/AppVersion-0.2.1-informational?style=flat-square)
+![Version: 0.2.2](https://img.shields.io/badge/Version-0.2.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.2](https://img.shields.io/badge/AppVersion-0.2.2-informational?style=flat-square)
 
 A self-hosted fast CI runner for GitLab: persistent BuildKit daemons with a shared cache on dedicated build nodes, and a gitlab-runner that sends CI jobs to them.
 
@@ -14,7 +14,7 @@ helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --ver
   --wait --timeout 10m
 ```
 
-For production, say where the cache lives (`buildkit.storage`: a hostPath on a dedicated disk) and pin the console image by digest. The repository's [README](https://github.com/hoobiboobi/ci-accelerator#readme) has the quickstart, the requirements, the console's levels and the limitations; [docs/gitops.md](https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/gitops.md) installs the same release with Flux or Argo CD. The subcharts' values are under `buildkit`, `console` and `gitlab-runner`; the table below lists the box's own keys.
+For production, say where the cache lives (`buildkit.storage`: a hostPath on a dedicated disk) and pin the console image by digest. The [documentation](https://ci-accelerator.io/docs/) has the quickstart, the requirements, the console's levels and the limitations; [GitOps](https://ci-accelerator.io/docs/gitops/) installs the same release with Flux or Argo CD. The subcharts' values are under `buildkit`, `console` and `gitlab-runner`; the table below lists the box's own keys.
 
 ## Requirements
 
@@ -22,8 +22,8 @@ Kubernetes: `>=1.34.0-0`
 
 | Repository | Name | Version |
 |------------|------|---------|
-| file://../buildkit | buildkit | 0.2.1 |
-| file://../console | console | 0.2.1 |
+| file://../buildkit | buildkit | 0.2.2 |
+| file://../console | console | 0.2.2 |
 | https://charts.gitlab.io | gitlab-runner | 0.93.0 |
 
 ## Values
