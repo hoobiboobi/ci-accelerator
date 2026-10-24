@@ -2,8 +2,8 @@
 # Checks that a release tag matches the charts before anything is published:
 # the three charts carry the tag's version, the umbrella depends on exactly
 # those buildkit and console versions, the console's appVersion (its image
-# tag, v<appVersion>) is the same, and CHANGELOG.md has an entry with
-# upgrade notes for it.
+# tag, v<appVersion>) is the same, the README installs it, and CHANGELOG.md
+# has an entry with upgrade notes for it.
 # Prints the version on success.
 #
 #   scripts/check-release-version.sh v0.1.0
@@ -44,6 +44,10 @@ qs=$(awk -F= '/^VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")
 if [ "$qs" != "$version" ]; then
   echo "scripts/quickstart.sh installs $qs, the tag says $version" >&2; fail=1
 fi
+# The README installs this release (its quickstart download and helm install).
+for pat in "releases/download/$tag/quickstart.sh" "charts/ci-accelerator --version $version "; do
+  grep -qF -- "$pat" "$ROOT/README.md" || { echo "README.md does not mention $pat" >&2; fail=1; }
+done
 # Every release says what an upgrade to it means.
 "$ROOT/scripts/changelog-section.sh" "$version" >/dev/null || fail=1
 [ "$fail" = 0 ] || exit 1
