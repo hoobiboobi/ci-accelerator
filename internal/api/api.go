@@ -101,6 +101,8 @@ func view(st *store.Stored) Build {
 	}
 	for _, s := range b.Steps {
 		switch {
+		case history.Canceled(s.Error):
+			v.Steps["canceled"]++
 		case s.Error != "":
 			v.Steps["failed"]++
 		case strings.HasPrefix(s.Name, "FROM "):

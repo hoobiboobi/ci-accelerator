@@ -338,3 +338,10 @@ func lessStep(a, b Step) bool {
 	}
 	return a.Key < b.Key
 }
+
+// Canceled reports whether a build's or step's error text says the job was
+// canceled rather than failed (BuildKit reports the client's cancellation
+// as a context error or a gRPC Canceled status).
+func Canceled(err string) bool {
+	return strings.HasSuffix(err, "context canceled") || strings.Contains(err, "code = Canceled")
+}
