@@ -31,8 +31,8 @@ workflow copies them into the GitHub release.
   - `01` + 3 bytes from the GitLab URL;
   - the pipeline id and the job id, 6 bytes each.
 
-  Traces stored by 0.1.0 keep the old layout. To find a pipeline's jobs,
-  query the `ci.pipeline.id` attribute; the install notes show how.
+  Traces stored by 0.1.0 keep the old layout. To find a pipeline's jobs
+  in your trace backend, query the `ci.pipeline.id` resource attribute.
   Nothing to change in values.
 - **Job pod annotations.** The runner configuration gains annotations, so
   the runner pod restarts once on upgrade; the build daemons do not. If you
@@ -79,12 +79,14 @@ workflow copies them into the GitHub release.
 
 - `quickstart.sh` (attached to every release): try the box on one clean
   Linux machine. It installs k3s, Helm, cert-manager and the box with its
-  console, every download pinned and checked. `--uninstall` removes it
-  all. Checked on every pull request on a clean Ubuntu runner: it installs,
+  console; k3s, Helm, cert-manager and the chart are pinned and checked
+  against their sha256 (the box's images come by tag, the daemons' by
+  digest). `--uninstall` removes it all, the build cache included. Checked
+  on every pull request on a clean Ubuntu runner: it installs,
   builds twice through the real runner (the second build cached), shows
   the build in the console, and uninstalls.
-- `charts/console` and the box's `console.enabled` (preview, off by
-  default): one pod that reads every daemon's build history and the CI job
+- `charts/console` and the box's `console.enabled` (on by default; false
+  leaves it out): one pod that reads every daemon's build history and the CI job
   pods into SQLite and serves read-only pages and a JSON API on a
   ClusterIP Service. It answers one question: why an image build was slow
   or not cached, and whether the change or the build farm caused it
@@ -119,7 +121,9 @@ workflow copies them into the GitHub release.
   (`console.retention.days`); each image's daily figures (builds by
   outcome, build times) are kept a year. With `global.console.url`, every job prints
   the link to its build. Without sign-in, keep it inside the cluster. Its
-  image is not published yet; `make console-image` builds it for kind.
+  image is published with every release
+  (`ghcr.io/hoobiboobi/ci-accelerator-console:v<version>`, amd64 and
+  arm64, signed); `make console-image` builds it for kind.
 - S3 cache for GitLab's `cache:` keyword (`gitlab-runner.runners.cache`;
   ADR-0035, docs/runner-cache.md): one folder per release and GitLab in
   any S3-compatible bucket, shared by every runner of the box; job logs

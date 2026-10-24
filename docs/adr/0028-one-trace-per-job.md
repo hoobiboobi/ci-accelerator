@@ -28,7 +28,7 @@ The runner's `pre_build_script` gives every job its own trace:
 
 - **Each build record holds only its own job's spans.** The job, pipeline and GitLab come from the record's trace id by arithmetic, not by timing. Several builds in one job share the job's trace and belong to it.
 - **Only the trace id can be relied on.** BuildKit waits at most 3 seconds after a build for the client's spans unless the client finalizes the record, which `buildctl` does not do. So a record may hold only the daemon's spans, without the `ci.*` attributes. The trace id is always there.
-- **A pipeline is no longer one trace** in the trace UI. Its jobs are found by the `ci.pipeline.id` attribute, and the install notes show the query. A later collector can add pipeline spans that link the job traces.
+- **A pipeline is no longer one trace** in the trace UI. Its jobs are found by the `ci.pipeline.id` resource attribute in the trace backend. A later collector can add pipeline spans that link the job traces.
 - **The scheme version** lets a later layout change without breaking readers.
 - **Traces recorded by 0.1.0** keep the old layout.
 - **A job that sets one `TRACEPARENT` for a whole pipeline** brings the mixing back. Readers detect it (several `ci.job.id` values in one record) and report the record as ambiguous instead of guessing.

@@ -19,7 +19,8 @@ On a branch `release/v<v>`:
    - `version:` and `appVersion:` in `charts/console/Chart.yaml` (the appVersion is the console image's tag, `v<appVersion>`);
    - `version:` in `charts/ci-accelerator/Chart.yaml`;
    - the `buildkit` and `console` dependencies' `version:` in `charts/ci-accelerator/Chart.yaml`;
-   - `VERSION=` in `scripts/quickstart.sh` (the one-node installer installs it; the release attaches the script).
+   - `VERSION=` in `scripts/quickstart.sh` (the one-node installer installs it; the release attaches the script);
+   - the README's quickstart download links and `helm install ... --version`.
 
    Also update the status line and the `--version` of the quickstart in `README.md`.
 2. In `CHANGELOG.md`:
@@ -50,7 +51,9 @@ Tags `v*` cannot be moved or deleted once pushed. The workflow:
 
 ## 5. Verify as a user
 
-Without registry credentials:
+Without registry credentials, with cosign 2.6 or newer (the signatures are
+Sigstore bundles stored as OCI referrers; older versions answer "no
+signatures found"):
 
 ```sh
 export HELM_REGISTRY_CONFIG=$(mktemp -d)/registry.json
@@ -58,7 +61,7 @@ helm pull oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <v>
 helm pull oci://ghcr.io/hoobiboobi/charts/buildkit --version <v>
 helm pull oci://ghcr.io/hoobiboobi/charts/console --version <v>
 sha256sum ci-accelerator-<v>.tgz buildkit-<v>.tgz console-<v>.tgz   # compare with SHA256SUMS of the release
-for ref in charts/ci-accelerator:<v> ci-accelerator-console:v<v>; do
+for ref in charts/buildkit:<v> charts/console:<v> charts/ci-accelerator:<v> ci-accelerator-console:v<v>; do
   cosign verify ghcr.io/hoobiboobi/$ref \
     --certificate-identity https://github.com/hoobiboobi/ci-accelerator/.github/workflows/release.yml@refs/tags/v<v> \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
