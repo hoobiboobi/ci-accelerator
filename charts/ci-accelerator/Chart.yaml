@@ -5,9 +5,10 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.2.0-rc.1
+version: 0.2.0
 # The buildkit release the daemons run.
-appVersion: "v0.33.1"
+# The box's own version (its console); the daemons' BuildKit version is in charts/buildkit.
+appVersion: "0.2.0"
 kubeVersion: ">=1.34.0-0"
 home: https://github.com/hoobiboobi/ci-accelerator
 sources:
@@ -27,10 +28,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.2.0-rc.1
+    version: 0.2.0
     repository: file://../buildkit
   - name: console
-    version: 0.2.0-rc.1
+    version: 0.2.0
     repository: file://../console
     condition: console.enabled
   - name: gitlab-runner

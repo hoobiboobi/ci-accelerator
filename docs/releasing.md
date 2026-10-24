@@ -15,10 +15,10 @@ How a version gets from `main` to users. The rules behind it (patch vs minor, up
 
 On a branch `release/v<v>`:
 
-1. Set the version in seven places:
+1. Set the version in eight places:
    - `version:` in `charts/buildkit/Chart.yaml`;
    - `version:` and `appVersion:` in `charts/console/Chart.yaml` (the appVersion is the console image's tag, `v<appVersion>`);
-   - `version:` in `charts/ci-accelerator/Chart.yaml`;
+   - `version:` and `appVersion:` in `charts/ci-accelerator/Chart.yaml` (the box's version is its own, not BuildKit's);
    - the `buildkit` and `console` dependencies' `version:` in `charts/ci-accelerator/Chart.yaml`;
    - `VERSION=` in `scripts/quickstart.sh` (the one-node installer installs it; the release attaches the script);
    - the README's quickstart download links and `helm install ... --version`.
