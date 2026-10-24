@@ -11,8 +11,27 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Fixed
+
+- The box's install notes showed the build job image as
+  `moby/buildkit:<box version>` (for example `moby/buildkit:0.2.1`, which
+  does not exist) since 0.2.0; they show the BuildKit release the daemons
+  run again.
+- Chart READMEs: three value descriptions were cut short (`tls.reloader`,
+  `terminationGracePeriodSeconds`, `caches.*`), and `caches.fromConfigMap`
+  showed a stray example.
+- Documentation: the runner cache's `consoleSecretName` is documented,
+  troubleshooting names the real `preflight` keys, the ADR index lists
+  0040 and 0041, small link and wording fixes.
+
 ### Changed
 
+- A final release's "Full changelog" link compares with the previous
+  final release, so it covers its release candidates.
+- The release check also covers `docs/gitops.md`, the README's one-node
+  upgrade command and the Artifact Hub change list.
+- The browser checks give Chrome 60 s to start and stop it when it does
+  not.
 - The release workflow signs the charts right after pushing them, before
   the console image is built. Artifact Hub checks a version's signature
   only when it first indexes the version; 0.2.1 was indexed in the three

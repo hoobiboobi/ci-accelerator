@@ -18,7 +18,7 @@ Build in a CI job (the job gets BUILDKIT_REMOTE_ADDR and the client
 certificate in BUILDKIT_TLS_DIR):
 
   build:
-    image: moby/buildkit:{{ .Chart.AppVersion }}
+    image: moby/buildkit:{{ .Subcharts.buildkit.Chart.AppVersion }}
     script:
       - buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR"
           build --frontend dockerfile.v0 --local context=. --local dockerfile=.

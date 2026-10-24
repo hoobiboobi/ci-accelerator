@@ -170,8 +170,11 @@ jobs:
               echo '```'
             fi
             # The previous release, for a compare link (gh lists releases newest first;
-            # this release does not exist yet).
-            prev=$(gh release list --exclude-drafts --limit 50 --json tagName -q '.[].tagName' | grep -v "^$GITHUB_REF_NAME\$" | head -1 || true)
+            # this release does not exist yet). A final release compares with the
+            # previous final one, so its link covers its release candidates too.
+            if [[ $GITHUB_REF_NAME == *-* ]]; then pre=''; else pre='--exclude-pre-releases'; fi
+            # shellcheck disable=SC2086
+            prev=$(gh release list --exclude-drafts $pre --limit 50 --json tagName -q '.[].tagName' | grep -v "^$GITHUB_REF_NAME\$" | head -1 || true)
             if [ -n "$prev" ]; then
               echo
               echo "Full changelog: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"

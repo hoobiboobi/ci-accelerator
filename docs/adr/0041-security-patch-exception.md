@@ -1,4 +1,4 @@
-# ADR-0041: Security patches skip the two-weeks wait
+# 0041. Security patches skip the two-weeks wait
 
 Date: 2026-10-24
 
@@ -20,7 +20,7 @@ A pin may be younger than two weeks when all of this holds:
    when it carries security fixes;
 2. it fixes a vulnerability that affects the project: govulncheck, trivy
    or Dependabot report it, or the advisory describes the project's use;
-3. the full CI passes on the bump, and the changelog or the journal names
+3. the full CI passes on the bump, and the changelog names
    the exception, so a regression can be traced to it.
 
 ## Consequences

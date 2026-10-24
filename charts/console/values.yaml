@@ -55,17 +55,18 @@ gitlab:
 caches:
   stores: []
   # - server: s3.example.com   # host[:port]
-  # --   bucket: ci-cache
+  #   bucket: ci-cache
   #   region: eu-1
   #   path: ci-accelerator/993196           # the runners' cache Path
   #   gitlabUrl: https://gitlab.com/         # exactly as the runners have it
   #   existingSecret: runner-cache-read
   #   insecure: false                        # true: plain http
   #   pathStyle: true                        # default: path style except AWS
-  # Or the name of a ConfigMap whose key holds the list (fields server,
+  # -- Or the name of a ConfigMap whose key holds the list (fields server,
   # bucket, region, path, instance, secret, insecure, pathStyle); the Role
   # to read its Secrets is then the writer's to make. Rendered with tpl.
   fromConfigMap: ""
+  # -- The ConfigMap's key with the list.
   key: caches.json
   # -- How often the folders are listed.
   every: 10m

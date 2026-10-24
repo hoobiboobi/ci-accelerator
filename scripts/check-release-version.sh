@@ -2,8 +2,9 @@
 # Checks that a release tag matches the charts before anything is published:
 # the three charts carry the tag's version, the umbrella depends on exactly
 # those buildkit and console versions, the console's appVersion (its image
-# tag, v<appVersion>) is the same, the README installs it, and CHANGELOG.md
-# has an entry with upgrade notes for it.
+# tag, v<appVersion>) is the same, the README and docs/gitops.md install
+# it, the README's one-node upgrade uses the quickstart's Helm, and
+# CHANGELOG.md has an entry with upgrade notes for it.
 # Prints the version on success.
 #
 #   scripts/check-release-version.sh v0.1.0
@@ -58,6 +59,20 @@ fi
 for pat in "releases/download/$tag/quickstart.sh" "charts/ci-accelerator --version $version "; do
   grep -qF -- "$pat" "$ROOT/README.md" || { echo "README.md does not mention $pat" >&2; fail=1; }
 done
+# The README's upgrade command for the one-node install uses the Helm the
+# script installs.
+qs_helm=$(awk -F= '/^HELM_VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")
+grep -qF -- "/helm-$qs_helm/helm upgrade" "$ROOT/README.md" \
+  || { echo "README.md: the quickstart upgrade command does not use helm-$qs_helm (scripts/quickstart.sh HELM_VERSION)" >&2; fail=1; }
+# The GitOps examples install this release (Flux version, Argo CD targetRevision).
+for pat in "      version: $version" "targetRevision: $version\`"; do
+  grep -qF -- "$pat" "$ROOT/docs/gitops.md" || { echo "docs/gitops.md does not mention '$pat'" >&2; fail=1; }
+done
+# Artifact Hub shows the umbrella's change list on the version page; it is
+# written per release (an entry for this version in CHANGELOG.md is checked
+# below, the annotation must at least exist).
+grep -q '^  artifacthub.io/changes: |$' "$ROOT/charts/ci-accelerator/Chart.yaml" \
+  || { echo "charts/ci-accelerator/Chart.yaml has no artifacthub.io/changes" >&2; fail=1; }
 # Every release says what an upgrade to it means.
 "$ROOT/scripts/changelog-section.sh" "$version" >/dev/null || fail=1
 [ "$fail" = 0 ] || exit 1

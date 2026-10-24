@@ -96,8 +96,8 @@ tls:
   # certificates only at start, so a renewed Secret takes effect after a
   # restart; with Reloader in the cluster that is a rolling restart (per
   # updateStrategy; nothing happens with OnDelete) as soon as the Secret
-  # changes. Under Argo CD or Flux run Reloader with
-  # --reload-strategy=annotations. Without Reloader, restart the daemons
+  # changes. Under Argo CD or Flux run Reloader with the flag
+  # `--reload-strategy=annotations`. Without Reloader, restart the daemons
   # yourself before the old certificate expires.
   reloader: true
 
@@ -365,8 +365,8 @@ resources: {}
 
 # -- Seconds a stopping daemon gets to finish running builds (it stops
 # accepting new ones at once). Builds still running after this are killed.
-# With maxUnavailable 1 a rollout takes up to nodes x this, so pass helm
-# --timeout accordingly. Production builds took 7-21 min: consider 1200-1800
+# With maxUnavailable 1 a rollout takes up to nodes x this, so pass a helm
+# `--timeout` to match. Production builds took 7-21 min: consider 1200-1800
 # there. Pod evictions and node shutdowns do not honour it.
 terminationGracePeriodSeconds: 300
 
