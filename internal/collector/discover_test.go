@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -94,5 +95,63 @@ func TestSupervisorFollowsTheDaemons(t *testing.T) {
 	defer mu.Unlock()
 	if dials["tcp://b:1234"] != 1 || dials["tcp://c:1234"] != 1 {
 		t.Errorf("dials: %v", dials)
+	}
+}
+
+// Right after start the daemons' headless Service may have no records yet:
+// the first failed lookups are retried within seconds and logged as
+// information; a lasting failure is a warning.
+func TestSupervisorRetriesFailedLookups(t *testing.T) {
+	c, _ := newCollector(t)
+	var mu sync.Mutex
+	var logs strings.Builder
+	calls := 0
+	dialed := make(chan string, 4)
+	sup := &Supervisor{
+		Collector: c,
+		Log:       slog.New(slog.NewTextHandler(&logs, nil)),
+		Every:     time.Hour,
+		Resolve: func(context.Context) ([]string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls++
+			if calls <= 2 {
+				return nil, errors.New("lookup: no such host")
+			}
+			return []string{"tcp://a:1234"}, nil
+		},
+		Dial: func(ctx context.Context, addr string) (Source, error) {
+			dialed <- addr
+			return &blocking{addr: addr, break_: make(chan struct{})}, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { sup.Run(ctx); close(done) }()
+	select {
+	case <-dialed:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the daemon was not read within 20 s of two failed lookups (Every is an hour)")
+	}
+	cancel()
+	<-done
+	if out := logs.String(); strings.Count(out, "daemons not resolvable yet") != 2 || strings.Contains(out, "level=WARN") {
+		t.Errorf("two failed lookups should be information, not warnings:\n%s", out)
+	}
+
+	// A lookup that keeps failing becomes a warning after the quick retries.
+	logs.Reset()
+	sup.Every = 10 * time.Millisecond
+	sup.Resolve = func(context.Context) ([]string, error) { return nil, errors.New("lookup: no such host") }
+	ctx, cancel = context.WithCancel(context.Background())
+	done = make(chan struct{})
+	go func() { sup.Run(ctx); close(done) }()
+	for i := 0; i < 300 && !strings.Contains(logs.String(), "cannot resolve the daemons"); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if out := logs.String(); !strings.Contains(out, `level=WARN msg="cannot resolve the daemons"`) || strings.Count(out, "daemons not resolvable yet") != 3 {
+		t.Errorf("a lasting failure should warn after three quick retries:\n%s", out)
 	}
 }
