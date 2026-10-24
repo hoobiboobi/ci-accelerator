@@ -18,6 +18,7 @@
   {{if .Dur}}<span><b>{{.Dur}}</b>{{if .Delta}} <span class="{{if .Slower}}slow{{else}}fast{{end}}">{{.Delta}} vs usual</span>{{else if .Usual}} <span class="muted">usual {{.Usual}}</span>{{end}}</span>{{else}}<span><b>building</b></span>{{end}}
   <span><b>{{.Ran}}</b> of {{.Steps}} step{{if ne .Steps 1}}s{{end}} ran</span>
 </div>
+{{with .LogURL}}<details class="box fold"><summary>{{icon "chev" 14 "chev"}}<b>Job log</b><span class="muted">the end of it, read from GitLab when you open this</span></summary><div class="pad">{{template "logbox" .}}</div></details>{{end}}
 {{with .Others}}<p class="others">This job ran {{add (len .) 1}} builds: {{range $i, $o := .}}{{if $i}}, {{end}}<a class="link" href="{{$o.URL}}">{{$o.Target}}</a> ({{$o.Dur}}, {{$o.Status.Label}}){{end}}.</p>{{end}}
 
 <section class="box" aria-labelledby="chgT"><div class="boxh"><h2 class="h" id="chgT">What changed since the previous build</h2>{{if .PrevURL}}<a class="link" href="{{.PrevURL}}">{{.PrevLabel}}</a>{{end}}</div>
@@ -73,8 +74,7 @@
 
 <details class="box fold"><summary>{{icon "chev" 14 "chev"}}<b>Details</b><span class="muted">node, job, context, trace, record</span></summary>
   <div class="pad"><dl class="kv">{{range .Details}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}</dl>
-  {{if .Trace}}<p><button class="btn" type="button" data-copy="{{.Trace}}">{{icon "copy" 13}}Copy the trace id</button></p>{{end}}
-  {{with .LogURL}}{{template "logbox" .}}{{end}}</div>
+  {{if .Trace}}<p><button class="btn" type="button" data-copy="{{.Trace}}">{{icon "copy" 13}}Copy the trace id</button></p>{{end}}</div>
 </details>
 </div>
 
