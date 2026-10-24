@@ -26,6 +26,9 @@
 #   --yes                    do not ask before installing
 #   --uninstall              remove k3s, everything in it, and the build cache
 #
+# Running it again (a new release with --version, a token added) keeps
+# /var/lib/ci-accelerator/values.yaml and what you put there.
+#
 # Needs: Ubuntu 24.04 or Debian 13 (or similar, systemd and cgroup v2),
 # amd64 or arm64, 4 CPUs, 8 GB of memory and 40 GB of free disk.
 set -euo pipefail
@@ -286,8 +289,21 @@ if [ -z "$CHART" ]; then
   CHART=$WORK/ci-accelerator-$VERSION.tgz
 fi
 
+# A second run keeps the values file: it is where sign-in, a different
+# cache path or anything else the user added live. Flags that change values
+# are applied with --set and printed, to be copied into the file.
+value_set=()
+if [ -f "$STATE/values.yaml" ]; then
+  say "Keeping the existing $STATE/values.yaml (delete it to start over)"
+  grep -q "gitlabUrl: $gitlab_url\$" "$STATE/values.yaml" || warn "$STATE/values.yaml names another GitLab than --gitlab-url: the file wins"
+  if [ -n "$gitlab_token" ] && ! grep -q "existingSecret: console-gitlab-token" "$STATE/values.yaml"; then
+    value_set+=(--set console.gitlab.token.existingSecret=console-gitlab-token)
+    warn "the GitLab token is applied with --set; add console.gitlab.token.existingSecret: console-gitlab-token to $STATE/values.yaml to keep it"
+  fi
+else
 cat >"$STATE/values.yaml" <<EOF
-# Written by quickstart.sh; reuse it with helm upgrade -f.
+# Written by quickstart.sh on the first install and left alone after that:
+# edit it and apply with helm upgrade -f (the install prints the command).
 global:
   jobs:
     architecture: $ARCH
@@ -313,13 +329,14 @@ if [ -n "$gitlab_token" ]; then
       existingSecret: console-gitlab-token
 EOF
 fi
+fi
 image_set=()
 if [ -n "$CONSOLE_IMAGE_TAR" ]; then
   /usr/local/bin/k3s ctr images import "$CONSOLE_IMAGE_TAR" >/dev/null
   ref=$(tar -xOf "$CONSOLE_IMAGE_TAR" manifest.json | sed -n 's/.*"RepoTags":\["\([^"]*\)".*/\1/p')
   image_set=(--set "console.image.repository=${ref%:*}" --set "console.image.tag=${ref##*:}" --set console.image.pullPolicy=Never)
 fi
-helm upgrade --install "$REL" "$CHART" -n "$NS" -f "$STATE/values.yaml" ${image_set[@]+"${image_set[@]}"} \
+helm upgrade --install "$REL" "$CHART" -n "$NS" -f "$STATE/values.yaml" ${image_set[@]+"${image_set[@]}"} ${value_set[@]+"${value_set[@]}"} \
   --wait --timeout 10m >"$STATE/install.log" 2>&1 || { cat "$STATE/install.log" >&2; die "the install failed (log: $STATE/install.log)"; }
 
 # --- done --------------------------------------------------------------------

@@ -84,6 +84,19 @@ ok=1
 for _ in $(seq 1 30); do console_builds && { ok=0; break; }; sleep 2; done
 check "the console lists both builds" test "$ok" = 0
 check "the console's pages answer" eval 'curl -fs http://localhost:18080/pipelines >/dev/null'
+
+echo "== a second run keeps values.yaml and the daemons"
+printf '# kept-by-the-user\n' >> /var/lib/ci-accelerator/values.yaml
+uid0=$(kc -n "$NS" get pods -l app.kubernetes.io/name=buildkit -o jsonpath='{.items[*].metadata.uid}')
+if env RUNNER_TOKEN=glrt-quickstart-check CI_ACCELERATOR_CHART="$ROOT/charts/ci-accelerator" \
+    CI_ACCELERATOR_CONSOLE_IMAGE_TAR="${1:-}" \
+    "$ROOT/scripts/quickstart.sh" --gitlab-url "$gitlab" --yes >"$LOGS/install-again.log" 2>&1; then
+  pass "quickstart.sh runs again"
+else
+  fail "quickstart.sh runs again (see $LOGS/install-again.log)"; tail -20 "$LOGS/install-again.log"
+fi
+check "it keeps the existing values.yaml" eval 'grep -q "Keeping the existing" "$LOGS/install-again.log" && grep -q "^# kept-by-the-user" /var/lib/ci-accelerator/values.yaml'
+check "and does not restart the daemons" test "$uid0" = "$(kc -n "$NS" get pods -l app.kubernetes.io/name=buildkit -o jsonpath='{.items[*].metadata.uid}')"
 kill "$pf" 2>/dev/null || true
 
 if [ "$FAILED" -gt 0 ]; then
