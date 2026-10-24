@@ -126,10 +126,11 @@ by tag, the daemons' by digest):
 - the box, with the build console.
 
 It prints the job to add to `.gitlab-ci.yml` and the SSH tunnel to the
-console. `--gitlab-token-file` gives the console a GitLab token with
-`read_api`, so it shows how long jobs waited for a runner. `sudo bash
-quickstart.sh --uninstall` removes everything again. It is not meant for
-production: one node, no high availability, and the console has no sign-in.
+console. The console starts in its first level (builds only, no GitLab
+access; see [The console](#the-console)): `--gitlab-token-file` adds job
+results and runner waits, and sign-in through GitLab works on this box
+too. `sudo bash quickstart.sh --uninstall` removes everything again. It
+is not meant for production: one node, no high availability.
 
 ### Requirements
 
@@ -233,9 +234,29 @@ A reusable CI component that does this is planned.
 
 ### The console
 
-The console is on by default. Give it a GitLab token with `read_api` for
-the runner's wait times and the commit comparisons: put the token into a
-Secret and add values like these:
+The console is on by default and works in three levels; each adds to the
+previous one, and the install notes say which is on.
+
+| | by itself (default) | with a GitLab token | with sign-in |
+|---|---|---|---|
+| image builds, steps, cache verdicts, what changed, pipeline timeline | yes | yes | yes |
+| job results, how long jobs waited for a runner, "N other jobs" | no | yes | yes |
+| "files or node" settled by comparing the two commits, end of a job's log | no | yes | yes |
+| who sees what | everyone who reaches it | everyone who reaches it | each person: the projects GitLab lets them read |
+| the console reads GitLab with | nothing | one shared token | each person's own token |
+
+**1. By itself.** The console reads the daemons' build history and the CI
+job pods, nothing else: every image build with its steps, the verdict
+(from cache, your change, build farm, unclear, failed) and the pipeline's
+timeline are there; a job's result is "unknown", runner waits are not
+shown, and a rebuild whose cache sat on another node stays "unclear". It
+has a ClusterIP Service and no sign-in, so whoever reaches it sees
+everything: keep it inside the cluster and reach it with
+`kubectl port-forward` (the install notes print the command; the
+one-machine install prints its SSH tunnel).
+
+**2. With a GitLab token.** One token with `read_api` for all viewers.
+Put it into a Secret and name it in the values:
 
 ```sh
 kubectl -n ci-accelerator create secret generic console-gitlab-token --from-literal=token=glpat-...
@@ -251,26 +272,43 @@ console:
       existingSecret: console-gitlab-token
 ```
 
-- **Reaching it:** the console has a ClusterIP Service only. Use
-  `kubectl port-forward` (the install notes print it), or your own Ingress
-  with its own authentication.
-- **The token** gives the console how long jobs waited for a runner, the
-  commit comparisons that settle "files or node", and the end of a job's
-  log on request. Without it the console still works, without those.
+On the one-machine install, run the script again with
+`--gitlab-token-file ./token` (same GitLab URL and runner token; it only
+updates the release).
 
-**Sign-in through GitLab** replaces the shared token: each person signs in
-and sees the projects whose jobs GitLab lets them read.
+**3. With sign-in through GitLab.** Replaces the shared token: each person
+signs in with their GitLab account, the console reads GitLab with their
+own token and shows them the projects whose jobs GitLab lets them read;
+`admins` see everything. This is the mode for a console that a team
+reaches over https.
 
-1. Serve the console over https at the root of its host (no sub-path), and
-   set `global.console.url` to that address.
-2. Create a Secret with a session key:
-   `kubectl -n ci-accelerator create secret generic console-session --from-literal=key=$(openssl rand -base64 32)`.
-3. In GitLab, create an OAuth application (User or Group Settings >
-   Applications): confidential, scopes `openid` and `read_api`, redirect
-   URI `<global.console.url>/auth/callback/<id>`. The install notes print
-   the exact URI. Put its id and secret into a Secret with the keys
-   `client-id` and `client-secret`.
-4. Set:
+1. Decide the address. Serve the console over https at the root of its
+   host (no sub-path) and set `global.console.url` to it; plain `http://`
+   is accepted only on `localhost`, i.e. through a port-forward or the
+   one-machine install's SSH tunnel (`http://localhost:8080`).
+2. In GitLab, create an OAuth application (User or Group Settings >
+   Applications; Admin > Applications on your own GitLab): confidential,
+   scopes `openid` and `read_api`, redirect URI
+   `<global.console.url>/auth/callback/<id>`, where `<id>` identifies the
+   GitLab instance (the first six hex digits of the sha256 of its URL;
+   the install notes print the exact URI). Put the application's id and
+   secret into a Secret:
+
+   ```sh
+   kubectl -n ci-accelerator create secret generic console-gitlab-oauth \
+     --from-file=client-id=./client-id --from-file=client-secret=./client-secret
+   ```
+
+3. Create a session key; it seals each person's GitLab token at rest, and
+   changing it signs everyone out:
+
+   ```sh
+   kubectl -n ci-accelerator create secret generic console-session \
+     --from-literal=key=$(openssl rand -base64 32)
+   ```
+
+4. Set the values and upgrade (drop `console.gitlab.token` if it was set:
+   a shared token and sign-in exclude each other):
 
    ```yaml
    console:
@@ -282,8 +320,18 @@ and sees the projects whose jobs GitLab lets them read.
            admins: [alice]                        # GitLab usernames who see everything
    ```
 
-A `gitlab` entry without `url` is the runner's GitLab. Every key is in
-[charts/console/values.yaml](charts/console/values.yaml).
+   A `gitlab` entry without `url` is the runner's GitLab; several entries
+   serve several GitLabs. On the one-machine install the values live in
+   `/var/lib/ci-accelerator/values.yaml`; apply them with the Helm the
+   script installed:
+
+   ```sh
+   sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.0/helm upgrade ci-accelerator \
+     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.2.0-rc.1 \
+     -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait
+   ```
+
+Every key is in [charts/console/values.yaml](charts/console/values.yaml).
 
 ### Sending metrics and traces to your backend
 

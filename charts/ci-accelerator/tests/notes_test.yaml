@@ -49,7 +49,10 @@ tests:
       - notMatchRegexRaw:
           pattern: 'preview'
       - matchRegexRaw:
-          pattern: 'With a GitLab token that can read the projects. jobs\n\(console\.gitlab\.token\.existingSecret\), it also shows how long jobs waited\nfor a runner and settles "files or node" by comparing commits\.'
+          pattern: 'Without GitLab access it shows image builds, their steps and cache\nverdicts, but no job results or runner waits\. More \(README, "The console"\):\n  - a GitLab token with read_api \(console\.gitlab\.token\.existingSecret\):'
+      # Without global.console.url the redirect URI shows where the address goes.
+      - matchRegexRaw:
+          pattern: '      <global\.console\.url>/auth/callback/051b90\n'
 
   - it: does not ask for a token the console already has
     set:
@@ -60,6 +63,8 @@ tests:
           pattern: 'Sign-in is off'
       - notMatchRegexRaw:
           pattern: 'console\.gitlab\.token\.existingSecret'
+      - matchRegexRaw:
+          pattern: 'With its GitLab token it also shows job results and runner waits'
 
   - it: prints the redirect URI of the runner's GitLab for sign-in
     set:

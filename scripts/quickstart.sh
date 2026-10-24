@@ -337,6 +337,13 @@ and from your computer:
   ssh -N -L 8080:localhost:8080 $(logname 2>/dev/null || echo you)@$host
 then open http://localhost:8080
 
+The console shows image builds, their steps and cache verdicts; job results
+and runner waits come from GitLab, which it cannot read yet. To add them,
+run this script again with --gitlab-token-file FILE (a token with read_api).
+For sign-in through GitLab, follow "The console" in the README; the values
+are in $STATE/values.yaml, apply changes with
+  sudo KUBECONFIG=$KUBECONFIG $HELM upgrade $REL $CHARTS/ci-accelerator --version $VERSION -n $NS -f $STATE/values.yaml --wait
+
 Values: $STATE/values.yaml   Install log: $STATE/install.log
 Kubernetes: sudo k3s kubectl get pods -A
 Remove everything: sudo $0 --uninstall
