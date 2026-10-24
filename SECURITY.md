@@ -32,7 +32,8 @@ sign-in shows everything to whoever reaches it.
 ## What the project does itself
 
 - Every dependency, image, tool and GitHub Action is pinned by version and
-  checksum or digest; pins are at least two weeks old when adopted.
+  checksum or digest; pins are at least two weeks old when adopted, except
+  a security patch of the same minor line, which is adopted at once.
 - Every pull request runs `govulncheck` on the console's code for both
   release targets and `trivy` on the built image; a weekly run repeats
   both against `main` and the latest published image.
