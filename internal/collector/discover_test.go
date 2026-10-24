@@ -13,6 +13,31 @@ import (
 	controlapi "github.com/moby/buildkit/api/services/control"
 )
 
+// lockedLog collects log lines written by the supervisor's goroutine while
+// the test reads them.
+type lockedLog struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+func (l *lockedLog) Reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.b.Reset()
+}
+
 // blocking is a daemon whose stream stays open until it is cancelled, or
 // breaks once when told to.
 type blocking struct {
@@ -104,12 +129,12 @@ func TestSupervisorFollowsTheDaemons(t *testing.T) {
 func TestSupervisorRetriesFailedLookups(t *testing.T) {
 	c, _ := newCollector(t)
 	var mu sync.Mutex
-	var logs strings.Builder
+	logs := &lockedLog{}
 	calls := 0
 	dialed := make(chan string, 4)
 	sup := &Supervisor{
 		Collector: c,
-		Log:       slog.New(slog.NewTextHandler(&logs, nil)),
+		Log:       slog.New(slog.NewTextHandler(logs, nil)),
 		Every:     time.Hour,
 		Resolve: func(context.Context) ([]string, error) {
 			mu.Lock()
@@ -153,5 +178,37 @@ func TestSupervisorRetriesFailedLookups(t *testing.T) {
 	<-done
 	if out := logs.String(); !strings.Contains(out, `level=WARN msg="cannot resolve the daemons"`) || strings.Count(out, "daemons not resolvable yet") != 3 {
 		t.Errorf("a lasting failure should warn after three quick retries:\n%s", out)
+	}
+
+	// A successful lookup starts the count over: failures after it are quick
+	// retries logged as information again, not warnings.
+	logs.Reset()
+	calls = 0
+	script := []bool{false, false, true, false, false, false} // ok from then on
+	sup.Resolve = func(context.Context) ([]string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls <= len(script) && !script[calls-1] {
+			return nil, errors.New("lookup: no such host")
+		}
+		return []string{"tcp://a:1234"}, nil
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	done = make(chan struct{})
+	go func() { sup.Run(ctx); close(done) }()
+	for i := 0; i < 300; i++ {
+		mu.Lock()
+		n := calls
+		mu.Unlock()
+		if n > len(script) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if out := logs.String(); strings.Count(out, "daemons not resolvable yet") != 5 || strings.Contains(out, "level=WARN") {
+		t.Errorf("failures after a successful lookup should be quick retries again, not warnings:\n%s", out)
 	}
 }
