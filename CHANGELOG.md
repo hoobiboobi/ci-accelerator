@@ -11,6 +11,12 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Added
+
+- Each chart carries a README (generated from its values comments) and
+  Artifact Hub metadata: icon, images, links and the release's changes;
+  the release pushes `artifacthub-repo.yml` next to every chart.
+
 ## 0.2.0 - 2026-10-24
 
 ### Upgrade notes

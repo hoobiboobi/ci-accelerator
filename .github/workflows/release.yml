@@ -93,6 +93,15 @@ jobs:
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
           scripts/build-console-image.sh "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator-console:v$VERSION" push | tee -a dist/digests
 
+      - name: Artifact Hub repository metadata
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          make .tools/oras-$(awk '/^ORAS_VERSION/ {print $3}' Makefile)/oras
+          printf '%s' "$GH_TOKEN" | .tools/oras-*/oras login ghcr.io -u "$GH_ACTOR" --password-stdin
+          make artifacthub-metadata CHARTS_REPO="$CHARTS_REPO"
+
       # Keyless signatures record the repository in Sigstore's public
       # transparency log, so only once the repository is public.
       - name: Install cosign

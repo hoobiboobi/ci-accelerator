@@ -18,8 +18,22 @@ keywords:
   - ci
   - docker
   - build-cache
+icon: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/main/docs/icon.svg
 annotations:
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/images: |
+    - name: buildkit
+      image: moby/buildkit:v0.33.1
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/hoobiboobi/ci-accelerator#readme
+    - name: Architecture
+      url: https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/architecture.md
+    - name: Troubleshooting
+      url: https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/troubleshooting.md
+    - name: support
+      url: https://github.com/hoobiboobi/ci-accelerator/issues
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi

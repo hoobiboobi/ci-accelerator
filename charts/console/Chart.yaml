@@ -16,8 +16,21 @@ keywords:
   - buildkit
   - ci
   - build-cache
+icon: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/main/docs/icon.svg
 annotations:
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/images: |
+    - name: console
+      image: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.0
+      platforms:
+        - linux/amd64
+        - linux/arm64
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/hoobiboobi/ci-accelerator#the-console
+    - name: support
+      url: https://github.com/hoobiboobi/ci-accelerator/issues
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
