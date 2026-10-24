@@ -1,0 +1,16 @@
+{{ template "chart.header" . }}
+{{ template "chart.deprecationWarning" . }}
+
+{{ template "chart.badgesSection" . }}
+
+{{ template "chart.description" . }}
+
+Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator). The console reads every daemon's build history and the CI job pods into SQLite on its own volume and answers one question: why an image build was slow or not cached - the change or the build farm. It works in three levels: by itself (builds, steps, cache verdicts, the pipeline timeline), with a GitLab token (job results, runner waits, "files or node" by comparing commits), or with sign-in through GitLab (each person sees the projects GitLab lets them read). The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs it on by default; on its own it needs the daemons' CA for its client certificate (`tls`) and their headless Service (`daemons.discover`).
+
+The repository's [README, "The console"](https://github.com/hoobiboobi/ci-accelerator#the-console) explains the levels and the sign-in setup.
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "helm-docs.versionFooter" . }}

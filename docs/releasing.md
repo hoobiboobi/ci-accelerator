@@ -21,7 +21,9 @@ On a branch `release/v<v>`:
    - `version:` and `appVersion:` in `charts/ci-accelerator/Chart.yaml` (the box's version is its own, not BuildKit's);
    - the `buildkit` and `console` dependencies' `version:` in `charts/ci-accelerator/Chart.yaml`;
    - `VERSION=` in `scripts/quickstart.sh` (the one-node installer installs it; the release attaches the script);
-   - the README's quickstart download links and `helm install ... --version`.
+   - the README's quickstart download links and `helm install ... --version`;
+   - the console image tag in `artifacthub.io/images` of `charts/console/Chart.yaml` and `charts/ci-accelerator/Chart.yaml`, and the release's `artifacthub.io/changes` in the umbrella's `Chart.yaml` (Artifact Hub shows them on the version page);
+   - `make chart-docs` regenerates the charts' READMEs (the packaged README is what Artifact Hub shows; `make lint` fails when they are stale).
 
    Also update the status line and the `--version` of the quickstart in `README.md`.
 2. In `CHANGELOG.md`:

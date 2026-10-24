@@ -44,6 +44,11 @@ box=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/ci-
 if [ "$box" != "$version" ]; then
   echo "charts/ci-accelerator/Chart.yaml has appVersion $box, the tag says $version" >&2; fail=1
 fi
+# The Artifact Hub image annotations name this release's console image.
+for chart in console ci-accelerator; do
+  grep -q "image: ghcr.io/hoobiboobi/ci-accelerator-console:v$version\$" "$ROOT/charts/$chart/Chart.yaml" \
+    || { echo "charts/$chart/Chart.yaml: artifacthub.io/images does not name ci-accelerator-console:v$version" >&2; fail=1; }
+done
 # The one-node installer installs this release.
 qs=$(awk -F= '/^VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")
 if [ "$qs" != "$version" ]; then

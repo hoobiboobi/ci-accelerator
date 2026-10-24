@@ -63,6 +63,13 @@ KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb
 # verified by the Go checksum database) for the console's code, trivy for
 # its image. Checksums from trivy's <version>_checksums.txt release asset.
 GOVULNCHECK_VERSION := 1.8.0
+# Chart READMEs from values comments (helm-docs, installed with Go) and the
+# Artifact Hub metadata push (oras; checksums from its release's checksums file).
+HELM_DOCS_VERSION := 1.14.2
+ORAS_VERSION := 1.3.4
+ORAS_SHA256_linux_amd64  := f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454
+ORAS_SHA256_linux_arm64  := 15702c6e3a4a56a8bd8ac5c17efdbcab56d9bada661ccbcf017f5b10c1d89399
+ORAS_SHA256_darwin_arm64 := 217761a9500242ff473de8656b5aca21136ff39e17e9e61fd8936bbfd902704c
 TRIVY_VERSION := 0.75.0
 TRIVY_SHA256_linux_amd64  := c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
 TRIVY_SHA256_linux_arm64  := a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a132956751a13b3
@@ -155,6 +162,35 @@ $(RUNNER_CHART):
 
 GOVULNCHECK := $(TOOLS)/govulncheck-$(GOVULNCHECK_VERSION)/govulncheck
 TRIVY       := $(TOOLS)/trivy-$(TRIVY_VERSION)/trivy
+HELM_DOCS   := $(TOOLS)/helm-docs-$(HELM_DOCS_VERSION)/helm-docs
+ORAS        := $(TOOLS)/oras-$(ORAS_VERSION)/oras
+
+$(HELM_DOCS):
+	@mkdir -p $(dir $@)
+	GOBIN=$(dir $@) $(GO_RUN) install github.com/norwoodj/helm-docs/cmd/helm-docs@v$(HELM_DOCS_VERSION)
+
+$(ORAS):
+	$(call fetch,https://github.com/oras-project/oras/releases/download/v$(ORAS_VERSION)/oras_$(ORAS_VERSION)_$(OS)_$(ARCH).tar.gz,$(TOOLS)/dl/oras-$(ORAS_VERSION).tgz,$(ORAS_SHA256_$(OS)_$(ARCH)))
+	@mkdir -p $(dir $@) && tar -xzf $(TOOLS)/dl/oras-$(ORAS_VERSION).tgz -C $(dir $@) oras
+
+.PHONY: chart-docs chart-docs-check
+chart-docs: $(HELM_DOCS) ## Regenerate charts/*/README.md from Chart.yaml, values comments and README.md.gotmpl
+	@$(HELM_DOCS) --chart-search-root charts --log-level warning
+
+chart-docs-check: $(HELM_DOCS) ## Fail when a chart README is out of date (make chart-docs)
+	@$(HELM_DOCS) --chart-search-root charts --log-level warning --output-file README.generated.md
+	@rc=0; for c in charts/*/; do \
+		cmp -s $$c/README.md $$c/README.generated.md || { echo "$$c/README.md is out of date: run make chart-docs"; rc=1; }; \
+		rm -f $$c/README.generated.md; done; exit $$rc
+
+# Pushes artifacthub-repo.yml next to every published chart (the tag
+# artifacthub.io of its OCI repository), as Artifact Hub reads it.
+.PHONY: artifacthub-metadata
+artifacthub-metadata: $(ORAS) ## Push artifacthub-repo.yml to every chart's OCI repository (CHARTS_REPO=ghcr.io/<owner>/charts)
+	@[ -n "$(CHARTS_REPO)" ] || { echo "set CHARTS_REPO=ghcr.io/<owner>/charts" >&2; exit 2; }
+	@for c in buildkit console ci-accelerator; do \
+		$(ORAS) push "$(CHARTS_REPO)/$$c:artifacthub.io" --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+			artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml >/dev/null && echo "pushed $(CHARTS_REPO)/$$c:artifacthub.io"; done
 
 $(GOVULNCHECK):
 	@mkdir -p $(dir $@)
@@ -223,7 +259,7 @@ deps: $(RUNNER_CHART) ## Vendor the umbrella chart's dependencies into charts/ci
 	@cp $(RUNNER_CHART) $(UMBRELLA)/charts/
 
 .PHONY: lint
-lint: $(SHELLCHECK) deps ## helm lint --strict (default and example values), chart LICENSE copies, shellcheck
+lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and example values), chart LICENSE copies, READMEs up to date, shellcheck
 	@for c in $(CHARTS); do \
 		echo "==> lint $$c"; \
 		cmp -s LICENSE $$c/LICENSE || { echo "$$c/LICENSE differs from LICENSE (the packaged chart must carry the license text)"; exit 1; }; \

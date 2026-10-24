@@ -19,8 +19,43 @@ keywords:
   - gitlab-runner
   - ci
   - build-cache
+icon: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/main/docs/icon.svg
 annotations:
   artifacthub.io/license: Apache-2.0
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/images: |
+    - name: buildkit
+      image: moby/buildkit:v0.33.1
+    - name: console
+      image: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.0
+      platforms:
+        - linux/amd64
+        - linux/arm64
+    - name: gitlab-runner
+      image: registry.gitlab.com/gitlab-org/gitlab-runner:alpine-v19.4.1
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/hoobiboobi/ci-accelerator#readme
+    - name: Try it on one machine
+      url: https://github.com/hoobiboobi/ci-accelerator#try-it-on-one-machine
+    - name: GitOps (Flux, Argo CD)
+      url: https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/gitops.md
+    - name: Changelog
+      url: https://github.com/hoobiboobi/ci-accelerator/blob/main/CHANGELOG.md
+    - name: support
+      url: https://github.com/hoobiboobi/ci-accelerator/issues
+  # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
+  artifacthub.io/changes: |
+    - kind: added
+      description: The console, on by default - why an image build was slow or not cached
+    - kind: added
+      description: quickstart.sh - the box on one clean Linux machine
+    - kind: added
+      description: S3 cache for GitLab's cache keyword and extra runner tiers
+    - kind: removed
+      description: VictoriaMetrics and VictoriaTraces are no longer part of the box
+    - kind: security
+      description: Go 1.27.3, Node 24.22.1, cert-manager v1.21.3 pins; govulncheck and trivy in CI
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
