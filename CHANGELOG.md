@@ -66,6 +66,10 @@ workflow copies them into the GitHub release.
 
 ### Changed
 
+- Pinned components: the console image is built with Go 1.27.3 on the
+  current distroless base, the browser checks run on Node 24.22.1 and the
+  one-machine install (and the e2e) pin cert-manager v1.21.3 - security
+  patches adopted under ADR-0041 before they were two weeks old.
 - The box installs no metrics and traces storage (ADR-0039). The daemons
   push over OTLP only to an endpoint you set (`buildkit.otel.*`), none by
   default. Builds can no longer reach the box's observability data,
