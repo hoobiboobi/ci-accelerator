@@ -78,10 +78,10 @@ GO_SHA256_linux_arm64 := a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269
 # Node for the browser checks (test/ui): LTS line 24, the newest release at
 # least two weeks old; sums from nodejs.org SHASUMS256.txt.
 NODE_VERSION := 24.22.1
-NODE_SHA256_linux_amd64  := eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c
-NODE_SHA256_linux_arm64  := 33c37be234ba8bee041961047b19160f4d7d0f164e8e246f78bdd10feff148b3
-NODE_SHA256_darwin_arm64 := 89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7
-NODE_SHA256_darwin_amd64 := d132557e7ee2b85af08b0c8c34338e65c6430f2238d01f727728ef42dc83b035
+NODE_SHA256_linux_amd64  := 6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
+NODE_SHA256_linux_arm64  := dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e
+NODE_SHA256_darwin_arm64 := 654ba79de6155647e22321932b45f2a1ccb705976cc337c9b8e278beb085a628
+NODE_SHA256_darwin_amd64 := 65e450f90a6eaacd5000f611861c4ce65fadc87f813795dc4ed0c0e5f2fca2d4
 
 OS   := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
