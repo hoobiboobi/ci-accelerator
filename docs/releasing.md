@@ -8,7 +8,8 @@ How a version gets from `main` to users. The rules behind it (patch vs minor, up
 
 - **Patch or minor?** A patch is fixes only. A minor brings something new that is ready and on by default.
 - **Is `main` releasable?** Unfinished work must be switched off by default. If `main` already holds changes that should not ship in a patch, release the patch from a branch instead (see [A patch from a release branch](#a-patch-from-a-release-branch)).
-- **Pinned components.** Look at the releases and security advisories of everything that is pinned: BuildKit, cert-manager, the gitlab-runner chart and image, Go and the console's base images (`cmd/console/Dockerfile`), Node, the kind node image, the e2e images (`test/e2e/run.sh`), the tools in the Makefile, and the actions in the workflows. Bump what has a fix and is at least two weeks old.
+- **Pinned components.** Look at the releases and security advisories of everything that is pinned: BuildKit, cert-manager, the gitlab-runner chart and image, Go and the console's base images (`cmd/console/Dockerfile`), Node, the kind node image, the e2e images (`test/e2e/run.sh`), the tools in the Makefile, and the actions in the workflows. Bump what has a fix and is at least two weeks old - except a security patch (see below).
+- **Security patches skip the two-weeks wait** ([ADR-0041](adr/0041-security-patch-exception.md)): a patch release of the same minor line that fixes a vulnerability which affects the project (govulncheck, trivy, Dependabot or the advisory says so) may be pinned at once, provided the full CI passes; the changelog or the journal names the exception. A new minor waits the two weeks even when it carries security fixes.
 
 ## 2. The release pull request
 
