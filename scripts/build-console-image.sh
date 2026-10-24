@@ -41,7 +41,8 @@ if [ "$mode" = push ]; then
 else
   echo "built ${ref%:*}@$digest (not pushed)" >&2
   if [ -n "${SCAN_TAR:-}" ]; then
-    docker buildx build --builder "$builder" --provenance=mode=min -f "$ROOT/cmd/console/Dockerfile" --platform linux/amd64 \
+    # No attestation here: the docker exporter cannot write a manifest list.
+    docker buildx build --builder "$builder" --provenance=false -f "$ROOT/cmd/console/Dockerfile" --platform linux/amd64 \
       --build-arg "VERSION=${ref##*:}" --build-arg "COMMIT=$COMMIT" \
       --output "type=docker,dest=$SCAN_TAR,name=$ref" "$ROOT" >&2
     echo "wrote $SCAN_TAR (linux/amd64)" >&2
