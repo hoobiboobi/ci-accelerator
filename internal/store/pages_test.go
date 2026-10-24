@@ -89,6 +89,31 @@ func TestPages(t *testing.T) {
 			t.Errorf("run in build %d: index %d does not name step %q (%d steps)", r.BuildID, r.Idx, api.Steps[idx].Key, len(other.Build.Steps))
 		}
 	}
+	// A later build with one more step in front holds the same step one
+	// index further: its run says so.
+	grown := *api
+	grown.Ref, grown.Started = "grownref", api.Started.Add(48*time.Hour)
+	grown.Steps = append([]history.Step{{Key: "[extra 1/1]", Name: "RUN echo extra", State: history.Built}}, api.Steps...)
+	gid, err := s.SaveBuild(ctx, Build{Build: &grown, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, err = s.StepHistory(ctx, ids[api.Ref], idx, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range runs {
+		if r.BuildID == gid {
+			found = true
+			if r.Idx != idx+1 {
+				t.Errorf("the grown build holds the step at %d, its run says %d", idx+1, r.Idx)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the grown build %d is not in the step's history", gid)
+	}
 }
 
 func byRef(bs []*history.Build, target string, job uint64) *history.Build {

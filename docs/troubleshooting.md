@@ -99,8 +99,9 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" debug worke
    `worker.hostname`; metrics and traces sent to your backend carry
    `k8s.pod.name`. The cache is per daemon: a job on another node, or a
    fallback while its own daemon was not ready, builds cold.
-2. **Was the daemon restarted?** With `emptyDir`, every restart and every
-   rollout empties the cache:
+2. **Was the daemon replaced?** With `emptyDir`, every new pod (rollout,
+   eviction, deletion) starts with an empty cache; a container restart inside
+   the same pod (the RESTARTS column) keeps it:
    ```sh
    kubectl -n ci-accelerator get pods -l app.kubernetes.io/name=buildkit
    ```
