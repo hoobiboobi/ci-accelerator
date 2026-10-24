@@ -26,7 +26,7 @@ func TestLoadCaches(t *testing.T) {
 		}
 		return p
 	}
-	one := `{"server":"s3.example.com","bucket":"ci-cache","region":"hel1","path":"box/051b90","instance":"051b90","secret":"runner-cache"}`
+	one := `{"server":"s3.example.com","bucket":"ci-cache","region":"eu-1","path":"box/051b90","instance":"051b90","secret":"runner-cache"}`
 	got, err := loadCaches(write("[" + one + "," + one + "]"))
 	if err != nil || len(got) != 1 || got[0].ID() != "s3.example.com/ci-cache/box/051b90" {
 		t.Fatalf("stores %+v, %v", got, err)
@@ -58,7 +58,7 @@ func TestScanCache(t *testing.T) {
 	defer srv.Close()
 	kube := fake.NewSimpleClientset(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "runner-cache", Namespace: "ci"},
 		Data: map[string][]byte{"accesskey": []byte("AKID\n"), "secretkey": []byte("SECRET")}})
-	s := runnercache.Store{Server: strings.TrimPrefix(srv.URL, "http://"), Insecure: true, Bucket: "ci-cache", Region: "hel1", Path: "box/051b90", Secret: "runner-cache"}
+	s := runnercache.Store{Server: strings.TrimPrefix(srv.URL, "http://"), Insecure: true, Bucket: "ci-cache", Region: "eu-1", Path: "box/051b90", Secret: "runner-cache"}
 	scan, err := scanCache(context.Background(), s, "ci", kube)
 	if err != nil || len(scan.Objects) != 1 || scan.Objects[0].Bytes != 67128 || scan.Lifecycle == nil || *scan.Lifecycle {
 		t.Fatalf("scan %+v, %v", scan, err)
