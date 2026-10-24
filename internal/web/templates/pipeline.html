@@ -10,7 +10,7 @@
   {{else}}
   <p class="lead">{{.Sentence}}</p>
   {{with .Card}}<div class="pc-facts"><span><b>{{.Jobs}}</b> job{{if ne .Jobs 1}}s{{end}}{{with .Dur}} in <b>{{.}}</b>{{end}}{{if .NotRun}} · {{.NotRun}} did not run{{end}}</span>{{if .Waited}}<span>waiting for a runner: usually <b>{{.Waited}}</b>, longest <b>{{.Longest}}</b> <span class="muted">({{.LongJ}})</span>{{if .WaitedLong}} · <b>{{.WaitedLong}}</b> job{{if ne .WaitedLong 1}}s{{end}} over 10 s{{end}}</span>{{end}}</div>{{end}}
-  {{with .WF}}<section class="box wfsec" aria-labelledby="tlT"><div class="boxh"><h2 class="h" id="tlT">Timeline</h2><span class="muted">every job of the pipeline{{with $.SetBy}} · <b>{{.}}</b> ended last{{end}}</span></div>
+  {{with .WF}}<section class="box wfsec" aria-labelledby="tlT"><div class="boxh"><h2 class="h" id="tlT">Timeline</h2><span class="muted">every job of the pipeline{{with $.SetBy}} · <b>{{.}}</b> ended last{{end}}{{if $.CritJobs}} · <span title="{{$.CritNames}}">critical path: <b>{{$.CritJobs}}</b> jobs, waited <b>{{$.CritWait}}</b>, ran <b>{{$.CritRun}}</b></span>{{end}}</span></div>
     <div class="pad">{{template "waterfall" .}}</div></section>{{end}}
   {{if .Rebuilt}}
   <section class="box" aria-labelledby="rbT"><div class="boxh"><h2 class="h" id="rbT">Rebuilt</h2><span class="muted">the first rebuilt step and why</span></div>

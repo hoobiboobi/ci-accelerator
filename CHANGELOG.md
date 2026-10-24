@@ -83,6 +83,9 @@ workflow copies them into the GitHub release.
 
 - The console shows its version at the bottom of the sidebar and with
   `console -version`: the image tag and the commit it was built from.
+- The pipeline timeline's critical path follows the stages: the job that
+  ended last, the job of the previous stage it waited for, and so on; the
+  header sums what the chain waited for runners and ran.
 - Vulnerability checks in CI: `govulncheck` over the console's code for both
   release targets and `trivy` over the built image on every pull request
   (`make vulncheck`, `make image-scan`), plus a weekly run against `main`

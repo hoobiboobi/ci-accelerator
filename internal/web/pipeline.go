@@ -33,6 +33,11 @@ type PipelineView struct {
 	WF         *Waterfall
 	Card       PipeCard // its status and what its jobs waited, as the pipelines page says
 	SetBy      string   // the job that ended last
+	// The critical path: the jobs that set the pipeline's time, stage by stage.
+	CritJobs   int
+	CritNames  string
+	CritWait   string
+	CritRun    string
 	OtherJobs  int
 	OtherDrawn int // of them, on the timeline (GitLab or a pod said when they ran)
 	NoBuilds   bool
@@ -135,9 +140,14 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 		v.Ready = duration(t1.Sub(t0))
 		v.Sentence = pipelineSentence(v)
 	}
-	if v.WF, v.SetBy, v.OtherDrawn, err = s.pipelineWaterfall(ctx, v.Title, rows, jobs); err != nil {
+	var cp CritPath
+	if v.WF, v.SetBy, cp, v.OtherDrawn, err = s.pipelineWaterfall(ctx, v.Title, rows, jobs); err != nil {
 		s.fail(w, err)
 		return
+	}
+	if len(cp.Names) > 1 {
+		v.CritJobs, v.CritNames = len(cp.Names), strings.Join(cp.Names, " → ")
+		v.CritWait, v.CritRun = duration(cp.Waited), duration(cp.Ran)
 	}
 	sh.Title = v.Title
 	v.Shell = sh
@@ -147,7 +157,7 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 // pipelineWaterfall lays every job of a pipeline out on one time axis,
 // in the order they started: a job with an image build opens into its
 // stages and steps; any other job is one bar, as GitLab (or its pod) says.
-func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []store.BuildRow, jobs []store.JobInfo) (*Waterfall, string, int, error) {
+func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []store.BuildRow, jobs []store.JobInfo) (*Waterfall, string, CritPath, int, error) {
 	byID := map[uint64]store.JobInfo{}
 	perJob := map[uint64]int{}
 	for _, j := range jobs {
@@ -160,14 +170,14 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []sto
 	for i := len(rows) - 1; i >= 0; i-- {
 		page, err := s.store.BuildPage(ctx, rows[i].ID)
 		if err != nil {
-			return nil, "", 0, err
+			return nil, "", CritPath{}, 0, err
 		}
 		if page == nil {
 			continue
 		}
 		d, err := s.explain(ctx, page)
 		if err != nil {
-			return nil, "", 0, err
+			return nil, "", CritPath{}, 0, err
 		}
 		b := page.Build
 		j := byID[rows[i].Job]
@@ -184,7 +194,7 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []sto
 		}
 		st := rowStatus(rows[i])
 		wjobs = append(wjobs, wfJob{Name: name, Status: &st, Times: timesOf(j, b.Started, end), Build: b, BuildID: rows[i].ID,
-			Views: d.Views, Link: fmt.Sprintf("/builds/%d", rows[i].ID)})
+			Views: d.Views, Link: fmt.Sprintf("/builds/%d", rows[i].ID), Stage: j.Stage})
 	}
 	with := jobsWithBuilds(rows)
 	drawn := 0
@@ -210,11 +220,11 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []sto
 		}
 		jt := jobTimes{Start: j.Started, End: end, Total: end.Sub(j.Started), Known: true}
 		jt.Queued = queuedAt(j, j.Started)
-		wjobs = append(wjobs, wfJob{Name: j.Name, Times: jt, Note: note, Link: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.ID)})
+		wjobs = append(wjobs, wfJob{Name: j.Name, Times: jt, Note: note, Link: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.ID), Stage: j.Stage})
 		drawn++
 	}
 	if len(wjobs) == 0 {
-		return nil, "", 0, nil
+		return nil, "", CritPath{}, 0, nil
 	}
 	sort.SliceStable(wjobs, func(a, b int) bool { return wjobs[a].Times.Start.Before(wjobs[b].Times.Start) })
 	// The axis starts when the first job began to wait for a runner.
@@ -229,8 +239,8 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []sto
 			crit = i
 		}
 	}
-	wjobs[crit].Crit = true
-	return waterfall(title, wjobs, start, false), wjobs[crit].Name, drawn, nil
+	cp := criticalPath(wjobs)
+	return waterfall(title, wjobs, start, false), wjobs[crit].Name, cp, drawn, nil
 }
 
 func jobsWithBuilds(rows []store.BuildRow) map[uint64]bool {
