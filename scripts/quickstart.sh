@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # Try ci-accelerator on one clean Linux machine: k3s (one node, also the
-# build node), Helm, cert-manager and the box with its console. Every
-# download is pinned and checked against a sha256. For a first look before
-# a real deployment, not for production: one node, no high availability,
-# the console reachable only through an SSH tunnel.
+# build node), Helm, cert-manager and the box with its console. k3s, Helm,
+# cert-manager and the chart are pinned and checked against a sha256 (the
+# box's images come by tag, the daemons' by digest). For a first look
+# before a real deployment, not for production: one node, no high
+# availability, the console reachable only through an SSH tunnel.
 #
-#   sudo RUNNER_TOKEN=glrt-... ./quickstart.sh --gitlab-url https://gitlab.example.com/
+#   sudo ./quickstart.sh --gitlab-url https://gitlab.example.com/   # asks for the runner's token
+#   sudo ./quickstart.sh --gitlab-url ... --runner-token-file ./runner-token
 #   sudo ./quickstart.sh --uninstall
 #
 # Options:
 #   --gitlab-url URL         your GitLab (required to install)
-#   --runner-token-file F    a file with the runner's token (glrt-...); or
-#                            RUNNER_TOKEN in the environment, or asked for
+#   --runner-token-file F    a file with the runner's token (glrt-...); without
+#                            it the script asks, or reads RUNNER_TOKEN from the
+#                            environment (not `sudo RUNNER_TOKEN=...`: that is
+#                            visible in ps and kept in the shell history)
 #   --gitlab-token-file F    optional: a GitLab token with read_api, so the
 #                            console shows how long jobs waited for a runner
 #                            and decides "files or node" for rebuilds
@@ -91,16 +95,20 @@ esac
 
 if [ "$uninstall" = 1 ]; then
   [ -x /usr/local/bin/k3s-uninstall.sh ] || [ -d "$STATE" ] || die "nothing to uninstall"
+  # The build cache may live outside $STATE (--build-dir); the install
+  # recorded where. Only an absolute path other than / is removed.
+  cache=$(cat "$STATE/build-dir" 2>/dev/null || echo "$BUILD_DIR")
+  case "$cache" in /?*) ;; *) cache=$STATE/buildkit ;; esac
   if [ "$yes" = 0 ]; then
     [ -t 0 ] || die "not a terminal: pass --yes to remove without asking"
-    read -r -p "Remove k3s, everything running in it and $STATE (the build cache)? [y/N] " a
+    read -r -p "Remove k3s, everything running in it, $STATE and the build cache in $cache? [y/N] " a
     case "$a" in y|Y|yes) ;; *) exit 1 ;; esac
   fi
   if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
     say "Removing k3s"
     /usr/local/bin/k3s-uninstall.sh
   fi
-  rm -rf "$STATE" "$TOOLS"
+  rm -rf "$STATE" "$TOOLS" "$cache"
   say "Removed."
   exit 0
 fi
@@ -154,7 +162,7 @@ if [ -z "$runner_token" ] && [ -t 0 ]; then
   read -r -s -p "The runner's token (glrt-...; create the runner in GitLab first): " runner_token
   echo
 fi
-[ -n "$runner_token" ] || die "no runner token: set RUNNER_TOKEN or --runner-token-file"
+[ -n "$runner_token" ] || die "no runner token: pass --runner-token-file, or run in a terminal to be asked"
 case "$runner_token" in glrt-*) ;; *) warn "the runner token does not start with glrt-: is it a runner authentication token?" ;; esac
 gitlab_token=""
 if [ -n "$gitlab_token_file" ]; then
@@ -266,7 +274,8 @@ if [ -n "$gitlab_token" ]; then
   kubectl -n "$NS" create secret generic console-gitlab-token --from-file=token="$WORK/gitlab-token" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 fi
-mkdir -p "$BUILD_DIR"
+mkdir -p "$BUILD_DIR" "$STATE"
+printf '%s\n' "$BUILD_DIR" >"$STATE/build-dir"
 
 if [ -z "$CHART" ]; then
   helm pull "$CHARTS/ci-accelerator" --version "$VERSION" -d "$WORK" >/dev/null
