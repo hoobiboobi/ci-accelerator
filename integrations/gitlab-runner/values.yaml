@@ -40,9 +40,9 @@ runners:
   #     Shared = true
   #     MaxUploadedArchiveSize = 4831838208
   #     [runners.cache.s3]
-  #       ServerAddress = "hel1.your-objectstorage.com"
+  #       ServerAddress = "s3.example.com"
   #       BucketName = "ci-cache"
-  #       BucketLocation = "hel1"
+  #       BucketLocation = "eu-1"
   # and "TRANSFER_METER_FREQUENCY=5s" in environment, so job logs show the
   # cache's size. See docs/runner-cache.md (lifecycle rule, layout).
   config: |

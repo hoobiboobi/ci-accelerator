@@ -100,9 +100,9 @@ gitlab-runner:
     #   cache:
     #     secretName: runner-cache   # keys accesskey and secretkey
     #     s3:
-    #       server: hel1.your-objectstorage.com
+    #       server: s3.example.com
     #       bucket: ci-cache
-    #       region: hel1
+    #       region: eu-1
     # Optional: s3.insecure (http), s3.pathStyle (true/false; default: path
     # style except on AWS), path (default <release>/<GitLab id>: every runner
     # of this release shares a project's caches), maxArchiveBytes (default
@@ -155,7 +155,7 @@ gitlab-runner:
 #       concurrent: 4                       # jobs at once
 #       cache:                              # as gitlab-runner.runners.cache
 #         secretName: runner-cache-deploy
-#         s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+#         s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
 # Optional per tier: image (default job image, alpine:3.22), manager
 # (resources, nodeSelector, tolerations of the runner pod),
 # terminationGracePeriodSeconds (how long a rollout waits for running jobs,

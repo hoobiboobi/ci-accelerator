@@ -19,13 +19,13 @@ tests:
   - it: writes the folders, with the GitLab's id, and may read only their Secrets
     set:
       caches.stores:
-        - {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1, path: /box/x/, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc, pathStyle: true}
+        - {server: s3.example.com, bucket: ci-cache, region: eu-1, path: /box/x/, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc, pathStyle: true}
         - {server: "s3.example.com:9000", bucket: b, region: us-east-1, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc, insecure: true}
     template: caches.yaml
     asserts:
       - equal:
           path: data["caches.json"]
-          value: '[{"bucket":"ci-cache","instance":"051b90","path":"box/x","pathStyle":true,"region":"hel1","secret":"rc","server":"hel1.your-objectstorage.com"},{"bucket":"b","insecure":true,"instance":"051b90","path":"","region":"us-east-1","secret":"rc","server":"s3.example.com:9000"}]'
+          value: '[{"bucket":"ci-cache","instance":"051b90","path":"box/x","pathStyle":true,"region":"eu-1","secret":"rc","server":"s3.example.com"},{"bucket":"b","insecure":true,"instance":"051b90","path":"","region":"us-east-1","secret":"rc","server":"s3.example.com:9000"}]'
         documentIndex: 0
       - equal: {path: rules, value: [{apiGroups: [""], resources: [secrets], resourceNames: [rc], verbs: [get]}]}
         documentIndex: 1
@@ -58,7 +58,7 @@ tests:
       - contains: {path: 'spec.template.spec.containers[0].args', content: "-cache-every=15s"}
   - it: needs every field of a folder
     set:
-      caches.stores: [{server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1, existingSecret: rc}]
+      caches.stores: [{server: s3.example.com, bucket: ci-cache, region: eu-1, existingSecret: rc}]
     template: deployment.yaml
     asserts:
       - failedTemplate: {errorPattern: "caches.stores\\[0\\].gitlabUrl is needed"}

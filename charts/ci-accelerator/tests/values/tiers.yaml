@@ -3,14 +3,14 @@ gitlab-runner:
   runners:
     cache:
       secretName: runner-cache
-      s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+      s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
 runnerTiers:
   deploy:
     token: {existingSecret: runner-deploy}
     resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
     cache:
       secretName: runner-cache
-      s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+      s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
   heavy:
     nodes: build
     concurrent: 2

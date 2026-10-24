@@ -53,7 +53,7 @@ func TestScan(t *testing.T) {
 	})
 	for _, lc := range []int{200, 404} {
 		srv := fakeS3(t, lc)
-		l := Lister{Store: Store{Server: strings.TrimPrefix(srv.URL, "http://"), Insecure: true, Bucket: "ci-cache", Region: "hel1", Path: "/box/051b90/"}, Keys: keys}
+		l := Lister{Store: Store{Server: strings.TrimPrefix(srv.URL, "http://"), Insecure: true, Bucket: "ci-cache", Region: "eu-1", Path: "/box/051b90/"}, Keys: keys}
 		s, err := l.Scan(context.Background(), time.Now())
 		srv.Close()
 		if err != nil {

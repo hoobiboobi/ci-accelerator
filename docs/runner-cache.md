@@ -29,9 +29,9 @@ nothing from the box: the runner uploads them to GitLab.
        cache:
          secretName: runner-cache
          s3:
-           server: hel1.your-objectstorage.com   # host[:port], no https://
+           server: s3.example.com   # host[:port], no https://
            bucket: ci-cache
-           region: hel1
+           region: eu-1
    ```
 
    Optional: `s3.insecure: true` (plain http, e.g. MinIO in the cluster),
@@ -64,7 +64,7 @@ The runner never deletes a cache. Give the bucket a lifecycle rule, for
 example caches older than 14 days (checked with Hetzner):
 
 ```sh
-aws --endpoint-url https://hel1.your-objectstorage.com s3api put-bucket-lifecycle-configuration \
+aws --endpoint-url https://s3.example.com s3api put-bucket-lifecycle-configuration \
   --bucket ci-cache --lifecycle-configuration '{"Rules":[{"ID":"ci-cache-expiry","Status":"Enabled",
   "Filter":{"Prefix":""},"Expiration":{"Days":14},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}'
 ```
@@ -133,7 +133,7 @@ token or a full node does not stop the others.
        concurrent: 4                  # jobs at once (default 4)
        cache:                         # optional, as gitlab-runner.runners.cache
          secretName: runner-cache
-         s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+         s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
    ```
 
    Optional: `image` (the default job image, `alpine:3.22`), `manager`
