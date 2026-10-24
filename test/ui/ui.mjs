@@ -327,7 +327,14 @@ async function pipelinePage(s, pages) {
   await s.type("zzzqqq");
   check(`${p} timeline search without a match hides every row`, (await visibleRows()) === 0);
   await s.eval(`(() => { const i = document.querySelector("[data-wf-q]"); i.value = ""; i.dispatchEvent(new Event("input")); i.blur(); })()`);
-  if (await s.click("[data-wf-crit]")) check(`${p} critical path`, await s.eval(`document.querySelector("[data-wf]").classList.contains("crit-on")`));
+  if (await s.click("[data-wf-crit]")) {
+    // The toggle must change what one sees: rows off the path fade, the path does not.
+    const fade = await s.eval(`(() => { const rows = [...document.querySelectorAll("[data-wf] .row.k-job")].filter(r => !r.hidden);
+      const op = r => parseFloat(getComputedStyle(r).opacity); const on = rows.filter(r => r.classList.contains("oncrit")), off = rows.filter(r => !r.classList.contains("oncrit"));
+      return { on: on.length, off: off.length, onFull: on.every(r => op(r) === 1), offFaded: off.every(r => op(r) < 1) }; })()`);
+    check(`${p} critical path fades the jobs off the path`, fade.on > 0 && (fade.off === 0 || fade.offFaded) && fade.onFull, JSON.stringify(fade));
+    await s.click("[data-wf-crit]");
+  }
   await s.click('[data-wf-depth="steps"]');
   const row = await s.eval(`(() => { const r = [...document.querySelectorAll("[data-wf] .row[data-wstep]")].find(r => !r.hidden); return r && r.dataset.id; })()`);
   if (row) {

@@ -821,6 +821,9 @@ a.boxh:hover { background: var(--hover); }
 .wfv .chip .tx { display: none; }
 .wfv .tc .meta { margin-left: auto; display: inline-flex; gap: 4px; flex: none; padding-left: 4px; }
 .wfv .chip.crit { color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink-2); background: none; }
+/* The critical path toggle: everything off the path fades, the path stays. */
+.wfv.crit-on .row:not(.oncrit):not(.k-pipe) { opacity: .28; }
+.wfv.crit-on .row.oncrit .nm { font-weight: 600; }
 .wfv .bar { position: absolute; top: 50%; height: 10px; transform: translateY(-50%); border-radius: 2px; min-width: 2px; }
 .wfv .k-job .bar { height: 12px; }
 .wfv .k-pipe .bar { height: 6px; background: var(--ink-3); border-radius: 3px; }
