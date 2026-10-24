@@ -214,7 +214,9 @@ EOF
 fi
 kubectl() { /usr/local/bin/k3s kubectl "$@"; }
 say "Waiting for Kubernetes"
-for _ in $(seq 1 60); do kubectl get nodes >/dev/null 2>&1 && break; sleep 2; done
+# The API server answers before the node has registered, and `kubectl wait`
+# fails at once when nothing matches: wait for the node itself first.
+for _ in $(seq 1 90); do [ -n "$(kubectl get nodes -o name 2>/dev/null)" ] && break; sleep 2; done
 kubectl wait node --all --for=condition=Ready --timeout=5m >/dev/null
 for d in coredns local-path-provisioner; do
   for _ in $(seq 1 60); do kubectl -n kube-system get deploy "$d" >/dev/null 2>&1 && break; sleep 2; done
