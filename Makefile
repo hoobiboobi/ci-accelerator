@@ -59,6 +59,16 @@ KIND_SHA256_linux_arm64 := 20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7f
 KUBECTL_VERSION := v1.37.1
 KUBECTL_SHA256_linux_amd64 := 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
 KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7
+# Vulnerability scanners: govulncheck (golang.org/x/vuln, installed with Go,
+# verified by the Go checksum database) for the console's code, trivy for
+# its image. Checksums from trivy's <version>_checksums.txt release asset.
+GOVULNCHECK_VERSION := 1.8.0
+TRIVY_VERSION := 0.75.0
+TRIVY_SHA256_linux_amd64  := c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
+TRIVY_SHA256_linux_arm64  := a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a132956751a13b3
+TRIVY_SHA256_darwin_arm64 := 4a77108cccf8e55c8d6823e1e759939a622277e66cd0daa3c1fc621ed69e4568
+TRIVY_OS = $(subst linux,Linux,$(subst darwin,macOS,$(OS)))
+TRIVY_ARCH = $(subst amd64,64bit,$(subst arm64,ARM64,$(ARCH)))
 # Go for the console (internal/, cmd/). Locally any Go >= 1.21 fetches this
 # toolchain itself (GOTOOLCHAIN, verified against the Go checksum database);
 # CI downloads the archive below. Checksums from https://go.dev/dl/?mode=json.
@@ -142,6 +152,30 @@ $(KUBECONFORM):
 
 $(RUNNER_CHART):
 	$(call fetch,https://gitlab-charts.s3.amazonaws.com/gitlab-runner-$(RUNNER_CHART_VERSION).tgz,$@,$(RUNNER_CHART_SHA256))
+
+GOVULNCHECK := $(TOOLS)/govulncheck-$(GOVULNCHECK_VERSION)/govulncheck
+TRIVY       := $(TOOLS)/trivy-$(TRIVY_VERSION)/trivy
+
+$(GOVULNCHECK):
+	@mkdir -p $(dir $@)
+	GOBIN=$(dir $@) $(GO_RUN) install golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION)
+
+$(TRIVY):
+	$(call fetch,https://github.com/aquasecurity/trivy/releases/download/v$(TRIVY_VERSION)/trivy_$(TRIVY_VERSION)_$(TRIVY_OS)-$(TRIVY_ARCH).tar.gz,$(TOOLS)/dl/trivy-$(TRIVY_VERSION).tgz,$(TRIVY_SHA256_$(OS)_$(ARCH)))
+	@mkdir -p $(dir $@) && tar -xzf $(TOOLS)/dl/trivy-$(TRIVY_VERSION).tgz -C $(dir $@) trivy
+
+.PHONY: vulncheck
+vulncheck: $(GOVULNCHECK) ## Known vulnerabilities reachable from the console's code, both release targets (.govulncheck-allow for grace periods)
+	@GOVULNCHECK=$(GOVULNCHECK) GOTOOLCHAIN=go$(GO_VERSION) scripts/vulncheck.sh
+
+# IMAGE=<ref> scans a registry image, IMAGE_TAR=<docker archive> a local one
+# (scripts/build-console-image.sh writes it with SCAN_TAR). Fails on HIGH or
+# CRITICAL findings that have a fix; .trivyignore.yaml holds grace periods.
+.PHONY: image-scan
+image-scan: $(TRIVY) ## trivy over the console image (IMAGE=<ref> or IMAGE_TAR=<file>): HIGH/CRITICAL with a fix fail
+	@[ -n "$(IMAGE)$(IMAGE_TAR)" ] || { echo "set IMAGE=<ref> or IMAGE_TAR=<docker archive>" >&2; exit 2; }
+	$(TRIVY) image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+		--ignorefile .trivyignore.yaml $(if $(IMAGE_TAR),--input $(IMAGE_TAR),$(IMAGE))
 
 .PHONY: ci-tools
 ci-tools: $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) $(CI_GO) ## CI only (Linux): pinned helm (CI_HELM_VERSION), kind, kubectl and Go into .tools/bin
