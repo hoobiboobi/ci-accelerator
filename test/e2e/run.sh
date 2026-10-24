@@ -65,9 +65,9 @@ CLIENT_SECRET=$REL-buildkit-client
 OWN_SECRET=$REL-own-tls
 CM_NS=cert-manager
 CA_NAME=$NS-$REL-buildkit-ca
-CERT_MANAGER_VERSION=v1.21.2
+CERT_MANAGER_VERSION=v1.21.3
 # sha256 of the chart archive pulled from oci://quay.io/jetstack/charts.
-CERT_MANAGER_SHA256=73a56e1728edd6c99f1f31082618c3259d279a76b7ebd3d4bdc5475c2442d34a
+CERT_MANAGER_SHA256=9ec67938b2981d8b333af61b3fcf53e26b4f6f5deb7ccda3de4ea116bb373a17
 # OTLP backends for the otel scenario, from the VictoriaMetrics Helm repo.
 VICTORIA_REPO=https://victoriametrics.github.io/helm-charts/
 VM_CHART_VERSION=0.48.0
