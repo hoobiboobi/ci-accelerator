@@ -1,0 +1,226 @@
+spec:
+  description: >-
+    Build a container image on the ci-accelerator build farm: the job sends
+    its context to the BuildKit daemon on its build node, which builds with
+    the shared cache and pushes. Runs only on a ci-accelerator runner.
+  inputs:
+    job-name:
+      description: Name of the job, so a pipeline can build several images.
+      default: build-image
+      regex: ^[A-Za-z0-9][A-Za-z0-9 _:./-]*$
+    stage:
+      description: Stage of the job.
+      default: build
+    runner-tags:
+      description: Tags that send the job to a ci-accelerator runner.
+      type: array
+      default: []
+    context:
+      description: Build context, a directory relative to the repository root.
+      default: .
+    dockerfile:
+      description: Path of the Dockerfile relative to the repository root. Empty means <context>/Dockerfile.
+      default: ""
+    target:
+      description: Build stage to stop at (Dockerfile target). Empty builds the last stage.
+      default: ""
+    platform:
+      description: Target platform(s), comma-separated (e.g. linux/amd64,linux/arm64). Empty means the build node's.
+      default: ""
+    build-args:
+      description: Build arguments, one KEY=VALUE per line. Never secrets - they end up in the image history and in traces; use secrets.
+      default: ""
+    secrets:
+      description: >-
+        Build secrets, one per line as id=VARIABLE: the value of the CI/CD
+        variable VARIABLE is mounted for RUN --mount=type=secret,id=id and
+        never stored.
+      default: ""
+    images:
+      description: Image references to push, one per line. CI/CD variables are expanded.
+      default: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    push:
+      description: Push the image. false builds without exporting (a check that it builds).
+      type: boolean
+      default: true
+    registry-auth:
+      description: >-
+        job-token: log in to this project's registry with the job's token and
+        ignore DOCKER_AUTH_CONFIG (which would override the job's
+        credentials). docker-auth-config: use the DOCKER_AUTH_CONFIG variable
+        as it is. none: no credentials.
+      options: [job-token, docker-auth-config, none]
+      default: job-token
+    labels:
+      description: Add the OCI labels source and revision (the project URL and the commit).
+      type: boolean
+      default: true
+    provenance:
+      description: Attach a provenance attestation (SLSA, mode=min) to the image.
+      type: boolean
+      default: false
+    timeout-minutes:
+      description: Stop the build after this many minutes (the connection to the daemon has no keepalive of its own).
+      type: number
+      default: 60
+    buildctl-args:
+      description: More arguments for buildctl build, one per line (e.g. --no-cache).
+      default: ""
+    buildkit-image:
+      description: Image with buildctl for the job; keep it at the daemons' BuildKit release.
+      default: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+---
+# ci-accelerator: https://ci-accelerator.io/docs/ - this file is the
+# component; its inputs are above. The inputs reach the script only as
+# CI/CD variables, never as script text.
+"$[[ inputs.job-name ]]":
+  stage: $[[ inputs.stage ]]
+  tags: $[[ inputs.runner-tags ]]
+  image:
+    name: $[[ inputs.buildkit-image ]]
+    entrypoint: [""]
+  interruptible: true
+  variables:
+    CIA_CONTEXT: $[[ inputs.context ]]
+    CIA_DOCKERFILE: $[[ inputs.dockerfile ]]
+    CIA_TARGET: $[[ inputs.target ]]
+    CIA_PLATFORM: $[[ inputs.platform ]]
+    CIA_BUILD_ARGS: $[[ inputs.build-args ]]
+    CIA_SECRETS: $[[ inputs.secrets ]]
+    CIA_IMAGES: $[[ inputs.images ]]
+    CIA_PUSH: "$[[ inputs.push ]]"
+    CIA_REGISTRY_AUTH: $[[ inputs.registry-auth ]]
+    CIA_LABELS: "$[[ inputs.labels ]]"
+    CIA_PROVENANCE: "$[[ inputs.provenance ]]"
+    CIA_TIMEOUT_MINUTES: "$[[ inputs.timeout-minutes ]]"
+    CIA_BUILDCTL_ARGS: $[[ inputs.buildctl-args ]]
+  script:
+    - |
+      set -eu
+      set -o pipefail
+      say() { printf '\033[1m%s\033[0m\n' "$*"; }
+      if [ -z "${BUILDKIT_REMOTE_ADDR:-}" ] || [ -z "${BUILDKIT_TLS_DIR:-}" ]; then
+        echo "BUILDKIT_REMOTE_ADDR/BUILDKIT_TLS_DIR are not set: this job must run on a ci-accelerator runner (check runner-tags)." >&2
+        exit 1
+      fi
+
+      # Registry credentials, in a directory of this job only. buildctl
+      # also reads DOCKER_AUTH_CONFIG, and an entry there for the same
+      # registry (often a read-only one, set for pulling job images)
+      # overrides the job token and breaks the push.
+      DOCKER_CONFIG=$(mktemp -d)
+      export DOCKER_CONFIG
+      # The artifact files exist whatever happens, so GitLab reports no
+      # missing files on a failed build.
+      trap 'rm -rf "$DOCKER_CONFIG"; [ -f build-metadata.json ] || echo "{}" >build-metadata.json; [ -f build.env ] || : >build.env' EXIT
+      case "$CIA_REGISTRY_AUTH" in
+        job-token)
+          unset DOCKER_AUTH_CONFIG
+          auth=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
+          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$CI_REGISTRY" "$auth" >"$DOCKER_CONFIG/config.json"
+          ;;
+        docker-auth-config) ;;
+        none) unset DOCKER_AUTH_CONFIG ;;
+      esac
+
+      # The Dockerfile: <context>/Dockerfile unless given.
+      dockerfile=${CIA_DOCKERFILE:-$CIA_CONTEXT/Dockerfile}
+      [ -f "$dockerfile" ] || { echo "no Dockerfile at $dockerfile" >&2; exit 1; }
+      [ -d "$CIA_CONTEXT" ] || { echo "no build context at $CIA_CONTEXT" >&2; exit 1; }
+
+      set -- --frontend dockerfile.v0 \
+        --local "context=$CIA_CONTEXT" \
+        --local "dockerfile=$(dirname "$dockerfile")" \
+        --opt "filename=$(basename "$dockerfile")" \
+        --progress plain
+      [ -z "$CIA_TARGET" ] || set -- "$@" --opt "target=$CIA_TARGET"
+      [ -z "$CIA_PLATFORM" ] || set -- "$@" --opt "platform=$CIA_PLATFORM"
+      if [ "$CIA_LABELS" = true ]; then
+        set -- "$@" --opt "label:org.opencontainers.image.source=$CI_PROJECT_URL" \
+          --opt "label:org.opencontainers.image.revision=$CI_COMMIT_SHA"
+      fi
+      [ "$CIA_PROVENANCE" != true ] || set -- "$@" --opt "attest:provenance=mode=min"
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        case "$line" in *=*) ;; *) echo "build-args: '$line' is not KEY=VALUE" >&2; exit 1 ;; esac
+        set -- "$@" --opt "build-arg:$line"
+      done <<EOF
+      $CIA_BUILD_ARGS
+      EOF
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        id=${line%%=*}; var=${line#*=}
+        case "$line" in *=*) ;; *) echo "secrets: '$line' is not id=VARIABLE" >&2; exit 1 ;; esac
+        case "$var" in ''|[0-9]*|*[!A-Za-z0-9_]*) echo "secrets: '$var' is not a variable name" >&2; exit 1 ;; esac
+        eval "set=\${$var+x}"
+        [ "$set" = x ] || { echo "secrets: the CI/CD variable $var is not set" >&2; exit 1; }
+        set -- "$@" --secret "id=$id,env=$var"
+      done <<EOF
+      $CIA_SECRETS
+      EOF
+      names=""
+      while IFS= read -r line; do
+        line=$(printf '%s' "$line" | tr -d ' \t')
+        [ -n "$line" ] || continue
+        names="${names:+$names,}$line"
+      done <<EOF
+      $CIA_IMAGES
+      EOF
+      if [ "$CIA_PUSH" = true ]; then
+        [ -n "$names" ] || { echo "images: nothing to push to" >&2; exit 1; }
+        set -- "$@" --output "type=image,\"name=$names\",push=true"
+      fi
+      while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        set -- "$@" "$line"
+      done <<EOF
+      $CIA_BUILDCTL_ARGS
+      EOF
+
+      say "context $CIA_CONTEXT ($(du -sh "$CIA_CONTEXT" 2>/dev/null | cut -f1) on disk, before .dockerignore), Dockerfile $dockerfile"
+      [ "$CIA_PUSH" != true ] || say "pushing $names"
+      log=$(mktemp)
+      # buildctl has no keepalive: a build node that vanishes without a
+      # reset would leave the job waiting for the job timeout.
+      if timeout -s TERM $((CIA_TIMEOUT_MINUTES * 60)) \
+        buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" \
+        build "$@" --metadata-file build-metadata.json 2>&1 | tee "$log"; then :; else
+        status=$?
+        if [ "$status" = 143 ]; then
+          echo "the build did not finish in $CIA_TIMEOUT_MINUTES minutes (timeout-minutes)" >&2
+        else
+          echo "the build failed (buildctl exit status $status)" >&2
+        fi
+        exit 1
+      fi
+
+      # Dockerfile steps only ("#6 [base 2/3] RUN ..."), not BuildKit's
+      # own (loading the definition, the context, exporting). FROM shows as
+      # DONE even when the base image is there, so it is not counted.
+      counts=$(awk '
+        /^#[0-9]+ \[([^]]* )?[0-9]+\/[0-9]+\] / && !/\] FROM / { step[$1] = 1 }
+        /^#[0-9]+ CACHED$/ && step[$1] { cached[$1] = 1 }
+        /^#[0-9]+ DONE / && step[$1] { done[$1] = 1 }
+        END { c = 0; r = 0; for (k in step) { if (k in cached) c++; else if (k in done) r++ } print c, r }' "$log")
+      cached=${counts% *}; built=${counts#* }
+      context=$(grep -oE 'transferring context: [0-9.]+[kMG]?B' "$log" | tail -n 1 | sed 's/transferring context: //')
+      # No exporter (push false), no metadata file.
+      digest=""
+      [ ! -f build-metadata.json ] || digest=$(sed -n 's/.*"containerimage.digest": *"\([^"]*\)".*/\1/p' build-metadata.json | head -n 1)
+      say "Dockerfile steps: $cached from cache, $built run; context sent: ${context:-unknown}"
+      first=${names%%,*}
+      repo=$first
+      case "${first##*/}" in *:*) repo=${first%:*} ;; esac   # drop the tag, not a registry port
+      {
+        echo "IMAGE=${first}"
+        echo "IMAGE_DIGEST=${digest}"
+        [ -z "$digest" ] || [ -z "$first" ] || echo "IMAGE_REF=${repo}@${digest}"
+      } >build.env
+      [ -z "$digest" ] || say "digest $digest"
+  artifacts:
+    when: always
+    reports:
+      dotenv: build.env
+    paths:
+      - build-metadata.json
+    expire_in: 1 week

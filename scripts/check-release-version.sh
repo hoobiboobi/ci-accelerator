@@ -59,6 +59,11 @@ fi
 for pat in "releases/download/$tag/quickstart.sh" "charts/ci-accelerator --version $version "; do
   grep -qF -- "$pat" "$ROOT/README.md" || { echo "README.md does not mention $pat" >&2; fail=1; }
 done
+# The GitLab CI component is included from this release's tag.
+for f in README.md ci/gitlab/README.md; do
+  grep -qF -- "hoobiboobi/ci-accelerator/$tag/ci/gitlab/build.yml" "$ROOT/$f" \
+    || { echo "$f does not include the component from $tag" >&2; fail=1; }
+done
 # The README's upgrade command for the one-node install uses the Helm the
 # script installs.
 qs_helm=$(awk -F= '/^HELM_VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")

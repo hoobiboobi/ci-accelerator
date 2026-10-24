@@ -312,6 +312,10 @@ $(NODE):
 	$(call fetch,https://nodejs.org/dist/v$(NODE_VERSION)/node-v$(NODE_VERSION)-$(OS)-$(if $(filter amd64,$(ARCH)),x64,arm64).tar.xz,$(TOOLS)/dl/node-$(NODE_VERSION).txz,$(NODE_SHA256_$(OS)_$(ARCH)))
 	@mkdir -p $(TOOLS)/node-v$(NODE_VERSION) && tar -xJf $(TOOLS)/dl/node-$(NODE_VERSION).txz -C $(TOOLS)/node-v$(NODE_VERSION) --strip-components=1
 
+.PHONY: component-test
+component-test: ## The GitLab CI component's job script against a fake buildctl, in its own image (needs docker, ruby)
+	@ci/gitlab/test/run.sh
+
 .PHONY: ui-test
 ui-test: $(NODE) ## Browser checks of the console's pages on its fixtures (needs Chrome; CHROME=<path> to pick one)
 	@UI_TEST=1 NODE=$(NODE) $(GO_RUN) test -count=1 -v -run '^TestUI(SignedIn)?$$' -timeout 15m ./internal/web/
