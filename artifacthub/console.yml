@@ -1,0 +1,8 @@
+# Artifact Hub repository metadata for oci://ghcr.io/hoobiboobi/charts/console,
+# pushed as the tag artifacthub.io of that repository (make artifacthub-metadata;
+# the release and the artifacthub workflow do it). repositoryID is the id
+# Artifact Hub shows for the repository: it makes the publisher verified.
+repositoryID: 1ec3f190-299d-4a81-b884-d0c24f74aefd
+owners:
+  - name: Aleksei Bondarenko
+    email: standprojectmail@gmail.com

@@ -1,0 +1,8 @@
+# Artifact Hub repository metadata for oci://ghcr.io/hoobiboobi/charts/ci-accelerator,
+# pushed as the tag artifacthub.io of that repository (make artifacthub-metadata;
+# the release and the artifacthub workflow do it). repositoryID is the id
+# Artifact Hub shows for the repository: it makes the publisher verified.
+repositoryID: 817feab1-39f3-47ee-93f4-c71e96537237
+owners:
+  - name: Aleksei Bondarenko
+    email: standprojectmail@gmail.com
