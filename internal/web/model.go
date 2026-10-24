@@ -40,9 +40,7 @@ var cats = map[string]Cat{
 
 // canceled says whether a build or step error is a cancellation (the job
 // was canceled or its client went away), not a failure of the Dockerfile.
-func canceled(err string) bool {
-	return strings.HasSuffix(err, "context canceled") || strings.Contains(err, "code = Canceled")
-}
+func canceled(err string) bool { return history.Canceled(err) }
 
 // catOf classifies a build by its reason, error and executed steps.
 func catOf(kind history.ReasonKind, buildErr string, built int) Cat {
