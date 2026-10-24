@@ -70,6 +70,9 @@ jobs:
       - name: gofmt, go vet, go test
         run: make go-test
 
+      - name: govulncheck, both release targets
+        run: make vulncheck
+
   # The console's image builds for both platforms exactly as a release
   # builds it (without pushing), so a release cannot fail there first.
   image:
@@ -83,7 +86,10 @@ jobs:
           fetch-depth: 1
 
       - name: Build
-        run: scripts/build-console-image.sh ci-accelerator-console:check check
+        run: SCAN_TAR="$RUNNER_TEMP/console.tar" scripts/build-console-image.sh ci-accelerator-console:check check
+
+      - name: trivy over the built image
+        run: make image-scan IMAGE_TAR="$RUNNER_TEMP/console.tar"
 
   ui:
     name: browser checks

@@ -6,7 +6,9 @@
 #   scripts/build-console-image.sh <image:tag> push    # a release
 #   scripts/build-console-image.sh <image:tag> check   # build only (CI)
 #
-# Prints <image>@<digest> after a push.
+# Prints <image>@<digest> after a push. With SCAN_TAR=<file> set, check
+# mode also writes the linux/amd64 image as a docker archive there (the
+# same build, from the builder's cache) for a vulnerability scan.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ref=${1:?usage: $0 <image:tag> push|check}
@@ -35,4 +37,9 @@ if [ "$mode" = push ]; then
   echo "${ref%:*}@$digest"
 else
   echo "built ${ref%:*}@$digest (not pushed)" >&2
+  if [ -n "${SCAN_TAR:-}" ]; then
+    docker buildx build --builder "$builder" -f "$ROOT/cmd/console/Dockerfile" --platform linux/amd64 \
+      --output "type=docker,dest=$SCAN_TAR,name=$ref" "$ROOT" >&2
+    echo "wrote $SCAN_TAR (linux/amd64)" >&2
+  fi
 fi

@@ -1,0 +1,49 @@
+# Weekly: known vulnerabilities reachable from the console's code on main,
+# and in the latest published console image. Pull requests run the same
+# checks against their own code and image (checks.yml); this catches what
+# is published after a quiet week.
+name: security
+
+on:
+  schedule:
+    - cron: '20 6 * * 1' # Mondays 06:20 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  code:
+    name: govulncheck (main)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install Go
+        run: make go-tools
+
+      - name: govulncheck, both release targets
+        run: make vulncheck
+
+  image:
+    name: trivy (published console image)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Scan the image of the current console appVersion
+        run: |
+          app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' charts/console/Chart.yaml)
+          make image-scan IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator-console:v$app"

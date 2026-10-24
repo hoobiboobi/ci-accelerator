@@ -77,6 +77,12 @@ workflow copies them into the GitHub release.
 
 ### Added
 
+- Vulnerability checks in CI: `govulncheck` over the console's code for both
+  release targets and `trivy` over the built image on every pull request
+  (`make vulncheck`, `make image-scan`), plus a weekly run against `main`
+  and the latest published image. Grace periods live in
+  `.govulncheck-allow` and `.trivyignore.yaml` with an expiry and a reason.
+  `SECURITY.md` says how to report a vulnerability.
 - `quickstart.sh` (attached to every release): try the box on one clean
   Linux machine. It installs k3s, Helm, cert-manager and the box with its
   console; k3s, Helm, cert-manager and the chart are pinned and checked

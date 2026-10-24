@@ -28,6 +28,7 @@ On a branch `release/v<v>`:
    - read its **Upgrade notes** as a user would, and make sure they say what to do;
    - start a new `## Unreleased` above it with `### Upgrade notes` and `None.`.
 3. Run `scripts/check-release-version.sh v<v>`. It checks the versions and the changelog entry, and prints the version.
+4. Run `make vulncheck` and look at `.govulncheck-allow` and `.trivyignore.yaml`: a release should not ship with a grace period that a bump can end.
 4. Open the pull request. The checks and the e2e (including `upgrade` from `<prev>`) must be green. Merge it.
 
 ## 3. Optional: a release candidate
