@@ -38,11 +38,11 @@ tests:
     set:
       gitlab-runner.runners.cache:
         secretName: runner-cache
-        s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+        s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
     asserts:
       - matchRegex:
           path: data["config.template.toml"]
-          pattern: '\[runners\.cache\]\n    Type = "s3"\n    Path = "box/051b90"\n    Shared = true\n    MaxUploadedArchiveSize = 4831838208\n    \[runners\.cache\.s3\]\n      ServerAddress = "hel1\.your-objectstorage\.com"\n      BucketName = "ci-cache"\n      BucketLocation = "hel1"\n      Insecure = false'
+          pattern: '\[runners\.cache\]\n    Type = "s3"\n    Path = "box/051b90"\n    Shared = true\n    MaxUploadedArchiveSize = 4831838208\n    \[runners\.cache\.s3\]\n      ServerAddress = "s3\.example\.com"\n      BucketName = "ci-cache"\n      BucketLocation = "eu-1"\n      Insecure = false'
         template: charts/gitlab-runner/templates/configmap.yaml
       - matchRegex:
           path: data["config.template.toml"]
@@ -74,7 +74,7 @@ tests:
     set:
       gitlab-runner.runners.cache:
         secretName: runner-cache
-        s3: {server: hel1.your-objectstorage.com, bucket: ci-cache}
+        s3: {server: s3.example.com, bucket: ci-cache}
     template: validate.yaml
     asserts:
       - failedTemplate: {errorPattern: "gitlab-runner.runners.cache.s3.region is needed"}
@@ -82,7 +82,7 @@ tests:
   - it: refuses an S3 cache without its keys
     set:
       gitlab-runner.runners.cache:
-        s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+        s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
     template: validate.yaml
     asserts:
       - failedTemplate: {errorPattern: "gitlab-runner.runners.cache.secretName: the Secret with the S3 keys"}
@@ -91,7 +91,7 @@ tests:
     set:
       gitlab-runner.runners.cache:
         secretName: runner-cache
-        s3: {server: "https://hel1.your-objectstorage.com", bucket: ci-cache, region: hel1}
+        s3: {server: "https://s3.example.com", bucket: ci-cache, region: eu-1}
     template: validate.yaml
     asserts:
       - failedTemplate: {errorPattern: "s3.server is a host"}
@@ -187,7 +187,7 @@ tests:
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
           cache:
             secretName: cache-deploy
-            s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+            s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
     template: runner-tiers.yaml
     documentSelector: {path: kind, value: Deployment}
     asserts:
@@ -273,7 +273,7 @@ tests:
         deploy:
           token: {existingSecret: runner-deploy}
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
-          cache: {s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}}
+          cache: {s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}}
     template: validate.yaml
     asserts:
       - failedTemplate: {errorPattern: "runnerTiers.deploy.cache.secretName"}
@@ -285,7 +285,7 @@ tests:
       gitlab-runner.runners.cache:
         secretName: runner-cache
         consoleSecretName: runner-cache-read
-        s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+        s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
       runnerTiers:
         deploy:
           token: {existingSecret: runner-deploy}
@@ -293,7 +293,7 @@ tests:
           cache:
             secretName: runner-cache
             consoleSecretName: runner-cache-read
-            s3: {server: hel1.your-objectstorage.com, bucket: ci-cache, region: hel1}
+            s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
         other:
           token: {existingSecret: runner-other}
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
@@ -305,7 +305,7 @@ tests:
     asserts:
       - equal:
           path: data["caches.json"]
-          value: '[{"bucket":"ci-cache","instance":"051b90","path":"box/051b90","region":"hel1","secret":"runner-cache-read","server":"hel1.your-objectstorage.com"},{"bucket":"other","insecure":true,"instance":"051b90","path":"elsewhere","pathStyle":true,"region":"us-east-1","secret":"other-keys","server":"minio.storage.svc:9000"}]'
+          value: '[{"bucket":"ci-cache","instance":"051b90","path":"box/051b90","region":"eu-1","secret":"runner-cache-read","server":"s3.example.com"},{"bucket":"other","insecure":true,"instance":"051b90","path":"elsewhere","pathStyle":true,"region":"us-east-1","secret":"other-keys","server":"minio.storage.svc:9000"}]'
         documentIndex: 0
       - equal: {path: 'rules[0].resourceNames', value: [runner-cache-read, other-keys]}
         documentIndex: 1

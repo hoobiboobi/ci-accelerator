@@ -53,7 +53,7 @@ tests:
           kind: Secret
           metadata: {name: gitlab-runner-token, namespace: ci-accelerator}
           data:
-            # glrt-ТВОЙ_ТОКЕН
+            # glrt-YOUR_TOKEN
             runner-token: Z2xydC3QotCS0J7QmV/QotCe0JrQldCd
             runner-registration-token: ""
     asserts:
