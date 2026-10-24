@@ -16,6 +16,15 @@ tests:
       - matchRegexRaw:
           pattern: 'buildctl --addr "\$BUILDKIT_REMOTE_ADDR" --tlsdir "\$BUILDKIT_TLS_DIR"'
 
+  # The build job's image is the BuildKit release the daemons run, not the
+  # box's own version (0.2.0 and 0.2.1 printed moby/buildkit:<box version>).
+  - it: gives the build job the daemons' BuildKit image
+    asserts:
+      - matchRegexRaw:
+          pattern: 'image: moby/buildkit:v\d+\.\d+\.\d+\n'
+      - notMatchRegexRaw:
+          pattern: 'image: moby/buildkit:\d'
+
   - it: points to the fragment without its own runner
     set:
       gitlab-runner.enabled: false

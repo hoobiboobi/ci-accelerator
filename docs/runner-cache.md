@@ -36,6 +36,8 @@ nothing from the box: the runner uploads them to GitLab.
 
    Optional: `s3.insecure: true` (plain http, e.g. MinIO in the cluster),
    `s3.pathStyle` (true or false; by default path style except on AWS),
+   `consoleSecretName` (a Secret with keys that may only read, for the
+   console's bucket listing; default: `secretName`),
    `path` (the folder; default `<release>/<GitLab id>`), `maxArchiveBytes`
    (default 4.5 GiB; Hetzner takes at most 5 GB per upload).
 

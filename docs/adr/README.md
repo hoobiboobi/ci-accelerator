@@ -43,3 +43,5 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0037](0037-console-builds-only.md) | Console v2: image builds only, five sections, five outcomes |
 | [0038](0038-files-or-node-from-gitlab.md) | Files or node: settled with GitLab's comparison of two commits |
 | [0039](0039-no-bundled-observability.md) | No bundled metrics and traces storage |
+| [0040](0040-vulnerability-checks.md) | Vulnerability checks in CI |
+| [0041](0041-security-patch-exception.md) | Security patches skip the two-weeks wait |

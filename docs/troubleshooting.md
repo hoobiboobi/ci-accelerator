@@ -34,8 +34,11 @@ names the fix; the common ones:
 | `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
 
 Checks that read the live cluster (Pod Security, build nodes, Secrets)
-need read access to Namespaces, Nodes and Secrets. Each one has a
-`preflight.*` switch for installers without it.
+need read access to Namespaces, Nodes and Secrets. Installers without it
+switch them off: `buildkit.preflight.podSecurity`,
+`buildkit.preflight.buildNodes` and `buildkit.preflight.tlsSecret` (the
+daemons; without the `buildkit.` prefix in the standalone chart),
+`preflight.runnerSecret` (the box's runner token Secret).
 
 ## The daemons do not start
 

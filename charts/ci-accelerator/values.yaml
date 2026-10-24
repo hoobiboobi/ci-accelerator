@@ -99,6 +99,7 @@ gitlab-runner:
     # keeps them). Off while s3.server is empty. For example:
     #   cache:
     #     secretName: runner-cache   # keys accesskey and secretkey
+    #     consoleSecretName: runner-cache-read   # optional: read-only keys for the console
     #     s3:
     #       server: s3.example.com
     #       bucket: ci-cache

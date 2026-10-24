@@ -76,7 +76,7 @@ skipped during rendering and run at install.
 ## What the chart does for GitOps
 
 - Every credential is an `existingSecret`; no `genCA`/`randAlphaNum` in the
-  templates (ADR-0023).
+  templates ([ADR-0002](adr/0002-helm-and-gitops.md)).
 - The jobs namespace is part of the release (`jobsNamespace.create`); set
   it to `false` when your tool creates it, keeping its `baseline` Pod
   Security label and the client certificate the box issues into it.

@@ -559,20 +559,24 @@ make e2e                      # end-to-end on kind
 |---|---|
 | `CHANGELOG.md` | Changes and upgrade notes of every release |
 | `CONTRIBUTING.md` | How to report issues and propose changes |
+| `SECURITY.md` | How to report a vulnerability, and what is scanned |
 | `docs/releasing.md` | How a release is cut and verified |
 | `charts/ci-accelerator` | The box (umbrella chart) |
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
 | `charts/console` | The console, usable and published on its own (`oci://ghcr.io/hoobiboobi/charts/console`) |
 | `cmd/console`, `internal/` | Go: the console (build history to builds and reasons, store, collector, pages) |
+| `scripts/quickstart.sh` | One clean Linux machine: k3s, cert-manager and the box (attached to every release) |
 | `scripts/buildkit-certs.sh` | CA and certificates for `charts/buildkit` without cert-manager (`tls.source=existingSecret`) |
 | `docs/architecture.md` | How the parts fit together: build path, cache, certificates, telemetry, rollouts |
 | `docs/troubleshooting.md` | Symptoms and fixes, runbooks |
 | `docs/dockerfile-guide.md` | Writing Dockerfiles that stay cached |
 | `docs/runner-cache.md` | The runners' S3 cache and runner tiers |
+| `docs/gitops.md` | Installing with Flux or Argo CD |
 | `docs/design/console.md` | The console's first design draft (historical) |
 | `docs/adr` | Architecture decision records: why the charts are the way they are |
 | `examples/kind` | Local cluster for development |
+| `artifacthub/` | Artifact Hub metadata of the three chart repositories |
 | `test/` | End-to-end checks and helpers |
 
 ## License

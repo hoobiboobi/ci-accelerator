@@ -63,7 +63,9 @@ async function launch() {
   const proc = spawn(findChrome(), flags, { stdio: ["ignore", "ignore", "pipe"] });
   const port = await new Promise((resolve, reject) => {
     let buf = "";
-    const t = setTimeout(() => reject(new Error("Chrome did not start: " + buf.slice(-400))), 20000);
+    // Two checks start their Chromes at once; a busy CI runner has needed
+    // more than 20 s. A Chrome that never answers is killed, not orphaned.
+    const t = setTimeout(() => { proc.kill("SIGKILL"); reject(new Error("Chrome did not start in 60 s: " + buf.slice(-400))); }, 60000);
     proc.stderr.on("data", d => {
       buf += d;
       const m = buf.match(/DevTools listening on ws:\/\/[^:]+:(\d+)\//);
