@@ -212,6 +212,13 @@ limit on build nodes.
   runner configuration or `integrations/gitlab-runner/values.yaml`), and
   `console.jobs.namespace` must be the jobs namespace. Builds started
   outside CI are stored but not listed.
+- **The console does not answer through an Ingress (or a tunnel) after
+  0.2.2.** The box's NetworkPolicy for the console admits pods of other
+  namespaces, not traffic from node addresses: an Ingress controller on the
+  host network (`hostNetwork: true`) comes from a node. Add the node
+  addresses to `console.networkPolicy.extraFrom` (`ipBlock`), or set
+  `console.networkPolicy.enabled=false` if the CNI enforces no policies
+  anyway. `kubectl port-forward` is not affected.
 - **A build node shows as unreachable.** The console reads each daemon's
   history over mutual TLS: check its client certificate (`<release>-console-client`)
   and that the daemons' NetworkPolicy admits the console pod. Daemons that

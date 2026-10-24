@@ -38,6 +38,7 @@ Kubernetes: `>=1.34.0-0`
 | console.enabled | bool | `true` |  |
 | console.gitlab.urlsFrom.configMap | string | `"{{ .Release.Name }}-console-gitlab"` |  |
 | console.jobs.namespace | string | `"{{ .Values.global.jobs.namespace }}"` |  |
+| console.networkPolicy.enabled | bool | `true` | Keep the box's CI jobs and builds away from the console: the jobs namespace and the daemons (RUN steps share their network) may not connect; Ingress controllers in other namespaces and port-forward still do. Needs a CNI that enforces NetworkPolicy; see charts/console. |
 | console.signIn.enabled | bool | `false` |  |
 | console.tls.certManager.issuerRef.name | string | `"{{ include \"ci-accelerator.issuerName\" . }}"` |  |
 | console.tls.existingSecret | string | `""` |  |

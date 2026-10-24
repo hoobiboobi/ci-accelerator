@@ -40,6 +40,10 @@ Kubernetes: `>=1.34.0-0`
 | jobs.namespace | string | `""` | Namespace of the CI job pods, read for job names, pipelines and commits. Empty: builds are kept without them. Rendered with tpl. |
 | jobs.rbac | object | `{"create":true}` | A Role and RoleBinding there that let the console get, list and watch pods. Without them, give that access some other way. |
 | nameOverride | string | `""` |  |
+| networkPolicy.deniedComponents | list | `["buildkit"]` | Pods of this namespace whose ci-accelerator.io/component label is one of these may not connect: the daemons, whose network every build shares. |
+| networkPolicy.deniedNamespaces | list | `[]` | More namespaces whose pods may not connect (the jobs namespace is always one when jobs.namespace is set). Rendered with tpl. |
+| networkPolicy.enabled | bool | `false` | Render a NetworkPolicy that admits connections from every namespace except this one, the jobs namespace and deniedNamespaces, and from pods of this namespace except deniedComponents. Only ingress is limited. |
+| networkPolicy.extraFrom | list | `[]` | More NetworkPolicyPeer entries that may connect, e.g. an ipBlock with the node addresses when the Ingress controller runs on the host network. |
 | nodeSelector | object | `{}` |  |
 | persistence | object | `{"existingClaim":"","size":"10Gi","storageClass":""}` | The store. SQLite needs block storage (ReadWriteOnce): never NFS or another shared file system. |
 | podAnnotations | object | `{}` |  |

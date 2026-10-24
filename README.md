@@ -446,7 +446,10 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   concurrent builds. Their egress is whatever the daemon's NetworkPolicy
   allows. List your cluster CIDRs in
   `buildkit.networkPolicy.egress.clusterCIDRs` to keep builds out of
-  in-cluster services. Blocking the API server reliably depends on the CNI.
+  in-cluster services. Blocking the API server reliably depends on the CNI:
+  kube-proxy sends Service traffic for `kubernetes.default` to the control
+  plane's node addresses, and a node's own address is always reachable from
+  its pods, so list the control-plane node addresses too.
 - **Trace data is untrusted.** Any build (a RUN step) can write spans
   through BuildKit, so traces in your backend are input from builds. The
   buildctl command line, build-arg values included, is recorded in traces:
@@ -494,7 +497,13 @@ vulnerability: [SECURITY.md](SECURITY.md).)
 - **Without sign-in it is open.** Every page, `/search-index`, `/events`
   and `/api/v1` answer whoever reaches the Service. The Service is ClusterIP
   only: use `kubectl port-forward`, or an Ingress with its own
-  authentication.
+  authentication. "Inside the cluster" is not a trust boundary here: the
+  box's own CI jobs and builds run untrusted code in it. The box therefore
+  ships a NetworkPolicy (`console.networkPolicy`, on by default since
+  0.2.2) that keeps the jobs namespace and the daemons (whose network
+  every RUN step shares) away from the console; other namespaces, an
+  Ingress controller among them, still reach it. It needs a CNI that
+  enforces NetworkPolicy.
 - **A configured token is shared.** Without sign-in, anyone who reaches
   the console can read the last 100 lines of a job's log through the
   installation's GitLab token.
