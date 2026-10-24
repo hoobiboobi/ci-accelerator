@@ -342,7 +342,8 @@ backend.
 These are known, deliberate or not yet solved. Read them before you share
 one installation between teams.
 
-**Security model: one installation is one trust domain.**
+**Security model: one installation is one trust domain.** (Reporting a
+vulnerability: [SECURITY.md](SECURITY.md).)
 - The daemons run as **privileged** pods. Their namespace must allow
   privileged pods.
 - **Builds share the cache:** RUN steps can read and write cache mounts
