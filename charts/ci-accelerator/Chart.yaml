@@ -5,10 +5,10 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.2.0
+version: 0.2.1
 # The buildkit release the daemons run.
 # The box's own version (its console); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.2.0"
+appVersion: "0.2.1"
 kubeVersion: ">=1.34.0-0"
 home: https://github.com/hoobiboobi/ci-accelerator
 sources:
@@ -27,7 +27,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.33.1
     - name: console
-      image: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.0
+      image: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.1
       platforms:
         - linux/amd64
         - linux/arm64
@@ -46,16 +46,12 @@ annotations:
       url: https://github.com/hoobiboobi/ci-accelerator/issues
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
+    - kind: fixed
+      description: The pipeline timeline's "Critical path" toggle fades what is off the path
+    - kind: fixed
+      description: quickstart.sh keeps an existing values.yaml on a second run
     - kind: added
-      description: The console, on by default - why an image build was slow or not cached
-    - kind: added
-      description: quickstart.sh - the box on one clean Linux machine
-    - kind: added
-      description: S3 cache for GitLab's cache keyword and extra runner tiers
-    - kind: removed
-      description: VictoriaMetrics and VictoriaTraces are no longer part of the box
-    - kind: security
-      description: Go 1.27.3, Node 24.22.1, cert-manager v1.21.3 pins; govulncheck and trivy in CI
+      description: Chart READMEs and Artifact Hub metadata (icon, images, links)
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -63,10 +59,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.2.0
+    version: 0.2.1
     repository: file://../buildkit
   - name: console
-    version: 0.2.0
+    version: 0.2.1
     repository: file://../console
     condition: console.enabled
   - name: gitlab-runner
