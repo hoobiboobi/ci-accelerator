@@ -90,11 +90,20 @@ builds of two small projects):
 3. **Users of a layer = builds that hit it.** From the stored history: a
    CACHED step with the same name on the same daemon whose parent chain
    matches. This is what shows "shared with project X".
-4. **Cache mounts.** With a namespace in the id: exact per project. The CI
-   component and the runner hook can set `BUILDKIT_CACHE_MOUNT_NS` to the
-   project path, as an opt-in input (it also isolates package caches between
-   projects; existing mounts go cold once). Without it: "shared", listing
-   the projects whose builds ran steps with that cache mount.
+4. **Cache mounts.** Without a namespace: "shared", listing the projects
+   whose builds ran steps with that cache mount. With a namespace in the id
+   they would be exact per project, but the namespace is a build argument
+   the client sends, so any client can name another project. It is left to
+   the router (v0.5), which can set it from the authenticated project in
+   every request; not through the CI component or a wrapper in the runner
+   hook. Notes for then, from the v0.33.1 source (not yet tested): the
+   frontend prefixes explicit `id=` values too (convert_runmount.go); a
+   namespace with a slash (the project path) drops a default mount's id
+   from the step's cache key (exec.go `checkShouldClearCacheOpts`): one
+   rebuild when it is switched on, layers still shared between projects;
+   one without a slash keeps it and splits the layer cache per project.
+   Costs: duplicated package caches, a cold package cache per new project,
+   orphaned mounts until GC removes them.
 5. **Base images** ("pulled from"): a row of their own, with the projects
    whose Dockerfiles use them; not split.
 6. **Build contexts:** one pool row per daemon.
@@ -117,6 +126,5 @@ that created and last used each cache record and expose it in
    names at the same moment on one daemon in a real installation (from the
    console's stored history).
 2. The matcher in the collector with fixtures from real snapshots.
-3. The `BUILDKIT_CACHE_MOUNT_NS` input in the component and the hook
-   (opt-in, upgrade note).
-4. The UI rows.
+3. The UI rows.
+4. With the router: the cache-mount namespace per project (above).
