@@ -8,6 +8,8 @@ import (
 	"time"
 
 	controlapi "github.com/moby/buildkit/api/services/control"
+
+	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 )
 
 // Active is a build a daemon is running now.
@@ -50,6 +52,10 @@ type Inspection struct {
 	Version string
 	GC      []GCRule
 	Usage   Usage
+	// Disk is the cache's filesystem, from the disk probe next to the
+	// daemon; nil without one. DiskErr: the probe did not answer.
+	Disk    *diskprobe.Disk
+	DiskErr string
 }
 
 // Inspector is a Source that can describe its daemon.

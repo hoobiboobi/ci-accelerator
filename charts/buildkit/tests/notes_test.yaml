@@ -103,9 +103,16 @@ tests:
       - matchRegexRaw:
           pattern: 'Before production:\n  - storage.type=emptyDir: every rollout'
       - matchRegexRaw:
-          pattern: '  - resources is empty: the daemon runs BestEffort'
+          pattern: "  - resources are the chart's minimum"
       - matchRegexRaw:
           pattern: '  - config.maxParallelism is 0 \(unlimited\)'
+
+  - it: says so when resources are emptied
+    set:
+      resources: null
+    asserts:
+      - matchRegexRaw:
+          pattern: '  - resources is empty: the daemon runs BestEffort'
 
   - it: drops the items that are configured
     set:

@@ -23,6 +23,7 @@ Kubernetes: `>=1.34.0-0`
 | caches.key | string | `"caches.json"` | The ConfigMap's key with the list. |
 | commonLabels | object | `{}` | Labels for every object; they cannot override the chart's own labels. |
 | daemons.discover | string | `""` | host:port of the BuildKit chart's headless Service; every address it resolves to is a daemon. Rendered with tpl. |
+| daemons.diskProbePort | int | `0` | Port of the disk probe next to each daemon (the buildkit chart's diskProbe), for the free space on the Nodes page. 0: not read. |
 | daemons.serverName | string | `""` | Name in the daemons' certificate. Default: the host of discover. |
 | enabled | bool | `false` | The switch the box uses (console.enabled). It has a default here so that `helm upgrade --reuse-values` from a box without the console keeps it off. Installed on its own, this chart ignores it. |
 | fullnameOverride | string | `""` |  |

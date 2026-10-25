@@ -44,7 +44,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.priorityClassName }}
+      {{- with (include "buildkit.priorityClassName" .) }}
       priorityClassName: {{ . | quote }}
       {{- end }}
       terminationGracePeriodSeconds: {{ int64 .Values.terminationGracePeriodSeconds }}
@@ -112,6 +112,45 @@ spec:
             - name: tls
               mountPath: {{ include "buildkit.tlsDir" . }}
               readOnly: true
+        {{- $probe := (.Values.diskProbe | default dict) }}
+        {{- if $probe.enabled }}
+        # Reports the free space of the cache's filesystem (statfs), which
+        # BuildKit's API does not; numbers only, read-only.
+        - name: disk-probe
+          image: {{ include "buildkit.diskProbeImage" . | quote }}
+          imagePullPolicy: {{ dig "image" "pullPolicy" "IfNotPresent" $probe }}
+          args:
+            - disk-probe
+            - -dir=/var/lib/buildkit
+            - -listen=:{{ int64 (default 9180 $probe.port) }}
+          ports:
+            - name: disk
+              containerPort: {{ int64 (default 9180 $probe.port) }}
+              protocol: TCP
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: disk
+            periodSeconds: 30
+          {{- with $probe.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/buildkit
+              readOnly: true
+        {{- end }}
       volumes:
         - name: config
           configMap:

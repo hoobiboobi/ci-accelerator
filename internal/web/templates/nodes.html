@@ -14,6 +14,11 @@
         {{if .Segs}}<div class="sstack" role="img" aria-label="{{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>
         <div class="legend">{{range .Segs}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{.Size}}</b></span>{{end}}</div>{{end}}</div>
       {{with .MountRows}}<div class="nkv">{{range .}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>{{end}}
+      {{with .Disk}}{{if .Err}}<p class="muted">Disk: the probe did not answer ({{.Err}}).</p>{{else}}
+      <div class="ndisk"><div class="sstack" role="img" aria-label="Disk: {{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>
+        <div class="legend">{{range .Segs}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{.Size}}</b></span>{{end}}</div>
+        <div class="nkv">{{range .Rows}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>
+        {{if .Notes}}<div class="callout {{if eq .Level "crit"}}bad{{else}}warn{{end}}" role="note">{{icon "warn" 15 "i"}}<div><b class="k">{{if eq .Level "crit"}}The disk is nearly full{{else}}Disk space{{end}}</b>{{range .Notes}}<span class="dnote">{{.}}</span>{{end}}</div></div>{{end}}</div>{{end}}{{end}}
       {{else}}<p class="muted">{{if .Err}}Could not read its cache: {{.Err}}{{else}}Reading its cache…{{end}}</p>{{end}}
       {{with .Since}}<p class="muted">{{.}}</p>{{end}}
       {{with .Version}}<p class="muted sm">BuildKit {{.}}</p>{{end}}</section>

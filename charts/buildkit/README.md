@@ -35,6 +35,15 @@ Kubernetes: `>=1.34.0-0`
 | config.maxParallelism | int | `0` | Max concurrently running build operations per daemon: RUN, COPY/ADD and source operations (image pulls, git, local context). 0 = unlimited, which is buildkit's default (not the CPU count). Production ran 28 on a 48-CPU daemon. |
 | config.maxRegistryConcurrency | int | `0` | Max concurrent connections per registry; 0 keeps the buildkit default (4). Pushes that get stuck hold their slot and can hang every build on the daemon (moby/buildkit#7275); the probes do not detect that. |
 | config.workerOCI | object | `{}` | Extra keys for the [worker.oci] table, e.g. {snapshotter: native}. Values: strings, numbers, booleans or lists. The keys the chart sets (enabled, gc, max-parallelism, gcpolicy) are rejected. |
+| diskProbe.enabled | bool | `false` |  |
+| diskProbe.image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability). |
+| diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
+| diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator-console"` |  |
+| diskProbe.image.tag | string | `""` | Default: v<chart version>, the console of the same release. |
+| diskProbe.port | int | `9180` |  |
+| diskProbe.resources.limits.memory | string | `"32Mi"` |  |
+| diskProbe.resources.requests.cpu | string | `"5m"` |  |
+| diskProbe.resources.requests.memory | string | `"16Mi"` |  |
 | extraEnv | list | `[]` | Extra environment variables for the daemon container. |
 | fullnameOverride | string | `""` | Override the full resource name (<release>-<chart> by default). Install-time only, like nameOverride. |
 | global.buildNodes.enabled | bool | `true` | false: ignore selector/tolerations below and run on any Linux node. (A switch, because Helm merges `selector: {}` with the default instead of clearing it.) |
@@ -70,7 +79,10 @@ Kubernetes: `>=1.34.0-0`
 | preflight.buildNodes | bool | `true` | Fail if no node carries every label of the build-node selector (the DaemonSet would want 0 pods while helm reports success). Needs cluster-wide list access to Nodes (an installer that is only a namespace admin gets Forbidden); set false then, or for node pools scaled to zero. |
 | preflight.podSecurity | bool | `true` | Fail if the namespace's pod-security.kubernetes.io/enforce label is set to anything but privileged (no daemon pod could start). Needs read access to the Namespace object, which namespace admins have. A namespace without the label is not checked (the cluster default applies); NOTES warns. |
 | preflight.tlsSecret | bool | `true` | With tls.source=existingSecret: fail if the Secret exists but lacks tls.crt, tls.key or ca.crt (`kubectl create secret tls` writes no ca.crt). A Secret that does not exist yet is not an error: the daemons wait for it. Needs read access to Secrets in the release namespace. |
-| priorityClassName | string | `""` | A PriorityClass above the CI job pods keeps the daemon from being preempted by them. |
+| priorityClass.create | bool | `true` |  |
+| priorityClass.preemptionPolicy | string | `"Never"` | Never: the daemon does not evict running CI jobs to get scheduled; PreemptLowerPriority lets it. |
+| priorityClass.value | int | `1000000` | Above CI jobs (0), below Kubernetes' own system classes (2000000000). |
+| priorityClassName | string | `""` | An existing PriorityClass for the daemons. Empty: the one this chart creates (priorityClass), or none if that is switched off. |
 | probes.liveness.failureThreshold | int | `6` |  |
 | probes.liveness.initialDelaySeconds | int | `0` |  |
 | probes.liveness.periodSeconds | int | `30` |  |
@@ -81,7 +93,7 @@ Kubernetes: `>=1.34.0-0`
 | probes.readiness.periodSeconds | int | `10` | A daemon that stops answering leaves the endpoints after periodSeconds x failureThreshold (30 s); until then its node's jobs still go to it. |
 | probes.readiness.timeoutSeconds | int | `10` |  |
 | probes.startup | object | `{"failureThreshold":150,"initialDelaySeconds":2,"periodSeconds":2,"terminationGracePeriodSeconds":30,"timeoutSeconds":3}` | Polls often until the daemon answers, then hands over to readiness (kubelet runs it right away) and liveness, which is off meanwhile, so a slow start on a large cache is not killed. Budget: failureThreshold x max(periodSeconds, timeoutSeconds) = 5 to 7.5 min. |
-| resources | object | `{}` | Daemon resources. Empty = BestEffort: first to be OOM-killed or evicted, lowest CPU weight. Size requests to the build load and leave kubelet and containerd headroom (an unlimited daemon starved a 192-core node in production). A hard CPU limit throttles builds. A memory limit applies to buildkitd and all RUN steps together, and an OOM kill takes the whole daemon with every running build; leave headroom above max-parallelism x the largest step. Production starting point:   requests: {cpu: "48", memory: 128Gi}   limits:   {memory: 128Gi} |
+| resources | object | `{"requests":{"cpu":"500m","memory":"512Mi"}}` | Daemon resources. The small default requests keep the daemon out of BestEffort, which the kubelet evicts first under memory pressure; size them to the build load and leave kubelet and containerd headroom (an unlimited daemon starved a 192-core node in production). A hard CPU limit throttles builds. A memory limit applies to buildkitd and all RUN steps together, and an OOM kill takes the whole daemon with every running build; leave headroom above max-parallelism x the largest step. Sizes:   a small node (4-8 CPU, 8-16 GiB):  requests {cpu: "1", memory: 2Gi},  limits {memory: 6Gi}   16-32 CPU, 64 GiB:                 requests {cpu: "8", memory: 16Gi}, limits {memory: 48Gi}   production (48+ CPU, 192+ GiB):    requests {cpu: "48", memory: 128Gi}, limits {memory: 128Gi} |
 | service.annotations | object | `{}` |  |
 | service.externalTrafficPolicy | string | `"Cluster"` | externalTrafficPolicy for NodePort (Cluster or Local). |
 | service.nodePort | string | `""` | Fixed node port when type is NodePort; must lie in the cluster's service-node-port-range (default 30000-32767). Empty lets Kubernetes pick. |

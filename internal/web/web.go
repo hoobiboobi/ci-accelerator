@@ -327,6 +327,11 @@ func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 	}
 	if s.opt.Live != nil {
 		for _, d := range s.opt.Live.Daemons() {
+			if dv := diskView(d.Inspection); dv != nil && dv.Level == "crit" {
+				sh.Warn = "A build node's disk is nearly full"
+			}
+		}
+		for _, d := range s.opt.Live.Daemons() {
 			if !d.Connected {
 				sh.Warn = "A build daemon is not reachable"
 			}

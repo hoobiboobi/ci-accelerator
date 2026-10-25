@@ -1,0 +1,74 @@
+suite: disk probe in the box
+templates:
+  - validate.yaml
+  - charts/console/templates/deployment.yaml
+  - charts/buildkit/templates/daemonset.yaml
+  - charts/buildkit/templates/configmap.yaml
+  - charts/buildkit/templates/priorityclass.yaml
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  - it: runs the probe next to each daemon, from the console's image, and the console reads it
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: disk-probe
+        template: charts/buildkit/templates/daemonset.yaml
+      - matchRegex:
+          path: spec.template.spec.containers[1].image
+          pattern: '^ghcr\.io/hoobiboobi/ci-accelerator-console:v'
+        template: charts/buildkit/templates/daemonset.yaml
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -disk-probe-port=9180
+        template: charts/console/templates/deployment.yaml
+
+  - it: gives the daemons their PriorityClass
+    asserts:
+      - equal:
+          path: metadata.name
+          value: ci-accelerator-box-buildkit
+        template: charts/buildkit/templates/priorityclass.yaml
+      - equal:
+          path: spec.template.spec.priorityClassName
+          value: ci-accelerator-box-buildkit
+        template: charts/buildkit/templates/daemonset.yaml
+
+  - it: refuses a probe image that is not the console's
+    template: validate.yaml
+    set:
+      console.image.repository: mirror.example/console
+    asserts:
+      - failedTemplate:
+          errorPattern: "buildkit.diskProbe.image .* must equal console.image"
+
+  - it: accepts both moved to a mirror together
+    template: validate.yaml
+    set:
+      console.image.repository: mirror.example/console
+      buildkit.diskProbe.image.repository: mirror.example/console
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: refuses ports that disagree
+    template: validate.yaml
+    set:
+      buildkit.diskProbe.port: 9300
+    asserts:
+      - failedTemplate:
+          errorPattern: "console.daemons.diskProbePort \\(9180\\) must equal buildkit.diskProbe.port \\(9300\\)"
+
+  - it: refuses a port for a probe that is off
+    template: validate.yaml
+    set:
+      buildkit.diskProbe.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: "diskProbePort is set but buildkit.diskProbe.enabled is false"

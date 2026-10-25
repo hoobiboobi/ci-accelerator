@@ -277,3 +277,31 @@ qualified. As a JSON list.
 {{- end }}
 {{- toJson (concat $names .Values.tls.certManager.extraDnsNames) }}
 {{- end }}
+
+{{/*
+The daemons' PriorityClass: the one named in priorityClassName, else the
+one this chart creates (cluster-scoped, so the namespace is in its name),
+else none. Values added after 0.2 are read with dig: an upgrade with
+--reuse-values keeps the old tree.
+*/}}
+{{- define "buildkit.priorityClassName" -}}
+{{- if .Values.priorityClassName }}
+{{- .Values.priorityClassName }}
+{{- else if dig "create" true (.Values.priorityClass | default dict) }}
+{{- printf "%s-%s" .Release.Namespace (include "buildkit.fullname" .) | trunc 253 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{/*
+The disk probe's image: the console's, of this chart's version unless set.
+*/}}
+{{- define "buildkit.diskProbeImage" -}}
+{{- $img := dig "image" dict (.Values.diskProbe | default dict) }}
+{{- $repo := default "ghcr.io/hoobiboobi/ci-accelerator-console" $img.repository }}
+{{- $tag := default (printf "v%s" .Chart.Version) $img.tag }}
+{{- if $img.digest }}
+{{- printf "%s:%s@%s" $repo $tag $img.digest }}
+{{- else }}
+{{- printf "%s:%s" $repo $tag }}
+{{- end }}
+{{- end }}

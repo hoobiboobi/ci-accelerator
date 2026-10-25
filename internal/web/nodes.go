@@ -45,6 +45,85 @@ type NodeCard struct {
 	Segs                                   []NSeg
 	MountRows                              []KV
 	Inspected                              bool
+	// Disk is the cache's filesystem, from the disk probe; nil without one.
+	Disk *DiskView
+}
+
+// DiskView is a daemon's disk: what fills it and how close it is to the
+// limits that delete cache (BuildKit's GC) or evict pods (the kubelet).
+type DiskView struct {
+	Segs  []NSeg
+	Rows  []KV
+	Level string // "", "warn" or "crit"
+	Notes []string
+	Err   string
+}
+
+// The kubelet's default hard eviction thresholds for the node's disks.
+const (
+	evictNodefs  = 0.10
+	evictImagefs = 0.15
+)
+
+// diskView reads a daemon's disk against its GC floor: free space under
+// minFreeSpace makes BuildKit delete cache after each build; available
+// space under the kubelet's thresholds evicts pods if the cache shares the
+// node's disk (emptyDir, or hostPath on the root disk).
+func diskView(in collector.Inspection) *DiskView {
+	if in.Disk == nil {
+		if in.DiskErr != "" {
+			return &DiskView{Err: in.DiskErr}
+		}
+		return nil
+	}
+	d := in.Disk
+	v := &DiskView{}
+	total := float64(d.Total)
+	used := d.Total - d.Free
+	cache := uint64(max(in.Usage.Total, 0))
+	if cache > used {
+		cache = used
+	}
+	pct := func(n uint64) string { return strconv.FormatFloat(100*float64(n)/total, 'f', 2, 64) }
+	for _, sg := range []struct {
+		class, label string
+		n            uint64
+	}{{"built", "Cache", cache}, {"runner", "Other files", used - cache}, {"free", "Free", d.Free}} {
+		if sg.n > 0 {
+			v.Segs = append(v.Segs, NSeg{Class: sg.class, Label: sg.label, Size: bytesText(int64(sg.n)), Flex: pct(sg.n)})
+		}
+	}
+	share := func(n uint64) string { return strconv.FormatFloat(100*float64(n)/total, 'f', 0, 64) + " %" }
+	v.Rows = append(v.Rows, KV{"Disk", bytesText(int64(d.Total))},
+		KV{"Free", bytesText(int64(d.Free)) + " (" + share(d.Free) + ")"},
+		KV{"Available to pods", bytesText(int64(d.Available)) + " (" + share(d.Available) + ")"})
+	if d.Inodes > 0 {
+		v.Rows = append(v.Rows, KV{"Inodes free", strconv.FormatFloat(100*float64(d.InodesFree)/float64(d.Inodes), 'f', 0, 64) + " %"})
+	}
+	var minFree int64
+	for _, r := range in.GC {
+		minFree = max(minFree, r.MinFree)
+	}
+	raise := func(level, note string) {
+		if level == "crit" || v.Level == "" {
+			v.Level = level
+		}
+		v.Notes = append(v.Notes, note)
+	}
+	avail := float64(d.Available) / total
+	switch {
+	case avail < evictNodefs:
+		raise("crit", "Under 10 % available: if the cache shares the node's disk, the kubelet is evicting pods now (the daemon last, by its priority).")
+	case avail < evictImagefs:
+		raise("warn", "Under 15 % available: close to the kubelet's eviction thresholds if the cache shares the node's disk.")
+	}
+	if minFree > 0 && int64(d.Free) < minFree {
+		raise("warn", "Less free than the garbage collection keeps ("+bytesText(minFree)+"): BuildKit deletes cache after each build until it is.")
+	}
+	if d.Inodes > 0 && float64(d.InodesFree)/float64(d.Inodes) < 0.05 {
+		raise("warn", "Under 5 % of inodes free: the disk fills up by file count before bytes.")
+	}
+	return v
 }
 
 // NSeg is a part of a daemon's cache.
@@ -154,6 +233,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		if !d.InspectedAt.IsZero() {
 			v.Measured = "Read from the running daemons at " + d.InspectedAt.UTC().Format("15:04:05 UTC")
 		}
+		card.Disk = diskView(d.Inspection)
 		v.Cards = append(v.Cards, card)
 	}
 	for _, name := range sortedKeys(images) {
