@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -78,5 +79,18 @@ func TestForgetGoneDaemon(t *testing.T) {
 	c.live.forget("old")
 	if ds := c.Daemons(); len(ds) != 1 || ds[0].Name != "new" {
 		t.Errorf("%+v", ds)
+	}
+}
+
+// An inspection that ends after its daemon was forgotten (a slow disk
+// probe during a rollout) does not bring the daemon back.
+func TestInspectionDoesNotResurrect(t *testing.T) {
+	var l live
+	l.connected("d", true)
+	l.forget("d")
+	l.inspected("d", Inspection{Version: "v0.33.1"}, nil)
+	l.inspected("d", Inspection{}, errors.New("timeout"))
+	if _, ok := l.daemons["d"]; ok {
+		t.Error("a forgotten daemon came back")
 	}
 }

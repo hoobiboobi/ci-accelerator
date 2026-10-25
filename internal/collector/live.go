@@ -141,7 +141,12 @@ func (l *live) event(name string, t controlapi.BuildHistoryEventType, rec *contr
 // changed (the console inspects every minute).
 func (l *live) inspected(name string, in Inspection, err error) {
 	l.mu.Lock()
-	d := l.state(name)
+	d := l.daemons[name]
+	if d == nil {
+		// Forgotten while it was inspected: it stays forgotten.
+		l.mu.Unlock()
+		return
+	}
 	same := false
 	if err != nil {
 		same = d.InspectErr == err.Error()

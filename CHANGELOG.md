@@ -55,6 +55,10 @@ workflow copies them into the GitHub release.
   UTC like every other time.
 - Console: the Nodes page updates itself when builds start and end; it
   never subscribed to the daemons' state.
+- Console: a daemon replaced by a rollout disappeared from the Nodes page
+  only if its address left the Service while its stream was still open;
+  when the stream had broken first (the pod stopping), it stayed as
+  "Unreachable" until the console restarted.
 - Console: an image's page opened while another project is chosen (a
   shared link, an old tab) switches to the project that builds the image
   instead of answering "Not found".
