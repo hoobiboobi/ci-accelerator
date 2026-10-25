@@ -5,7 +5,7 @@ Each release upgrades in place from the previous one; see
 Every version has **Upgrade notes**, even if they say "None". The release
 workflow copies them into the GitHub release.
 
-## Unreleased
+## 0.2.3 - 2026-10-25
 
 ### Upgrade notes
 
