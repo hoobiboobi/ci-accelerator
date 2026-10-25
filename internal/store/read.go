@@ -38,8 +38,11 @@ const buildColumns = `b.id, b.generation, d.name, b.ref, b.attribution, b.instan
 
 // Previous returns the latest build of the same project and target that
 // started before b, restored for FirstRebuild; nil when there is none.
-// known is false while b's project is not known (its job not seen yet):
-// then there is nothing to compare with, which is not a first build.
+// Builds of b's own pipeline do not count: they build the same commit at
+// the same time (parallel jobs, retries), and comparing with one makes the
+// commit's own work look like "nothing changed". known is false while b's
+// project is not known (its job not seen yet): then there is nothing to
+// compare with, which is not a first build.
 func (s *Store) Previous(ctx context.Context, b *history.Build) (prev *Stored, known bool, err error) {
 	instance, job := nullInstance(b.Attribution.Instance), nullUint(b.Attribution.Job)
 	if !instance.Valid || !job.Valid {
@@ -55,7 +58,9 @@ func (s *Store) Previous(ctx context.Context, b *history.Build) (prev *Stored, k
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+buildColumns+` FROM builds b JOIN daemons d ON d.id = b.daemon_id
 		WHERE b.instance = ? AND b.project_id = ? AND b.target = ? AND b.started_at < ? AND b.ref <> ?
-		ORDER BY b.started_at DESC LIMIT 1`, instance, project, b.Target, b.Started.UnixMilli(), b.Ref)
+			AND b.pipeline_id IS NOT ?
+		ORDER BY b.started_at DESC LIMIT 1`, instance, project, b.Target, b.Started.UnixMilli(), b.Ref,
+		nullUint(b.Attribution.Pipeline))
 	if err != nil {
 		return nil, true, err
 	}
@@ -76,8 +81,9 @@ func (s *Store) Next(ctx context.Context, b *history.Build) (*Stored, error) {
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+buildColumns+` FROM builds b JOIN daemons d ON d.id = b.daemon_id
 		WHERE b.instance = ? AND b.project_id = (SELECT project_id FROM jobs WHERE instance = ? AND job_id = ?)
-			AND b.target = ? AND b.started_at > ? AND b.ref <> ?
-		ORDER BY b.started_at LIMIT 1`, instance, instance, job, b.Target, b.Started.UnixMilli(), b.Ref)
+			AND b.target = ? AND b.started_at > ? AND b.ref <> ? AND b.pipeline_id IS NOT ?
+		ORDER BY b.started_at LIMIT 1`, instance, instance, job, b.Target, b.Started.UnixMilli(), b.Ref,
+		nullUint(b.Attribution.Pipeline))
 	if err != nil {
 		return nil, err
 	}

@@ -219,21 +219,48 @@ func (c *Collector) JobKnown(ctx context.Context, instance string, job uint64) e
 	return c.settle(ctx, instance, pipeline)
 }
 
-// recompute compares the build after b (same project and target) again,
-// now that b is stored, and returns it when its reason changed.
+// recompute compares the builds after b (same project and target) again,
+// now that b is stored, and returns one when a reason changed. Builds of
+// one pipeline never compare with each other, so EVERY build of the next
+// pipeline that built this target has b as its previous build.
 func (c *Collector) recompute(ctx context.Context, b *history.Build) (*history.Build, error) {
 	next, err := c.store.Next(ctx, b)
 	if err != nil || next == nil {
 		return nil, err
 	}
-	r, err := c.reason(ctx, next.Build)
-	if err != nil {
-		return nil, err
+	candidates := []*store.Stored{next}
+	if p := next.Build.Attribution; p.State == history.Attributed {
+		// Pipeline() does not restore the graphs; Load the siblings.
+		sts, err := c.store.Pipeline(ctx, p.Instance, p.Pipeline)
+		if err != nil {
+			return nil, err
+		}
+		for _, st := range sts {
+			if st.Build.Target != b.Target || st.Build.Ref == b.Ref || st.Build.Ref == next.Build.Ref {
+				continue
+			}
+			loaded, err := c.store.Load(ctx, st.ID)
+			if err != nil {
+				return nil, err
+			}
+			candidates = append(candidates, loaded)
+		}
 	}
-	if r.Kind == next.Reason.Kind && r.Step.Key == next.Reason.Step.Key && r.Old == next.Reason.Old && r.New == next.Reason.New {
-		return nil, nil
+	var changed *history.Build
+	for _, cand := range candidates {
+		r, err := c.reason(ctx, cand.Build)
+		if err != nil {
+			return nil, err
+		}
+		if r.Kind == cand.Reason.Kind && r.Step.Key == cand.Reason.Step.Key && r.Old == cand.Reason.Old && r.New == cand.Reason.New {
+			continue
+		}
+		if err := c.store.SetReason(ctx, cand.Build.Ref, cand.Build.Daemon, r); err != nil {
+			return nil, err
+		}
+		changed = cand.Build
 	}
-	return next.Build, c.store.SetReason(ctx, next.Build.Ref, next.Build.Daemon, r)
+	return changed, nil
 }
 
 func (c *Collector) save(ctx context.Context, b *history.Build, gen int64) error {

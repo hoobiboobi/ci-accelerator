@@ -32,6 +32,7 @@ func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, li
 				JOIN pipelines p2 ON p2.instance = b2.instance AND p2.pipeline_id = b2.pipeline_id
 				WHERE b2.instance = b.instance AND b2.project_id = b.project_id AND b2.target = b.target
 					AND b2.started_at < b.started_at AND b2.completed_at IS NOT NULL
+					AND b2.pipeline_id IS NOT b.pipeline_id
 				ORDER BY b2.started_at DESC LIMIT 1), '')
 		FROM builds b INDEXED BY builds_elsewhere
 		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
