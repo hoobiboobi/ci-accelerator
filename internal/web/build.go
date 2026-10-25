@@ -399,7 +399,11 @@ func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stor
 	case history.FilesChanged:
 		out = append(out, Change{"Files", template.HTML(at + " reads " + orContext(r.Paths) + " — changed")})
 	case history.CacheElsewhere:
-		out = append(out, Change{"Files", template.HTML(at + " reads " + orContext(r.Paths) + " — changed or not: the previous build ran on another node, and BuildKit does not record the files")})
+		why := "this node's cache no longer had the step, and BuildKit does not record the files"
+		if r.Old != "" {
+			why = "the previous build ran on another node, and BuildKit does not record the files"
+		}
+		out = append(out, Change{"Files", template.HTML(at + " reads " + orContext(r.Paths) + " — changed or not: " + why)})
 	}
 	prevBuilt := 0
 	for _, st := range pb.Steps {

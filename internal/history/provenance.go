@@ -271,6 +271,67 @@ func (p *Provenance) localInput(id string) bool {
 	return false
 }
 
+// contextDependent reports whether a step's cache key depends on the build
+// context: a local source anywhere among its transitive inputs. The step
+// identity strips local-source content on purpose (see identity), so a step
+// can be rebuilt with an unchanged identity whenever context files fed any
+// ancestor — not only when it reads them itself (localInput).
+func (p *Provenance) contextDependent(id string) bool {
+	return p.walkCone(id, map[string]bool{}, nil)
+}
+
+// contextSources lists what the build context feeds into a step's ancestry:
+// the copy sources of every step in its cone that reads a local source
+// directly, and "." for one that reads it without copy actions. Broad on
+// purpose: matching a changed file against these errs towards "your
+// change", never away from it.
+func (p *Provenance) contextSources(id string) []string {
+	set := map[string]bool{}
+	p.walkCone(id, map[string]bool{}, set)
+	out := make([]string, 0, len(set))
+	for s := range set {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// walkCone visits a step and its transitive inputs. With sources nil it
+// reports whether the cone contains a local source; otherwise it collects
+// every direct reader's copy sources into sources and walks the whole cone.
+func (p *Provenance) walkCone(id string, seen map[string]bool, sources map[string]bool) bool {
+	if seen[id] {
+		return false
+	}
+	seen[id] = true
+	s, ok := p.Steps[id]
+	if !ok {
+		return false
+	}
+	if src := viewOf(s.Op).Op.Source; src != nil && strings.HasPrefix(src.Identifier, "local://") {
+		return true
+	}
+	if sources != nil && p.localInput(id) {
+		cs := p.copySources(id)
+		if len(cs) == 0 {
+			cs = []string{"."}
+		}
+		for _, c := range cs {
+			sources[c] = true
+		}
+	}
+	found := false
+	for _, in := range s.Inputs {
+		if p.walkCone(in, seen, sources) {
+			if sources == nil {
+				return true
+			}
+			found = true
+		}
+	}
+	return found
+}
+
 // copySources lists the source paths of a step's copy actions.
 func (p *Provenance) copySources(id string) []string {
 	var out []string

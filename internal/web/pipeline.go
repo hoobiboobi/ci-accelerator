@@ -274,7 +274,7 @@ func pipelineSentence(v *PipelineView) string {
 		case "farm":
 			parts = append(parts, fmt.Sprintf("%d because of the build farm", by[k]))
 		case "unclear":
-			parts = append(parts, fmt.Sprintf("%d unclear (last built on another node)", by[k]))
+			parts = append(parts, fmt.Sprintf("%d unclear (files or cache)", by[k]))
 		case "failed":
 			parts = append(parts, fmt.Sprintf("%d failed", by[k]))
 		case "running":

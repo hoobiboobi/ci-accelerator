@@ -371,6 +371,9 @@ func reasonText(b store.BuildRow, st Status) string {
 	switch st.Key {
 	case "unclear":
 		if b.Reason == history.CacheElsewhere {
+			if b.Old == "" {
+				return "Rebuilt here although nothing seems to have changed; files or an evicted cache, unclear"
+			}
 			return "The last build of the image ran on another node; whether its files changed is unclear"
 		}
 		return "Steps ran with no earlier build to compare with"

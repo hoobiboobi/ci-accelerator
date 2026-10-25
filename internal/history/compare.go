@@ -21,14 +21,17 @@ const (
 	// FilesChanged: same definition, but it reads the build context, whose
 	// files changed. Which files is not recorded by BuildKit.
 	FilesChanged ReasonKind = "files-changed"
-	// NotInCache: same definition, no context input: evicted, or cached on
-	// another daemon.
+	// NotInCache: same definition, no build-context input anywhere below
+	// the step, and the previous build ran on this daemon (Old empty):
+	// the cache here no longer had it.
 	NotInCache ReasonKind = "not-in-cache"
-	// CacheElsewhere: same definition as in the previous build, which ran
-	// on another daemon: its cache is there, not here. For a step that reads
-	// the build context, Paths lists what it reads: whether those files
-	// changed as well, BuildKit's history cannot tell. Settle decides it
-	// when another build of the same pipeline can.
+	// CacheElsewhere: same definition as in the previous build, but the
+	// build context feeds the step or an ancestor, so the files or the
+	// cache — the records cannot tell which. Paths lists what the context
+	// feeds into its ancestry. Old/New name the daemons when the previous
+	// build ran elsewhere; both empty means it ran here. Settle decides it
+	// when another build of the same pipeline can; GitLab's comparison of
+	// the commits decides the rest.
 	CacheElsewhere ReasonKind = "cache-elsewhere"
 	// OtherNode: the step reads no files and did not change, or its files
 	// did not change (a job of the same pipeline proves it, see Settle):
@@ -90,18 +93,32 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 			return Reason{Kind: NewStep, Step: s}, true
 		}
 		if p.Identity == s.Identity {
-			if prev.Daemon != "" && cur.Daemon != "" && prev.Daemon != cur.Daemon {
-				if !cur.prov.localInput(s.StepID) {
-					// It reads no files and did not change: only the
-					// cache can be missing here, never the code.
-					return Reason{Kind: OtherNode, Step: s, Old: prev.Daemon, New: cur.Daemon}, true
-				}
-				// It reads files: they may have changed too.
-				return Reason{Kind: CacheElsewhere, Step: s, Old: prev.Daemon, New: cur.Daemon,
-					Paths: cur.prov.copySources(s.StepID)}, true
-			}
+			crossDaemon := prev.Daemon != "" && cur.Daemon != "" && prev.Daemon != cur.Daemon
 			if cur.prov.localInput(s.StepID) {
+				if crossDaemon {
+					// It reads files: they may have changed too.
+					return Reason{Kind: CacheElsewhere, Step: s, Old: prev.Daemon, New: cur.Daemon,
+						Paths: cur.prov.copySources(s.StepID)}, true
+				}
 				return Reason{Kind: FilesChanged, Step: s, Paths: cur.prov.copySources(s.StepID)}, true
+			}
+			if cur.prov.contextDependent(s.StepID) {
+				// The step itself reads no files, but an ancestor reads the
+				// build context (the file-reading step may be cached or
+				// received): its cache key depends on files the records
+				// cannot see, so the files or the cache — unclear, whatever
+				// the daemons. Settle or GitLab's comparison decides it.
+				r := Reason{Kind: CacheElsewhere, Step: s, Paths: cur.prov.contextSources(s.StepID)}
+				if crossDaemon {
+					r.Old, r.New = prev.Daemon, cur.Daemon
+				}
+				return r, true
+			}
+			// No local source anywhere below the step and it did not
+			// change: with the same identity its cache key is the same,
+			// so only the cache can be missing, never the code.
+			if crossDaemon {
+				return Reason{Kind: OtherNode, Step: s, Old: prev.Daemon, New: cur.Daemon}, true
 			}
 			return Reason{Kind: NotInCache, Step: s}, true
 		}
@@ -247,6 +264,14 @@ func Settle(builds []*Build, reasons []Reason) []Reason {
 			continue
 		}
 		if by := cachedOnAnotherDaemon(builds, i, r.Step.Identity); by != "" {
+			// The rule every settling shares: an "the cache was elsewhere"
+			// outcome is OtherNode only when the previous build ran on
+			// another daemon (Old). With no previous daemon the files did
+			// not change and the cache was HERE last time: eviction.
+			if r.Old == "" {
+				out[i].Kind, out[i].By = NotInCache, by
+				continue
+			}
 			out[i].Kind, out[i].By = OtherNode, by
 			continue
 		}
