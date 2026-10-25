@@ -305,6 +305,32 @@ console-image: ## Build the console image for this machine's architecture and lo
 	@kind load docker-image $(CONSOLE_IMAGE) --name $(KIND_CLUSTER) >/dev/null 2>&1
 	@echo "$(CONSOLE_IMAGE) loaded into kind cluster $(KIND_CLUSTER)"
 
+# A running install whose console `make console-swap` replaces.
+CONSOLE_NS      ?= ci-accelerator
+CONSOLE_RELEASE ?= ci-accelerator
+.PHONY: console-swap
+console-swap: ## Rebuild the console from this tree in seconds and swap it into a running install on kind (CONSOLE_NS, CONSOLE_RELEASE); the daemons are left alone
+	@set -e; \
+	arch=$$(kubectl --context $(KUBE_CONTEXT) get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}'); \
+	base=$$(sed -n 's/^FROM \(gcr\.io[^ ]*\).*/\1/p' cmd/console/Dockerfile); \
+	rev=$$(git describe --always --dirty --abbrev=12); tag=swap-$$(date +%Y%m%d%H%M%S); \
+	dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO_RUN) build -trimpath -ldflags="-s -w -buildid= -X main.version=dev -X main.commit=$$rev" -o "$$dir/console" ./cmd/console; \
+	printf 'FROM %s\nCOPY console /console\nUSER 65532:65532\nENTRYPOINT ["/console"]\n' "$$base" >"$$dir/Dockerfile"; \
+	DOCKER_BUILDKIT=0 docker build -q -t ci-accelerator-console:$$tag "$$dir" >/dev/null; \
+	kind load docker-image ci-accelerator-console:$$tag --name $(KIND_CLUSTER) >/dev/null 2>&1; \
+	kubectl --context $(KUBE_CONTEXT) -n $(CONSOLE_NS) set image deploy/$(CONSOLE_RELEASE)-console console=ci-accelerator-console:$$tag >/dev/null; \
+	kubectl --context $(KUBE_CONTEXT) -n $(CONSOLE_NS) rollout status deploy/$(CONSOLE_RELEASE)-console --timeout=180s >/dev/null; \
+	echo "console $$rev ($$arch) running in $(CONSOLE_NS)/$(CONSOLE_RELEASE)-console as ci-accelerator-console:$$tag"
+
+.PHONY: quick
+quick: ## Before a push, in a few minutes: gofmt, go vet, Go tests (cached), chart lint and unit tests, the CI component's test; CI runs the rest
+	@out=$$("$$($(GO_RUN) env GOROOT)/bin/gofmt" -l internal cmd); \
+		if [ -n "$$out" ]; then echo "not gofmt-formatted: $$out" >&2; exit 1; fi
+	@$(GO_RUN) vet ./...
+	@$(GO_RUN) test ./... >/dev/null && echo "go test: ok"
+	@$(MAKE) --no-print-directory lint unittest component-test
+
 .PHONY: ui-tools
 ui-tools: $(NODE) ## Pinned Node for the browser checks into .tools/node-v<version>
 
