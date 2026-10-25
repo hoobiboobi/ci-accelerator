@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.2.2
+version: 0.2.3
 # The box's own version (its console); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.2.2"
+appVersion: "0.2.3"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -26,7 +26,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.33.1
     - name: console
-      image: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.2
+      image: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3
       platforms:
         - linux/amd64
         - linux/arm64
@@ -45,16 +45,18 @@ annotations:
       url: https://github.com/hoobiboobi/ci-accelerator/issues
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
-    - kind: security
-      description: A NetworkPolicy keeps the box's CI jobs and builds away from the console (on by default in the box)
+    - kind: added
+      description: A GitLab CI component that builds and pushes an image on the build farm (ci/gitlab/build.yml), included by URL with an integrity hash
+    - kind: added
+      description: The daemons get their own PriorityClass and default resource requests, so the kubelet evicts CI jobs before them under node pressure
+    - kind: added
+      description: The console shows each build node's disk against the garbage collection and eviction limits (a disk probe next to each daemon)
+    - kind: added
+      description: The console's pipelines page searches by number, commit, title, branch, author and job name, within a period
     - kind: fixed
-      description: The install notes name the daemons' BuildKit image again, not the box version
+      description: The console's live mark no longer flashes between pages; Nodes updates itself; replaced daemons no longer stay "Unreachable"
     - kind: fixed
-      description: Chart READMEs show every value description in full
-    - kind: changed
-      description: Links point to the website, ci-accelerator.io
-    - kind: changed
-      description: The release signs the charts right after pushing them
+      description: An image's page opened with another project chosen switches to the image's project
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -62,10 +64,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.2.2
+    version: 0.2.3
     repository: file://../buildkit
   - name: console
-    version: 0.2.2
+    version: 0.2.3
     repository: file://../console
     condition: console.enabled
   - name: gitlab-runner
