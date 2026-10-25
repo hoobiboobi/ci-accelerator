@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -58,7 +59,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 			title = fmt.Sprintf("Pipeline #%d", b.Pipeline)
 		}
 		items = append(items, indexItem{Kind: "Pipeline", Label: title, URL: "/pipelines/" + store.PipelineKey(b.Instance, b.Pipeline), Icon: "pipe",
-			Sub: fmt.Sprintf("#%d · %s · %s", b.Pipeline, short(b.SHA, 7), b.Ref)})
+			Sub: joinSet(" · ", fmt.Sprintf("#%d", b.Pipeline), short(b.SHA, 7), b.Ref)})
 	}
 	if s.opt.Live != nil {
 		for _, d := range s.opt.Live.Daemons() {
@@ -84,6 +85,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	// and on every inspection that finds something new: only pages that
 	// show it ask for it.
 	nodes := r.URL.Query().Get("nodes") != ""
+	// A page on the daemons alone (Nodes) hears of nothing else.
+	onlyNodes := nodes && want == "" && !byProject
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -157,6 +160,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 					if pk.Instance == wantProject.Instance && project == wantProject.ID && hear(k) {
 						fmt.Fprintf(w, "event: changed\ndata: %s\n\n", k)
 					}
+				case onlyNodes:
 				case (want == "" || k == want) && hear(k):
 					fmt.Fprintf(w, "event: changed\ndata: %s\n\n", k)
 				}
@@ -173,4 +177,15 @@ func origin(r *http.Request) string {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
+}
+
+// joinSet joins the parts that are not empty.
+func joinSet(sep string, parts ...string) string {
+	var out []string
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, sep)
 }

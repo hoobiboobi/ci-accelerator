@@ -2,12 +2,17 @@
 {{define "content"}}
 <div class="page">
   <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div><div class="titlerow"><h1 class="t" tabindex="-1">Pipelines</h1></div></header>
-  <form class="filters" method="get" action="/pipelines" data-autosubmit>
+  <form class="filters" method="get" action="/pipelines" data-autosubmit role="search">
+    <label class="fq"><span>Search</span><input type="search" name="q" id="pQ" value="{{.Q}}" placeholder="Pipeline #, commit SHA, title, job, author" maxlength="200" autocomplete="off" spellcheck="false" enterkeyhint="search"></label>
+    <label><span>Period</span><select name="period" id="pPeriod">{{range .Periods}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+    {{if eq .Period "custom"}}<label><span>From (UTC)</span><input type="date" name="from" id="pFrom" value="{{.From}}"{{if .BadDates}} aria-invalid="true"{{end}}></label>
+    <label><span>To (UTC)</span><input type="date" name="to" id="pTo" value="{{.To}}"{{if .BadDates}} aria-invalid="true"{{end}}></label>{{end}}
     <label><span>Branch</span><select name="branch" id="pBranch"><option value="">All branches</option>{{range .Branches}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
     {{if .CanMine}}<label class="chk"><input type="checkbox" name="mine" value="1" id="pMine" {{if .Mine}}checked{{end}}><span>Mine</span></label>{{end}}
     <button class="btn" type="submit">Apply</button>
     <span class="pg-key" aria-hidden="true"><span><i class="q"></i>waiting for a runner</span><span><i class="jw-job"></i>job</span><span><i class="st-cached"></i>image from cache</span><span><i class="st-change"></i>image rebuilt: change</span><span><i class="st-farm"></i>rebuilt: build farm</span><span><i class="st-unclear"></i>rebuilt: unclear</span><span><i class="jw-failed"></i>failed</span></span>
   </form>
+  {{if .BadDates}}<p class="muted note0">A date could not be read; use the calendar or YYYY-MM-DD.</p>{{else if .Backwards}}<p class="muted note0">The period ends before it starts: “To” is earlier than “From”.</p>{{end}}
   {{if .NoAPI}}<p class="muted note0">How long jobs waited for a runner comes from GitLab: {{if .Viewer}}it could not be read{{else}}give the console a GitLab token, or sign in{{end}}.</p>{{end}}
   <div class="pcards">
   {{range .Cards}}
@@ -32,9 +37,10 @@
     {{end}}
   </article>
   {{else}}
-  <div class="empty"><b>No pipeline here yet.</b><p>{{if .Newer}}No older pipelines.{{else}}A pipeline shows up when one of its jobs runs on the box's runners.{{end}}</p></div>
+  {{if .Filtered}}<div class="empty"><b>No pipeline matches.</b><p>{{if .Q}}Nothing for “{{.Q}}”{{if ne .Period ""}} in this period{{end}}.{{else}}No pipeline in this period.{{end}} <a class="link" href="/pipelines{{with .Branch}}?branch={{.}}{{end}}">Clear the search and the period</a></p></div>
+  {{else}}<div class="empty"><b>No pipeline here yet.</b><p>{{if .Newer}}No older pipelines.{{else}}A pipeline shows up when one of its jobs runs on the box's runners.{{end}}</p></div>{{end}}
   {{end}}
   </div>
-  <nav class="pager" aria-label="Pages">{{if .Newer}}<a class="btn" href="/pipelines{{with .Branch}}?branch={{.}}{{end}}">Newest</a>{{end}}{{with .Older}}<a class="btn" href="{{.}}">Older {{icon "chev" 13}}</a>{{end}}</nav>
+  <nav class="pager" aria-label="Pages">{{if .Newer}}<a class="btn" href="{{.Newest}}">Newest</a>{{end}}{{with .Older}}<a class="btn" href="{{.}}">Older {{icon "chev" 13}}</a>{{end}}</nav>
 </div>
 {{end}}

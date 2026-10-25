@@ -37,7 +37,9 @@
       <a class="sbtn" href="/nodes" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 15}}<span class="lbl">Nodes</span>{{with .Warn}}<span class="wdot" role="img" aria-label="{{.}}" title="{{.}}"></span>{{end}}</a>
     </nav>
     <div class="side-foot">
-      <p class="side-live" id="live" role="status" hidden></p>
+      {{/* Rendered in its final state, and its line kept on every page, so
+         moving between pages does not make it or the buttons below jump. */}}
+      <p class="side-live{{if not (or .Live .LiveNodes)}} off{{end}}" id="live" role="status">{{if or .Live .LiveNodes}}Live{{end}}</p>
       <button class="sbtn" id="themeBtn" type="button" aria-label="Toggle theme (t)"><span class="th-dark">{{icon "moon" 15}}<span class="lbl">Dark theme</span></span><span class="th-light">{{icon "sun" 15}}<span class="lbl">Light theme</span></span><kbd>t</kbd></button>
       <button class="sbtn" id="helpBtn" type="button" aria-label="Keyboard shortcuts (?)">{{icon "kbd" 15}}<span class="lbl">Shortcuts</span><kbd>?</kbd></button>
       {{with .Viewer}}

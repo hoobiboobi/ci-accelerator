@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"maps"
@@ -1234,5 +1235,183 @@ func TestReviewFixes(t *testing.T) {
 	idx := get(t, ts, "/search-index")
 	if !strings.Contains(idx.body, `"url":"/pipelines"`) {
 		t.Errorf("the search lacks the pipelines section: %.200s", idx.body)
+	}
+}
+
+// The pipelines page finds pipelines by number, commit SHA, title, branch,
+// author and job name, narrows them to a period, and keeps both in its
+// page links.
+func TestPipelinesSearch(t *testing.T) {
+	ts, st, _ := console(t)
+	inst := history.InstancePrefix("https://gitlab.example.com/")
+	for _, j := range []store.Job{
+		{JobID: 7001, PipelineID: 900001, Name: "lint-frontend", Ref: "feature/search", SHA: "abcdef1234567890abcdef1234567890abcdef12",
+			CommitTitle: "Add a search box", CommitAuthor: "Alice Example <alice@example.com>", PipelineCreatedAt: testNow.Add(-2 * time.Hour)},
+		{JobID: 7002, PipelineID: 900002, Name: "build-api", Ref: "main", SHA: "1234567deadbeef1234567deadbeef1234567dea",
+			CommitTitle: "Bump 100% of deps_x", CommitAuthor: "Bob <bob@example.com>", PipelineCreatedAt: testNow.Add(-10 * 24 * time.Hour)},
+	} {
+		j.Instance, j.ProjectID, j.ProjectPath = inst, 42, "example/app"
+		if err := st.SaveJob(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := `href="/pipelines/`+inst+`/900001"`, `href="/pipelines/`+inst+`/900002"`
+	cards := func(p page) int { return strings.Count(p.body, `<article class="pcard">`) }
+	find := func(q, extra string) page {
+		t.Helper()
+		p := get(t, ts, "/pipelines?q="+url.QueryEscape(q)+extra)
+		p.safe(t)
+		if p.status != 200 {
+			t.Fatalf("search %q: %d", q, p.status)
+		}
+		return p
+	}
+	for q, want := range map[string]string{
+		"900001": a, "#900002": b, "#9000": "", "abcdef1": a, "ABCDEF1": a, "1234567dead": b,
+		"search box": a, "SEARCH": a, "feature/": a, "alice": a, "lint-front": a, "build-api": b, "100%": b, "deps_x": b,
+		// LIKE's wildcards match only themselves.
+		"%": b, "_": b,
+	} {
+		p := find(q, "")
+		if want == "" { // both
+			if !strings.Contains(p.body, a) || !strings.Contains(p.body, b) {
+				t.Errorf("search %q: not both pipelines", q)
+			}
+			continue
+		}
+		other := a
+		if want == a {
+			other = b
+		}
+		if !strings.Contains(p.body, want) || strings.Contains(p.body, other) {
+			t.Errorf("search %q: not just the expected pipeline", q)
+		}
+		if !strings.Contains(p.body, `value="`+html.EscapeString(q)+`"`) {
+			t.Errorf("search %q: the box does not keep it", q)
+		}
+	}
+	for _, q := range []string{"zz%zz", "a_b_c_d", "no such pipeline anywhere"} {
+		if p := find(q, ""); cards(p) != 0 || !strings.Contains(p.body, "No pipeline matches.") {
+			t.Errorf("search %q: %d cards, want none and the empty note", q, cards(p))
+		}
+	}
+	if p := find("", "&period=24h"); !strings.Contains(p.body, a) || strings.Contains(p.body, b) {
+		t.Error("last 24 hours: wrong pipelines")
+	}
+	if p := find("", "&period=30d"); !strings.Contains(p.body, a) || !strings.Contains(p.body, b) {
+		t.Error("last 30 days: wrong pipelines")
+	}
+	day := func(d time.Duration) string { return testNow.Add(d).Format(time.DateOnly) }
+	if p := find("", "&period=custom&from="+day(-11*24*time.Hour)+"&to="+day(-10*24*time.Hour)); strings.Contains(p.body, a) || !strings.Contains(p.body, b) {
+		t.Error("a custom period: wrong pipelines (the To day is included)")
+	}
+	if p := find("", "&period=custom&from=2026-10-21&to=2026-10-19"); !strings.Contains(p.body, "ends before it starts") {
+		t.Error("a period that ends before it starts is not explained")
+	}
+	if p := find("", "&period=custom&from=2000-01-01&to=2000-01-02"); cards(p) != 0 || !strings.Contains(p.body, `id="pFrom" value="2000-01-01"`) {
+		t.Errorf("a period with no pipelines: %d cards, or no date fields", cards(p))
+	}
+	all := cards(get(t, ts, "/pipelines"))
+	if p := find("", "&period=custom&from=yesterday"); !strings.Contains(p.body, `aria-invalid="true"`) || cards(p) != all {
+		t.Error("a date that cannot be read is not flagged, or it filters")
+	}
+	if p := find("", "&period=bogus"); cards(p) != all {
+		t.Errorf("an unknown period: %d cards, want %d", cards(p), all)
+	}
+	// Further pages keep the search and the period.
+	v := &PipelinesView{Q: "a b", Period: "custom", From: "2026-10-01", Branch: "main"}
+	link := pipeLink(v, url.Values{"before": {"1"}})
+	for _, part := range []string{"q=a+b", "period=custom", "from=2026-10-01", "branch=main", "before=1"} {
+		if !strings.Contains(link, part) {
+			t.Errorf("page link %s lacks %s", link, part)
+		}
+	}
+}
+
+// The live indicator arrives in its final state: "Live" where the page
+// updates itself, an invisible line of the same height elsewhere; Nodes
+// subscribes to the daemons' state.
+func TestLiveIndicator(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, _ := pipelines(t, st)
+	for path, want := range map[string]string{
+		"/pipelines":            `<p class="side-live" id="live" role="status">Live</p>`,
+		"/pipelines/" + keys[0]: `<p class="side-live" id="live" role="status">Live</p>`,
+		"/nodes":                `<p class="side-live" id="live" role="status">Live</p>`,
+	} {
+		if p := get(t, ts, path); !strings.Contains(p.body, want) {
+			t.Errorf("%s: no live indicator in its final state", path)
+		}
+	}
+	if p := get(t, ts, "/nodes"); !strings.Contains(p.body, `data-live-nodes="true"`) {
+		t.Error("Nodes does not ask for the daemons' live state")
+	}
+}
+
+// An image's address names no project: opened while another project is
+// chosen, it switches to the project that builds it; switching may lead
+// only to the console's own pages.
+func TestImageOfAnotherProject(t *testing.T) {
+	ts, st, _ := console(t)
+	inst := history.InstancePrefix("https://gitlab.example.com/")
+	// Project 77 builds an image of its own.
+	keys, byPipe := pipelines(t, st)
+	b, err := st.BuildPage(ctx, byPipe[keys[0]][0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := *b.Build
+	x.Target, x.Ref = "only-in-77", "other-1"
+	x.Attribution = history.Attribution{State: history.Attributed, Instance: inst, Pipeline: 910001, Job: 7101}
+	x.Started = testNow.Add(-time.Hour)
+	x.Completed = x.Started.Add(3 * time.Second)
+	if _, err := st.SaveBuild(ctx, store.Build{Build: &x, Generation: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 7101, PipelineID: 910001, ProjectID: 77, ProjectPath: "example/other", Name: "lint"}); err != nil {
+		t.Fatal(err)
+	}
+	day := testNow.Add(-30 * 24 * time.Hour)
+	of77, err := st.Targets(ctx, store.ProjectKey{Instance: inst, ID: 77}, day)
+	if err != nil || len(of77) == 0 {
+		t.Fatalf("project 77: targets %v, %v", of77, err)
+	}
+	of42, err := st.Targets(ctx, store.ProjectKey{Instance: inst, ID: 42}, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	only42 := ""
+	for _, x := range of42 {
+		if !slices.Contains(of77, x) {
+			only42 = x
+		}
+	}
+	if only42 == "" {
+		t.Fatalf("fixtures: no image of project 42 alone (42 %v, 77 %v)", of42, of77)
+	}
+	img := "/images/" + url.PathEscape(imageKey(only42))
+	c := ts.Client()
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	req, _ := http.NewRequest("GET", ts.URL+img, nil)
+	req.AddCookie(&http.Cookie{Name: "project", Value: inst + "/77"})
+	res, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	want := "/projects/" + inst + "/42?to=" + url.QueryEscape(img)
+	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != want {
+		t.Fatalf("image of project 42 seen from project 77: %d %q, want a switch to %q", res.StatusCode, res.Header.Get("Location"), want)
+	}
+	if p := get(t, ts, want); p.status != http.StatusFound || p.header.Get("Location") != img {
+		t.Errorf("switching leads to %d %q, want the image", p.status, p.header.Get("Location"))
+	}
+	for _, to := range []string{"//evil.example/images/x", "https://evil.example/", "/images/x/../../nope", "/images/", "/builds/1"} {
+		if p := get(t, ts, "/projects/"+inst+"/42?to="+url.QueryEscape(to)); p.header.Get("Location") != "/" {
+			t.Errorf("to=%q leads to %q, want /", to, p.header.Get("Location"))
+		}
+	}
+	if p := get(t, ts, "/images/no-such-image"); p.status != http.StatusNotFound || !strings.Contains(p.body, ">Overview</a>") {
+		t.Errorf("an unknown image: %d", p.status)
 	}
 }

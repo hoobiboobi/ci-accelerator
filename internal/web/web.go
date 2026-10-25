@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -281,6 +282,9 @@ type Shell struct {
 type NotFound struct {
 	Shell
 	What string
+	// Elsewhere: the projects that have what was asked for, with links that
+	// switch to them and open it there.
+	Elsewhere []Option
 }
 
 func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {
@@ -352,6 +356,10 @@ func pinProject(sh *Shell, instance string, project uint64) {
 
 var pagesOf = map[string]bool{"/": true, "/pipelines": true, "/builds": true, "/images": true, "/nodes": true}
 
+// imagePath is an image's page, the one other place switching the project
+// may lead to (an image's address holds no project).
+var imagePath = regexp.MustCompile(`^/images/[A-Za-z0-9._~%-]+$`)
+
 // navPage is the address of a section, for the project switcher to stay in it.
 func navPage(nav string) string {
 	switch nav {
@@ -372,7 +380,7 @@ func (s *Server) chooseProject(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: "project", Value: k.String(), Path: "/", MaxAge: 365 * 24 * 3600,
 		Secure: s.opt.Auth != nil || r.TLS != nil, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	to := r.URL.Query().Get("to")
-	if !pagesOf[to] {
+	if !pagesOf[to] && !imagePath.MatchString(to) {
 		to = "/"
 	}
 	http.Redirect(w, r, to, http.StatusFound)

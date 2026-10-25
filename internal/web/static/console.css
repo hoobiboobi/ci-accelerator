@@ -552,7 +552,8 @@ pre.logb { margin: 0; font-family: var(--mono); font-size: 11px; line-height: 1.
 .c-pipe { background: var(--ink-3); }
 
 /* side: live status, theme words */
-.side-live { margin: 0; padding: 0 8px 4px; font-size: 11px; color: var(--side-ink-3); display: flex; align-items: center; gap: 6px; }
+.side-live { margin: 0; padding: 0 8px 4px; font-size: 11px; line-height: 16px; min-height: 16px; color: var(--side-ink-3); display: flex; align-items: center; gap: 6px; }
+.side-live.off { visibility: hidden; }
 .side-live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--received); }
 .th-dark, .th-light { display: contents; }
 :root[data-theme="dark"] .th-dark, :root[data-theme="light"] .th-light, :root:not([data-theme]) .th-light { display: none; }
@@ -666,6 +667,10 @@ a.boxh:hover { background: var(--hover); }
 .filters { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: end; }
 .filters label { display: grid; gap: 3px; font-size: 11.5px; color: var(--ink-3); }
 .filters label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); height: 28px; }
+.filters input[type="search"], .filters input[type="date"] { height: 28px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; font-size: 12.5px; padding: 0 8px; box-sizing: border-box; }
+.filters label.fq { flex: 1 1 240px; max-width: 360px; }
+.filters input[type="search"] { width: 100%; }
+.filters input[aria-invalid="true"] { border-color: var(--del); }
 .filters select { height: 28px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; font-size: 12.5px; padding: 0 6px; max-width: 220px; }
 .blist { display: grid; }
 .brow { display: grid; grid-template-columns: 76px minmax(80px, 150px) 170px minmax(0, 1fr) 120px minmax(0, 170px); gap: 12px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
@@ -894,3 +899,4 @@ a.boxh:hover { background: var(--hover); }
   .pc-meta { grid-column: 1 / 3; }
 }
 .pcards { display: grid; gap: 12px; }
+.page ul.plain { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 6px; }

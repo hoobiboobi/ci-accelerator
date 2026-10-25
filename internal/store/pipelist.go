@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,8 +14,43 @@ type PipeQuery struct {
 	Project ProjectKey
 	Ref     string
 	Author  string // "Name" or "Name <email>"
-	Before  time.Time
-	Limit   int
+	// Search: a pipeline number or its first digits ("123", "#123"), the
+	// start of a commit SHA, or text in the commit title, the branch, the author or the name
+	// of one of the pipeline's jobs (case does not matter).
+	Search string
+	// Since and Until bound when the pipelines were created: Since
+	// included, Until not.
+	Since, Until time.Time
+	Before       time.Time
+	Limit        int
+}
+
+// searchWhere is the condition for PipeQuery.Search on table "pipelines".
+func searchWhere(q string) (string, []any) {
+	q = strings.TrimSpace(q)
+	like := "%" + likeEscape(q) + "%"
+	conds := []string{`commit_title LIKE ? ESCAPE '\'`, `ref LIKE ? ESCAPE '\'`, `commit_author LIKE ? ESCAPE '\'`,
+		`EXISTS (SELECT 1 FROM jobs WHERE jobs.instance = pipelines.instance AND jobs.pipeline_id = pipelines.pipeline_id
+			AND jobs.name LIKE ? ESCAPE '\')`}
+	args := []any{like, like, like, like}
+	if digits := strings.TrimPrefix(q, "#"); digits != "" {
+		if n, err := strconv.ParseUint(digits, 10, 64); err == nil && n > 0 {
+			conds, args = append(conds, "pipeline_id = ?"), append(args, nullUint(n))
+			// GitLab's numbers are long: the first digits are enough.
+			if len(digits) >= 3 && digits[0] != '0' {
+				conds, args = append(conds, "CAST(pipeline_id AS TEXT) LIKE ?"), append(args, digits+"%")
+			}
+		}
+	}
+	if len(q) >= 4 && len(q) <= 40 && strings.Trim(strings.ToLower(q), "0123456789abcdef") == "" {
+		conds, args = append(conds, "sha LIKE ?"), append(args, strings.ToLower(q)+"%")
+	}
+	return "(" + strings.Join(conds, " OR ") + ")", args
+}
+
+// likeEscape makes s match itself in a LIKE pattern with ESCAPE '\'.
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(s)
 }
 
 // PipeRow is a pipeline as the pipelines page lists it.
@@ -40,6 +76,16 @@ func (s *Store) PipelineList(ctx context.Context, q PipeQuery) ([]PipeRow, error
 	if q.Author != "" {
 		where, args = append(where, "(commit_author = ? OR substr(commit_author, 1, ?) = ?)"),
 			append(args, q.Author, len(q.Author)+2, q.Author+" <")
+	}
+	if strings.TrimSpace(q.Search) != "" {
+		w, a := searchWhere(q.Search)
+		where, args = append(where, w), append(args, a...)
+	}
+	if !q.Since.IsZero() {
+		where, args = append(where, "COALESCE(created_at, seen_at) >= ?"), append(args, q.Since.UnixMilli())
+	}
+	if !q.Until.IsZero() {
+		where, args = append(where, "COALESCE(created_at, seen_at) < ?"), append(args, q.Until.UnixMilli())
 	}
 	if !q.Before.IsZero() {
 		where, args = append(where, "COALESCE(created_at, seen_at) < ?"), append(args, q.Before.UnixMilli())
