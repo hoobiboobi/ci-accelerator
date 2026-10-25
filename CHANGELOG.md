@@ -39,7 +39,7 @@ workflow copies them into the GitHub release.
 
 - The daemons get their own PriorityClass (above CI jobs, never preempting
   them): under memory or disk pressure the kubelet evicts CI jobs before
-  them. On the Hetzner test box a full disk evicted the daemon first.
+  them. On a test box whose disk filled up, the daemon went first.
 - The daemons have small default resource requests instead of none, so
   they are no longer BestEffort.
 - Console: the Nodes page shows each daemon's disk (cache, other files,
