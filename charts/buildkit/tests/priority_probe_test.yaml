@@ -163,3 +163,11 @@ tests:
       diskProbe.port: 1234
     asserts:
       - failedTemplate: {}
+
+  - it: keeps the daemon ready whatever the probe does (no readiness probe on it)
+    template: daemonset.yaml
+    set:
+      diskProbe.enabled: true
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[1].readinessProbe

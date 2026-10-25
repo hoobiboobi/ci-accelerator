@@ -75,15 +75,19 @@ Numbers from the production setup this project is derived from:
   build farm caused it. Five sections:
   - Overview: rebuild reasons, ranked by the build time they cost;
   - Pipelines: each pipeline's jobs by stage on a time axis, with how long
-    each waited for a runner and ran. A pipeline opens into a waterfall of
-    every job, and its image builds into stages and steps;
+    each waited for a runner and ran, searchable by pipeline number, commit,
+    title, branch, author or job name within a period (24 hours, 7 or 30
+    days, or dates). A pipeline opens into a waterfall of every job, and its
+    image builds into stages and steps;
   - Builds: every image build, filtered by branch, outcome, image or your
     own, and grouped by pipeline if you like;
   - Images: cache rate and build time per image over 24 hours or 7 days;
     one image's page goes back 24 hours, 7 days, 30 days or a year;
   - Nodes: each daemon's builds and running builds, its cache by kind and
-    its GC policies, and the runners' S3 cache per project, with a warning
-    when the bucket has no lifecycle rule.
+    its GC policies, its disk (cache, other files, free space, inodes) with
+    a warning near the GC's keep-free floor or the kubelet's eviction
+    thresholds, and the runners' S3 cache per project, with a warning when
+    the bucket has no lifecycle rule.
 
   Every build gets one of five outcomes: from cache, your change, build
   farm, unclear or failed. A build's page starts with one sentence, then
@@ -122,7 +126,10 @@ chart are pinned and checked against their sha256 (the box's images come
 by tag, the daemons' by digest):
 - k3s, with the machine as its only node and build node;
 - Helm and cert-manager;
-- the box, with the build console.
+- the box, with the build console. The daemon's resources are sized from
+  the machine on the first install (half its CPUs and a quarter of its
+  memory requested, three quarters of the memory at most) and kept in
+  `/var/lib/ci-accelerator/values.yaml`.
 
 It prints the job to add to `.gitlab-ci.yml` and the SSH tunnel to the
 console. The console starts in its first level (builds only, no GitLab
@@ -158,6 +165,13 @@ is not meant for production: one node, no high availability.
 - **A CNI that enforces NetworkPolicy** (Calico, Cilium, kindnet, ...).
   Without one, the daemons accept connections from any namespace and builds
   can reach cloud instance metadata; mutual TLS still applies.
+- **Permission to create a PriorityClass** (cluster-scoped): the daemons get
+  their own, so under node pressure the kubelet evicts CI jobs before them.
+  Without that permission set `buildkit.priorityClass.create=false`, or name
+  an existing class in `buildkit.priorityClassName`.
+- **Daemon resources:** the defaults (500m CPU, 512Mi requested) only keep
+  the daemons out of BestEffort; size `buildkit.resources` to your build
+  nodes (the chart's values list sizes).
 - **Helm 3 (3.19+) or Helm 4.**
 
 ### 1. A namespace for the box
@@ -451,6 +465,10 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   kube-proxy sends Service traffic for `kubernetes.default` to the control
   plane's node addresses, and a node's own address is always reachable from
   its pods, so list the control-plane node addresses too.
+- **The disk probe's numbers are readable by builds.** The box runs a small
+  container next to each daemon that reports the cache disk's size and free
+  space on port 9180 for the console; builds share the pod's network and can
+  read those numbers too.
 - **Trace data is untrusted.** Any build (a RUN step) can write spans
   through BuildKit, so traces in your backend are input from builds. The
   buildctl command line, build-arg values included, is recorded in traces:
@@ -524,8 +542,8 @@ vulnerability: [SECURITY.md](SECURITY.md).)
 **Scope.**
 - **GitLab only.** GitHub Actions support (through Actions Runner
   Controller) is planned.
-- **No CI component yet.** Registry pushes are configured by hand (see
-  above).
+- **The CI component is for GitLab only**; GitHub Actions is planned with
+  the GitHub support above.
 
 ## Testing
 

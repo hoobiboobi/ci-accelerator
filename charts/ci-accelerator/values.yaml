@@ -81,7 +81,9 @@ buildkit:
   # container running the console's image. Keep diskProbe.image equal to
   # console.image and diskProbe.port to console.daemons.diskProbePort.
   diskProbe:
+    # -- The probe next to each daemon (charts/buildkit diskProbe).
     enabled: true
+    # -- Equal to console.daemons.diskProbePort.
     port: 9180
 
 # The official gitlab-runner chart. Set enabled=false to keep your own
@@ -182,6 +184,7 @@ console:
       configMap: '{{ .Release.Name }}-console-gitlab'
   daemons:
     discover: '{{ include "ci-accelerator.buildkitHeadless" . }}.{{ .Release.Namespace }}.svc:1234'
+    # -- Equal to buildkit.diskProbe.port: the console reads each daemon's disk there.
     diskProbePort: 9180
   tls:
     # With buildkit.tls.source=existingSecret, set console.tls.existingSecret

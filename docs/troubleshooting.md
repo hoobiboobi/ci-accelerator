@@ -32,6 +32,9 @@ names the fix; the common ones:
 | `gitlab-runner.runners.config does not render to valid TOML` | Your own `runners.config` (or a value it uses) breaks the TOML; the message names the line |
 | `global.buildNodes.selector has kubernetes.io/arch=...` | Set `global.jobs.architecture` to the same architecture |
 | `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
+| `priorityclasses.scheduling.k8s.io is forbidden` | The installer may not create cluster-scoped objects: `buildkit.priorityClass.create=false`, or name an existing class in `buildkit.priorityClassName` |
+| `buildkit.diskProbe.image (...) must equal console.image (...)` | The disk probe runs the console's image: set both to the same repository, tag and digest (a mirror needs both) |
+| `console.daemons.diskProbePort (...) must equal buildkit.diskProbe.port` | Set the same port in both, or switch the probe off and set the port to 0 |
 
 Checks that read the live cluster (Pod Security, build nodes, Secrets)
 need read access to Namespaces, Nodes and Secrets. Installers without it
@@ -55,6 +58,7 @@ kubectl -n ci-accelerator describe pod <daemon pod> | tail -20
 | `ContainerCreating`, event about the TLS Secret | The certificate is not issued yet: `kubectl -n ci-accelerator get certificate`, then `kubectl describe certificate` |
 | `CrashLoopBackOff`, log `failed to load config` | A configuration buildkitd rejects (often `config.extraConfig`). The rollout stops on the first node; `helm rollback` |
 | `CrashLoopBackOff` with hostPath, lock error | Another daemon holds the state directory: a second release on the same path, or a surge pod (the chart refuses `maxSurge` with hostPath) |
+| `disk-probe` in `ImagePullBackOff`, daemon pod not started | The probe runs the console's image, and a pod starts only with all its images: mirror it with the console's, or `buildkit.diskProbe.enabled=false` |
 | No pods at all after a successful `helm install` | The namespace enforces `baseline`/`restricted` without a label the chart could see (some distributions default to `baseline`); see the DaemonSet's events |
 
 ## The runner
@@ -191,16 +195,18 @@ limit on build nodes.
   a node is idle, so it may remove a build node and its cache. Annotate
   build nodes with `cluster-autoscaler.kubernetes.io/scale-down-disabled=true`,
   or keep build pools out of autoscaling.
-- **Resource limits imposed by the namespace:**
-  - a ResourceQuota that requires requests rejects daemon pods without
-    `resources`;
-  - a LimitRange can add a default memory limit, and an OOM kill takes the
-    daemon down with every running build.
-
-  Set `buildkit.resources` explicitly. Production started from requests of
-  48 CPU / 128 GiB and a memory limit of 128 GiB.
-- **Priority.** Give the daemons a PriorityClass above the CI job pods
-  (`buildkit.priorityClassName`), so jobs never preempt them.
+- **Resources.** The chart's default requests (500m CPU, 512Mi) only keep
+  the daemons out of BestEffort, and the install notes say so while they
+  are in place. Size `buildkit.resources` to the build nodes; the chart's
+  values list sizes (production started from requests of 48 CPU / 128 GiB
+  and a memory limit of 128 GiB). A LimitRange can add a default memory
+  limit, and an OOM kill takes the daemon down with every running build.
+- **Priority.** The chart gives the daemons their own PriorityClass
+  (`<namespace>-<release>-buildkit`, value 1000000, never preempting): under
+  node pressure the kubelet evicts CI jobs before them. Creating it needs
+  permission for cluster-scoped objects; otherwise set
+  `buildkit.priorityClass.create=false`, or name your own class in
+  `buildkit.priorityClassName`.
 - **kube-proxy replacements.** Same-node routing needs kube-proxy 1.34+ or
   a replacement that implements `PreferSameNode`. Others balance across
   nodes silently: caches stay cold and builds still work.
@@ -222,7 +228,22 @@ limit on build nodes.
 - **A build node shows as unreachable.** The console reads each daemon's
   history over mutual TLS: check its client certificate (`<release>-console-client`)
   and that the daemons' NetworkPolicy admits the console pod. Daemons that
-  are gone after a rollout disappear from the page by themselves.
+  are gone after a rollout disappear from the page by themselves (before
+  0.2.3 they could stay until the console restarted).
+- **"Disk: the probe did not answer".** The console asks the disk probe
+  next to each daemon on port 9180: check the daemon pod's `disk-probe`
+  container and that the daemons' NetworkPolicy has the `disk` port (it
+  has, when `buildkit.diskProbe.enabled`). Right after an upgrade, the old
+  daemons have no probe until they are replaced.
+- **Disk warnings on the Nodes page.** "Less free than the garbage
+  collection keeps": BuildKit deletes cache after each build until
+  `minFreeSpace` is free again, so builds get colder; give the cache more
+  room or lower `maxUsedSpace`. "Under 15 % / 10 % available": if the cache
+  shares the node's disk (emptyDir, or hostPath on the root disk), the
+  kubelet starts evicting pods at its thresholds; the daemons go last by
+  their priority, but CI jobs fail. At 10 % the Nodes item in the sidebar
+  shows a warning dot. "Under 5 % of inodes free": the disk fills up by
+  file count before bytes.
 - **No runner or checkout time, no jobs of other runners.** Those come from
   GitLab's API. Sign in through GitLab (`console.signIn`), or without
   sign-in give the console a token that can read the projects' jobs

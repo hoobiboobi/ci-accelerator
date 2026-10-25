@@ -137,11 +137,9 @@ spec:
               drop: [ALL]
             seccompProfile:
               type: RuntimeDefault
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: disk
-            periodSeconds: 30
+          # No readiness probe: a pod is ready only when all its containers
+          # are, and a probe that stops answering must not take the daemon
+          # out of the Service (the console reports it instead).
           {{- with $probe.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
