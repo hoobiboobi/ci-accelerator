@@ -97,6 +97,9 @@ func whyShort(b store.BuildRow) string {
 	case history.NotInCache:
 		return "no longer in this node's cache"
 	case history.CacheElsewhere:
+		if b.Old == "" {
+			return "files or an evicted cache, unclear"
+		}
 		return "last built on another node"
 	}
 	return fmt.Sprintf("%d step%s ran; nothing to compare with", b.Built, plural(b.Built))

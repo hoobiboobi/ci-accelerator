@@ -13,6 +13,9 @@ func TestSettle(t *testing.T) {
 	cached := func(s Step) Step { s.State = Cached; return s }
 	built := func(s Step) Step { s.State = Built; return s }
 	elsewhere := Reason{Kind: CacheElsewhere, Step: built(common), Old: "node-a", New: "node-b", Paths: []string{"common"}}
+	// The previous build ran on this daemon (no Old): the context feeds the
+	// step through an ancestor, so files or an evicted cache.
+	sameDaemon := Reason{Kind: CacheElsewhere, Step: built(common), Paths: []string{"common"}}
 	files := Reason{Kind: FilesChanged, Step: built(common), Paths: []string{"common"}}
 
 	tests := []struct {
@@ -24,6 +27,13 @@ func TestSettle(t *testing.T) {
 	}{
 		{"cached on another daemon in the pipeline", []*Build{build("cur", "node-b", 7, built(common)), build("api", "node-c", 7, cached(common))},
 			[]Reason{elsewhere, {}}, OtherNode, "api"},
+		// A sibling's cache hit proves the files did not change; with the
+		// previous build on THIS daemon that means eviction, never
+		// "another node".
+		{"same-daemon reason with a cache witness is eviction", []*Build{build("cur", "node-b", 7, built(common)), build("api", "node-c", 7, cached(common))},
+			[]Reason{sameDaemon, {}}, NotInCache, "api"},
+		{"same-daemon reason with a files witness", []*Build{build("cur", "node-b", 7, built(common)), build("test", "node-c", 7, built(common))},
+			[]Reason{sameDaemon, files}, FilesChanged, "test"},
 		{"rebuilt for changed files in the pipeline", []*Build{build("cur", "node-b", 7, built(common)), build("test", "node-c", 7, built(common))},
 			[]Reason{elsewhere, files}, FilesChanged, "test"},
 		{"the cache proof wins", []*Build{build("cur", "node-b", 7, built(common)), build("test", "node-c", 7, built(common)), build("api", "node-d", 7, cached(common))},

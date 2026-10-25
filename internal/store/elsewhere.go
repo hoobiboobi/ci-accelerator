@@ -18,12 +18,16 @@ type Elsewhere struct {
 	SHA     string // this build's commit; empty when not known
 	PrevSHA string // the previous build's; empty when not known
 	Paths   []string
+	// Old is the daemon of the image's previous build when it was another
+	// one; empty when the previous build ran on the same daemon. It decides
+	// whether a no-change outcome is "other node" or an evicted cache.
+	Old string
 }
 
 // Elsewhere returns a project's builds since t whose reason is
 // CacheElsewhere and that nothing has settled yet, newest first.
 func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, limit int) ([]Elsewhere, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.started_at, COALESCE(p.sha, ''), b.reason_paths,
+	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.started_at, COALESCE(p.sha, ''), b.reason_paths, b.reason_old,
 			COALESCE((SELECT p2.sha FROM builds b2 INDEXED BY builds_target
 				JOIN pipelines p2 ON p2.instance = b2.instance AND p2.pipeline_id = b2.pipeline_id
 				WHERE b2.instance = b.instance AND b2.project_id = b.project_id AND b2.target = b.target
@@ -46,7 +50,7 @@ func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, li
 			started int64
 			paths   string
 		)
-		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.PrevSHA); err != nil {
+		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.Old, &e.PrevSHA); err != nil {
 			return nil, err
 		}
 		e.Started = time.UnixMilli(started).UTC()

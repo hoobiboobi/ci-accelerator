@@ -171,15 +171,24 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 				code(r.Step.Name), at, e(shortDaemon(r.Old)), e(shortDaemon(r.New)), e(by))),
 			Hint: "<b>What helps:</b> keeping a project's jobs on the node that holds its cache (sticky routing, planned). Until then: fewer, larger build nodes, or pin the project to one node with runner tags."}
 	case history.CacheElsewhere:
+		detail := fmt.Sprintf("Either %s changed, or this node's cache no longer had the step. No other job in this pipeline settles which.",
+			orContext(r.Paths))
+		if r.Old != "" {
+			detail = fmt.Sprintf("Either %s changed, or the cache is on node <b>%s</b>, where this target was built last time (this job ran on <b>%s</b>). No other job in this pipeline settles which.",
+				orContext(r.Paths), e(shortDaemon(r.Old)), e(shortDaemon(r.New)))
+		}
 		return Verdict{Tone: "unknown", Kicker: "Files or node",
-			Title: template.HTML(fmt.Sprintf("Rebuilt from %s%s.", code(r.Step.Name), at)),
-			Detail: template.HTML(fmt.Sprintf("Either %s changed, or the cache is on node <b>%s</b>, where this target was built last time (this job ran on <b>%s</b>). No other job in this pipeline settles which.",
-				orContext(r.Paths), e(shortDaemon(r.Old)), e(shortDaemon(r.New)))),
-			Hint: "<b>Why it is unclear:</b> BuildKit's build records do not keep a fingerprint of the copied files."}
+			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s.", code(r.Step.Name), at)),
+			Detail: template.HTML(detail),
+			Hint:   "<b>Why it is unclear:</b> BuildKit's build records do not keep a fingerprint of the copied files."}
 	case history.NotInCache:
-		return Verdict{Tone: "unknown", Kicker: "Not in the cache",
+		v := Verdict{Tone: "unknown", Kicker: "Not in the cache",
 			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: it was not found in the cache.", code(r.Step.Name), at)),
-			Detail: "Same step as last time and it reads no files: the cache was cleaned up, or it is on another node."}
+			Detail: "Same step as last time, and nothing below it reads the build context: this node's cache no longer had it — cleaned up, or never built here."}
+		if by != "" {
+			v.Detail = template.HTML(fmt.Sprintf("Same step as last time. <b>%s</b> in this pipeline got it from cache on its node, so the files did not change: this node's cache no longer had it — cleaned up, or never built here.", e(by)))
+		}
+		return v
 	}
 	return Verdict{Tone: "built", Kicker: string(r.Kind), Title: template.HTML(fmt.Sprintf("Rebuilt from %s%s.", code(r.Step.Name), at))}
 }
@@ -207,7 +216,17 @@ func withVia(v Verdict, r history.Reason, via string) Verdict {
 				source, code(r.Step.Name), e(shortDaemon(r.Old)), e(shortDaemon(r.New))))
 		}
 	case history.FilesChanged:
-		v.Detail += template.HTML(fmt.Sprintf(" %s lists them; the previous build ran on another node, so it would have been rebuilt there too.", source))
+		if r.Old != "" {
+			v.Detail += template.HTML(fmt.Sprintf(" %s lists them; the previous build ran on another node, so it would have been rebuilt there too.", source))
+		} else {
+			v.Detail += template.HTML(fmt.Sprintf(" %s lists them.", source))
+		}
+	case history.NotInCache:
+		if cmp != "" {
+			v.Detail = template.HTML(fmt.Sprintf("%s shows no change in what feeds this step. This node's cache no longer had it — cleaned up, or never built here.", source))
+		} else {
+			v.Detail = template.HTML(fmt.Sprintf("%s, so its files did not change. This node's cache no longer had the step — cleaned up, or never built here.", source))
+		}
 	}
 	return v
 }

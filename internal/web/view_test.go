@@ -141,7 +141,12 @@ func TestVerdicts(t *testing.T) {
 		{history.Reason{Kind: history.OtherNode, Step: step, Old: "box-buildkit-4hxsv", New: "box-buildkit-rn6k5"}, "test", "node", []string{"node <b>4hxsv</b>", "ran on <b>rn6k5</b>", "<b>test</b>"}, nil},
 		{history.Reason{Kind: history.OtherNode, Step: step, Old: "box-buildkit-4hxsv", New: "box-buildkit-rn6k5"}, "", "node", []string{"reads no files and did not change", "node <b>4hxsv</b>"}, []string{"in this pipeline"}},
 		{history.Reason{Kind: history.CacheElsewhere, Step: step, Old: "box-buildkit-4hxsv", New: "box-buildkit-rn6k5"}, "", "unknown", []string{"Either its input changed", "node <b>4hxsv</b>"}, nil},
-		{history.Reason{Kind: history.NotInCache, Step: step}, "", "unknown", []string{"not found in the cache"}, nil},
+		// The previous build ran on this daemon: no node may be named.
+		{history.Reason{Kind: history.CacheElsewhere, Step: step, Paths: []string{"api"}}, "", "unknown",
+			[]string{"Either <code>api</code> changed", "cache no longer had the step"}, []string{"node <b>", "another node"}},
+		{history.Reason{Kind: history.NotInCache, Step: step}, "", "unknown", []string{"not found in the cache"}, []string{"another node"}},
+		{history.Reason{Kind: history.NotInCache, Step: step}, "test", "unknown",
+			[]string{"<b>test</b> in this pipeline got it from cache", "cache no longer had it"}, []string{"another node"}},
 		{history.Reason{Kind: history.ArgChanged, Step: step, Arg: "RUN_ID, TOKEN<b>"}, "", "built",
 			[]string{"build arguments <code>RUN_ID</code>, <code>TOKEN&lt;b&gt;</code> changed", "did not change"}, []string{"→"}},
 	} {

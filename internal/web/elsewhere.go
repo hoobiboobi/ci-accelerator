@@ -89,7 +89,7 @@ func (s *Server) settle(ctx context.Context, api *gitlab.Fetcher, cred gitlab.Cr
 			out = append(out, store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: a commit is not known"})
 			continue
 		case e.SHA == e.PrevSHA:
-			out = append(out, store.Settled{ID: e.ID, Kind: history.OtherNode, Via: "same commit " + short(e.SHA, 8)})
+			out = append(out, store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: "same commit " + short(e.SHA, 8)})
 			continue
 		}
 		k := pair{e.PrevSHA, e.SHA}
@@ -136,9 +136,20 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 	case len(hit) > 0:
 		return store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: clipList(hit, 20), Via: via}
 	case complete && len(e.Paths) > 0:
-		return store.Settled{ID: e.ID, Kind: history.OtherNode, Via: via}
+		return store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: via}
 	}
 	return store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: GitLab's comparison was cut short"}
+}
+
+// noChangeKind is the verdict for a build whose files provably did not
+// change — the rule every settling shares (history.Settle applies the same
+// one): OtherNode only when the previous build ran on another daemon; with
+// no previous daemon the cache was HERE last time, so it was evicted.
+func noChangeKind(e store.Elsewhere) history.ReasonKind {
+	if e.Old == "" {
+		return history.NotInCache
+	}
+	return history.OtherNode
 }
 
 // touches says whether a changed file of the repository is something a
