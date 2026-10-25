@@ -199,16 +199,19 @@ func (s *Store) Usual(ctx context.Context, b *history.Build, project uint64) (ti
 
 // DaemonCount is what the store knows about one daemon's builds.
 type DaemonCount struct {
-	Builds    int
-	OtherNode int // rebuilt here only because the cache was on another node
-	Unclear   int // rebuilt here, files or node
-	Last      time.Time
+	Builds int
+	// Farm counts rebuilds for want of cache here (history.FarmKinds: it
+	// was on another node, or no longer on this one) — the same set the
+	// Overview's "build farm" uses, so the two pages always agree.
+	Farm    int
+	Unclear int // rebuilt here, files or node
+	Last    time.Time
 }
 
 // DaemonCounts returns, per daemon name, its builds started since t.
 func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]DaemonCount, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT d.name, count(b.id),
-			COALESCE(sum(b.reason_kind = 'other-node'), 0), COALESCE(sum(b.reason_kind = 'cache-elsewhere'), 0), max(b.started_at)
+			COALESCE(sum(b.reason_kind IN `+farmKinds+`), 0), COALESCE(sum(b.reason_kind = 'cache-elsewhere'), 0), max(b.started_at)
 		FROM daemons d LEFT JOIN builds b ON b.daemon_id = d.id AND b.started_at >= ? GROUP BY d.name`, since.UnixMilli())
 	if err != nil {
 		return nil, err
@@ -221,7 +224,7 @@ func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]D
 			c    DaemonCount
 			last sql.NullInt64
 		)
-		if err := rows.Scan(&name, &c.Builds, &c.OtherNode, &c.Unclear, &last); err != nil {
+		if err := rows.Scan(&name, &c.Builds, &c.Farm, &c.Unclear, &last); err != nil {
 			return nil, err
 		}
 		c.Last = msTime(last)

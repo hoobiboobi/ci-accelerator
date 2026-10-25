@@ -30,10 +30,10 @@ const rollupRedo = 3
 
 // statusCase names a build's outcome as the pages do (running builds are
 // left out by the query).
-const statusCase = `CASE
+var statusCase = `CASE
 	WHEN b.error != '' THEN 'failed'
 	WHEN b.reason_kind IN ` + changeKinds + ` THEN 'change'
-	WHEN b.reason_kind IN ('other-node', 'not-in-cache') THEN 'farm'
+	WHEN b.reason_kind IN ` + farmKinds + ` THEN 'farm'
 	WHEN b.reason_kind = 'cache-elsewhere' OR b.built > 0 THEN 'unclear'
 	ELSE 'cached' END`
 
