@@ -110,9 +110,11 @@ check "the console's pages answer" eval 'curl -fs http://localhost:18080/pipelin
 echo "== a second run keeps values.yaml and the daemons"
 printf '# kept-by-the-user\n' >> /var/lib/ci-accelerator/values.yaml
 uid0=$(kc -n "$NS" get pods -l app.kubernetes.io/name=buildkit -o jsonpath='{.items[*].metadata.uid}')
-if env RUNNER_TOKEN=glrt-quickstart-check CI_ACCELERATOR_CHART="$ROOT/charts/ci-accelerator" \
-    CI_ACCELERATOR_CONSOLE_IMAGE_TAR="$IMAGE_TAR" \
-    "$ROOT/scripts/quickstart.sh" --gitlab-url "$gitlab" --yes >"$LOGS/install-again.log" 2>&1; then
+# The same script and chart source as the first run: in release mode the
+# user's re-run pulls the chart from the registry again; forcing the source
+# tree's chart here fails without make deps (nothing is vendored).
+if env RUNNER_TOKEN=glrt-quickstart-check ${overrides[@]+"${overrides[@]}"} \
+    bash "$SCRIPT" --gitlab-url "$gitlab" --yes >"$LOGS/install-again.log" 2>&1; then
   pass "quickstart.sh runs again"
 else
   fail "quickstart.sh runs again (see $LOGS/install-again.log)"; tail -20 "$LOGS/install-again.log"

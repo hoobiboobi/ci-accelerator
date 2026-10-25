@@ -80,16 +80,15 @@ RUNNER_CHART_VERSION=0.93.0
 RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 # The last published release, which the upgrade scenario installs from the
 # registry and upgrades to this tree. Bump both with every release.
-UPGRADE_FROM=0.2.2
-UPGRADE_FROM_SHA256=826e575c165aaae6082a6d082ff19993f1c080aa55e9b67e85e7ca28a42e7c1e
-UPGRADE_FROM_BUILDKIT_SHA256=89454fc479e15fe8ea9bd652f9f3f005e09592a86be5cc032d004f36510578f6
+UPGRADE_FROM=0.2.4
+UPGRADE_FROM_SHA256=c0776fd4743664c5bbf74e66450a94b4d5dcfa28a389cb568afb71b8deede389
+UPGRADE_FROM_BUILDKIT_SHA256=c44b27f79790df9528c72706091c2fcc9389ebcbc31943b316e9867b690195c5
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
-# then restarts every daemon; say so in the upgrade notes).
-# 0.2.3: the daemons get a PriorityClass and default resource
-# requests, and the box adds a disk probe container. Back to 0 when
-# UPGRADE_FROM moves past the release that ships them.
-UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
+# then restarts every daemon; say so in the upgrade notes). 0 since 0.2.4:
+# the disk probe's image tag is pinned, so a release alone changes nothing
+# in the daemon pods.
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # An S3 store for the runner cache (MinIO publishes no images any more):
@@ -1444,12 +1443,13 @@ s_upgrade() {
   # The values users keep: Helm reuses the old values tree, without the
   # keys this tree added (they must be read with defaults). The console
   # image of this tree is not published yet (its tag is the release under
-  # test): the image `make console-image` loads into kind stands in.
+  # test): the image `make console-image` loads into kind stands in. The
+  # disk probe keeps its pinned, published image: overriding it would
+  # itself roll the daemons.
   make -C "$ROOT" console-image CONSOLE_IMAGE=ci-accelerator-console:e2e >"$LOGS/upgrade-console-image.log" 2>&1 \
     || { fail "build the console image (see $LOGS/upgrade-console-image.log)"; return; }
   if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reuse-values \
       --set console.image.repository=ci-accelerator-console --set console.image.tag=e2e --set console.image.pullPolicy=Never \
-      --set buildkit.diskProbe.image.repository=ci-accelerator-console --set buildkit.diskProbe.image.tag=e2e --set buildkit.diskProbe.image.pullPolicy=Never \
       --wait --timeout 8m >"$LOGS/upgrade-reuse.log" 2>&1; then
     pass "helm upgrade --reuse-values from $UPGRADE_FROM"
   else
