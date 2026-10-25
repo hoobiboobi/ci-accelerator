@@ -212,3 +212,61 @@ func TestSupervisorRetriesFailedLookups(t *testing.T) {
 		t.Errorf("failures after a successful lookup should be quick retries again, not warnings:\n%s", out)
 	}
 }
+
+// A rollout: the old daemon's stream breaks (its pod stops) and only then
+// does its address leave the Service, while the stream waits to reconnect.
+// It is forgotten all the same, not left as "unreachable" for ever.
+func TestSupervisorForgetsADaemonGoneWhileReconnecting(t *testing.T) {
+	c, _ := newCollector(t)
+	var mu sync.Mutex
+	addrs := []string{"tcp://old:1234"}
+	broke := make(chan struct{}, 1)
+	dials := 0
+	sup := &Supervisor{
+		Collector: c,
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Every:     20 * time.Millisecond,
+		Resolve: func(context.Context) ([]string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), addrs...), nil
+		},
+		Dial: func(ctx context.Context, addr string) (Source, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			dials++
+			if dials > 1 {
+				return nil, errors.New("connection refused") // the pod is stopping
+			}
+			return &blocking{addr: addr, break_: broke}, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sup.Run(ctx)
+	state := func() (known, connected bool) {
+		for _, d := range c.Daemons() {
+			if d.Name == "tcp://old:1234" {
+				return true, d.Connected
+			}
+		}
+		return false, false
+	}
+	until := func(what string, ok func() bool) {
+		t.Helper()
+		for i := 0; i < 300; i++ {
+			if ok() {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("timed out: %s", what)
+	}
+	until("connected", func() bool { k, c := state(); return k && c })
+	broke <- struct{}{}
+	until("shown as down", func() bool { k, c := state(); return k && !c })
+	mu.Lock()
+	addrs = nil
+	mu.Unlock()
+	until("forgotten", func() bool { k, _ := state(); return !k })
+}
