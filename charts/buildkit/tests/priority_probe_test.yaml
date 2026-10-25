@@ -181,3 +181,14 @@ tests:
       - equal:
           path: spec.template.spec.containers[1].image
           value: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3
+
+  - it: does not follow the chart's version (a release must not restart the daemons by itself)
+    template: daemonset.yaml
+    chart:
+      version: 9.9.9
+    set:
+      diskProbe.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3
