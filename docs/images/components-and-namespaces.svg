@@ -10,13 +10,13 @@
     </marker>
     <style>
       text { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #ece9e4; }
-      .ns { font-size: 15px; font-weight: 600; }
+      .ns { font-size: 16px; font-weight: 600; }
       .ns-note { font-size: 14px; font-weight: 400; fill: #9a948b; }
-      .name { font-size: 14px; font-weight: 600; }
-      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; font-weight: 500; }
-      .sub { font-size: 13px; fill: #bab5ad; }
-      .edge { font-size: 12px; fill: #9a948b; }
-      .edge-accent { font-size: 12px; font-weight: 600; fill: #9a9fff; }
+      .name { font-size: 15px; font-weight: 600; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; font-weight: 500; }
+      .sub { font-size: 14px; fill: #bab5ad; }
+      .edge { font-size: 13px; fill: #9a948b; }
+      .edge-accent { font-size: 13px; font-weight: 600; fill: #9a9fff; }
       .region { fill: #1c1b19; stroke: #3a3734; stroke-width: 1; }
       .card { fill: #222120; stroke: #3a3734; stroke-width: 1; }
       .card-main { fill: #222120; stroke: #9a9fff; stroke-width: 1.5; }
@@ -57,14 +57,14 @@
   <text x="56" y="507" class="sub">ingress from the jobs namespace and the console</text>
 
   <!-- The jobs namespace -->
-  <text x="648" y="38"><tspan class="ns">namespace ci-accelerator-jobs</tspan><tspan class="ns-note"> · baseline</tspan></text>
+  <text x="644" y="38"><tspan class="ns">namespace ci-accelerator-jobs</tspan><tspan class="ns-note"> · baseline</tspan></text>
   <rect class="region" x="640" y="52" width="300" height="190" rx="12"/>
   <rect class="card" x="660" y="72" width="260" height="150" rx="8"/>
   <text x="676" y="94" class="name">CI job pod</text>
   <text x="676" y="113" class="sub">on a build node, 50m CPU</text>
   <text x="676" y="140" class="mono">BUILDKIT_REMOTE_ADDR</text>
   <text x="676" y="162" class="mono">/certs</text>
-  <text x="726" y="162" class="sub">client certificate</text>
+  <text x="730" y="162" class="sub">client certificate</text>
   <text x="676" y="189" class="sub">runs buildctl and sends</text>
   <text x="676" y="207" class="sub">the build context</text>
 

@@ -6,7 +6,7 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 
 ## Components and namespaces
 
-![The box namespace holds the gitlab-runner manager, the buildkit Service and headless Service, the daemon DaemonSet, the optional console and the daemons' NetworkPolicy. The runner creates CI job pods in the jobs namespace, which reach the daemons' Service over mutual TLS. The release's CA in cert-manager's namespace signs the daemons' server certificate and the jobs' client certificate.](images/components-and-namespaces.svg)
+[![The box namespace holds the gitlab-runner manager, the buildkit Service and headless Service, the daemon DaemonSet, the optional console and the daemons' NetworkPolicy. The runner creates CI job pods in the jobs namespace, which reach the daemons' Service over mutual TLS. The release's CA in cert-manager's namespace signs the daemons' server certificate and the jobs' client certificate.](images/components-and-namespaces.svg)](images/components-and-namespaces.svg)
 
 | Part | Where | Notes |
 |---|---|---|
