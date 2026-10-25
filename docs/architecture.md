@@ -6,21 +6,7 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 
 ## Components and namespaces
 
-```
- namespace ci-accelerator (Pod Security: privileged)          namespace ci-accelerator-jobs (baseline)
- ┌─────────────────────────────────────────────────────┐      ┌────────────────────────────────────┐
- │ gitlab-runner (manager)  ── creates job pods ───────┼─────►│ CI job pod (on a build node)       │
- │                                                     │      │   BUILDKIT_REMOTE_ADDR             │
- │ Service <release>-buildkit :1234 (PreferSameNode) ◄─┼──────┤   /certs: client certificate       │
- │ Service <release>-buildkit-headless                 │ mTLS └────────────────────────────────────┘
- │ DaemonSet <release>-buildkit (one per build node)   │
- │   state: hostPath or emptyDir                       │      namespace cert-manager
- │   disk probe next to each daemon (:9180)            │
- │   OTLP to your backend (optional)                   │      ┌────────────────────────────────────┐
- │ Deployment <release>-console (optional)             │      │ the release's CA (Secret, Issuer)  │
- │ NetworkPolicy for the daemons                       │      └────────────────────────────────────┘
- └─────────────────────────────────────────────────────┘
-```
+![The box namespace holds the gitlab-runner manager, the buildkit Service and headless Service, the daemon DaemonSet, the optional console and the daemons' NetworkPolicy. The runner creates CI job pods in the jobs namespace, which reach the daemons' Service over mutual TLS. The release's CA in cert-manager's namespace signs the daemons' server certificate and the jobs' client certificate.](images/components-and-namespaces.svg)
 
 | Part | Where | Notes |
 |---|---|---|

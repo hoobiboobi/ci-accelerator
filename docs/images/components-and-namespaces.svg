@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" role="img" aria-labelledby="t d">
+  <title id="t">Components and namespaces</title>
+  <desc id="d">The box namespace holds the gitlab-runner manager, the buildkit Services, the daemon DaemonSet, the optional console and the daemons' NetworkPolicy. The runner creates CI job pods in the jobs namespace; they reach the daemons' Service over mutual TLS. cert-manager's namespace holds the release's CA, which signs the daemons' server certificate and the jobs' client certificate.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#9a948b"/>
+    </marker>
+    <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#9a9fff"/>
+    </marker>
+    <style>
+      text { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #ece9e4; }
+      .ns { font-size: 15px; font-weight: 600; }
+      .ns-note { font-size: 14px; font-weight: 400; fill: #9a948b; }
+      .name { font-size: 14px; font-weight: 600; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; font-weight: 500; }
+      .sub { font-size: 13px; fill: #bab5ad; }
+      .edge { font-size: 12px; fill: #9a948b; }
+      .edge-accent { font-size: 12px; font-weight: 600; fill: #9a9fff; }
+      .region { fill: #1c1b19; stroke: #3a3734; stroke-width: 1; }
+      .card { fill: #222120; stroke: #3a3734; stroke-width: 1; }
+      .card-main { fill: #222120; stroke: #9a9fff; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="960" height="560" rx="14" fill="#161514"/>
+
+  <!-- The box namespace -->
+  <text x="28" y="38"><tspan class="ns">namespace ci-accelerator</tspan><tspan class="ns-note"> · Pod Security: privileged</tspan></text>
+  <rect class="region" x="20" y="52" width="548" height="488" rx="12"/>
+
+  <rect class="card" x="40" y="72" width="508" height="52" rx="8"/>
+  <text x="56" y="94" class="name">gitlab-runner (manager)</text>
+  <text x="56" y="113" class="sub">polls GitLab for jobs</text>
+
+  <rect class="card" x="40" y="140" width="508" height="52" rx="8"/>
+  <text x="56" y="162" class="mono">Service &lt;release&gt;-buildkit :1234</text>
+  <text x="56" y="181" class="sub">PreferSameNode: the daemon on the job’s own node</text>
+
+  <rect class="card" x="40" y="204" width="508" height="52" rx="8"/>
+  <text x="56" y="226" class="mono">Service &lt;release&gt;-buildkit-headless</text>
+  <text x="56" y="245" class="sub">every daemon by name, for the console</text>
+
+  <rect class="card-main" x="40" y="268" width="508" height="122" rx="8"/>
+  <text x="56" y="290" class="mono">DaemonSet &lt;release&gt;-buildkit</text>
+  <text x="56" y="310" class="sub">one daemon per build node</text>
+  <text x="56" y="329" class="sub">state: hostPath or emptyDir</text>
+  <text x="56" y="348" class="sub">disk probe next to each daemon (:9180)</text>
+  <text x="56" y="367" class="sub">OTLP metrics and traces to your backend (optional)</text>
+
+  <rect class="card" x="40" y="402" width="508" height="52" rx="8"/>
+  <text x="56" y="424" class="mono">Deployment &lt;release&gt;-console<tspan class="sub" font-family="system-ui, sans-serif"> (optional)</tspan></text>
+  <text x="56" y="443" class="sub">reads every build from the daemons</text>
+
+  <rect class="card" x="40" y="466" width="508" height="52" rx="8"/>
+  <text x="56" y="488" class="name">NetworkPolicy for the daemons</text>
+  <text x="56" y="507" class="sub">ingress from the jobs namespace and the console</text>
+
+  <!-- The jobs namespace -->
+  <text x="648" y="38"><tspan class="ns">namespace ci-accelerator-jobs</tspan><tspan class="ns-note"> · baseline</tspan></text>
+  <rect class="region" x="640" y="52" width="300" height="190" rx="12"/>
+  <rect class="card" x="660" y="72" width="260" height="150" rx="8"/>
+  <text x="676" y="94" class="name">CI job pod</text>
+  <text x="676" y="113" class="sub">on a build node, 50m CPU</text>
+  <text x="676" y="140" class="mono">BUILDKIT_REMOTE_ADDR</text>
+  <text x="676" y="162" class="mono">/certs</text>
+  <text x="726" y="162" class="sub">client certificate</text>
+  <text x="676" y="189" class="sub">runs buildctl and sends</text>
+  <text x="676" y="207" class="sub">the build context</text>
+
+  <!-- cert-manager's namespace -->
+  <text x="648" y="384"><tspan class="ns">namespace cert-manager</tspan></text>
+  <rect class="region" x="640" y="398" width="300" height="120" rx="12"/>
+  <rect class="card" x="660" y="418" width="260" height="80" rx="8"/>
+  <text x="676" y="441" class="name">the release’s CA</text>
+  <text x="676" y="461" class="sub">Secret and Issuer; signs the</text>
+  <text x="676" y="480" class="sub">server and client certificates</text>
+
+  <!-- runner creates job pods -->
+  <line x1="548" y1="98" x2="656" y2="98" stroke="#9a948b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="604" y="84" class="edge" text-anchor="middle">creates</text>
+  <text x="604" y="118" class="edge" text-anchor="middle">job pods</text>
+
+  <!-- job pods reach the daemons' Service over mutual TLS -->
+  <line x1="660" y1="166" x2="552" y2="166" stroke="#9a9fff" stroke-width="1.5" marker-end="url(#arrow-accent)"/>
+  <text x="604" y="156" class="edge-accent" text-anchor="middle">mTLS</text>
+
+  <!-- the CA signs the client certificate of the jobs namespace -->
+  <path d="M790 418 V246" fill="none" stroke="#9a948b" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+  <text x="800" y="318" class="edge">client certificate</text>
+
+  <!-- and the daemons' server certificate -->
+  <path d="M660 470 H604 V340 H552" fill="none" stroke="#9a948b" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+  <text x="604" y="498" class="edge" text-anchor="middle">server</text>
+  <text x="604" y="514" class="edge" text-anchor="middle">certificate</text>
+</svg>
