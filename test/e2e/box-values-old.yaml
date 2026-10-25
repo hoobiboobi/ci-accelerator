@@ -1,5 +1,5 @@
 # e2e-only: what the UPGRADE_FROM release (the last published one) needs on
-# kind on top of box-values.yaml. 0.2.1 turns the console on by default:
+# kind on top of box-values.yaml. 0.2.2 turns the console on by default:
 # it runs on the control-plane node (every kind worker is a tainted build
 # node) from the published image, with a small volume from kind's
 # local-path provisioner. Rewrite this file with every release.

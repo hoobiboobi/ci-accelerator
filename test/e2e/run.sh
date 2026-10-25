@@ -80,13 +80,13 @@ RUNNER_CHART_VERSION=0.93.0
 RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 # The last published release, which the upgrade scenario installs from the
 # registry and upgrades to this tree. Bump both with every release.
-UPGRADE_FROM=0.2.1
-UPGRADE_FROM_SHA256=883b85359dc8b9160b69a04febb40175def5ccb3e0fc21dee9ddaa75a15cc823
-UPGRADE_FROM_BUILDKIT_SHA256=36387390bf161c32dde427fc8d3dd67439dc475a90531e8e8ec891e688856730
+UPGRADE_FROM=0.2.2
+UPGRADE_FROM_SHA256=826e575c165aaae6082a6d082ff19993f1c080aa55e9b67e85e7ca28a42e7c1e
+UPGRADE_FROM_BUILDKIT_SHA256=89454fc479e15fe8ea9bd652f9f3f005e09592a86be5cc032d004f36510578f6
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
 # then restarts every daemon; say so in the upgrade notes).
-# Since 0.2.2: the daemons get a PriorityClass and default resource
+# 0.2.3: the daemons get a PriorityClass and default resource
 # requests, and the box adds a disk probe container. Back to 0 when
 # UPGRADE_FROM moves past the release that ships them.
 UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
