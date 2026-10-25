@@ -82,7 +82,7 @@ func whyShort(b store.BuildRow) string {
 	case history.FirstBuild:
 		return "first build of " + orDefault(b.Target) + " on record"
 	case history.FilesChanged:
-		if len(b.Paths) > 0 {
+		if viaVerified(b.Via) && len(b.Paths) > 0 {
 			return "files changed: " + strings.Join(clipList(b.Paths, 2), ", ")
 		}
 		return "the files it copies changed"
@@ -104,6 +104,11 @@ func whyShort(b store.BuildRow) string {
 	}
 	return fmt.Sprintf("%d step%s ran; nothing to compare with", b.Built, plural(b.Built))
 }
+
+// viaVerified says whether a reason's paths are GitLab's verified diff
+// hits: only then may a page name them as changed. A witness (reason_by)
+// proves THAT files changed, never which.
+func viaVerified(via string) bool { return strings.HasPrefix(via, "gitlab ") }
 
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {

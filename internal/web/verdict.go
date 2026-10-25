@@ -145,9 +145,12 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: the base image points to a new image.", code(r.Step.Name), at)),
 			Detail: template.HTML(fmt.Sprintf("<code>%s</code> → <code>%s</code>.", e(r.Old), e(r.New)))}
 	case history.FilesChanged:
+		// Without a settling (see withVia for the GitLab-verified case) the
+		// paths are candidates, never a verified diff: "changed" may only
+		// name a file the comparison listed.
 		v := Verdict{Tone: "built", Kicker: "Files changed",
-			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: %s changed.", code(r.Step.Name), at, paths(r.Paths))),
-			Detail: template.HTML("Steps after it were rebuilt because their input changed.")}
+			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: a file it builds on changed.", code(r.Step.Name), at)),
+			Detail: template.HTML(fmt.Sprintf("It builds on %s from the repository; which of them changed, BuildKit's records cannot tell. Steps after it were rebuilt because their input changed.", orContext(r.Paths)))}
 		if by != "" {
 			v.Detail += template.HTML(fmt.Sprintf(" Confirmed by <b>%s</b> in this pipeline, which ran on the node holding the cache and still had to rebuild it.", e(by)))
 		}
@@ -216,10 +219,17 @@ func withVia(v Verdict, r history.Reason, via string) Verdict {
 				source, code(r.Step.Name), e(shortDaemon(r.Old)), e(shortDaemon(r.New))))
 		}
 	case history.FilesChanged:
+		// Settled by the comparison: the paths are its verified hits, so
+		// naming them as changed is proven.
+		at := ""
+		if r.Step.Line > 0 {
+			at = fmt.Sprintf(" (Dockerfile line %d)", r.Step.Line)
+		}
+		v.Title = template.HTML(fmt.Sprintf("Rebuilt from %s%s: %s changed.", code(r.Step.Name), at, paths(r.Paths)))
 		if r.Old != "" {
-			v.Detail += template.HTML(fmt.Sprintf(" %s lists them; the previous build ran on another node, so it would have been rebuilt there too.", source))
+			v.Detail = template.HTML(fmt.Sprintf("Steps after it were rebuilt because their input changed. %s lists them; the previous build ran on another node, so it would have been rebuilt there too.", source))
 		} else {
-			v.Detail += template.HTML(fmt.Sprintf(" %s lists them.", source))
+			v.Detail = template.HTML(fmt.Sprintf("Steps after it were rebuilt because their input changed. %s lists them.", source))
 		}
 	case history.NotInCache:
 		if cmp != "" {

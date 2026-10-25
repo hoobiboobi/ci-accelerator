@@ -58,3 +58,36 @@ func TestUnclearTextsOnOneNode(t *testing.T) {
 		t.Errorf("whyShort lost the cross-daemon wording: %q", whyShort(cross))
 	}
 }
+
+// List texts name a path as changed only when GitLab's comparison verified
+// it (Via "gitlab a..b"); a witness-settled reason keeps candidates
+// unnamed.
+func TestFilesChangedNamedOnlyWhenVerified(t *testing.T) {
+	witness := store.BuildRow{Reason: history.FilesChanged, Paths: []string{"deps.lock", "services/api"}, Built: 1, Completed: time.Now()}
+	verified := witness
+	verified.Via = "gitlab 11111111..22222222"
+	for name, text := range map[string]string{
+		"whyShort":   whyShort(witness),
+		"reasonText": reasonText(witness, rowStatus(witness)),
+	} {
+		if strings.Contains(text, "deps.lock") {
+			t.Errorf("%s names an unverified path as changed: %q", name, text)
+		}
+	}
+	if got := whyShort(verified); !strings.Contains(got, "deps.lock") {
+		t.Errorf("whyShort dropped the verified paths: %q", got)
+	}
+	if got := reasonText(verified, rowStatus(verified)); !strings.Contains(got, "deps.lock") {
+		t.Errorf("reasonText dropped the verified paths: %q", got)
+	}
+	// Unverified rows share one Overview group whatever their candidate
+	// paths; verified ones group by the named files.
+	other := witness
+	other.Paths = []string{"payload.txt"}
+	if fingerprint(witness, rowStatus(witness)) != fingerprint(other, rowStatus(other)) {
+		t.Error("unverified files rows with equal labels landed in different groups")
+	}
+	if fingerprint(verified, rowStatus(verified)) == fingerprint(witness, rowStatus(witness)) {
+		t.Error("a verified files row shares the unverified group")
+	}
+}

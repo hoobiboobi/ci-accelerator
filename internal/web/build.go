@@ -279,7 +279,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if v.Changes, err = s.changes(ctx, b, prev, p.Reason, d); err != nil {
+	if v.Changes, err = s.changes(ctx, b, prev, p.Reason, p.Via, d); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -360,7 +360,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 
 // changes says what differs from the previous build of the target, as far
 // as BuildKit's records tell: only what differs.
-func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stored, r history.Reason, d *built) ([]Change, error) {
+func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stored, r history.Reason, via string, d *built) ([]Change, error) {
 	if prev == nil {
 		return nil, nil
 	}
@@ -397,7 +397,11 @@ func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stor
 	case history.BaseImageChanged:
 		out = append(out, Change{"Base image", template.HTML(fmt.Sprintf(`<span class="old mono">%s</span> → <span class="new mono">%s</span>`, e(r.Old), e(r.New)))})
 	case history.FilesChanged:
-		out = append(out, Change{"Files", template.HTML(at + " reads " + orContext(r.Paths) + " — changed")})
+		if viaVerified(via) {
+			out = append(out, Change{"Files", template.HTML(orContext(r.Paths) + " — changed (GitLab's comparison of the commits)")})
+		} else {
+			out = append(out, Change{"Files", template.HTML(at + " builds on " + orContext(r.Paths) + " — which of them changed, the records cannot tell")})
+		}
 	case history.CacheElsewhere:
 		why := "this node's cache no longer had the step, and BuildKit does not record the files"
 		if r.Old != "" {

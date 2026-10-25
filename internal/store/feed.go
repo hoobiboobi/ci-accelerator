@@ -14,15 +14,19 @@ import (
 // BuildRow is a build as the console's lists show it: what it was, how
 // it ended and why, without its steps.
 type BuildRow struct {
-	ID                int64
-	Instance          string
-	Pipeline, Job     uint64
-	Target, Daemon    string
-	Started           time.Time
-	Completed         time.Time // zero while it runs
-	Error             string
-	Reason            history.ReasonKind
-	ReasonStep        string // the first rebuilt step's instruction
+	ID             int64
+	Instance       string
+	Pipeline, Job  uint64
+	Target, Daemon string
+	Started        time.Time
+	Completed      time.Time // zero while it runs
+	Error          string
+	Reason         history.ReasonKind
+	ReasonStep     string // the first rebuilt step's instruction
+	// Via says who settled the reason after the build was stored
+	// ("gitlab a..b", "same commit …", "unresolved: …"); empty otherwise.
+	// Paths are verified diff hits only when Via starts with "gitlab".
+	Via               string
 	Paths             []string
 	Old, New, Arg     string
 	Built             int           // steps executed (resolving images aside)
@@ -79,7 +83,8 @@ const feedCols = `b.id, b.instance, b.pipeline_id, b.job_id, b.target, d.name, b
 	COALESCE(p.ref, ''), COALESCE(p.sha, ''), COALESCE(p.commit_title, ''), COALESCE(p.commit_author, ''),
 	COALESCE(j.name, ''), p.created_at,
 	CASE WHEN b.reason_step IS NULL THEN '' ELSE COALESCE((SELECT COALESCE(s.name, sd.name, '') FROM steps s
-		LEFT JOIN step_defs sd ON sd.identity = s.identity WHERE s.build_id = b.id AND s.idx = b.reason_step), '') END`
+		LEFT JOIN step_defs sd ON sd.identity = s.identity WHERE s.build_id = b.id AND s.idx = b.reason_step), '') END,
+	b.reason_via`
 
 // Builds returns a project's builds, newest first.
 func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
@@ -139,7 +144,7 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 		)
 		if err := rows.Scan(&r.ID, &instance, &pipeline, &job, &r.Target, &r.Daemon, &started, &completed, &r.Error,
 			&kind, &paths, &r.Old, &r.New, &r.Arg, &r.Built, &builtMs, &r.Ref, &r.SHA, &r.Title, &r.Author,
-			&r.JobName, &created, &r.ReasonStep); err != nil {
+			&r.JobName, &created, &r.ReasonStep, &r.Via); err != nil {
 			return nil, err
 		}
 		if instance.Valid {
