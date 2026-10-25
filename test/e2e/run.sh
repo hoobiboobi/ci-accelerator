@@ -86,9 +86,10 @@ UPGRADE_FROM_BUILDKIT_SHA256=36387390bf161c32dde427fc8d3dd67439dc475a90531e8e8ec
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
 # then restarts every daemon; say so in the upgrade notes).
-# 0.2: the daemons carry their node as a worker label, and the box keeps
-# more build history; both change the pod template.
-UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
+# Since 0.2.2: the daemons get a PriorityClass and default resource
+# requests, and the box adds a disk probe container. Back to 0 when
+# UPGRADE_FROM moves past the release that ships them.
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # An S3 store for the runner cache (MinIO publishes no images any more):
@@ -508,9 +509,19 @@ s_preflight() {
   else
     fail "namespace admin: node check failed for another reason (see $LOGS/ns-admin-nodes.log)"
   fi
-  check "namespace admin: renders with both checks switched off" \
+  # The daemons' PriorityClass is cluster-scoped: a namespace admin cannot
+  # create it and switches it off (or names an existing class).
+  if hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${ns_admin[@]}" \
+      --set preflight.podSecurity=false --set preflight.buildNodes=false >"$LOGS/ns-admin-priority.log" 2>&1; then
+    fail "namespace admin: creating the PriorityClass was not refused"
+  elif grep -qi 'priorityclasses.* is forbidden\|cannot create resource "priorityclasses"' "$LOGS/ns-admin-priority.log"; then
+    pass "namespace admin: creating the PriorityClass is refused (cluster-scoped)"
+  else
+    fail "namespace admin: the install failed for another reason (see $LOGS/ns-admin-priority.log)"
+  fi
+  check "namespace admin: renders with both checks and the PriorityClass switched off" \
     quiet hc install "$REL-ns" "$CHART" -n "$PSA_NS" --dry-run=server "${ns_admin[@]}" \
-      --set preflight.podSecurity=false --set preflight.buildNodes=false
+      --set preflight.podSecurity=false --set preflight.buildNodes=false --set priorityClass.create=false
   kc delete namespace "$PSA_NS" --wait=false >/dev/null
 }
 
