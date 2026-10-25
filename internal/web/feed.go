@@ -362,6 +362,11 @@ func fingerprint(b store.BuildRow, st Status) string {
 	case history.FirstBuild:
 		return "first"
 	case history.FilesChanged:
+		// Unverified paths are candidates, and the label does not name
+		// them: one group, or equal-looking groups would multiply.
+		if !viaVerified(b.Via) {
+			return "files:?"
+		}
 		return "files:" + strings.Join(b.Paths, ",")
 	}
 	return string(b.Reason) + ":" + b.ReasonStep
@@ -389,7 +394,7 @@ func reasonText(b store.BuildRow, st Status) string {
 	case history.FirstBuild:
 		return "First build of an image on record"
 	case history.FilesChanged:
-		if len(b.Paths) > 0 {
+		if viaVerified(b.Via) && len(b.Paths) > 0 {
 			return "Files changed: " + strings.Join(clipList(b.Paths, 3), ", ")
 		}
 		return "The files a step copies changed"

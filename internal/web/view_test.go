@@ -136,8 +136,14 @@ func TestVerdicts(t *testing.T) {
 		{history.Reason{Kind: history.StepChanged, Step: step, Old: "COPY a .", New: "COPY <x> ."}, "", "built", []string{"<code>COPY &lt;x&gt; .</code> (Dockerfile line 11)"}, nil},
 		{history.Reason{Kind: history.ArgChanged, Step: step, Arg: "V<", Old: "v-1", New: "v-2"}, "", "built", []string{"<code>V&lt;</code> changed", "<code>v-1</code> → <code>v-2</code>"}, nil},
 		{history.Reason{Kind: history.BaseImageChanged, Step: step, Old: "python:3.13-slim", New: "python:3.14-slim"}, "", "built", []string{"base image", "<code>python:3.13-slim</code> → <code>python:3.14-slim</code>"}, nil},
-		{history.Reason{Kind: history.FilesChanged, Step: step, Paths: []string{"."}}, "lint<b>", "built", []string{"<code>.</code> changed", "Confirmed by <b>lint&lt;b&gt;</b>", "COPY . ."}, nil},
-		{history.Reason{Kind: history.FilesChanged, Step: step, Paths: []string{"src/"}}, "", "built", []string{"<code>src/</code> changed"}, []string{"Confirmed", "Tip"}},
+		// Without a GitLab comparison the paths are candidates: no path is
+		// named as changed (a witness proves THAT files changed, not which).
+		{history.Reason{Kind: history.FilesChanged, Step: step, Paths: []string{"."}}, "lint<b>", "built",
+			[]string{"a file it builds on changed", "builds on <code>.</code>", "Confirmed by <b>lint&lt;b&gt;</b>", "COPY . ."},
+			[]string{"<code>.</code> changed"}},
+		{history.Reason{Kind: history.FilesChanged, Step: step, Paths: []string{"src/"}}, "", "built",
+			[]string{"a file it builds on changed", "builds on <code>src/</code>"},
+			[]string{"<code>src/</code> changed", "Confirmed", "Tip"}},
 		{history.Reason{Kind: history.OtherNode, Step: step, Old: "box-buildkit-4hxsv", New: "box-buildkit-rn6k5"}, "test", "node", []string{"node <b>4hxsv</b>", "ran on <b>rn6k5</b>", "<b>test</b>"}, nil},
 		{history.Reason{Kind: history.OtherNode, Step: step, Old: "box-buildkit-4hxsv", New: "box-buildkit-rn6k5"}, "", "node", []string{"reads no files and did not change", "node <b>4hxsv</b>"}, []string{"in this pipeline"}},
 		{history.Reason{Kind: history.CacheElsewhere, Step: step, Old: "box-buildkit-4hxsv", New: "box-buildkit-rn6k5"}, "", "unknown", []string{"Either its input changed", "node <b>4hxsv</b>"}, nil},
@@ -172,13 +178,31 @@ func TestVerdicts(t *testing.T) {
 	if v := verdictFor(b, history.Reason{Kind: history.StepChanged, Step: step, Old: "a", New: "b"}, "", 3, 0, nil); len(v.Diff) != 2 {
 		t.Errorf("no diff: %+v", v)
 	}
+	// Settled by GitLab's comparison: the paths are verified diff hits and
+	// may be named as changed.
+	verifiedReason := history.Reason{Kind: history.FilesChanged, Step: step, Paths: []string{"deps.lock"}}
+	v := withVia(verdictFor(b, verifiedReason, "", 3, 0, nil), verifiedReason, "gitlab 11111111..22222222")
+	vall := string(v.Title) + string(v.Detail)
+	for _, h := range []string{"<code>deps.lock</code> changed", "11111111..22222222", "(Dockerfile line 11)"} {
+		if !strings.Contains(vall, h) {
+			t.Errorf("verified files-changed: %q not in %s", h, vall)
+		}
+	}
+	if strings.Contains(vall, "another node") || strings.Contains(vall, "cannot tell") {
+		t.Errorf("verified same-daemon files-changed over-claims: %s", vall)
+	}
+	// An unresolved settling keeps the hedged wording.
+	v = withVia(verdictFor(b, verifiedReason, "", 3, 0, nil), verifiedReason, "unresolved: boom")
+	if !strings.Contains(string(v.Title), "a file it builds on changed") {
+		t.Errorf("unresolved via must stay hedged: %s", v.Title)
+	}
 	failed := *b
 	failed.Error = "exit code: 1 <b>"
 	if v := verdictFor(&failed, history.Reason{}, "", 0, 0, nil); v.Tone != "failed" || !strings.Contains(string(v.Detail), "&lt;b&gt;") {
 		t.Errorf("failed: %+v", v)
 	}
 	rec := []Received{{Stages: []string{"deps", "base"}, From: "build-api<i>", Wait: 3 * time.Second}}
-	v := verdictFor(b, history.Reason{}, "", 0, 90*time.Second, rec)
+	v = verdictFor(b, history.Reason{}, "", 0, 90*time.Second, rec)
 	if v.Tone != "cached" || !strings.Contains(string(v.Detail), "1\u00a0min 30\u00a0s") ||
 		!strings.Contains(string(v.Detail), "stages <b>deps, base</b> from <b>build-api&lt;i&gt;</b>") {
 		t.Errorf("cached: %+v", v)
