@@ -1,0 +1,15 @@
+{{- if and (not .Values.priorityClassName) (dig "create" true (.Values.priorityClass | default dict)) }}
+# Cluster-scoped: the kubelet evicts pods that use more than they requested
+# in order of priority, so the daemons outlast the CI jobs under node
+# pressure.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ include "buildkit.priorityClassName" . }}
+  labels:
+    {{- include "buildkit.labels" . | nindent 4 }}
+value: {{ int64 (dig "value" 1000000 (.Values.priorityClass | default dict)) }}
+preemptionPolicy: {{ dig "preemptionPolicy" "Never" (.Values.priorityClass | default dict) }}
+globalDefault: false
+description: BuildKit daemons of {{ .Release.Namespace }}/{{ .Release.Name }} (ci-accelerator)
+{{- end }}

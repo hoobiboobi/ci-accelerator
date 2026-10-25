@@ -106,6 +106,9 @@ daemons:
   discover: ""
   # -- Name in the daemons' certificate. Default: the host of discover.
   serverName: ""
+  # -- Port of the disk probe next to each daemon (the buildkit chart's
+  # diskProbe), for the free space on the Nodes page. 0: not read.
+  diskProbePort: 0
 
 # -- The client certificate the console presents to the daemons. Either a
 # Secret with ca.crt, tls.crt and tls.key, or one cert-manager issues from

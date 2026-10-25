@@ -28,6 +28,7 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/api"
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
+	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/podwatch"
@@ -50,6 +51,7 @@ type config struct {
 	cacheEvery                                 time.Duration
 	daemons, gitlabURLs                        []string
 	keepDays, keepOutputDays                   int
+	diskProbePort                              int
 }
 
 // version and commit are set at build time (-ldflags -X main.version=...);
@@ -68,6 +70,22 @@ func versionString() string {
 }
 
 func main() {
+	// `console disk-probe`: the sidecar next to a daemon that reports its
+	// cache's free space (the buildkit chart's diskProbe).
+	if len(os.Args) > 1 && os.Args[1] == "disk-probe" {
+		fs := flag.NewFlagSet("disk-probe", flag.ExitOnError)
+		dir := fs.String("dir", "/var/lib/buildkit", "directory whose filesystem is reported")
+		listen := fs.String("listen", ":9180", "address of GET /disk and /healthz")
+		fs.Parse(os.Args[2:])
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		slog.Info("disk probe", "dir", *dir, "listen", *listen, "version", versionString())
+		if err := diskprobe.Serve(ctx, *listen, *dir); err != nil {
+			slog.Error("disk probe", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	var c config
 	var daemons, gitlabURLs list
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -88,6 +106,7 @@ func main() {
 	flag.StringVar(&c.namespace, "namespace", os.Getenv("POD_NAMESPACE"), "namespace of the Secrets with the caches' keys (default $POD_NAMESPACE)")
 	flag.DurationVar(&c.cacheEvery, "cache-every", 10*time.Minute, "how often the caches are listed")
 	flag.StringVar(&c.signIn, "sign-in", "", "JSON file configuring sign-in through GitLab; empty: no sign-in (keep the console inside the cluster)")
+	flag.IntVar(&c.diskProbePort, "disk-probe-port", 0, "port of the disk probe next to each daemon (the buildkit chart's diskProbe); 0: none")
 	flag.IntVar(&c.keepDays, "keep-days", 30, "days builds are kept")
 	flag.IntVar(&c.keepOutputDays, "keep-output-days", 7, "days step output is kept")
 	flag.Parse()
@@ -153,7 +172,11 @@ func run(c config, log *slog.Logger) error {
 		Dial: func(ctx context.Context, addr string) (collector.Source, error) {
 			dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-			return collector.Dial(dctx, addr, tls)
+			d, err := collector.Dial(dctx, addr, tls)
+			if err == nil && c.diskProbePort > 0 {
+				d.DiskProbe(c.diskProbePort)
+			}
+			return d, err
 		},
 		Resolve: func(ctx context.Context) ([]string, error) { return resolve(ctx, c) },
 	}

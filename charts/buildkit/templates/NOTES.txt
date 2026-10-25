@@ -82,8 +82,11 @@ so the cluster default applies. Where that default is baseline or restricted
 {{- else }}
 {{- $notes = append $notes (printf "storage.type=hostPath: the cache in %s stays on the nodes after helm uninstall; remove it by hand." .Values.storage.hostPath.path) }}
 {{- end }}
+{{- $req := dig "requests" dict (.Values.resources | default dict) }}
 {{- if not .Values.resources }}
 {{- $notes = append $notes "resources is empty: the daemon runs BestEffort, so it is the first to be OOM-killed or evicted, and builds can starve kubelet. Set requests sized to the build load." }}
+{{- else if and (eq (toString $req.cpu) "500m") (eq (toString $req.memory) "512Mi") (not .Values.resources.limits) }}
+{{- $notes = append $notes "resources are the chart's minimum (requests 500m CPU, 512Mi): size them to the build load and the node (values.yaml lists sizes)." }}
 {{- end }}
 {{- if not .Values.networkPolicy.enabled }}
 {{- $notes = append $notes "networkPolicy.enabled is false: RUN steps share the daemon's network, so every build can reach cloud instance metadata (node credentials) and every in-cluster service. Enable it (and list the cluster CIDRs in networkPolicy.egress.clusterCIDRs) where the CNI enforces NetworkPolicy." }}

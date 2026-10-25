@@ -30,11 +30,14 @@ Kubernetes: `>=1.34.0-0`
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| buildkit.diskProbe.enabled | bool | `true` |  |
+| buildkit.diskProbe.port | int | `9180` |  |
 | buildkit.networkPolicy.enabled | bool | `true` |  |
 | buildkit.networkPolicy.ingress.extraFrom[0].podSelector.matchLabels."ci-accelerator.io/component" | string | `"console"` |  |
 | buildkit.tls.client.namespaces[0] | string | `"{{ .Values.global.jobs.namespace }}"` |  |
 | console.caches.fromConfigMap | string | `"{{ .Release.Name }}-console-caches"` |  |
 | console.daemons.discover | string | `"{{ include \"ci-accelerator.buildkitHeadless\" . }}.{{ .Release.Namespace }}.svc:1234"` |  |
+| console.daemons.diskProbePort | int | `9180` |  |
 | console.enabled | bool | `true` |  |
 | console.gitlab.urlsFrom.configMap | string | `"{{ .Release.Name }}-console-gitlab"` |  |
 | console.jobs.namespace | string | `"{{ .Values.global.jobs.namespace }}"` |  |

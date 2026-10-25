@@ -77,6 +77,12 @@ buildkit:
         - podSelector:
             matchLabels:
               ci-accelerator.io/component: console
+  # The free space of each daemon's disk for the console's Nodes page: a
+  # container running the console's image. Keep diskProbe.image equal to
+  # console.image and diskProbe.port to console.daemons.diskProbePort.
+  diskProbe:
+    enabled: true
+    port: 9180
 
 # The official gitlab-runner chart. Set enabled=false to keep your own
 # runner and use integrations/gitlab-runner/values.yaml with it instead.
@@ -176,6 +182,7 @@ console:
       configMap: '{{ .Release.Name }}-console-gitlab'
   daemons:
     discover: '{{ include "ci-accelerator.buildkitHeadless" . }}.{{ .Release.Namespace }}.svc:1234'
+    diskProbePort: 9180
   tls:
     # With buildkit.tls.source=existingSecret, set console.tls.existingSecret
     # (a client certificate from the daemons' CA).

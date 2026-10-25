@@ -900,3 +900,9 @@ a.boxh:hover { background: var(--hover); }
 }
 .pcards { display: grid; gap: 12px; }
 .page ul.plain { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 6px; }
+/* a daemon's disk: cache, other files, free */
+.c-free { background: color-mix(in oklab, var(--ink-3) 18%, var(--panel)); }
+.callout.bad { --tone: var(--del); }
+.ndisk { display: grid; gap: 8px; }
+.ndisk .legend { margin-top: 0; }
+.dnote { display: block; }

@@ -5,7 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +17,8 @@ import (
 	"github.com/containerd/containerd/v2/core/content/proxy"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client"
+
+	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -28,6 +34,10 @@ type TLS struct {
 type Daemon struct {
 	name string
 	c    *client.Client
+	addr string
+	// probe is the base URL of the disk probe next to the daemon; empty:
+	// none.
+	probe string
 }
 
 // Dial connects to the daemon at addr (tcp://host:port). Its name is the
@@ -53,8 +63,23 @@ func Dial(ctx context.Context, addr string, tls TLS) (*Daemon, error) {
 		c.Close()
 		return nil, fmt.Errorf("%s: the daemon reports no host name", addr)
 	}
-	return &Daemon{name: name, c: c}, nil
+	return &Daemon{name: name, c: c, addr: addr}, nil
 }
+
+// DiskProbe makes Inspect also read the free space of the daemon's cache
+// from the probe on port of the daemon's pod (the buildkit chart's
+// diskProbe sidecar).
+func (d *Daemon) DiskProbe(port int) {
+	u, err := url.Parse(d.addr)
+	if err != nil || u.Hostname() == "" || port <= 0 {
+		return
+	}
+	d.probe = "http://" + net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
+}
+
+// probeClient reads disk probes: plain HTTP inside the cluster, numbers
+// only.
+var probeClient = &http.Client{Timeout: 3 * time.Second}
 
 // Name is the daemon's pod name.
 func (d *Daemon) Name() string { return d.name }
@@ -129,6 +154,14 @@ func (d *Daemon) Inspect(ctx context.Context) (Inspection, error) {
 		records[i] = Record{Type: string(r.RecordType), Description: r.Description, Size: r.Size, LastUsed: r.LastUsedAt}
 	}
 	in.Usage = Classify(records)
+	if d.probe != "" {
+		// The daemon answered: a probe that does not is noted, not fatal.
+		if disk, err := diskprobe.Fetch(ctx, probeClient, d.probe); err != nil {
+			in.DiskErr = err.Error()
+		} else {
+			in.Disk = &disk
+		}
+	}
 	return in, nil
 }
 

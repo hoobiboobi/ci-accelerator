@@ -9,7 +9,19 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- The daemons restart once: their pods get a PriorityClass, small resource
+  requests and (in the box) a disk probe container. A rollout replaces one
+  node's daemon at a time; with `storage.type=emptyDir` each daemon starts
+  with an empty cache, with `hostPath` it keeps it.
+- The buildkit chart creates a PriorityClass (cluster-scoped, named
+  `<namespace>-<release>-buildkit`), which needs permission to create
+  PriorityClasses. Without it, or to use your own class, set
+  `buildkit.priorityClass.create=false` or `buildkit.priorityClassName`.
+- The daemons now request 500m CPU and 512Mi of memory by default
+  (`buildkit.resources`); size them to your build nodes (the chart's
+  values list sizes).
+- With `--reuse-values` the box keeps its old values: the disk probe stays
+  off until `--reset-then-reuse-values` (as docs/releasing.md recommends).
 
 ### Added
 
@@ -24,6 +36,16 @@ None.
   digits), commit SHA, commit title, branch, author and job name, and
   narrows to the last 24 hours, 7 or 30 days or to dates (UTC). Ctrl+K
   offers to search all pipelines for what was typed.
+
+- The daemons get their own PriorityClass (above CI jobs, never preempting
+  them): under memory or disk pressure the kubelet evicts CI jobs before
+  them. On the Hetzner test box a full disk evicted the daemon first.
+- The daemons have small default resource requests instead of none, so
+  they are no longer BestEffort.
+- Console: the Nodes page shows each daemon's disk (cache, other files,
+  free space, inodes) from a disk probe next to the daemon, and warns
+  under BuildKit's keep-free floor or near the kubelet's eviction
+  thresholds; a nearly full disk lights the Nodes item.
 
 ### Fixed
 

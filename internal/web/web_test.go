@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
+	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -1413,5 +1414,53 @@ func TestImageOfAnotherProject(t *testing.T) {
 	}
 	if p := get(t, ts, "/images/no-such-image"); p.status != http.StatusNotFound || !strings.Contains(p.body, ">Overview</a>") {
 		t.Errorf("an unknown image: %d", p.status)
+	}
+}
+
+// A daemon's disk on the Nodes page: what fills it, and warnings against
+// the GC's keep-free floor and the kubelet's eviction thresholds; a nearly
+// full disk lights the Nodes item.
+func TestNodesDisk(t *testing.T) {
+	gc := []collector.GCRule{{All: true, MaxUsed: 80 << 30, MinFree: 30 << 30}}
+	disk := func(free, avail uint64) *diskprobe.Disk {
+		return &diskprobe.Disk{Total: 100 << 30, Free: free << 30, Available: avail << 30, Inodes: 1000, InodesFree: 900}
+	}
+	for _, c := range []struct {
+		name       string
+		d          *diskprobe.Disk
+		level      string
+		notes, err int
+	}{
+		{"roomy", disk(60, 55), "", 0, 0},
+		{"under the GC floor", disk(25, 20), "warn", 1, 0},
+		{"near eviction", disk(18, 12), "warn", 2, 0},
+		{"evicting", disk(9, 6), "crit", 2, 0},
+	} {
+		v := diskView(collector.Inspection{GC: gc, Usage: collector.Usage{Total: 30 << 30}, Disk: c.d})
+		if v == nil || v.Level != c.level || len(v.Notes) != c.notes {
+			t.Errorf("%s: %+v", c.name, v)
+		}
+	}
+	if v := diskView(collector.Inspection{}); v != nil {
+		t.Error("a disk without a probe")
+	}
+	if v := diskView(collector.Inspection{DiskErr: "timeout"}); v == nil || v.Err == "" {
+		t.Error("a probe that did not answer is not shown")
+	}
+	// The cache as BuildKit counts it never shows more than the used space.
+	if v := diskView(collector.Inspection{Usage: collector.Usage{Total: 500 << 30}, Disk: disk(60, 55)}); v.Segs[0].Size != bytesText(40<<30) {
+		t.Errorf("cache over the used space: %+v", v.Segs)
+	}
+
+	full := live{{Name: "daemon-a", Connected: true, InspectedAt: testNow, Inspection: collector.Inspection{GC: gc, Disk: disk(9, 6)}},
+		{Name: "daemon-b", Connected: true, InspectedAt: testNow, Inspection: collector.Inspection{GC: gc, Disk: disk(60, 55)}}}
+	ts, _, _, _ := consoleWith(t, Options{Live: full})
+	p := get(t, ts, "/nodes")
+	p.safe(t)
+	if !strings.Contains(p.body, "The disk is nearly full") || !strings.Contains(p.body, `class="callout bad"`) || strings.Count(p.body, `class="ndisk"`) != 2 {
+		t.Error("Nodes does not show the disks and the full one")
+	}
+	if !strings.Contains(get(t, ts, "/pipelines").body, `aria-label="A build node&#39;s disk is nearly full"`) {
+		t.Error("a nearly full disk does not light the Nodes item")
 	}
 }

@@ -352,16 +352,20 @@ probes:
     # after this instead of the pod's terminationGracePeriodSeconds.
     terminationGracePeriodSeconds: 30
 
-# -- Daemon resources. Empty = BestEffort: first to be OOM-killed or evicted,
-# lowest CPU weight. Size requests to the build load and leave kubelet and
-# containerd headroom (an unlimited daemon starved a 192-core node in
-# production). A hard CPU limit throttles builds. A memory limit applies to
-# buildkitd and all RUN steps together, and an OOM kill takes the whole
-# daemon with every running build; leave headroom above max-parallelism x
-# the largest step. Production starting point:
-#   requests: {cpu: "48", memory: 128Gi}
-#   limits:   {memory: 128Gi}
-resources: {}
+# -- Daemon resources. The small default requests keep the daemon out of
+# BestEffort, which the kubelet evicts first under memory pressure; size
+# them to the build load and leave kubelet and containerd headroom (an
+# unlimited daemon starved a 192-core node in production). A hard CPU limit
+# throttles builds. A memory limit applies to buildkitd and all RUN steps
+# together, and an OOM kill takes the whole daemon with every running
+# build; leave headroom above max-parallelism x the largest step. Sizes:
+#   a small node (4-8 CPU, 8-16 GiB):  requests {cpu: "1", memory: 2Gi},  limits {memory: 6Gi}
+#   16-32 CPU, 64 GiB:                 requests {cpu: "8", memory: 16Gi}, limits {memory: 48Gi}
+#   production (48+ CPU, 192+ GiB):    requests {cpu: "48", memory: 128Gi}, limits {memory: 128Gi}
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
 
 # -- Seconds a stopping daemon gets to finish running builds (it stops
 # accepting new ones at once). Builds still running after this are killed.
@@ -394,9 +398,42 @@ nodeSelector: {}
 # -- Appended to global.buildNodes.tolerations.
 tolerations: []
 affinity: {}
-# -- A PriorityClass above the CI job pods keeps the daemon from being
-# preempted by them.
+# -- An existing PriorityClass for the daemons. Empty: the one this chart
+# creates (priorityClass), or none if that is switched off.
 priorityClassName: ""
+# The daemons' own PriorityClass. Under node pressure (memory or disk) the
+# kubelet evicts pods that use more than they requested in order of
+# priority, so without one the daemon - every running build and, with
+# emptyDir, its cache - goes as early as any CI job. Cluster-scoped, named
+# <namespace>-<fullname>; creating it needs that permission.
+priorityClass:
+  create: true
+  # -- Above CI jobs (0), below Kubernetes' own system classes (2000000000).
+  value: 1000000
+  # -- Never: the daemon does not evict running CI jobs to get scheduled;
+  # PreemptLowerPriority lets it.
+  preemptionPolicy: Never
+
+# A small container next to the daemon that reports the free space of the
+# cache's filesystem (statfs), which BuildKit's API does not: the console
+# shows it on the Nodes page against the GC limits and warns before the
+# disk fills. It runs the console's image; enable it together with the
+# console (the box does). Answers plain HTTP on its port with numbers only
+# (the console reaches it like the daemon; builds share the pod's network
+# and can read the numbers too).
+diskProbe:
+  enabled: false
+  port: 9180
+  image:
+    repository: ghcr.io/hoobiboobi/ci-accelerator-console
+    # -- Default: v<chart version>, the console of the same release.
+    tag: ""
+    # -- When set, the image is pulled by digest (tag is kept for readability).
+    digest: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests: {cpu: 5m, memory: 16Mi}
+    limits: {memory: 32Mi}
 
 # -- Extra pod labels. They cannot override the selector or component labels.
 podLabels: {}

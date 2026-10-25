@@ -989,6 +989,26 @@ sys.exit("unexpected: %r" % bad if bad else 0)' "$pod"
   hc uninstall gitlab-runner -n "$NS" --wait --timeout 3m >/dev/null 2>&1 || true
 }
 
+# box_disk: the daemons run with their own PriorityClass (evicted after
+# CI jobs under node pressure) and a disk probe whose numbers reach the
+# console's Nodes page.
+box_disk() {
+  local pc="$BOX_NS-$BOX_REL-buildkit" sel="app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" n
+  check "the daemons' PriorityClass is above CI jobs and never preempts them" \
+    [ "$(kc get priorityclass "$pc" -o jsonpath='{.value} {.preemptionPolicy}' 2>/dev/null)" = "1000000 Never" ]
+  check "every daemon pod runs with that priority" \
+    [ -z "$(kc -n "$BOX_NS" get pods -l "$sel" -o jsonpath='{range .items[*]}{.spec.priority}{"\n"}{end}' | grep -v '^1000000$')" ]
+  n=$(kc -n "$BOX_NS" get pods -l "$sel" -o name | wc -l | tr -d ' ')
+  check "every daemon pod's disk probe is ready" \
+    [ "$(kc -n "$BOX_NS" get pods -l "$sel" -o jsonpath='{range .items[*].status.containerStatuses[?(@.name=="disk-probe")]}{.ready}{"\n"}{end}' | grep -c '^true$')" = "$n" ]
+  box_nodes_disk() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/nodes" 2>/dev/null >"$LOGS/box-nodes.html"
+    [ "$(grep -o 'class="ndisk"' "$LOGS/box-nodes.html" | wc -l | tr -d ' ')" = "$n" ] && grep -q 'Available to pods' "$LOGS/box-nodes.html"
+  }
+  # The console reads each daemon once a minute.
+  check "the Nodes page shows every daemon's disk" eventually 150 box_nodes_disk
+}
+
 s_box() {
   step "box: charts/ci-accelerator installs daemons, runner, jobs namespace and storage that work together"
   local node arch box_tid
@@ -1056,6 +1076,7 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
       grep -q 'class="dl step st-built' "$LOGS/box-console-page.html"
   }
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
+  box_disk
   box_console_policy
   box_settle
   box_ui
@@ -1417,6 +1438,7 @@ s_upgrade() {
     || { fail "build the console image (see $LOGS/upgrade-console-image.log)"; return; }
   if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reuse-values \
       --set console.image.repository=ci-accelerator-console --set console.image.tag=e2e --set console.image.pullPolicy=Never \
+      --set buildkit.diskProbe.image.repository=ci-accelerator-console --set buildkit.diskProbe.image.tag=e2e --set buildkit.diskProbe.image.pullPolicy=Never \
       --wait --timeout 8m >"$LOGS/upgrade-reuse.log" 2>&1; then
     pass "helm upgrade --reuse-values from $UPGRADE_FROM"
   else

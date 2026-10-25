@@ -1,0 +1,165 @@
+suite: priority class, default resources and the disk probe
+templates:
+  - priorityclass.yaml
+  - daemonset.yaml
+  - networkpolicy.yaml
+  - configmap.yaml
+values:
+  - values/tls.yaml
+release:
+  name: bk
+  namespace: ci-accelerator
+tests:
+  - it: creates its own PriorityClass above CI jobs that never preempts them
+    template: priorityclass.yaml
+    asserts:
+      - isKind:
+          of: PriorityClass
+      - equal:
+          path: metadata.name
+          value: ci-accelerator-bk-buildkit
+      - equal:
+          path: value
+          value: 1000000
+      - equal:
+          path: preemptionPolicy
+          value: Never
+      - equal:
+          path: globalDefault
+          value: false
+
+  - it: gives the daemons that class and small requests, no limits
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.priorityClassName
+          value: ci-accelerator-bk-buildkit
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+
+  - it: uses an existing class instead of creating one
+    set:
+      priorityClassName: build-critical
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: priorityclass.yaml
+      - equal:
+          path: spec.template.spec.priorityClassName
+          value: build-critical
+        template: daemonset.yaml
+
+  - it: sets no class when creating one is switched off
+    set:
+      priorityClass.create: false
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: priorityclass.yaml
+      - notExists:
+          path: spec.template.spec.priorityClassName
+        template: daemonset.yaml
+
+  - it: takes the value and preemption policy from values
+    template: priorityclass.yaml
+    set:
+      priorityClass.value: 5000
+      priorityClass.preemptionPolicy: PreemptLowerPriority
+    asserts:
+      - equal:
+          path: value
+          value: 5000
+      - equal:
+          path: preemptionPolicy
+          value: PreemptLowerPriority
+
+  - it: has no disk probe by default
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+        template: daemonset.yaml
+
+  - it: runs the disk probe from the console image of the same release, read-only and unprivileged
+    template: daemonset.yaml
+    set:
+      diskProbe.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].name
+          value: disk-probe
+      - matchRegex:
+          path: spec.template.spec.containers[1].image
+          pattern: '^ghcr\.io/hoobiboobi/ci-accelerator-console:v\d+\.\d+\.\d+'
+      - equal:
+          path: spec.template.spec.containers[1].args
+          value: [disk-probe, -dir=/var/lib/buildkit, -listen=:9180]
+      - equal:
+          path: spec.template.spec.containers[1].volumeMounts
+          value:
+            - name: state
+              mountPath: /var/lib/buildkit
+              readOnly: true
+      - equal:
+          path: spec.template.spec.containers[1].securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[1].securityContext.capabilities.drop
+          value: [ALL]
+      - equal:
+          path: spec.template.spec.containers[1].ports[0]
+          value: {name: disk, containerPort: 9180, protocol: TCP}
+
+  - it: pulls the probe by digest when one is given
+    template: daemonset.yaml
+    set:
+      diskProbe.enabled: true
+      diskProbe.port: 9300
+      diskProbe.image.repository: registry.example/console
+      diskProbe.image.tag: v9.9.9
+      diskProbe.image.digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: registry.example/console:v9.9.9@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      - contains:
+          path: spec.template.spec.containers[1].args
+          content: -listen=:9300
+
+  - it: lets the probe's peers reach its port
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.extraFrom:
+        - podSelector: {matchLabels: {app: console}}
+      diskProbe.enabled: true
+    asserts:
+      - contains:
+          path: spec.ingress[0].ports
+          content: {port: disk, protocol: TCP}
+
+  - it: does not open the probe's port without the probe
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.extraFrom:
+        - podSelector: {matchLabels: {app: console}}
+    asserts:
+      - lengthEqual:
+          path: spec.ingress[0].ports
+          count: 1
+
+  - it: refuses the daemon's port for the probe
+    template: daemonset.yaml
+    set:
+      diskProbe.enabled: true
+      diskProbe.port: 1234
+    asserts:
+      - failedTemplate: {}

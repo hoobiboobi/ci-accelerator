@@ -401,6 +401,34 @@
     "tolerations": { "type": "array", "items": { "type": "object" } },
     "affinity": { "type": "object" },
     "priorityClassName": { "type": "string" },
+    "priorityClass": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": { "type": "boolean" },
+        "value": { "type": "integer", "minimum": -2147483648, "maximum": 1000000000 },
+        "preemptionPolicy": { "enum": ["Never", "PreemptLowerPriority"] }
+      }
+    },
+    "diskProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1024, "maximum": 65535, "not": { "const": 1234 } },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string" },
+            "digest": { "type": "string", "pattern": "^(sha256:[0-9a-f]{64})?$" },
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "resources": { "type": "object", "additionalProperties": false, "properties": { "limits": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "requests": { "type": "object", "additionalProperties": { "type": ["string", "number"] } } } }
+      }
+    },
     "podLabels": { "$ref": "#/definitions/stringMap" },
     "podAnnotations": { "$ref": "#/definitions/stringMap" },
     "extraEnv": { "type": "array", "items": { "type": "object" } }

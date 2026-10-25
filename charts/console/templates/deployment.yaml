@@ -69,6 +69,9 @@ spec:
             {{- with $jobs }}
             - -jobs-namespace={{ . }}
             {{- end }}
+            {{- with (dig "diskProbePort" 0 (.Values.daemons | default dict)) }}
+            - -disk-probe-port={{ int . }}
+            {{- end }}
             - -keep-days={{ int .Values.retention.days }}
             - -keep-output-days={{ int .Values.retention.outputDays }}
             - -release={{ .Release.Name }}

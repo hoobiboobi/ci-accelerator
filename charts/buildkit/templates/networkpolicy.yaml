@@ -24,10 +24,15 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Clients (CI jobs); mutual TLS still decides who gets in.
+    # Clients (CI jobs); mutual TLS still decides who gets in. The disk
+    # probe answers numbers only.
     - ports:
         - port: grpc
           protocol: TCP
+        {{- if dig "enabled" false (.Values.diskProbe | default dict) }}
+        - port: disk
+          protocol: TCP
+        {{- end }}
       from:
         {{- with $namespaces }}
         - namespaceSelector:

@@ -11,3 +11,10 @@ console:
     size: 1Gi
   tolerations:
     - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+# The disk probe next to each daemon runs the console's image too.
+buildkit:
+  diskProbe:
+    image:
+      repository: ci-accelerator-console
+      tag: e2e
+      pullPolicy: Never

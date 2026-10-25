@@ -113,7 +113,8 @@
       "required": ["discover", "serverName"],
       "properties": {
         "discover": { "type": "string" },
-        "serverName": { "type": "string" }
+        "serverName": { "type": "string" },
+        "diskProbePort": { "type": "integer", "minimum": 0, "maximum": 65535 }
       }
     },
     "tls": {

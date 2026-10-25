@@ -301,6 +301,14 @@ if [ -f "$STATE/values.yaml" ]; then
     warn "the GitLab token is applied with --set; add console.gitlab.token.existingSecret: console-gitlab-token to $STATE/values.yaml to keep it"
   fi
 else
+# The daemon on this one node: half the CPUs and a quarter of the memory
+# requested, three quarters of the memory at most; the rest is for k3s, the
+# runner, the console and the CI jobs.
+cpus=$(nproc)
+mem_mi=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+req_cpu=$(( cpus / 2 > 1 ? cpus / 2 : 1 ))
+req_mem=$(( mem_mi / 4 ))
+lim_mem=$(( mem_mi * 3 / 4 ))
 cat >"$STATE/values.yaml" <<EOF
 # Written by quickstart.sh on the first install and left alone after that:
 # edit it and apply with helm upgrade -f (the install prints the command).
@@ -319,6 +327,10 @@ buildkit:
     type: hostPath
     hostPath:
       path: $BUILD_DIR
+  # Sized for this node ($cpus CPUs, ${mem_mi}Mi) at the first install.
+  resources:
+    requests: {cpu: "$req_cpu", memory: ${req_mem}Mi}
+    limits: {memory: ${lim_mem}Mi}
 console:
   enabled: true
 EOF
@@ -334,7 +346,8 @@ image_set=()
 if [ -n "$CONSOLE_IMAGE_TAR" ]; then
   /usr/local/bin/k3s ctr images import "$CONSOLE_IMAGE_TAR" >/dev/null
   ref=$(tar -xOf "$CONSOLE_IMAGE_TAR" manifest.json | sed -n 's/.*"RepoTags":\["\([^"]*\)".*/\1/p')
-  image_set=(--set "console.image.repository=${ref%:*}" --set "console.image.tag=${ref##*:}" --set console.image.pullPolicy=Never)
+  image_set=(--set "console.image.repository=${ref%:*}" --set "console.image.tag=${ref##*:}" --set console.image.pullPolicy=Never
+    --set "buildkit.diskProbe.image.repository=${ref%:*}" --set "buildkit.diskProbe.image.tag=${ref##*:}" --set buildkit.diskProbe.image.pullPolicy=Never)
 fi
 helm upgrade --install "$REL" "$CHART" -n "$NS" -f "$STATE/values.yaml" ${image_set[@]+"${image_set[@]}"} ${value_set[@]+"${value_set[@]}"} \
   --wait --timeout 10m >"$STATE/install.log" 2>&1 || { cat "$STATE/install.log" >&2; die "the install failed (log: $STATE/install.log)"; }
