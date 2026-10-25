@@ -38,7 +38,7 @@ type NodesView struct {
 type NodeCard struct {
 	Name, Short, Node, Version, Err, Since string
 	Ready                                  bool
-	Builds, OtherNode, Unclear             int
+	Builds, Farm, Unclear                  int
 	Running                                int
 	RunningNote                            string
 	Total, Images, Layers, Mounts          int64
@@ -184,7 +184,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	for _, d := range daemons {
 		c := counts[d.Name]
 		card := NodeCard{Name: d.Name, Short: shortDaemon(d.Name), Node: d.Inspection.Node, Version: d.Inspection.Version,
-			Ready: d.Connected, Builds: c.Builds, OtherNode: c.OtherNode, Unclear: c.Unclear, Running: len(d.Active), Err: d.InspectErr,
+			Ready: d.Connected, Builds: c.Builds, Farm: c.Farm, Unclear: c.Unclear, Running: len(d.Active), Err: d.InspectErr,
 			Inspected: !d.InspectedAt.IsZero()}
 		if d.Connected {
 			v.Ready++

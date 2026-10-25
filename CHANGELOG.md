@@ -9,7 +9,38 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- The console's rebuild reasons got stricter: a "build farm" verdict is
+  now only given when nothing below the rebuilt step reads the build
+  context; a rebuild the records cannot explain is "files or node —
+  unclear" until a job of the same pipeline or GitLab's commit comparison
+  settles it. Builds stored before the upgrade keep their old verdicts
+  until the image builds again (the reason is recomputed) or they age out
+  of the 30-day retention. Without a GitLab credential the console now
+  says "unclear" where it used to guess; with one, the comparison names
+  the actual changed files.
+- The Nodes page's "Rebuilt for want of cache here" now counts evicted
+  caches too (the same definition the Overview's "build farm" uses), so
+  the number can rise after the upgrade.
+
+### Fixed
+
+- A rebuild caused by a commit is no longer blamed on the build farm when
+  the file-reading step was deduplicated into a concurrent job, cached, or
+  sits in another stage (`COPY --from`): the engine follows the step's
+  whole ancestor cone and GitLab's comparison checks every file the
+  context feeds into it.
+- A sibling job's cache hit no longer counts as proof that the files did
+  not change when that cache was written by the same pipeline seconds
+  earlier.
+- A parallel job or retry of the same pipeline is never "the previous
+  build": comparing against one made the commit's own work look like the
+  farm's fault ("same commit") on its own pipeline page.
+- Pages no longer claim "it is on another node" for a build whose previous
+  build ran on the same daemon, and no longer name a file as *changed*
+  unless GitLab's comparison verified it — a pipeline witness proves that
+  files changed, not which, and the pages now say so.
+- The Overview's "build farm" and the Nodes page's per-node counter use
+  one definition of the farm's fault and can no longer disagree.
 
 ## 0.2.3 - 2026-10-25
 

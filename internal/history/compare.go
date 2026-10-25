@@ -43,6 +43,14 @@ const (
 	NewStep ReasonKind = "new-step"
 )
 
+// FarmKinds are the reasons the build farm answers for: the code did not
+// change and the cache was missing — on another node, or no longer on this
+// one. The definition exists exactly once; every consumer (the pages'
+// statusOf, the feed's outcome filters, the rollups, the Nodes counters)
+// derives from it or is locked to it by a test, so the Overview and the
+// Nodes page can never disagree about what counts as the farm's fault.
+func FarmKinds() []ReasonKind { return []ReasonKind{OtherNode, NotInCache} }
+
 // Reason explains the first rebuilt step of a build.
 type Reason struct {
 	Kind  ReasonKind

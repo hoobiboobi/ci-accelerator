@@ -66,13 +66,26 @@ type BuildQuery struct {
 // changeKinds are the reasons that are the build's own change.
 const changeKinds = `('first-build', 'step-changed', 'new-step', 'arg-changed', 'base-image-changed', 'files-changed')`
 
+// farmKinds is history.FarmKinds as a SQL list: every query that decides
+// "the farm's fault" uses this one value, so the Overview, the outcome
+// filters, the rollups and the Nodes counters cannot drift apart.
+var farmKinds = kindsSQL(history.FarmKinds())
+
+func kindsSQL(ks []history.ReasonKind) string {
+	quoted := make([]string, len(ks))
+	for i, k := range ks {
+		quoted[i] = "'" + string(k) + "'"
+	}
+	return "(" + strings.Join(quoted, ", ") + ")"
+}
+
 // outcomes select finished builds by status, as the web pages name them:
 // a reason decides before the executed steps do (a build whose rebuilt
 // step came from another job executed nothing and was not cached).
 var outcomes = map[string]string{
 	"cached":  "(b.built = 0 AND b.error = '' AND b.reason_kind = '' AND b.completed_at IS NOT NULL)",
 	"change":  "(b.error = '' AND b.reason_kind IN " + changeKinds + " AND b.completed_at IS NOT NULL)",
-	"farm":    "(b.error = '' AND b.reason_kind IN ('other-node', 'not-in-cache') AND b.completed_at IS NOT NULL)",
+	"farm":    "(b.error = '' AND b.reason_kind IN " + farmKinds + " AND b.completed_at IS NOT NULL)",
 	"unclear": "(b.error = '' AND (b.reason_kind = 'cache-elsewhere' OR (b.reason_kind = '' AND b.built > 0)) AND b.completed_at IS NOT NULL)",
 	"failed":  "(b.error != '')",
 	"rebuilt": "(b.error != '' OR (b.completed_at IS NOT NULL AND (b.built > 0 OR b.reason_kind != '')))",

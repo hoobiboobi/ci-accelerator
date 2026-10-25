@@ -8,7 +8,7 @@
   <div class="ncards">
     {{range .Cards}}
     <section class="box ncard" aria-label="Node {{.Short}}"><div class="hd">{{if .Ready}}<span class="okdot" aria-hidden="true"></span>{{else}}<span class="okdot bad" aria-hidden="true"></span>{{end}}<b>{{.Short}}</b>{{with .Node}}<span class="muted">on {{.}}</span>{{end}}{{if .Ready}}<span class="chip received ml">{{icon "s_cached" 11}}Ready</span>{{else}}<span class="chip failed ml">{{icon "warn" 11}}Unreachable</span>{{end}}</div>
-      <div class="nkv"><span>Builds, 24 hours</span><span>{{.Builds}}</span><span>Rebuilt for want of cache here</span><span>{{.OtherNode}}{{if .Unclear}} <span class="wtxt" title="whether the files changed or the cache was gone is unclear">+{{.Unclear}} unclear</span>{{end}}</span><span>Running now</span><span>{{.Running}} · {{.RunningNote}}</span></div>
+      <div class="nkv"><span>Builds, 24 hours</span><span>{{.Builds}}</span><span>Rebuilt for want of cache here</span><span>{{.Farm}}{{if .Unclear}} <span class="wtxt" title="whether the files changed or the cache was gone is unclear">+{{.Unclear}} unclear</span>{{end}}</span><span>Running now</span><span>{{.Running}} · {{.RunningNote}}</span></div>
       {{if .Inspected}}
       <div><div class="nkv"><span>Cache by BuildKit</span><span><b>{{bytes .Total}}</b></span></div>
         {{if .Segs}}<div class="sstack" role="img" aria-label="{{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>

@@ -59,6 +59,25 @@ func TestUnclearTextsOnOneNode(t *testing.T) {
 	}
 }
 
+// statusOf must call "farm" exactly the kinds history.FarmKinds lists —
+// the store's SQL counters derive from the same list, so this test is the
+// lock that keeps the Overview and the Nodes page in agreement.
+func TestFarmStatusFollowsFarmKinds(t *testing.T) {
+	farm := map[history.ReasonKind]bool{}
+	for _, k := range history.FarmKinds() {
+		farm[k] = true
+	}
+	kinds := []history.ReasonKind{"", history.FirstBuild, history.StepChanged, history.NewStep,
+		history.ArgChanged, history.BaseImageChanged, history.FilesChanged, history.NotInCache,
+		history.CacheElsewhere, history.OtherNode}
+	for _, k := range kinds {
+		got := statusOf(k, "", 1, false).Key == "farm"
+		if got != farm[k] {
+			t.Errorf("statusOf(%q) farm = %v, history.FarmKinds says %v", k, got, farm[k])
+		}
+	}
+}
+
 // List texts name a path as changed only when GitLab's comparison verified
 // it (Via "gitlab a..b"); a witness-settled reason keeps candidates
 // unnamed.
