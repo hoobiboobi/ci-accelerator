@@ -5,6 +5,12 @@ Each release upgrades in place from the previous one; see
 Every version has **Upgrade notes**, even if they say "None". The release
 workflow copies them into the GitHub release.
 
+## Unreleased
+
+### Upgrade notes
+
+None.
+
 ## 0.2.3 - 2026-10-25
 
 ### Upgrade notes
@@ -22,6 +28,14 @@ workflow copies them into the GitHub release.
   values list sizes).
 - With `--reuse-values` the box keeps its old values: the disk probe stays
   off until `--reset-then-reuse-values` (as docs/releasing.md recommends).
+- The disk probe runs the console's image on the build nodes. If you
+  mirror `console.image`, set `buildkit.diskProbe.image` to the same
+  repository, tag and digest; the box refuses values where they differ.
+- A one-node install from `quickstart.sh` keeps its
+  `/var/lib/ci-accelerator/values.yaml`: it gets the default requests, not
+  ones sized to the machine. Add `buildkit.resources` there (a fresh
+  install writes half the CPUs and a quarter of the memory requested,
+  three quarters of the memory as the limit).
 
 ### Added
 
@@ -36,12 +50,12 @@ workflow copies them into the GitHub release.
   digits), commit SHA, commit title, branch, author and job name, and
   narrows to the last 24 hours, 7 or 30 days or to dates (UTC). Ctrl+K
   offers to search all pipelines for what was typed.
-
 - The daemons get their own PriorityClass (above CI jobs, never preempting
   them): under memory or disk pressure the kubelet evicts CI jobs before
   them. On a test box whose disk filled up, the daemon went first.
 - The daemons have small default resource requests instead of none, so
-  they are no longer BestEffort.
+  they are no longer BestEffort; `quickstart.sh` sizes them from the
+  machine on a first install.
 - Console: the Nodes page shows each daemon's disk (cache, other files,
   free space, inodes) from a disk probe next to the daemon, and warns
   under BuildKit's keep-free floor or near the kubelet's eviction

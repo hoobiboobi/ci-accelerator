@@ -15,6 +15,7 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
  │ Service <release>-buildkit-headless                 │ mTLS └────────────────────────────────────┘
  │ DaemonSet <release>-buildkit (one per build node)   │
  │   state: hostPath or emptyDir                       │      namespace cert-manager
+ │   disk probe next to each daemon (:9180)            │
  │   OTLP to your backend (optional)                   │      ┌────────────────────────────────────┐
  │ Deployment <release>-console (optional)             │      │ the release's CA (Secret, Issuer)  │
  │ NetworkPolicy for the daemons                       │      └────────────────────────────────────┘
@@ -23,7 +24,8 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 
 | Part | Where | Notes |
 |---|---|---|
-| buildkitd | DaemonSet on build nodes (`ci-accelerator.io/node-role=build`) | Privileged, rootful; one per node |
+| buildkitd | DaemonSet on build nodes (`ci-accelerator.io/node-role=build`) | Privileged, rootful; one per node; its own PriorityClass |
+| Disk probe | A container in each daemon pod (box) | The console's image; reports the cache disk's size and free space (statfs) |
 | gitlab-runner manager | Box namespace, any non-build node | Polls GitLab, creates job pods |
 | CI job pods | Jobs namespace, build nodes | Thin clients: `buildctl` and the build context |
 | Console (optional) | Box namespace, any non-build node | Reads the daemons' build history and the job pods |
@@ -32,6 +34,13 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 The jobs namespace is separate because job pods run untrusted code and the
 runner needs broad rights there; the daemons' keys must not be in reach
 ([ADR-0010](adr/0010-namespaces.md)).
+
+**Priority and resources.** The kubelet evicts pods under memory or disk
+pressure that use more than they requested, in order of priority. The
+daemons therefore have their own PriorityClass (`<namespace>-<release>-buildkit`,
+value 1000000, `preemptionPolicy: Never`: above CI jobs, and never evicting
+a running job to get scheduled) and default requests of 500m CPU and 512Mi
+([ADR-0043](adr/0043-daemon-priority-and-disk-probe.md)).
 
 ## The path of a build
 
@@ -175,6 +184,14 @@ namespace. It only reads; nothing it does changes a build.
   TLS port (1234), with a client certificate of its own from the daemons'
   CA. The daemons' NetworkPolicy has an ingress rule that admits pods
   labelled `ci-accelerator.io/component: console`.
+- **Disk space from the disk probes.** BuildKit reports what the cache
+  holds, not how much room its disk has left. Once a minute, with each
+  daemon's inspection, the console asks the probe next to it (plain HTTP on
+  the daemon pod's address, port `diskProbePort`, 9180) for the size, free
+  space and inodes of the cache's filesystem. The daemons' NetworkPolicy
+  opens that port to the same peers as the TLS port. The Nodes page shows
+  it against BuildKit's keep-free floor and the kubelet's eviction
+  thresholds.
 - **Job data from the job pods.** A Role in the jobs namespace lets it get,
   list and watch pods. The pods' annotations tie each build to its
   pipeline, job, project and commit; the trace id ties the build record to
@@ -197,7 +214,9 @@ restarts, when:
 - the rendered `buildkitd.toml` changes (the template carries its checksum);
 - the image changes;
 - environment values change (for example `extraEnv`, OTLP endpoints);
-- the TLS Secret name changes.
+- the TLS Secret name changes;
+- the PriorityClass, the resources or the disk probe (on, off, its image)
+  change.
 
 Upgrading the chart without changing any of these does not restart
 anything ([ADR-0013](adr/0013-stable-pod-template.md)).

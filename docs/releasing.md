@@ -75,6 +75,8 @@ docker pull ghcr.io/hoobiboobi/ci-accelerator-console:v<v>
 
 About half an hour later [Artifact Hub](https://artifacthub.io/packages/helm/ci-accelerator/ci-accelerator) lists the version with the Signed badge and the verified publisher mark. It checks the signature once, when it first indexes the version (every half hour), and never again for the same digest; the workflow therefore signs right after the push. A version indexed inside that window stays unsigned there for good (0.2.1 did; `cosign verify` is what counts).
 
+Then check the release the way a user installs it on one machine: run the Quickstart workflow by hand with the release's version (`gh workflow run quickstart.yml -f release=<v>`). It downloads `quickstart.sh` from the release, checks it against `SHA256SUMS` and installs from the registry on a clean runner.
+
 A package pushed for the first time is private: make it public under the repository's Packages (`charts/console` and `ci-accelerator-console` came with 0.2.0). Then install the umbrella from the registry on a kind cluster with `console.enabled=true` and run a build, as the README quickstart does.
 
 ## 6. After the release

@@ -35,15 +35,13 @@ Kubernetes: `>=1.34.0-0`
 | config.maxParallelism | int | `0` | Max concurrently running build operations per daemon: RUN, COPY/ADD and source operations (image pulls, git, local context). 0 = unlimited, which is buildkit's default (not the CPU count). Production ran 28 on a 48-CPU daemon. |
 | config.maxRegistryConcurrency | int | `0` | Max concurrent connections per registry; 0 keeps the buildkit default (4). Pushes that get stuck hold their slot and can hang every build on the daemon (moby/buildkit#7275); the probes do not detect that. |
 | config.workerOCI | object | `{}` | Extra keys for the [worker.oci] table, e.g. {snapshotter: native}. Values: strings, numbers, booleans or lists. The keys the chart sets (enabled, gc, max-parallelism, gcpolicy) are rejected. |
-| diskProbe.enabled | bool | `false` |  |
+| diskProbe.enabled | bool | `false` | Run the probe. Off here (no console to read it); the box turns it on. |
 | diskProbe.image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability). |
 | diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
-| diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator-console"` |  |
+| diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator-console"` | The console's image: mirror it together with the console's. |
 | diskProbe.image.tag | string | `""` | Default: v<chart version>, the console of the same release. |
-| diskProbe.port | int | `9180` |  |
-| diskProbe.resources.limits.memory | string | `"32Mi"` |  |
-| diskProbe.resources.requests.cpu | string | `"5m"` |  |
-| diskProbe.resources.requests.memory | string | `"16Mi"` |  |
+| diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the console's daemons.diskProbePort. |
+| diskProbe.resources | object | `{"limits":{"memory":"32Mi"},"requests":{"cpu":"5m","memory":"16Mi"}}` | The probe's resources (it reads one number a minute). |
 | extraEnv | list | `[]` | Extra environment variables for the daemon container. |
 | fullnameOverride | string | `""` | Override the full resource name (<release>-<chart> by default). Install-time only, like nameOverride. |
 | global.buildNodes.enabled | bool | `true` | false: ignore selector/tolerations below and run on any Linux node. (A switch, because Helm merges `selector: {}` with the default instead of clearing it.) |
@@ -79,7 +77,7 @@ Kubernetes: `>=1.34.0-0`
 | preflight.buildNodes | bool | `true` | Fail if no node carries every label of the build-node selector (the DaemonSet would want 0 pods while helm reports success). Needs cluster-wide list access to Nodes (an installer that is only a namespace admin gets Forbidden); set false then, or for node pools scaled to zero. |
 | preflight.podSecurity | bool | `true` | Fail if the namespace's pod-security.kubernetes.io/enforce label is set to anything but privileged (no daemon pod could start). Needs read access to the Namespace object, which namespace admins have. A namespace without the label is not checked (the cluster default applies); NOTES warns. |
 | preflight.tlsSecret | bool | `true` | With tls.source=existingSecret: fail if the Secret exists but lacks tls.crt, tls.key or ca.crt (`kubectl create secret tls` writes no ca.crt). A Secret that does not exist yet is not an error: the daemons wait for it. Needs read access to Secrets in the release namespace. |
-| priorityClass.create | bool | `true` |  |
+| priorityClass.create | bool | `true` | Create the PriorityClass. false: no class (or priorityClassName's). |
 | priorityClass.preemptionPolicy | string | `"Never"` | Never: the daemon does not evict running CI jobs to get scheduled; PreemptLowerPriority lets it. |
 | priorityClass.value | int | `1000000` | Above CI jobs (0), below Kubernetes' own system classes (2000000000). |
 | priorityClassName | string | `""` | An existing PriorityClass for the daemons. Empty: the one this chart creates (priorityClass), or none if that is switched off. |

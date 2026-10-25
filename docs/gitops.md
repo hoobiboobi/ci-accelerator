@@ -83,3 +83,13 @@ skipped during rendering and run at install.
 - An upgrade that changes the daemons' pod template rolls the DaemonSet one
   node at a time; `emptyDir` caches are lost then (README, "Where the
   cache lives").
+- Cluster-scoped objects: the daemons' PriorityClass
+  (`<namespace>-<release>-buildkit`, from 0.2.3) and, with a CA the chart
+  bootstraps, a ClusterIssuer. The tool's service account needs to create
+  them (for Argo CD, an AppProject whose `clusterResourceWhitelist` allows
+  `scheduling.k8s.io/PriorityClass`), or set
+  `buildkit.priorityClass.create=false` and name an existing class in
+  `buildkit.priorityClassName`. The names stay the same across syncs.
+- The disk probe runs the console's image: a mirrored registry needs
+  `buildkit.diskProbe.image` set to the same repository, tag and digest as
+  `console.image`; the chart refuses values where they differ.

@@ -407,6 +407,7 @@ priorityClassName: ""
 # emptyDir, its cache - goes as early as any CI job. Cluster-scoped, named
 # <namespace>-<fullname>; creating it needs that permission.
 priorityClass:
+  # -- Create the PriorityClass. false: no class (or priorityClassName's).
   create: true
   # -- Above CI jobs (0), below Kubernetes' own system classes (2000000000).
   value: 1000000
@@ -422,15 +423,19 @@ priorityClass:
 # (the console reaches it like the daemon; builds share the pod's network
 # and can read the numbers too).
 diskProbe:
+  # -- Run the probe. Off here (no console to read it); the box turns it on.
   enabled: false
+  # -- Its port (GET /disk, /healthz); the console's daemons.diskProbePort.
   port: 9180
   image:
+    # -- The console's image: mirror it together with the console's.
     repository: ghcr.io/hoobiboobi/ci-accelerator-console
     # -- Default: v<chart version>, the console of the same release.
     tag: ""
     # -- When set, the image is pulled by digest (tag is kept for readability).
     digest: ""
     pullPolicy: IfNotPresent
+  # -- The probe's resources (it reads one number a minute).
   resources:
     requests: {cpu: 5m, memory: 16Mi}
     limits: {memory: 32Mi}
