@@ -44,7 +44,7 @@ func TestRestoredBuildsGiveTheSameReasons(t *testing.T) {
 			pairs++
 		}
 	}
-	for _, k := range []ReasonKind{StepChanged, ArgChanged, BaseImageChanged, FilesChanged} {
+	for _, k := range []ReasonKind{StepChanged, ArgChanged, BaseImageChanged, CacheElsewhere} {
 		if !kinds[k] {
 			t.Errorf("no pair of fixtures gave %s: the test covers less than it claims", k)
 		}

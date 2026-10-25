@@ -227,8 +227,16 @@ func TestReasons(t *testing.T) {
 	}{
 		{"first build", nil, b(1001), FirstBuild, "[deps 2/6]", nil},
 		{"build argument", b(1001), b(1002), ArgChanged, "[api 2/2]", func(r Reason) bool { return r.Arg == "VERSION" && r.Old == "dev" && r.New == "2" }},
-		{"source file", b(1002), b(1003), FilesChanged, "[api 1/2]", func(r Reason) bool { return strings.Join(r.Paths, ",") == "api" }},
-		{"dependencies", b(1003), b(1004), FilesChanged, "[deps 5/6]", func(r Reason) bool { return strings.Join(r.Paths, ",") == "deps.txt" }},
+		// The context feeds the first rebuilt step (or an ancestor): the
+		// files or the cache — the comparison of the commits settles it
+		// later. Paths carry the whole cone's context sources; the daemons
+		// stay empty on one daemon.
+		{"source file", b(1002), b(1003), CacheElsewhere, "[api 1/2]", func(r Reason) bool {
+			return strings.Join(r.Paths, ",") == "api,deps.txt" && r.Old == ""
+		}},
+		{"dependencies", b(1003), b(1004), CacheElsewhere, "[deps 5/6]", func(r Reason) bool {
+			return strings.Join(r.Paths, ",") == "deps.txt" && r.Old == ""
+		}},
 		{"changed step", b(1005), b(1008), StepChanged, "[api 2/2]", func(r Reason) bool { return strings.Contains(r.New, "echo changed") && r.Step.Line == 14 }},
 		{"base image", b(1008), b(1009), BaseImageChanged, "[deps 1/6]", func(r Reason) bool {
 			return strings.Contains(r.Old, "alpine:3.22@") && strings.Contains(r.New, "alpine:3.21@")
@@ -256,8 +264,8 @@ func TestReasons(t *testing.T) {
 	if r, ok := FirstRebuild(b(1009), b(1011)); ok {
 		t.Errorf("a fully cached build reported %s at %s", r.Kind, r.Step.Key)
 	}
-	// COPY . . reads the whole context.
-	if r, ok := FirstRebuild(byJob(t, bs, 1007, "test"), byJob(t, bs, 1011, "test")); !ok || r.Kind != FilesChanged || strings.Join(r.Paths, ",") != "." {
+	// COPY . . reads the whole context: "." is among the cone's sources.
+	if r, ok := FirstRebuild(byJob(t, bs, 1007, "test"), byJob(t, bs, 1011, "test")); !ok || r.Kind != CacheElsewhere || strings.Join(r.Paths, ",") != ".,deps.txt" {
 		t.Errorf("COPY . .: %+v", r)
 	}
 }
@@ -273,8 +281,8 @@ func TestCacheOnAnotherDaemon(t *testing.T) {
 		t.Errorf("another daemon: %+v", r)
 	}
 	cur.Daemon = "daemon-a"
-	if r, _ := FirstRebuild(&prev, &cur); r.Kind != FilesChanged {
-		t.Errorf("same daemon: %s, want files-changed", r.Kind)
+	if r, _ := FirstRebuild(&prev, &cur); r.Kind != CacheElsewhere || r.Old != "" {
+		t.Errorf("same daemon: %+v, want cache-elsewhere without daemons", r)
 	}
 
 	// A step that reads no files and did not change was rebuilt only
