@@ -20,6 +20,22 @@ None.
   later jobs as a dotenv report. Included by URL from the release's tag
   with an integrity hash (any GitLab 17.9 or newer, also self-managed), or
   copied into a project. The release notes print the include block.
+- Console: the pipelines page searches by pipeline number (or its first
+  digits), commit SHA, commit title, branch, author and job name, and
+  narrows to the last 24 hours, 7 or 30 days or to dates (UTC). Ctrl+K
+  offers to search all pipelines for what was typed.
+
+### Fixed
+
+- Console: the "Live" mark in the sidebar no longer flashes, and the
+  buttons below it no longer move, when going from page to page; a dropped
+  connection shows only after 3 seconds. The time of the last update is in
+  UTC like every other time.
+- Console: the Nodes page updates itself when builds start and end; it
+  never subscribed to the daemons' state.
+- Console: an image's page opened while another project is chosen (a
+  shared link, an old tab) switches to the project that builds the image
+  instead of answering "Not found".
 
 ## 0.2.2 - 2026-10-25
 

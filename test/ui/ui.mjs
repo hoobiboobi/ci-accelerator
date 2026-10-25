@@ -366,6 +366,35 @@ async function pipelinesPage(s) {
     await s.click(".pcard .pc-head", 1200);
     check("pipelines: a card opens its pipeline", (await s.eval("location.pathname")) === st.href, st.href);
   }
+  // The live mark arrives as "Live", not after the stream opens: it used to
+  // appear a moment after every page load.
+  // What the server sends, before any script runs: the stream opens too
+  // fast here to see the gap in the loaded page.
+  const arrives = p => s.eval(`fetch(${JSON.stringify(p)}).then(r => r.text()).then(t => {
+    const l = new DOMParser().parseFromString(t, "text/html").getElementById("live");
+    return l ? l.className + " [" + l.textContent + "]" : "none"; })`);
+  const mark = [await arrives("/pipelines"), await arrives("/nodes")];
+  check("live mark: there at once, not after the stream opens", mark.every(m => m === "side-live [Live]"), mark.join(" | "));
+  // Search: typed text without Enter does not search when a card is
+  // clicked; Enter searches by the pipeline's number and keeps a clean
+  // address.
+  if (st.href) {
+    const id = st.href.split("/").pop();
+    await s.click("#pQ", 100);
+    await s.type("no-such-pipeline");
+    await s.click(".pcard .pc-head", 1200);
+    check("search: a card clicked after typing opens the card", (await s.eval("location.pathname")) === st.href, await s.eval("location.href"));
+    await s.go("/pipelines");
+    await s.click("#pQ", 100);
+    await s.type(id);
+    // Enter as a keyboard sends it, with its "\r": that is what submits.
+    await s.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+    await s.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await sleep(1500);
+    const found = await s.eval(`({ url: location.pathname + location.search, cards: document.querySelectorAll(".pcard").length,
+      first: (document.querySelector(".pcard .pc-head") || { getAttribute: () => "" }).getAttribute("href") })`);
+    check("search: Enter finds a pipeline by its number", found.url === "/pipelines?q=" + id && found.first === st.href, JSON.stringify(found));
+  }
   check("pipelines: no errors", s.take().length === 0);
 }
 
