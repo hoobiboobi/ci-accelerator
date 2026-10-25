@@ -625,7 +625,8 @@
         const q = $("[data-wf-q]", main);
         if (q) { q.focus({ preventScroll: true }); q.setSelectionRange(typing[0], typing[1]); }
       }
-      if (status) status.textContent = "Updated " + new Date().toLocaleTimeString();
+      // In UTC, like every time the console shows.
+      if (status) status.textContent = "Updated " + new Date().toISOString().slice(11, 19);
     } finally {
       busy = false;
     }
