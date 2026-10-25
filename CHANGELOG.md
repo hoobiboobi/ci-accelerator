@@ -11,6 +11,12 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Changed
+
+- docs/architecture.md: the components and namespaces diagram is an image
+  (docs/images/components-and-namespaces.svg) instead of ASCII art, and
+  shows which certificates the release's CA signs.
+
 ## 0.2.4 - 2026-10-25
 
 ### Upgrade notes
