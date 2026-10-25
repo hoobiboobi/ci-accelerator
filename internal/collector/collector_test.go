@@ -253,7 +253,7 @@ func TestArrivalOrderDoesNotMatter(t *testing.T) {
 			t.Errorf("%s: stored differently\n got:\n%s\nwant:\n%s", name, got, want)
 		}
 	}
-	if !strings.Contains(want, "from=") || !strings.Contains(want, "reason=files-changed") {
+	if !strings.Contains(want, "from=") || !strings.Contains(want, "reason=cache-elsewhere") {
 		t.Fatalf("the dump shows no link or reason:\n%s", want)
 	}
 }

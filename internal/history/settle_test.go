@@ -36,10 +36,25 @@ func TestSettle(t *testing.T) {
 			[]Reason{sameDaemon, files}, FilesChanged, "test"},
 		{"rebuilt for changed files in the pipeline", []*Build{build("cur", "node-b", 7, built(common)), build("test", "node-c", 7, built(common))},
 			[]Reason{elsewhere, files}, FilesChanged, "test"},
+		// A sibling that rebuilt the same step on the daemon of its own
+		// previous build (same-daemon cache-elsewhere) is a files witness:
+		// the cache was there and still missed.
+		{"same-daemon sibling rebuild is a files witness", []*Build{build("cur", "node-b", 7, built(common)), build("test", "node-c", 7, built(common))},
+			[]Reason{elsewhere, sameDaemon}, FilesChanged, "test"},
 		{"the cache proof wins", []*Build{build("cur", "node-b", 7, built(common)), build("test", "node-c", 7, built(common)), build("api", "node-d", 7, cached(common))},
 			[]Reason{elsewhere, files, {}}, OtherNode, "api"},
 		{"cached on the same daemon proves nothing", []*Build{build("cur", "node-b", 7, built(common)), build("api", "node-b", 7, cached(common))},
 			[]Reason{elsewhere, {}}, CacheElsewhere, ""},
+		// The witness's cache hit may be this pipeline's own product: a
+		// sibling EXECUTED the step on the witness's daemon (same commit,
+		// written seconds earlier), so the hit proves nothing about the
+		// files. The files witness still decides.
+		{"cache witness disqualified by a same-pipeline build on its daemon",
+			[]*Build{build("cur", "node-b", 7, built(common)), build("api", "node-c", 7, built(common)), build("search", "node-c", 7, cached(common))},
+			[]Reason{elsewhere, files, {}}, FilesChanged, "api"},
+		{"disqualified cache witness with no files witness stays unclear",
+			[]*Build{build("cur", "node-b", 7, built(common)), build("api", "node-c", 7, built(common)), build("search", "node-c", 7, cached(common))},
+			[]Reason{elsewhere, {}, {}}, CacheElsewhere, ""},
 		{"another pipeline proves nothing", []*Build{build("cur", "node-b", 7, built(common)), build("api", "node-c", 8, cached(common)), build("test", "node-c", 8, built(common))},
 			[]Reason{elsewhere, {}, files}, CacheElsewhere, ""},
 		{"another step proves nothing", []*Build{build("cur", "node-b", 7, built(common)), build("api", "node-c", 7, cached(Step{Key: "[api 1/2]", Identity: "id-api"}))},

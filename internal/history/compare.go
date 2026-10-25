@@ -94,20 +94,15 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		}
 		if p.Identity == s.Identity {
 			crossDaemon := prev.Daemon != "" && cur.Daemon != "" && prev.Daemon != cur.Daemon
-			if cur.prov.localInput(s.StepID) {
-				if crossDaemon {
-					// It reads files: they may have changed too.
-					return Reason{Kind: CacheElsewhere, Step: s, Old: prev.Daemon, New: cur.Daemon,
-						Paths: cur.prov.copySources(s.StepID)}, true
-				}
-				return Reason{Kind: FilesChanged, Step: s, Paths: cur.prov.copySources(s.StepID)}, true
-			}
 			if cur.prov.contextDependent(s.StepID) {
-				// The step itself reads no files, but an ancestor reads the
-				// build context (the file-reading step may be cached or
-				// received): its cache key depends on files the records
-				// cannot see, so the files or the cache — unclear, whatever
-				// the daemons. Settle or GitLab's comparison decides it.
+				// The build context feeds this step or an ancestor (the
+				// file-reading step may itself be cached or received, so
+				// the first executed step says nothing by itself): the
+				// files or the cache — unclear. Paths carry everything the
+				// context feeds into the whole ancestor cone, not just
+				// this step's own sources: the rebuild could have been
+				// caused by any of them. Settle or GitLab's comparison of
+				// the commits decides it.
 				r := Reason{Kind: CacheElsewhere, Step: s, Paths: cur.prov.contextSources(s.StepID)}
 				if crossDaemon {
 					r.Old, r.New = prev.Daemon, cur.Daemon
@@ -276,7 +271,16 @@ func Settle(builds []*Build, reasons []Reason) []Reason {
 			continue
 		}
 		for j, o := range reasons {
-			if j != i && samePipeline(builds[i], builds[j]) && o.Kind == FilesChanged && o.Step.Identity == r.Step.Identity {
+			if j == i || !samePipeline(builds[i], builds[j]) || o.Step.Identity != r.Step.Identity {
+				continue
+			}
+			// A sibling that rebuilt the same step although its previous
+			// build ran on its own daemon (FilesChanged once settled, or a
+			// same-daemon CacheElsewhere): the cache was there and still
+			// missed, so the files changed (erring towards the change, as
+			// everywhere: an eviction in the same breath is the rare
+			// alternative).
+			if o.Kind == FilesChanged || (o.Kind == CacheElsewhere && o.Old == "") {
 				out[i].Kind, out[i].By = FilesChanged, builds[j].Ref
 				break
 			}
@@ -286,19 +290,38 @@ func Settle(builds []*Build, reasons []Reason) []Reason {
 }
 
 // cachedOnAnotherDaemon returns a build of builds[i]'s pipeline, on another
-// daemon, that found the step with this identity in its cache.
+// daemon, that found the step with this identity in its cache. A witness
+// whose daemon also EXECUTED the step in this pipeline proves nothing: its
+// cache hit may be that very execution's product (same commit, written
+// seconds earlier), not a survivor from before the change.
 func cachedOnAnotherDaemon(builds []*Build, i int, identity string) string {
 	for j, o := range builds {
 		if j == i || !samePipeline(builds[i], o) || o.Daemon == "" || o.Daemon == builds[i].Daemon {
 			continue
 		}
 		for _, s := range o.Steps {
-			if s.Identity == identity && s.State == Cached {
+			if s.Identity == identity && s.State == Cached && !builtInPipelineOn(builds, builds[i], o.Daemon, identity) {
 				return o.Ref
 			}
 		}
 	}
 	return ""
+}
+
+// builtInPipelineOn says whether any build of cur's pipeline executed the
+// step with this identity on the given daemon.
+func builtInPipelineOn(builds []*Build, cur *Build, daemon, identity string) bool {
+	for _, b := range builds {
+		if b.Daemon != daemon || !samePipeline(cur, b) {
+			continue
+		}
+		for _, s := range b.Steps {
+			if s.Identity == identity && s.State == Built {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func samePipeline(a, b *Build) bool {

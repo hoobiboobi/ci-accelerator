@@ -141,7 +141,7 @@ func TestReasonsAgainstStoredBuilds(t *testing.T) {
 			}
 		}
 	}
-	for _, k := range []history.ReasonKind{history.FirstBuild, history.StepChanged, history.ArgChanged, history.BaseImageChanged, history.FilesChanged} {
+	for _, k := range []history.ReasonKind{history.FirstBuild, history.StepChanged, history.ArgChanged, history.BaseImageChanged, history.CacheElsewhere} {
 		if !kinds[k] {
 			t.Errorf("no build gave %s", k)
 		}
