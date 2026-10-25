@@ -428,10 +428,11 @@ diskProbe:
   # -- Its port (GET /disk, /healthz); the console's daemons.diskProbePort.
   port: 9180
   image:
-    # -- The console's image: mirror it together with the console's.
+    # -- The console's image (a mirror needs this tag too).
     repository: ghcr.io/hoobiboobi/ci-accelerator-console
-    # -- Default: v<chart version>, the console of the same release.
-    tag: ""
+    # -- The probe's own version, not the release's: a new tag restarts every
+    # daemon, so it moves only when the probe itself changes.
+    tag: v0.2.3
     # -- When set, the image is pulled by digest (tag is kept for readability).
     digest: ""
     pullPolicy: IfNotPresent

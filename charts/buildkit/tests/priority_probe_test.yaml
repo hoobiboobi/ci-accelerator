@@ -84,7 +84,7 @@ tests:
           count: 1
         template: daemonset.yaml
 
-  - it: runs the disk probe from the console image of the same release, read-only and unprivileged
+  - it: runs the disk probe from the console image at the probe's own version, read-only and unprivileged
     template: daemonset.yaml
     set:
       diskProbe.enabled: true
@@ -92,9 +92,9 @@ tests:
       - equal:
           path: spec.template.spec.containers[1].name
           value: disk-probe
-      - matchRegex:
+      - equal:
           path: spec.template.spec.containers[1].image
-          pattern: '^ghcr\.io/hoobiboobi/ci-accelerator-console:v\d+\.\d+\.\d+'
+          value: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3
       - equal:
           path: spec.template.spec.containers[1].args
           value: [disk-probe, -dir=/var/lib/buildkit, -listen=:9180]
@@ -171,3 +171,13 @@ tests:
     asserts:
       - notExists:
           path: spec.template.spec.containers[1].readinessProbe
+
+  - it: keeps the probe's version for values kept from 0.2.3 (empty tag), so an upgrade restarts nothing
+    template: daemonset.yaml
+    set:
+      diskProbe.enabled: true
+      diskProbe.image.tag: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3

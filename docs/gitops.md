@@ -90,6 +90,6 @@ skipped during rendering and run at install.
   `scheduling.k8s.io/PriorityClass`), or set
   `buildkit.priorityClass.create=false` and name an existing class in
   `buildkit.priorityClassName`. The names stay the same across syncs.
-- The disk probe runs the console's image: a mirrored registry needs
-  `buildkit.diskProbe.image` set to the same repository, tag and digest as
-  `console.image`; the chart refuses values where they differ.
+- The disk probe runs the console's image at its own tag
+  (`buildkit.diskProbe.image.tag`, which moves only when the probe changes):
+  a mirrored registry needs that tag as well as the console's.

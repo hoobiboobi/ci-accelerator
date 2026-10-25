@@ -9,7 +9,15 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+None. Upgrading from 0.2.3 does not restart the daemons.
+
+### Fixed
+
+- The disk probe next to each daemon had the release's version as its
+  image tag, so every later upgrade would have restarted all daemons (and
+  emptied `emptyDir` caches). It now has its own version (`v0.2.3`), which
+  moves only when the probe changes; a mirrored registry needs that tag,
+  and `buildkit.diskProbe.image` no longer has to equal `console.image`.
 
 ## 0.2.3 - 2026-10-25
 

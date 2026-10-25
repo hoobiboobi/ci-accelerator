@@ -46,3 +46,12 @@ it coming.
   they are numbers about the disk the builds already write to.
 - Without `--reset-then-reuse-values` an upgraded box keeps its old values
   and the probe stays off.
+
+## Correction (after 0.2.3)
+
+0.2.3 gave the probe the release's version as its image tag and made the
+box refuse a probe image unlike the console's. Every later upgrade would
+then have restarted all daemons, against the rule that a release restarts
+them only on purpose. The probe now has its own pinned version (`v0.2.3`),
+bumped only when the probe changes (with an upgrade note), and the image
+check is gone; the port check stays.

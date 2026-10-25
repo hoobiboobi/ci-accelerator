@@ -23,6 +23,7 @@ On a branch `release/v<v>`:
    - `VERSION=` in `scripts/quickstart.sh` (the one-node installer installs it; the release attaches the script);
    - the README's quickstart download links and `helm install ... --version`;
    - the console image tag in `artifacthub.io/images` of `charts/console/Chart.yaml` and `charts/ci-accelerator/Chart.yaml`, and the release's `artifacthub.io/changes` in the umbrella's `Chart.yaml` (Artifact Hub shows them on the version page);
+   - the disk probe's image tag (`diskProbe.image.tag` in `charts/buildkit/values.yaml` and the default in `buildkit.diskProbeImage`) only when `internal/diskprobe` changed since that tag: a new tag restarts every daemon on upgrade, so it needs an upgrade note and `UPGRADE_ROLLOUT_EXPECTED=1`;
    - `make chart-docs` regenerates the charts' READMEs (the packaged README is what Artifact Hub shows; `make lint` fails when they are stale).
 
    Also update the status line and the `--version` of the quickstart in `README.md`.

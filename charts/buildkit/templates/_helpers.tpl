@@ -293,12 +293,14 @@ else none. Values added after 0.2 are read with dig: an upgrade with
 {{- end }}
 
 {{/*
-The disk probe's image: the console's, of this chart's version unless set.
+The disk probe's image: the console's image at the probe's own version.
+It must not follow the chart's version, or every release would restart
+the daemons; an empty tag (values kept from 0.2.3) is that version too.
 */}}
 {{- define "buildkit.diskProbeImage" -}}
 {{- $img := dig "image" dict (.Values.diskProbe | default dict) }}
 {{- $repo := default "ghcr.io/hoobiboobi/ci-accelerator-console" $img.repository }}
-{{- $tag := default (printf "v%s" .Chart.Version) $img.tag }}
+{{- $tag := default "v0.2.3" $img.tag }}
 {{- if $img.digest }}
 {{- printf "%s:%s@%s" $repo $tag $img.digest }}
 {{- else }}

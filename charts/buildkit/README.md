@@ -38,8 +38,8 @@ Kubernetes: `>=1.34.0-0`
 | diskProbe.enabled | bool | `false` | Run the probe. Off here (no console to read it); the box turns it on. |
 | diskProbe.image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability). |
 | diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
-| diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator-console"` | The console's image: mirror it together with the console's. |
-| diskProbe.image.tag | string | `""` | Default: v<chart version>, the console of the same release. |
+| diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator-console"` | The console's image (a mirror needs this tag too). |
+| diskProbe.image.tag | string | `"v0.2.3"` | The probe's own version, not the release's: a new tag restarts every daemon, so it moves only when the probe itself changes. |
 | diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the console's daemons.diskProbePort. |
 | diskProbe.resources | object | `{"limits":{"memory":"32Mi"},"requests":{"cpu":"5m","memory":"16Mi"}}` | The probe's resources (it reads one number a minute). |
 | extraEnv | list | `[]` | Extra environment variables for the daemon container. |

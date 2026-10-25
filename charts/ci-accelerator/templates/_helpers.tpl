@@ -191,8 +191,8 @@ lookup is empty offline, so the check is skipped there.
 {{- end }}
 
 {{/*
-The disk probe runs the console's image next to each daemon, and the
-console reads it on its port: both pairs must agree.
+The console reads the disk probe next to each daemon on its port: both
+must agree.
 */}}
 {{- define "ci-accelerator.checkDiskProbe" -}}
 {{- $probe := .Values.buildkit.diskProbe | default dict }}
@@ -204,13 +204,6 @@ console reads it on its port: both pairs must agree.
 {{- end }}
 {{- if and (not $probe.enabled) (gt $port 0) }}
 {{- fail "console.daemons.diskProbePort is set but buildkit.diskProbe.enabled is false: enable the probe, or set the port to 0." }}
-{{- end }}
-{{- if $probe.enabled }}
-{{- $pi := $probe.image | default dict }}
-{{- $ci := $console.image | default dict }}
-{{- if or (ne (toString $pi.repository) (toString $ci.repository)) (ne (toString $pi.tag) (toString $ci.tag)) (ne (toString $pi.digest) (toString $ci.digest)) }}
-{{- fail (printf "buildkit.diskProbe.image (%s:%s %s) must equal console.image (%s:%s %s): the probe is the console's program. Set both to the same repository, tag and digest." (toString $pi.repository) (toString $pi.tag) (toString $pi.digest) (toString $ci.repository) (toString $ci.tag) (toString $ci.digest)) }}
-{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
