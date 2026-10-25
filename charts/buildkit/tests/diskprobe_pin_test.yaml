@@ -1,0 +1,39 @@
+suite: the disk probe image is pinned, not the chart version
+templates:
+  - daemonset.yaml
+chart:
+  version: 9.9.9
+values:
+  - values/tls.yaml
+release:
+  name: bk
+  namespace: ci-accelerator
+set:
+  diskProbe:
+    enabled: true
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  # A default of v<chart version> restarted every daemon on each chart
+  # release: the pod template changed although the probe program had not.
+  - it: keeps the pinned probe image under another chart version
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3
+  - it: an explicitly empty tag from old values still gets the pin
+    set:
+      diskProbe.image.tag: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3
+  - it: an own tag and digest win over the pin
+    set:
+      diskProbe.image.tag: v9.8.7
+      diskProbe.image.digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: ghcr.io/hoobiboobi/ci-accelerator-console:v9.8.7@sha256:0000000000000000000000000000000000000000000000000000000000000000

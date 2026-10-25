@@ -39,7 +39,7 @@ Kubernetes: `>=1.34.0-0`
 | diskProbe.image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability). |
 | diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
 | diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator-console"` | The console's image: mirror it together with the console's. |
-| diskProbe.image.tag | string | `""` | Default: v<chart version>, the console of the same release. |
+| diskProbe.image.tag | string | `""` | Default: v0.2.3, the console that last changed the probe program — pinned, so a chart release alone does not restart every daemon. |
 | diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the console's daemons.diskProbePort. |
 | diskProbe.resources | object | `{"limits":{"memory":"32Mi"},"requests":{"cpu":"5m","memory":"16Mi"}}` | The probe's resources (it reads one number a minute). |
 | extraEnv | list | `[]` | Extra environment variables for the daemon container. |

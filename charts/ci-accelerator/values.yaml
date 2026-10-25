@@ -78,8 +78,9 @@ buildkit:
             matchLabels:
               ci-accelerator.io/component: console
   # The free space of each daemon's disk for the console's Nodes page: a
-  # container running the console's image. Keep diskProbe.image equal to
-  # console.image and diskProbe.port to console.daemons.diskProbePort.
+  # container running the console's image at its own pinned tag (see
+  # charts/buildkit diskProbe.image — a mirror sets it there). Keep
+  # diskProbe.port equal to console.daemons.diskProbePort.
   diskProbe:
     # -- The probe next to each daemon (charts/buildkit diskProbe).
     enabled: true

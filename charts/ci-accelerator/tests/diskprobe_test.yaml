@@ -40,19 +40,10 @@ tests:
           value: ci-accelerator-box-buildkit
         template: charts/buildkit/templates/daemonset.yaml
 
-  - it: refuses a probe image that is not the console's
+  - it: accepts a probe image that differs from the console's (the probe has its own pin)
     template: validate.yaml
     set:
       console.image.repository: mirror.example/console
-    asserts:
-      - failedTemplate:
-          errorPattern: "buildkit.diskProbe.image .* must equal console.image"
-
-  - it: accepts both moved to a mirror together
-    template: validate.yaml
-    set:
-      console.image.repository: mirror.example/console
-      buildkit.diskProbe.image.repository: mirror.example/console
     asserts:
       - hasDocuments:
           count: 0

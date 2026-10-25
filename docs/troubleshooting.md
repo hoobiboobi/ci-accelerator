@@ -33,7 +33,6 @@ names the fix; the common ones:
 | `global.buildNodes.selector has kubernetes.io/arch=...` | Set `global.jobs.architecture` to the same architecture |
 | `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
 | `priorityclasses.scheduling.k8s.io is forbidden` | The installer may not create cluster-scoped objects: `buildkit.priorityClass.create=false`, or name an existing class in `buildkit.priorityClassName` |
-| `buildkit.diskProbe.image (...) must equal console.image (...)` | The disk probe runs the console's image: set both to the same repository, tag and digest (a mirror needs both) |
 | `console.daemons.diskProbePort (...) must equal buildkit.diskProbe.port` | Set the same port in both, or switch the probe off and set the port to 0 |
 
 Checks that read the live cluster (Pod Security, build nodes, Secrets)
@@ -58,7 +57,7 @@ kubectl -n ci-accelerator describe pod <daemon pod> | tail -20
 | `ContainerCreating`, event about the TLS Secret | The certificate is not issued yet: `kubectl -n ci-accelerator get certificate`, then `kubectl describe certificate` |
 | `CrashLoopBackOff`, log `failed to load config` | A configuration buildkitd rejects (often `config.extraConfig`). The rollout stops on the first node; `helm rollback` |
 | `CrashLoopBackOff` with hostPath, lock error | Another daemon holds the state directory: a second release on the same path, or a surge pod (the chart refuses `maxSurge` with hostPath) |
-| `disk-probe` in `ImagePullBackOff`, daemon pod not started | The probe runs the console's image, and a pod starts only with all its images: mirror it with the console's, or `buildkit.diskProbe.enabled=false` |
+| `disk-probe` in `ImagePullBackOff`, daemon pod not started | The probe runs the console's image at its own pinned tag (`buildkit.diskProbe.image`, default `v0.2.3`), and a pod starts only with all its images: mirror that tag too, or `buildkit.diskProbe.enabled=false` |
 | No pods at all after a successful `helm install` | The namespace enforces `baseline`/`restricted` without a label the chart could see (some distributions default to `baseline`); see the DaemonSet's events |
 
 ## The runner

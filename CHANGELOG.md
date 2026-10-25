@@ -21,8 +21,17 @@ workflow copies them into the GitHub release.
 - The Nodes page's "Rebuilt for want of cache here" now counts evicted
   caches too (the same definition the Overview's "build farm" uses), so
   the number can rise after the upgrade.
+- The disk probe's image tag now defaults to a pinned `v0.2.3` instead of
+  the chart version, and the box no longer requires
+  `buildkit.diskProbe.image` to equal `console.image`. Upgrading from
+  0.2.3 the rendered daemon pods are unchanged: NO daemon rollout. If you
+  mirror images, mirror the probe's pinned tag too.
 
 ### Fixed
+
+- A chart release alone no longer restarts every daemon: the disk probe's
+  default image tag was `v<chart version>`, so any upgrade after 0.2.3
+  changed the pod template although the probe program had not changed.
 
 - A rebuild caused by a commit is no longer blamed on the build farm when
   the file-reading step was deduplicated into a concurrent job, cached, or
