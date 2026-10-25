@@ -9,6 +9,12 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 0.2.4 - 2026-10-25
+
+### Upgrade notes
+
 - The console's rebuild reasons got stricter: a "build farm" verdict is
   now only given when nothing below the rebuilt step reads the build
   context; a rebuild the records cannot explain is "files or node —
