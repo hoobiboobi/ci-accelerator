@@ -58,10 +58,18 @@ builds of two small projects):
 
 1. **Snapshots.** The collector takes `DiskUsage` per daemon at most once a
    minute while builds complete (as GC does) and every 10 minutes when idle,
-   and keeps the latest snapshot plus each record's first-seen time. The
-   cost of `DiskUsage` on a large cache (it walks every record under the
-   cache manager's lock, moby/buildkit#7175) must be measured on a
-   production-size cache before the interval is fixed.
+   and keeps the latest snapshot plus each record's first-seen time.
+   Cost, measured (2026-10-25, a separate buildkitd v0.33.1 on kind/arm64,
+   records made by builds of 400 RUN steps each): `buildctl du --format
+   json` takes about 12.5 ms per 1000 records (0.02 s empty, 0.25 s at
+   20 000 records), twice that while five builds run (0.5 s at 21 000).
+   `DiskUsage` holds the cache manager's lock while it walks the records in
+   memory (`cache/manager.go`), so builds wait for that part; sizes that
+   are not known yet are computed afterwards, outside the lock, in
+   parallel, and kept, so only the first snapshot after a build walks the
+   new layers' files. A 2.4 TB cache of 20-50 MB records (50 000-120 000
+   records) would hold the lock for roughly 1-3 s per snapshot: fine once a
+   minute, not on every page view.
 2. **Owner of a layer = the build that created it.** A new record is matched
    to the builds running on that daemon at its `createdAt` that *executed*
    a step with that name (COPY/ADD by exact step name, RUN by command), and
@@ -69,6 +77,16 @@ builds of two small projects):
    candidate: owned by that build's project. Several projects (concurrent
    builds executing identical steps on the same parent): "ambiguous", never
    guessed. LINK merge records follow their copy record.
+   Seen in the concurrency spike (two projects with the same Dockerfile,
+   built at the same time): a step both builds share is created once and
+   both builds report it as executed (`DONE`), so it is really shared;
+   steps whose content differs give two records with the same
+   description and the same parent, created 2-22 ms apart, and everything
+   after them forms two symmetric chains. Nothing in `DiskUsage` tells the
+   two chains apart, only their creation times, and the matcher does not
+   depend on timing. Such records go to a row "shared by A and B" with
+   their total bytes. Within one project (the jobs of a monorepo) the
+   question does not arise: both chains belong to it.
 3. **Users of a layer = builds that hit it.** From the stored history: a
    CACHED step with the same name on the same daemon whose parent chain
    matches. This is what shows "shared with project X".
@@ -94,9 +112,10 @@ that created and last used each cache record and expose it in
 
 ## Next steps
 
-1. A spike with concurrent builds of two projects sharing a base and a step
-   name, to count the ambiguous cases, and `DiskUsage` timing on a cache of
-   hundreds of GB.
+1. Done (2026-10-25): the concurrency spike and the `DiskUsage` timing
+   (above). Still open: how often different projects run identical step
+   names at the same moment on one daemon in a real installation (from the
+   console's stored history).
 2. The matcher in the collector with fixtures from real snapshots.
 3. The `BUILDKIT_CACHE_MOUNT_NS` input in the component and the hook
    (opt-in, upgrade note).
