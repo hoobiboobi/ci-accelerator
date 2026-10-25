@@ -11,10 +11,6 @@ console:
     size: 1Gi
   tolerations:
     - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
-# The disk probe next to each daemon runs the console's image too.
-buildkit:
-  diskProbe:
-    image:
-      repository: ci-accelerator-console
-      tag: e2e
-      pullPolicy: Never
+# The disk probe keeps its pinned, published image (charts/buildkit
+# diskProbe.image): overriding it here would roll the daemons on every
+# upgrade step the e2e asserts to be rollout-free.
