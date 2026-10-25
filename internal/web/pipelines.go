@@ -21,8 +21,18 @@ type PipelinesView struct {
 	Mine     bool
 	CanMine  bool
 	Branches []Option
+	// Q is the search; Period one of periods' values; From and To the
+	// dates (UTC, YYYY-MM-DD) of a custom period, To included.
+	Q, Period, From, To string
+	Periods             []Option
+	// BadDates: a custom period's dates could not be read; Backwards: its
+	// end is before its start.
+	BadDates, Backwards bool
+	// Filtered: a search or a period narrows the list.
+	Filtered bool
 	Cards    []PipeCard
 	Older    string
+	Newest   string
 	Newer    bool
 	// NoAPI: the console cannot read GitLab, so how long jobs waited for a
 	// runner is not known.
@@ -82,6 +92,83 @@ const laneRows = 3
 // pipePage is how many pipelines a page lists.
 const pipePage = 20
 
+// periods are the choices of the pipelines page's time filter.
+var periods = []struct {
+	Value, Label string
+	Span         time.Duration
+}{
+	{"", "Any time", 0},
+	{"24h", "Last 24 hours", 24 * time.Hour},
+	{"7d", "Last 7 days", 7 * 24 * time.Hour},
+	{"30d", "Last 30 days", 30 * 24 * time.Hour},
+	{"custom", "Dates…", 0},
+}
+
+// pipeFilter reads the search and the period of a pipelines request into
+// the view and the query.
+func pipeFilter(q url.Values, now time.Time, v *PipelinesView, pq *store.PipeQuery) {
+	v.Q = strings.TrimSpace(q.Get("q"))
+	if len(v.Q) > 200 {
+		v.Q = v.Q[:200]
+	}
+	pq.Search = v.Q
+	v.Period = q.Get("period")
+	known := false
+	for _, p := range periods {
+		if p.Value == v.Period {
+			known = true
+			if p.Span > 0 {
+				pq.Since = now.Add(-p.Span)
+			}
+		}
+	}
+	if !known {
+		v.Period = ""
+	}
+	for _, p := range periods {
+		v.Periods = append(v.Periods, Option{Value: p.Value, Label: p.Label, On: p.Value == v.Period})
+	}
+	if v.Period == "custom" {
+		v.From, v.To = q.Get("from"), q.Get("to")
+		if v.From != "" {
+			if t, err := time.Parse(time.DateOnly, v.From); err == nil {
+				pq.Since = t
+			} else {
+				v.BadDates = true
+			}
+		}
+		if v.To != "" {
+			if t, err := time.Parse(time.DateOnly, v.To); err == nil {
+				pq.Until = t.Add(24 * time.Hour)
+			} else {
+				v.BadDates = true
+			}
+		}
+	}
+	v.Backwards = !pq.Since.IsZero() && !pq.Until.IsZero() && !pq.Until.After(pq.Since)
+	v.Filtered = v.Q != "" || !pq.Since.IsZero() || !pq.Until.IsZero()
+}
+
+// pipeLink is the pipelines page with the view's filters and extra.
+func pipeLink(v *PipelinesView, extra url.Values) string {
+	u := url.Values{}
+	for k, val := range map[string]string{"branch": v.Branch, "q": v.Q, "period": v.Period, "from": v.From, "to": v.To} {
+		if val != "" {
+			u.Set(k, val)
+		}
+	}
+	if v.Mine {
+		u.Set("mine", "1")
+	}
+	for k, vals := range extra {
+		u[k] = vals
+	}
+	if len(u) == 0 {
+		return "/pipelines"
+	}
+	return "/pipelines?" + u.Encode()
+}
+
 func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sh, err := s.projectPage(r, "pipelines")
@@ -92,13 +179,14 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	sh.Title = "Pipelines"
 	q := r.URL.Query()
 	v := &PipelinesView{Branch: q.Get("branch"), Mine: q.Get("mine") == "1", CanMine: sh.Viewer != nil}
+	pq := store.PipeQuery{Project: sh.Project.ProjectKey, Ref: v.Branch, Limit: pipePage}
+	pipeFilter(q, s.now(), v, &pq)
 	if sh.Project.ID == 0 {
 		v.Shell = sh
 		s.render(w, "pipelines", http.StatusOK, v)
 		return
 	}
 	s.settleLater(r, sh.Project.ProjectKey)
-	pq := store.PipeQuery{Project: sh.Project.ProjectKey, Ref: v.Branch, Limit: pipePage}
 	if b, _ := strconv.ParseInt(q.Get("before"), 10, 64); b > 0 {
 		pq.Before, v.Newer = time.UnixMilli(b), true
 	}
@@ -167,16 +255,9 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 		v.Cards = append(v.Cards, s.pipeCard(p, jobs[p.ID], builds[p.ID]))
 	}
 	if len(list) == pipePage {
-		older := url.Values{}
-		if v.Branch != "" {
-			older.Set("branch", v.Branch)
-		}
-		if v.Mine {
-			older.Set("mine", "1")
-		}
-		older.Set("before", strconv.FormatInt(list[len(list)-1].Created.UnixMilli(), 10))
-		v.Older = "/pipelines?" + older.Encode()
+		v.Older = pipeLink(v, url.Values{"before": {strconv.FormatInt(list[len(list)-1].Created.UnixMilli(), 10)}})
 	}
+	v.Newest = pipeLink(v, nil)
 	v.Shell = sh
 	s.render(w, "pipelines", http.StatusOK, v)
 }

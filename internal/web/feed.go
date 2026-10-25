@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -754,7 +755,32 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		known = known || t == target
 	}
 	if !known {
-		s.notFound(w, r, "image")
+		// An image's address names no project: one opened from a link, or
+		// in a tab after switching projects, may be another project's.
+		var elsewhere []Option
+		for _, p := range sh.Projects {
+			if p.ProjectKey == sh.Project.ProjectKey {
+				continue
+			}
+			ts, err := s.store.Targets(ctx, p.ProjectKey, s.now().Add(-30*24*time.Hour))
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			if slices.Contains(ts, target) {
+				label := p.Path
+				if label == "" {
+					label = fmt.Sprintf("project %d", p.ID)
+				}
+				elsewhere = append(elsewhere, Option{Value: "/projects/" + p.Instance + "/" + strconv.FormatUint(p.ID, 10) + "?to=" + url.QueryEscape(r.URL.Path), Label: label})
+			}
+		}
+		if len(elsewhere) == 1 {
+			http.Redirect(w, r, elsewhere[0].Value, http.StatusFound)
+			return
+		}
+		sh.Title = "Not found"
+		s.render(w, "notfound", http.StatusNotFound, NotFound{Shell: sh, What: "image", Elsewhere: elsewhere})
 		return
 	}
 	for _, t := range targets {

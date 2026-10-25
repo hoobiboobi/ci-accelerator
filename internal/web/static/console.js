@@ -270,11 +270,25 @@
   window.addEventListener("scroll", () => { if (popFor && popFor.isConnected) showPop(popFor); }, { passive: true });
 
   // ---- filters apply as they change; the Apply button is for no script ----
+  // A search box applies on Enter only: "change" fires when it loses
+  // focus, so clicking a result after typing would run the search instead.
+  // The address keeps only the filters that are set (dates only for a
+  // period of dates).
   function setupFilters() {
     $$("form[data-autosubmit]", main).forEach(f => {
       const btn = $('button[type="submit"]', f);
       if (btn) btn.hidden = true;
-      $$("select, input", f).forEach(el => el.addEventListener("change", () => f.requestSubmit ? f.requestSubmit() : f.submit()));
+      $$('select, input:not([type="search"])', f).forEach(el => el.addEventListener("change", () => f.requestSubmit ? f.requestSubmit() : f.submit()));
+      f.addEventListener("submit", ev => {
+        ev.preventDefault();
+        const period = f.elements.period ? f.elements.period.value : "";
+        const q = new URLSearchParams();
+        for (const [k, v] of new FormData(f)) {
+          if (v === "" || ((k === "from" || k === "to") && period !== "custom")) continue;
+          q.append(k, v);
+        }
+        location.assign((f.getAttribute("action") || location.pathname) + (q.toString() ? "?" + q : ""));
+      });
     });
   }
 
@@ -426,8 +440,12 @@
       if (it.sub && fuzzy(q, it.sub)) results.push({ it, idx: [], score: 100 });
     });
     if (q) results.sort((a, b) => b.score - a.score);
-    const order = ["Job", "Pipeline", "Node", "Page", "Command"];
+    const order = ["Job", "Pipeline", "Node", "Page", "Command", "Search"];
     results = results.slice(0, 40).sort((a, b) => order.indexOf(a.it.kind) - order.indexOf(b.it.kind));
+    // The index holds recent pipelines only: the pipelines page searches
+    // them all.
+    const typed = palQ.value.trim();
+    if (typed) results.push({ it: { kind: "Search", label: "Search all pipelines for “" + typed + "”", url: "/pipelines?q=" + encodeURIComponent(typed) }, idx: [], score: 0 });
     sel = 0;
     palL.replaceChildren();
     if (!results.length) {
@@ -443,7 +461,7 @@
         group = r.it.kind;
         const g = document.createElement("div");
         g.className = "pal-g";
-        g.textContent = group + "s";
+        g.textContent = group === "Search" ? "Search" : group + "s";
         palL.append(g);
       }
       const o = document.createElement("div");
@@ -568,13 +586,13 @@
   // ---- live updates ----
   // The server says what changed; the page fetches itself again and swaps
   // its content, at most once a second.
-  const live = main.dataset.live;
+  const live = main.dataset.live || "";
   const status = $("#live");
-  if (!live || !window.EventSource) return;
+  if (!(live || main.dataset.liveNodes) || !window.EventSource) return;
   const params = new URLSearchParams();
   const notify = main.dataset.liveNotify === "true";
   if (live.startsWith("project:")) params.set("project", live.slice(8));
-  else if (live !== "all") params.set("pipeline", live);
+  else if (live && live !== "all") params.set("pipeline", live);
   if (main.dataset.liveNodes) params.set("nodes", "1");
   const filterQ = params.toString() ? "?" + params.toString() : "";
   let timer = null, busy = false;
@@ -627,14 +645,20 @@
       // otherwise never hold still.
       if (!timer) timer = setTimeout(() => { timer = null; const nd = $("#newdata", main); if (nd) nd.hidden = false; }, 30000);
     });
-    es.addEventListener("open", () => { if (status) { status.hidden = false; status.textContent = "Live"; } });
-    es.addEventListener("error", () => { if (status) status.textContent = "Reconnecting…"; });
+    // The page arrives saying "Live". A stream that drops for a moment
+    // (EventSource reconnects by itself, and leaving the page drops it too)
+    // says nothing; only one gone for more than 3 seconds does.
+    es.addEventListener("open", () => { clearTimeout(lost); lost = null; say("Live"); });
+    es.addEventListener("error", () => { if (!lost) lost = setTimeout(() => say("Reconnecting…"), 3000); });
   }
+  let lost = null;
+  function say(text) { if (status) status.textContent = text; }
   function disconnect() {
     if (!es) return;
     es.close();
     es = null;
-    if (status) status.textContent = "Paused";
+    clearTimeout(lost);
+    lost = null;
   }
   // Back on the page: catch up on what changed meanwhile.
   function resume() {
