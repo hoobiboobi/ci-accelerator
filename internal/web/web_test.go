@@ -48,17 +48,17 @@ func console(t *testing.T) (*httptest.Server, *store.Store, map[string]int64) {
 }
 
 func consoleServer(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *Server) {
-	return consoleWith(t, Options{})
+	return consoleWith(t, testOpts{})
 }
 
-func consoleWith(t *testing.T, opt Options) (*httptest.Server, *store.Store, map[string]int64, *Server) {
+func consoleWith(t *testing.T, opt testOpts) (*httptest.Server, *store.Store, map[string]int64, *Server) {
 	t.Helper()
-	return consoleBuild(t, func(*store.Store) Options { return opt }, httptest.NewServer)
+	return consoleBuild(t, func(*store.Store) testOpts { return opt }, httptest.NewServer)
 }
 
 // consoleBuild is consoleWith for options that need the store (sign-in),
 // served by start (plain or TLS).
-func consoleBuild(t *testing.T, options func(*store.Store) Options, start func(http.Handler) *httptest.Server) (*httptest.Server, *store.Store, map[string]int64, *Server) {
+func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(http.Handler) *httptest.Server) (*httptest.Server, *store.Store, map[string]int64, *Server) {
 	t.Helper()
 	st, err := store.Open(ctx, t.TempDir(), store.Options{Now: func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }})
 	if err != nil {
@@ -133,7 +133,8 @@ func consoleBuild(t *testing.T, options func(*store.Store) Options, start func(h
 	if os.Getenv("WEB_TEST_LOG") != "" {
 		logTo = os.Stderr
 	}
-	srv, err := New(st, slog.New(slog.NewTextHandler(logTo, nil)), options(st))
+	backend, opt := options(st).wire(t, st)
+	srv, err := New(backend, slog.New(slog.NewTextHandler(logTo, nil)), opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +277,7 @@ func TestPagesRenderAndEscape(t *testing.T) {
 					break
 				}
 				if panel.status != http.StatusOK || strings.Contains(panel.body, "<html") {
-					t.Errorf("panel %d: %d, %.80q", i, panel.status, panel.body)
+					t.Fatalf("panel %d: %d, %.80q", i, panel.status, panel.body)
 				}
 				panel.safe(t)
 				queue = append(queue, fmt.Sprintf("/builds/1/steps/%d", i))
@@ -554,7 +555,7 @@ func TestPipelinePage(t *testing.T) {
 // a short page that says so.
 func TestJobPages(t *testing.T) {
 	f, asked := fakeGitLab(t, "Running with gitlab-runner\n$ make test\ntoken glpat-AbCdEfGhIjKlMnOpQrSt12 used\nok\n")
-	ts, st, _, _ := consoleWith(t, Options{API: f, Token: gitlab.Token("t")})
+	ts, st, _, _ := consoleWith(t, testOpts{API: f, Token: gitlab.Token("t")})
 	keys, byPipe := pipelines(t, st)
 	b := byPipe[keys[0]][0]
 	p := get(t, ts, fmt.Sprintf("/jobs/%s/%d", b.Instance, b.Job))
@@ -784,7 +785,7 @@ func TestNodes(t *testing.T) {
 				MountList:  []collector.Mount{{Description: "cached mount /root/.cache/pip from exec x", Size: 10 << 20, LastUsed: testNow}}}},
 		Active: []collector.Active{{Daemon: "box-buildkit-abcde", Target: "api" + evil, Started: started}}},
 		{Name: "box-buildkit-fghij", Connected: false, Inspection: collector.Inspection{Usage: collector.Usage{ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20}}}}}
-	ts, _, _, _ := consoleWith(t, Options{Live: daemons, Release: "box"})
+	ts, _, _, _ := consoleWith(t, testOpts{Live: daemons, Release: "box"})
 	nodes := get(t, ts, "/nodes")
 	nodes.safe(t)
 	for _, want := range []string{"1 ready of 2", "on node-1", "300 MB", "/root/.cache/pip cache mount", "Duplicate cache",
@@ -835,7 +836,7 @@ func TestGitLabAPIOnOpen(t *testing.T) {
 	client := gitlab.New([]string{"https://gitlab.example.com/"})
 	client.HTTP = &http.Client{Transport: rewrite{to}}
 	f := &gitlab.Fetcher{Client: client}
-	ts, st, _, srv := consoleWith(t, Options{API: f, Token: gitlab.Token("t")})
+	ts, st, _, srv := consoleWith(t, testOpts{API: f, Token: gitlab.Token("t")})
 	f.Store = st
 	srv.APIWait = 3 * time.Second
 	keys, byPipe := pipelines(t, st)
@@ -864,7 +865,7 @@ func TestGitLabAPIOnOpen(t *testing.T) {
 
 // A reason that names a daemon that is gone says so.
 func TestGoneDaemon(t *testing.T) {
-	ts, st, _, _ := consoleWith(t, Options{Live: live{{Name: "daemon-a", Connected: true}}})
+	ts, st, _, _ := consoleWith(t, testOpts{Live: live{{Name: "daemon-a", Connected: true}}})
 	keys, byPipe := pipelines(t, st)
 	row := byPipe[keys[0]][0]
 	p, err := st.BuildPage(ctx, row.ID)
@@ -943,6 +944,9 @@ func TestStepHistoryLinksOpenTheSameStep(t *testing.T) {
 			if panel.status == http.StatusNotFound {
 				break
 			}
+			if panel.status != http.StatusOK {
+				t.Fatalf("build %d step %d: %d", id, i, panel.status)
+			}
 			want := command.FindStringSubmatch(panel.body)
 			for _, m := range histLink.FindAllStringSubmatch(panel.body, -1) {
 				links++
@@ -971,7 +975,7 @@ func TestStepHistoryLinksOpenTheSameStep(t *testing.T) {
 
 // The console's version sits at the bottom of the sidebar on every page.
 func TestVersionInTheSidebar(t *testing.T) {
-	ts, _, _, _ := consoleWith(t, Options{Version: "v9.9.9 (abc123def456)"})
+	ts, _, _, _ := consoleWith(t, testOpts{Version: "v9.9.9 (abc123def456)"})
 	for _, path := range []string{"/", "/builds", "/nodes"} {
 		if p := get(t, ts, path); !strings.Contains(p.body, `<div class="side-note side-ver" title="ci-accelerator console v9.9.9 (abc123def456)">console v9.9.9 (abc123def456)</div>`) {
 			t.Errorf("%s: no version in the sidebar", path)
@@ -1135,7 +1139,7 @@ func TestDevAssets(t *testing.T) {
 			}
 		}
 	}
-	ts, _, _, _ := consoleWith(t, Options{Assets: os.DirFS(dir)})
+	ts, _, _, _ := consoleWith(t, testOpts{Assets: os.DirFS(dir)})
 	if p := get(t, ts, "/"); p.status != 200 || strings.Contains(p.body, "edited-on-disk") {
 		t.Fatalf("before the edit: %d", p.status)
 	}
@@ -1182,7 +1186,7 @@ func TestPipelinesPage(t *testing.T) {
 	client := gitlab.New([]string{"https://gitlab.example.com/"})
 	client.HTTP = &http.Client{Transport: rewrite{to}}
 	f := &gitlab.Fetcher{Client: client}
-	ts, st, _, _ := consoleWith(t, Options{API: f, Token: gitlab.Token("t")})
+	ts, st, _, _ := consoleWith(t, testOpts{API: f, Token: gitlab.Token("t")})
 	f.Store = st
 	keys, byPipe := pipelines(t, st)
 	mu.Lock()
@@ -1469,7 +1473,7 @@ func TestNodesDisk(t *testing.T) {
 
 	full := live{{Name: "daemon-a", Connected: true, InspectedAt: testNow, Inspection: collector.Inspection{GC: gc, Disk: disk(9, 6)}},
 		{Name: "daemon-b", Connected: true, InspectedAt: testNow, Inspection: collector.Inspection{GC: gc, Disk: disk(60, 55)}}}
-	ts, _, _, _ := consoleWith(t, Options{Live: full})
+	ts, _, _, _ := consoleWith(t, testOpts{Live: full})
 	p := get(t, ts, "/nodes")
 	p.safe(t)
 	if !strings.Contains(p.body, "The disk is nearly full") || !strings.Contains(p.body, `class="callout bad"`) || strings.Count(p.body, `class="ndisk"`) != 2 {

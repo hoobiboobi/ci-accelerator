@@ -35,7 +35,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		{Kind: "Page", Label: "Images", URL: "/images", Icon: "images"},
 		{Kind: "Page", Label: "Nodes", URL: "/nodes", Icon: "nodes"},
 	}
-	targets, err := s.store.Targets(ctx, sh.Project.ProjectKey, s.now().Add(-30*24*time.Hour))
+	targets, err := s.data.Targets(ctx, sh.Project.ProjectKey, s.now().Add(-30*24*time.Hour))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -43,7 +43,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	for _, t := range targets {
 		items = append(items, indexItem{Kind: "Image", Label: orDefault(t), URL: "/images/" + url.PathEscape(imageKey(t)), Icon: "images"})
 	}
-	rows, err := s.store.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Limit: 500})
+	rows, err := s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Limit: 500})
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -61,10 +61,8 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		items = append(items, indexItem{Kind: "Pipeline", Label: title, URL: "/pipelines/" + store.PipelineKey(b.Instance, b.Pipeline), Icon: "pipe",
 			Sub: joinSet(" · ", fmt.Sprintf("#%d", b.Pipeline), short(b.SHA, 7), b.Ref)})
 	}
-	if s.opt.Live != nil {
-		for _, d := range s.opt.Live.Daemons() {
-			items = append(items, indexItem{Kind: "Node", Label: shortDaemon(d.Name), URL: "/nodes", Icon: "nodes", Sub: d.Name + paren(d.Inspection.Node)})
-		}
+	for _, d := range s.data.Daemons() {
+		items = append(items, indexItem{Kind: "Node", Label: shortDaemon(d.Name), URL: "/nodes", Icon: "nodes", Sub: d.Name + paren(d.Inspection.Node)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -99,8 +97,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many live pages open", http.StatusServiceUnavailable)
 		return
 	}
-	sub := s.store.Subscribe()
-	defer s.store.Unsubscribe(sub)
+	sub := s.data.Subscribe()
+	defer s.data.Unsubscribe(sub)
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-store")
@@ -120,7 +118,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		ok, seen := allowed[k]
 		if !seen {
 			if pk, valid := store.ParseProjectKey(k); valid {
-				if project, err := s.store.PipelineProject(r.Context(), pk.Instance, pk.ID); err == nil {
+				if project, err := s.data.PipelineProject(r.Context(), pk.Instance, pk.ID); err == nil {
 					ok = s.may(r, pk.Instance, project)
 				}
 			}
@@ -140,6 +138,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		case <-sub.C:
 			for _, k := range sub.Take() {
 				switch {
+				case k == "*":
+					// The source of changes was away: whatever the page
+					// shows may have changed.
+					fmt.Fprint(w, "event: changed\ndata: *\n\n")
 				case k == "":
 					if nodes {
 						fmt.Fprint(w, "event: changed\ndata: live\n\n")
@@ -151,7 +153,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 					}
 					project, known := projectOf[k]
 					if !known {
-						project, _ = s.store.PipelineProject(r.Context(), pk.Instance, pk.ID)
+						project, _ = s.data.PipelineProject(r.Context(), pk.Instance, pk.ID)
 						if len(projectOf) > 2000 {
 							clear(projectOf)
 						}

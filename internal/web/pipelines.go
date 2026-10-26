@@ -196,7 +196,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 			pq.Author = sh.Viewer.Username
 		}
 	}
-	branches, err := s.store.Branches(ctx, sh.Project.ProjectKey, s.now().Add(-31*24*time.Hour))
+	branches, err := s.data.Branches(ctx, sh.Project.ProjectKey, s.now().Add(-31*24*time.Hour))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -204,14 +204,14 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	for _, b := range branches {
 		v.Branches = append(v.Branches, Option{Value: b, Label: b, On: b == v.Branch})
 	}
-	list, err := s.store.PipelineList(ctx, pq)
+	list, err := s.data.PipelineList(ctx, pq)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	// GitLab says how long each job waited for a runner: read what is
 	// missing for the pipelines on the page, together, briefly.
-	api, cred := s.api(r)
+	api := s.api(r)
 	v.NoAPI = api == nil
 	if api != nil {
 		var wg sync.WaitGroup
@@ -228,11 +228,11 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 			wg.Add(1)
 			go func(p store.PipeRow) {
 				defer wg.Done()
-				api.Ensure(cred, p.Instance, sh.Project.ID, p.ID, p.Status, p.APIAt, wait)
+				api.Ensure(ctx, p.Instance, sh.Project.ID, p.ID, p.Status, p.APIAt, wait)
 			}(p)
 		}
 		wg.Wait()
-		if list, err = s.store.PipelineList(ctx, pq); err != nil {
+		if list, err = s.data.PipelineList(ctx, pq); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -241,12 +241,12 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	for i, p := range list {
 		ids[i] = p.ID
 	}
-	jobs, err := s.store.JobsOf(ctx, sh.Project.Instance, ids)
+	jobs, err := s.data.JobsOf(ctx, sh.Project.Instance, ids)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	builds, err := s.store.BuildsOf(ctx, sh.Project.ProjectKey, ids)
+	builds, err := s.data.BuildsOf(ctx, sh.Project.ProjectKey, ids)
 	if err != nil {
 		s.fail(w, err)
 		return

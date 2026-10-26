@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -22,28 +23,21 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
-	"github.com/hoobiboobi/ci-accelerator/internal/collector"
-	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
 //go:embed templates/*.html static/*
 var files embed.FS
 
-// Live is the daemons as the collector sees them now.
-type Live interface {
-	Daemons() []collector.DaemonState
-}
-
-// Options are the console's sources besides its store; each may be nil.
+// Options are the console's sources besides its backend; each may be nil.
 type Options struct {
-	Live Live
-	API  *gitlab.Fetcher
-	// Token is the installation's GitLab token; nil: none. Not used with
-	// sign-in: GitLab is read with each person's own token.
-	Token gitlab.Credential
+	// GitLab reads GitLab's API; nil: the console has no way to.
+	GitLab GitLab
+	// InstallToken: the installation has a GitLab token of its own. Not
+	// used with sign-in: GitLab is read with each person's own token.
+	InstallToken bool
 	// Auth signs people in through GitLab; nil: no sign-in.
-	Auth *auth.Auth
+	Auth Signer
 	// Release names the installation on the nodes page.
 	Release string
 	// Version of the console, shown at the bottom of the sidebar.
@@ -56,7 +50,7 @@ type Options struct {
 
 // Server renders the pages.
 type Server struct {
-	store  *store.Store
+	data   Backend
 	opt    Options
 	log    *slog.Logger
 	files  fs.FS // templates/ and static/
@@ -108,8 +102,8 @@ var pageFiles = map[string][]string{
 
 // New parses the templates; a template that does not parse is a build
 // error, caught by the tests.
-func New(s *store.Store, log *slog.Logger, opt Options) (*Server, error) {
-	srv := &Server{store: s, opt: opt, log: log, files: files,
+func New(b Backend, log *slog.Logger, opt Options) (*Server, error) {
+	srv := &Server{data: b, opt: opt, log: log, files: files,
 		streams: make(chan struct{}, MaxStreams), logs: make(chan struct{}, MaxLogReads), Heartbeat: 25 * time.Second, APIWait: 700 * time.Millisecond, now: time.Now}
 	if opt.Assets != nil {
 		srv.files = opt.Assets
@@ -251,6 +245,14 @@ func (s *Server) render(w http.ResponseWriter, page string, status int, data any
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
+	var away interface{ Unavailable() bool }
+	if errors.As(err, &away) && away.Unavailable() {
+		// The web of a split console: its controller is away (restarting).
+		s.log.Warn("page", "err", err)
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "The console's controller is not reachable; try again in a moment.", http.StatusBadGateway)
+		return
+	}
 	s.log.Error("page", "err", err)
 	http.Error(w, "the console could not read its store", http.StatusInternalServerError)
 }
@@ -304,7 +306,7 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {
 // before, or the most recently built.
 func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r), Version: s.opt.Version, Zone: zone(r).String()}
-	ps, err := s.store.Projects(r.Context())
+	ps, err := s.data.Projects(r.Context())
 	if err != nil {
 		return sh, err
 	}
@@ -328,16 +330,15 @@ func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 		// Nothing to see: every query of the pages finds nothing.
 		sh.Project.ProjectKey, sh.NoProjects = nothing, true
 	}
-	if s.opt.Live != nil {
-		for _, d := range s.opt.Live.Daemons() {
-			if dv := diskView(d.Inspection); dv != nil && dv.Level == "crit" {
-				sh.Warn = "A build node's disk is nearly full"
-			}
+	daemons := s.data.Daemons()
+	for _, d := range daemons {
+		if dv := diskView(d.Inspection); dv != nil && dv.Level == "crit" {
+			sh.Warn = "A build node's disk is nearly full"
 		}
-		for _, d := range s.opt.Live.Daemons() {
-			if !d.Connected {
-				sh.Warn = "A build daemon is not reachable"
-			}
+	}
+	for _, d := range daemons {
+		if !d.Connected {
+			sh.Warn = "A build daemon is not reachable"
 		}
 	}
 	return sh, nil
@@ -394,28 +395,29 @@ func (s *Server) chooseProject(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, to, http.StatusFound)
 }
 
-// api returns the GitLab reader and whose token it reads with for r; nil
-// when the console has no token to read with.
-func (s *Server) api(r *http.Request) (*gitlab.Fetcher, gitlab.Credential) {
-	if s.opt.API == nil {
-		return nil, nil
+// api returns the GitLab reader for r, which reads with the token of the
+// person on r (sign-in) or the installation's; nil when there is no token
+// to read with.
+func (s *Server) api(r *http.Request) GitLab {
+	if s.opt.GitLab == nil {
+		return nil
 	}
 	if s.opt.Auth != nil {
-		if v := viewer(r); v != nil {
-			return s.opt.API, v
+		if viewer(r) != nil {
+			return s.opt.GitLab
 		}
-		return nil, nil
+		return nil
 	}
-	if s.opt.Token == nil {
-		return nil, nil
+	if !s.opt.InstallToken {
+		return nil
 	}
-	return s.opt.API, s.opt.Token
+	return s.opt.GitLab
 }
 
 // ensureAPI reads a pipeline's jobs from GitLab when that is due, waiting
 // briefly; it says whether it asked.
 func (s *Server) ensureAPI(r *http.Request, p *store.Pipeline) bool {
-	api, cred := s.api(r)
+	api := s.api(r)
 	if p == nil || api == nil || p.ProjectID == 0 {
 		return false
 	}
@@ -428,7 +430,7 @@ func (s *Server) ensureAPI(r *http.Request, p *store.Pipeline) bool {
 		}
 		status = ""
 	}
-	api.Ensure(cred, p.Instance, p.ProjectID, p.ID, status, p.APIAt, s.APIWait)
+	api.Ensure(r.Context(), p.Instance, p.ProjectID, p.ID, status, p.APIAt, s.APIWait)
 	return true
 }
 

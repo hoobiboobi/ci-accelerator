@@ -83,7 +83,7 @@ func signedIn(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *
 	to, _ := url.Parse(g.srv.URL)
 	via := &http.Client{Transport: rewrite{to}, Timeout: 10 * time.Second}
 	const gl = "https://gitlab.example.com/"
-	ts, st, ids, _ := consoleBuild(t, func(st *store.Store) Options {
+	ts, st, ids, _ := consoleBuild(t, func(st *store.Store) testOpts {
 		client := gitlab.New([]string{gl})
 		client.HTTP = via
 		a, err := auth.New(auth.Config{PublicURL: "https://127.0.0.1", Key: make([]byte, 32), HTTP: via,
@@ -91,7 +91,7 @@ func signedIn(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *
 		if err != nil {
 			t.Fatal(err)
 		}
-		return Options{Auth: a, API: &gitlab.Fetcher{Client: client, Store: st}}
+		return testOpts{Auth: a, API: &gitlab.Fetcher{Client: client, Store: st}}
 	}, httptest.NewTLSServer)
 	inst := history.InstancePrefix(gl)
 	browser := func(user string) *http.Client {
