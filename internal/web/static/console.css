@@ -783,7 +783,9 @@ a.boxh:hover { background: var(--hover); }
 .tog:hover { color: var(--ink); }
 .tog[aria-pressed="true"] { border-color: var(--ink-2); color: var(--ink); background: var(--sel); }
 .zoomi { font-size: 11.5px; color: var(--ink-3); display: inline-flex; gap: 6px; align-items: center; }
-.wfv .wfbox { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; overflow: auto; max-height: max(420px, calc(100vh - 230px)); position: relative; overscroll-behavior: contain; }
+/* No overscroll-behavior: once the box has scrolled to its end, the wheel
+   goes on to the page (contain trapped it inside the box). */
+.wfv .wfbox { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; overflow: auto; max-height: max(420px, calc(100vh - 230px)); position: relative; }
 .wfv .wfin { min-width: calc(var(--tw) + 460px); }
 .wfv .wfax { position: sticky; top: 0; z-index: 4; display: grid; grid-template-columns: var(--tw) minmax(0, 1fr); background: var(--raised); border-bottom: 1px solid var(--rule); height: 26px; }
 .wfv .wfax .h { position: sticky; left: 0; z-index: 2; background: var(--raised); border-right: 1px solid var(--rule); padding: 0 10px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--ink-3); }
