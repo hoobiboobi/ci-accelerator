@@ -7,13 +7,13 @@
     <div class="seg" role="group" aria-label="Depth">{{if gt .Jobs 1}}<button type="button" data-wf-depth="jobs" aria-pressed="true">Jobs</button>{{end}}<button type="button" data-wf-depth="stages" aria-pressed="{{if gt .Jobs 1}}false{{else}}true{{end}}">Stages</button><button type="button" data-wf-depth="steps" aria-pressed="false">Steps</button></div>
   </div>
   <div class="wfbox"><div class="wfin">
-    <div class="wfax"><div class="h"><span class="lbl">Pipeline › job › stage › step</span><span>{{len .Rows}} rows</span></div><div class="tk">{{range .Ticks}}<span style="left: {{.L}}%">{{.Label}}</span>{{end}}</div></div>
+    <div class="wfax"><div class="h"><span class="lbl">Pipeline › job › stage › step</span><span>{{len .Rows}} rows</span><span class="wgrip" role="separator" aria-orientation="vertical" aria-label="Width of the names column" tabindex="0" title="Drag to widen the names; double-click to fit the longest name"></span></div><div class="tk">{{range .Ticks}}<span style="left: {{.L}}%">{{.Label}}</span>{{end}}</div></div>
     <div class="tg" role="tree" aria-label="Timeline">
       <div class="gridl" aria-hidden="true">{{range .Ticks}}<b style="left: {{.L}}%"></b>{{end}}</div>
       {{range .Rows}}
       <div class="row k-{{.Kind}} d{{.Depth}}{{if .Crit}} critrow{{end}}{{if .OnCrit}} oncrit{{end}}" role="treeitem" data-id="{{.ID}}" data-parent="{{.Parent}}" data-state="{{.State}}" data-text="{{.Text}}" {{if .Kids}}aria-expanded="{{if .Open}}true{{else}}false{{end}}"{{end}}{{if .Hidden}} hidden{{end}} tabindex="-1"{{with .Step}} data-wstep="{{.}}"{{end}}{{with .Link}} data-link="{{.}}"{{end}}>
         <div class="tc">{{if .Kids}}<button class="wchev" type="button" tabindex="-1" aria-label="Expand or fold">{{icon "chev" 12}}</button>{{else}}<span class="sp16"></span>{{end}}<span class="wg {{.Glyph}}">{{icon .Icon 11}}</span>
-          {{if .Link}}<a class="nm{{if .Mono}} cmd{{end}}" href="{{.Link}}">{{.Name}}</a>{{else}}<span class="nm{{if .Mono}} cmd{{end}}">{{if .Key}}<span class="k">{{.Key}}</span>{{end}}{{.Name}}</span>{{end}}
+          {{if .Link}}<a class="nm{{if .Mono}} cmd{{end}}" href="{{.Link}}" title="{{.Name}}">{{.Name}}</a>{{else}}<span class="nm{{if .Mono}} cmd{{end}}" title="{{if .Key}}{{.Key}} {{end}}{{.Name}}">{{if .Key}}<span class="k">{{.Key}}</span>{{end}}{{.Name}}</span>{{end}}
           <span class="meta">{{with .Chip}}<span class="stat st-{{.Key}} vtag">{{icon .Icon 11}}{{.Label}}</span>{{end}}{{if and .Crit (eq .Kind "job")}}<span class="chip crit" title="Sets the pipeline time">◆</span>{{end}}</span></div>
         <div class="tl"><div class="trk">{{range .Bars}}<i class="bar c-{{.Class}}" style="left: {{.L}}%; width: {{.W}}%"{{with .Title}} title="{{.}}"{{end}}></i>{{end}}{{if .LabelEnd}}<span class="lab end over" style="right: {{.LabelEnd}}%">{{.Label}}</span>{{else}}<span class="lab" style="left: {{.LabelL}}%">{{.Label}}</span>{{end}}</div></div>
       </div>
