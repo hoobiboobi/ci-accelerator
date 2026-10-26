@@ -11,7 +11,7 @@
     <div class="tg" role="tree" aria-label="Timeline">
       <div class="gridl" aria-hidden="true">{{range .Ticks}}<b style="left: {{.L}}%"></b>{{end}}</div>
       {{range .Rows}}
-      <div class="row k-{{.Kind}} d{{.Depth}}{{if .Crit}} critrow{{end}}{{if .OnCrit}} oncrit{{end}}" role="treeitem" data-id="{{.ID}}" data-parent="{{.Parent}}" data-state="{{.State}}" data-text="{{.Text}}" {{if .Kids}}aria-expanded="{{if .Open}}true{{else}}false{{end}}"{{end}} tabindex="-1"{{with .Step}} data-wstep="{{.}}"{{end}}{{with .Link}} data-link="{{.}}"{{end}}>
+      <div class="row k-{{.Kind}} d{{.Depth}}{{if .Crit}} critrow{{end}}{{if .OnCrit}} oncrit{{end}}" role="treeitem" data-id="{{.ID}}" data-parent="{{.Parent}}" data-state="{{.State}}" data-text="{{.Text}}" {{if .Kids}}aria-expanded="{{if .Open}}true{{else}}false{{end}}"{{end}}{{if .Hidden}} hidden{{end}} tabindex="-1"{{with .Step}} data-wstep="{{.}}"{{end}}{{with .Link}} data-link="{{.}}"{{end}}>
         <div class="tc">{{if .Kids}}<button class="wchev" type="button" tabindex="-1" aria-label="Expand or fold">{{icon "chev" 12}}</button>{{else}}<span class="sp16"></span>{{end}}<span class="wg {{.Glyph}}">{{icon .Icon 11}}</span>
           {{if .Link}}<a class="nm{{if .Mono}} cmd{{end}}" href="{{.Link}}">{{.Name}}</a>{{else}}<span class="nm{{if .Mono}} cmd{{end}}">{{if .Key}}<span class="k">{{.Key}}</span>{{end}}{{.Name}}</span>{{end}}
           <span class="meta">{{with .Chip}}<span class="stat st-{{.Key}} vtag">{{icon .Icon 11}}{{.Label}}</span>{{end}}{{if and .Crit (eq .Kind "job")}}<span class="chip crit" title="Sets the pipeline time">◆</span>{{end}}</span></div>

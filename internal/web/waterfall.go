@@ -35,7 +35,11 @@ type WFRow struct {
 	Note       string // a job without a build: what GitLab says of it
 	Crit       bool
 	Open       bool // its children show at first
-	Kids       bool
+	// Hidden: a parent starts folded. Rendered by the server, so the first
+	// paint is already the folded tree (folding in the script after load
+	// flashed every row open for a moment).
+	Hidden bool
+	Kids   bool
 	Bars       []WFBar
 	Label      template.HTML
 	LabelL     string // where the label sits, percent
@@ -396,7 +400,19 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time, onlyOne bool) *Wa
 			r.LabelEnd = strconv.FormatFloat(at, 'f', 2, 64)
 		}
 	}
+	hideFolded(w.Rows)
 	return w
+}
+
+// hideFolded marks the rows under a folded parent: parents come before
+// their children.
+func hideFolded(rows []WFRow) {
+	shut := map[string]bool{} // rows whose children do not show
+	for i := range rows {
+		r := &rows[i]
+		r.Hidden = r.Parent != "" && shut[r.Parent]
+		shut[r.ID] = r.Hidden || (r.Kids && !r.Open)
+	}
 }
 
 // barSpan is where a row's bars begin and end, percent of the axis.

@@ -1464,3 +1464,48 @@ func TestNodesDisk(t *testing.T) {
 		t.Error("a nearly full disk does not light the Nodes item")
 	}
 }
+
+// The server renders the folded tree, so the first paint is final: a row
+// under a folded parent carries hidden, every other row does not. Folding
+// in the script after load showed every step for a moment.
+func TestFoldedRowsAreHiddenByTheServer(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	rowRe := regexp.MustCompile(`<div class="row [^"]*"[^>]*data-id="([^"]*)" data-parent="([^"]*)"[^>]*>`)
+	checkedWF, checkedSteps := 0, 0
+	for _, k := range keys {
+		p := get(t, ts, "/pipelines/"+k)
+		open := map[string]bool{"": true}
+		visible := map[string]bool{"": true}
+		for _, m := range rowRe.FindAllStringSubmatch(p.body, -1) {
+			tag, id, parent := m[0], m[1], m[2]
+			want := visible[parent] && open[parent]
+			got := !strings.Contains(tag, " hidden")
+			if got != want {
+				t.Errorf("%s row %s (parent %s): visible %v, want %v", k, id, parent, got, want)
+			}
+			visible[id] = got
+			open[id] = !strings.Contains(tag, `aria-expanded="false"`)
+			checkedWF++
+		}
+		for _, b := range byPipe[k] {
+			bp := get(t, ts, fmt.Sprintf("/builds/%d", b.ID))
+			folded := map[string]bool{}
+			for _, m := range regexp.MustCompile(`data-blk="(\d+)" data-fold="(true|false)" aria-expanded="(true|false)"`).FindAllStringSubmatch(bp.body, -1) {
+				if (m[2] == "true") != (m[3] == "false") {
+					t.Errorf("build %d block %s: fold %s but aria-expanded %s", b.ID, m[1], m[2], m[3])
+				}
+				folded[m[1]] = m[2] == "true"
+			}
+			for _, m := range regexp.MustCompile(`<tr class="st[^"]*" data-of="(\d+)"[^>]*>`).FindAllStringSubmatch(bp.body, -1) {
+				if hidden := strings.Contains(m[0], " hidden"); hidden != folded[m[1]] {
+					t.Errorf("build %d: a step of block %s hidden=%v, folded=%v", b.ID, m[1], hidden, folded[m[1]])
+				}
+				checkedSteps++
+			}
+		}
+	}
+	if checkedWF == 0 || checkedSteps == 0 {
+		t.Fatalf("checked %d timeline rows and %d step rows", checkedWF, checkedSteps)
+	}
+}
