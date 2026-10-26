@@ -142,6 +142,8 @@ else
 fi
 
 kc() { kubectl --context "$CTX" "$@"; }
+# Port-forwards in the background call kubectl itself, not kc: $! must be
+# kubectl's pid, or kill leaves it running (a function runs in a subshell).
 hc() { helm --kube-context "$CTX" "$@"; }
 
 # --- reporting ---------------------------------------------------------------
@@ -1115,7 +1117,7 @@ box_ui() {
     if [ "${E2E_UI:-}" = 1 ]; then fail "browser checks: no Node >= 22 (make ui-tools)"; else info "browser checks skipped: no Node >= 22 (make ui-tools)"; fi
     return
   fi
-  kc -n "$BOX_NS" port-forward "svc/$BOX_REL-console" "$port:8080" >"$LOGS/box-ui-port-forward.log" 2>&1 &
+  kubectl --context "$CTX" -n "$BOX_NS" port-forward "svc/$BOX_REL-console" "$port:8080" >"$LOGS/box-ui-port-forward.log" 2>&1 &
   pf=$!
   eventually 15 quiet curl -fsS "http://127.0.0.1:$port/healthz" || { fail "browser checks: no port-forward to the console"; kill "$pf" 2>/dev/null; return; }
   if "$node" "$ROOT/test/ui/ui.mjs" --base "http://127.0.0.1:$port" >"$LOGS/box-ui.log" 2>&1; then ok=1; fi
@@ -1233,7 +1235,7 @@ box_signin() {
          fail "turn on the console's sign-in (see $LOGS/box-signin-upgrade.log, box-signin-console.log)"; return; }
   check "the install notes give the OAuth application's redirect URI" \
     grep -q "fake-gitlab.$NS.svc/: $url/auth/callback/$inst" "$LOGS/box-signin-upgrade.log"
-  kc -n "$BOX_NS" port-forward "svc/$BOX_REL-console" "$port:8080" >"$LOGS/box-signin-port-forward.log" 2>&1 &
+  kubectl --context "$CTX" -n "$BOX_NS" port-forward "svc/$BOX_REL-console" "$port:8080" >"$LOGS/box-signin-port-forward.log" 2>&1 &
   pf=$!
   eventually 30 quiet curl -fsS "$url/healthz" || { fail "sign-in: no port-forward to the console"; kill "$pf" 2>/dev/null; return; }
   check "with sign-in, a page sends to sign in" \
@@ -1374,7 +1376,7 @@ box_split() {
     eval '[ "$(kc -n "$BOX_NS" get deploy "$BOX_REL-console-web" -o jsonpath="{.status.readyReplicas}" 2>/dev/null)" = 2 ]'
   # Who may call: through a port-forward, which a NetworkPolicy does not see.
   local port=$((${E2E_UI_PORT:-18431} + 7)) pf
-  kc -n "$BOX_NS" port-forward "deploy/$BOX_REL-console" "$port:8443" >"$LOGS/box-api-port-forward.log" 2>&1 &
+  kubectl --context "$CTX" -n "$BOX_NS" port-forward "deploy/$BOX_REL-console" "$port:8443" >"$LOGS/box-api-port-forward.log" 2>&1 &
   pf=$!
   eventually 15 quiet curl -ksS -o /dev/null "https://127.0.0.1:$port/healthz" \
     || { fail "no port-forward to the controller's API"; kill "$pf" 2>/dev/null; return; }
