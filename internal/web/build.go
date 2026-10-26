@@ -323,7 +323,11 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if p.Saved > 0 {
 		v.Details = append(v.Details, KV{"Time the cache saved, about", duration(p.Saved)})
 	}
-	v.Details = append(v.Details, KV{"Started", b.Started.UTC().Format(time.RFC3339)})
+	started := when(b.Started, zone(r))
+	if !strings.HasSuffix(started.Text, " UTC") {
+		started.Text += " · " + started.UTC
+	}
+	v.Details = append(v.Details, KV{"Started", started.Text})
 	if len(b.Images) > 0 {
 		v.Details = append(v.Details, KV{"Pushed", strings.Join(b.Images, ", ")})
 	}
@@ -672,12 +676,8 @@ func orDefault(target string) string {
 	return target
 }
 
-func ago(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format("2 Jan 15:04 UTC")
-}
+// ago is a past moment with its day, in the reader's zone.
+func ago(t time.Time, loc *time.Location) string { return stampOf(t, loc, "2 Jan 15:04").Text }
 
 // traceID is the trace id the runner gives a job.
 func traceID(a history.Attribution) string {

@@ -111,7 +111,7 @@ type BuildItem struct {
 	Target          string
 	Status          Status
 	Why             string
-	When            string
+	When            Stamp
 	Dur, Delta      string
 	Slower          bool
 	Ref, SHA, Title string
@@ -121,10 +121,10 @@ type BuildItem struct {
 	Quiet           bool // came from the cache: shown, but quietly
 }
 
-func (s *Server) item(b store.BuildRow, usual map[string]usualTime) BuildItem {
+func (s *Server) item(b store.BuildRow, usual map[string]usualTime, loc *time.Location) BuildItem {
 	st := rowStatus(b)
 	it := BuildItem{ID: b.ID, URL: fmt.Sprintf("/builds/%d", b.ID), Target: orDefault(b.Target), Status: st, Why: whyShort(b),
-		When: clock(b.Started, s.now()), Ref: b.Ref, SHA: short(b.SHA, 8), Title: b.Title, Pipeline: b.Pipeline, Quiet: st.Key == "cached"}
+		When: clockStamp(b.Started, inZone(s.now(), loc)), Ref: b.Ref, SHA: short(b.SHA, 8), Title: b.Title, Pipeline: b.Pipeline, Quiet: st.Key == "cached"}
 	if b.Target == "" {
 		it.Target = "default target"
 	}
@@ -161,17 +161,30 @@ func delta(d, usual time.Duration) (string, bool) {
 	return "−" + duration(abs), false
 }
 
-// clock is a time the way lists show it: the time of day today, the day
-// and time otherwise.
+// clock is a time the way lists show it, in now's location (the reader's
+// zone, see inZone): the time of day today, the day and time otherwise;
+// "UTC" follows when that is the zone.
 func clock(t, now time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	t, now = t.UTC(), now.UTC()
+	t = t.In(now.Location())
+	out := t.Format("2 Jan 15:04")
 	if t.YearDay() == now.YearDay() && t.Year() == now.Year() {
-		return t.Format("15:04")
+		out = t.Format("15:04")
 	}
-	return t.Format("2 Jan 15:04")
+	if now.Location() == time.UTC {
+		out += " UTC"
+	}
+	return out
+}
+
+// clockStamp is clock with the moment in UTC for a tooltip.
+func clockStamp(t, now time.Time) Stamp {
+	if t.IsZero() {
+		return Stamp{}
+	}
+	return Stamp{Text: clock(t, now), UTC: t.UTC().Format("2006-01-02 15:04:05") + " UTC"}
 }
 
 // ---- the build list ----
@@ -308,7 +321,7 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 		v.Newest = f.URL()
 	}
 	for _, b := range rows {
-		v.Items = append(v.Items, s.item(b, st.usual))
+		v.Items = append(v.Items, s.item(b, st.usual, zone(r)))
 	}
 	if f.Group {
 		at := map[uint64]int{}
@@ -409,7 +422,7 @@ func reasonText(b store.BuildRow, st Status) string {
 }
 
 // reasons groups the rebuilt builds of bs, the most time first.
-func (s *Server) reasons(bs []store.BuildRow, window string, limit int) []Reason {
+func (s *Server) reasons(bs []store.BuildRow, window string, limit int, loc *time.Location) []Reason {
 	at := map[string]int{}
 	var out []Reason
 	images := map[string]map[string]bool{}
@@ -440,7 +453,7 @@ func (s *Server) reasons(bs []store.BuildRow, window string, limit int) []Reason
 		if len(names) > 5 {
 			out[i].More, names = len(names)-5, names[:5]
 		}
-		out[i].Images, out[i].Last = names, clock(last[fp], s.now())
+		out[i].Images, out[i].Last = names, clock(last[fp], inZone(s.now(), loc))
 		if len(images[fp]) == 1 {
 			q := url.Values{"outcome": {out[i].Status.Key}, "image": {names[0]}}
 			out[i].URL = "/builds?" + q.Encode()
@@ -476,7 +489,7 @@ type StripCell struct {
 	Status     Status
 }
 
-func (s *Server) imageRows(bs []store.BuildRow, since time.Time) []ImageRow {
+func (s *Server) imageRows(bs []store.BuildRow, since time.Time, loc *time.Location) []ImageRow {
 	by := map[string][]store.BuildRow{}
 	for _, b := range bs {
 		if b.Started.Before(since) {
@@ -514,7 +527,7 @@ func (s *Server) imageRows(bs []store.BuildRow, since time.Time) []ImageRow {
 			b := list[i]
 			st := rowStatus(b)
 			row.Strip = append(row.Strip, StripCell{URL: fmt.Sprintf("/builds/%d", b.ID), Status: st,
-				Title: st.Label + " · " + clock(b.Started, s.now()) + " · " + duration(b.Duration())})
+				Title: st.Label + " · " + clock(b.Started, inZone(s.now(), loc)) + " · " + duration(b.Duration())})
 		}
 		out = append(out, row)
 	}
@@ -607,7 +620,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	if lost > 0 {
 		v.NotCode = int(100 * notCode / lost)
 	}
-	all := s.reasons(in, v.Window, 0)
+	all := s.reasons(in, v.Window, 0, zone(r))
 	v.Reasons = all
 	if len(all) > 6 {
 		v.Reasons, v.MoreReasons = all[:6], fmt.Sprintf("%d more reasons", len(all)-6)
@@ -642,7 +655,7 @@ func (s *Server) images(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	v.Images = s.imageRows(st.builds, s.now().Add(-span))
+	v.Images = s.imageRows(st.builds, s.now().Add(-span), zone(r))
 	v.Shell = sh
 	s.render(w, "images", http.StatusOK, v)
 }
@@ -829,7 +842,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	if first.After(since) {
 		since = first
 	}
-	v.Chart = s.chart(bs, since, ut.Rebuilt)
+	v.Chart = s.chart(bs, since, ut.Rebuilt, zone(r))
 	counts, err := s.store.StepCounts(ctx, sh.Project.ProjectKey, target, since, 8)
 	if err != nil {
 		s.fail(w, err)
@@ -842,7 +855,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	for _, c := range counts {
 		v.Steps = append(v.Steps, StepRowView{Name: c.Name, Ran: c.Ran, Of: v.Builds, Time: duration(c.RanTime), W: c.Ran * 100 / most})
 	}
-	v.Reasons = s.reasons(bs, v.Window, 5)
+	v.Reasons = s.reasons(bs, v.Window, 5, zone(r))
 	latest, err := s.store.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, Limit: 10})
 	if err != nil {
 		s.fail(w, err)
@@ -850,7 +863,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	}
 	st := usualTimes(bs)
 	for _, b := range latest {
-		v.Recent = append(v.Recent, s.item(b, st))
+		v.Recent = append(v.Recent, s.item(b, st, zone(r)))
 	}
 	v.ListURL = Filters{Image: target}.URL()
 	v.Shell = sh
@@ -925,8 +938,8 @@ const maxDots = 300
 // chartSlices is how many slices of the window grouped builds fall into.
 const chartSlices = 90
 
-func (s *Server) chart(bs []store.BuildRow, since time.Time, usual time.Duration) *Chart {
-	from, to := since, s.now()
+func (s *Server) chart(bs []store.BuildRow, since time.Time, usual time.Duration, loc *time.Location) *Chart {
+	from, to := since, inZone(s.now(), loc)
 	span := to.Sub(from)
 	if span <= 0 {
 		return nil

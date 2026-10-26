@@ -164,12 +164,8 @@ func pctOf(part, whole time.Duration) float64 {
 	return math.Max(0, math.Min(100, 100*float64(part)/float64(whole)))
 }
 
-func when(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format("2 Jan 15:04")
-}
+// when is a moment with its day, in the reader's zone.
+func when(t time.Time, loc *time.Location) Stamp { return stampOf(t, loc, "2 Jan 15:04:05") }
 
 func shortID(id uint64) string {
 	s := strconv.FormatUint(id, 10)

@@ -5,8 +5,8 @@
   <form class="filters" method="get" action="/pipelines" data-autosubmit role="search">
     <label class="fq"><span>Search</span><input type="search" name="q" id="pQ" value="{{.Q}}" placeholder="Pipeline #, commit SHA, title, job, author" maxlength="200" autocomplete="off" spellcheck="false" enterkeyhint="search"></label>
     <label><span>Period</span><select name="period" id="pPeriod">{{range .Periods}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
-    {{if eq .Period "custom"}}<label><span>From (UTC)</span><input type="date" name="from" id="pFrom" value="{{.From}}"{{if .BadDates}} aria-invalid="true"{{end}}></label>
-    <label><span>To (UTC)</span><input type="date" name="to" id="pTo" value="{{.To}}"{{if .BadDates}} aria-invalid="true"{{end}}></label>{{end}}
+    {{if eq .Period "custom"}}<label><span>From</span><input type="date" name="from" id="pFrom" value="{{.From}}"{{if .BadDates}} aria-invalid="true"{{end}}></label>
+    <label><span>To</span><input type="date" name="to" id="pTo" value="{{.To}}"{{if .BadDates}} aria-invalid="true"{{end}}></label>{{end}}
     <label><span>Branch</span><select name="branch" id="pBranch"><option value="">All branches</option>{{range .Branches}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
     {{if .CanMine}}<label class="chk"><input type="checkbox" name="mine" value="1" id="pMine" {{if .Mine}}checked{{end}}><span>Mine</span></label>{{end}}
     <button class="btn" type="submit">Apply</button>
@@ -21,7 +21,7 @@
       <span class="pstate ps-{{.State.Key}}">{{icon .State.Icon 12}}{{.State.Label}}</span>
       <span class="pc-title">{{.Title}}</span>
       <span class="pc-dur">{{if .Dur}}{{.Dur}}{{else}}—{{end}}</span>
-      <span class="pc-meta">{{with .Ref}}<span>{{.}}</span>{{end}}{{with .SHA}}<span class="mono">{{.}}</span>{{end}}{{with .Who}}<span>{{.}}</span>{{end}}<span>{{.When}}</span></span>
+      <span class="pc-meta">{{with .Ref}}<span>{{.}}</span>{{end}}{{with .SHA}}<span class="mono">{{.}}</span>{{end}}{{with .Who}}<span>{{.}}</span>{{end}}<span title="{{.When.UTC}}">{{.When}}</span></span>
     </a>
     <div class="pc-facts">
       <span><b>{{.Jobs}}</b> job{{if ne .Jobs 1}}s{{end}}{{if .NotRun}} · {{.NotRun}} did not run{{end}}</span>

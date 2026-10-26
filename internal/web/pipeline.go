@@ -24,7 +24,7 @@ type PipelineView struct {
 	Key, Title string
 	ID         uint64
 	Ref, SHA   string
-	Started    string
+	Started    Stamp
 	GitLabURL  string
 	Sentence   string
 	Ready      string // from the first build's start to the last build's end
@@ -99,7 +99,7 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 	}
 	v.OtherJobs = len(jobs) - len(jobsWithBuilds(rows))
 	if info != nil {
-		v.Card = s.pipeCard(store.PipeRow{Instance: instance, ID: id, Status: info.Status, Created: info.Created, WebURL: info.WebURL}, jobs, rows)
+		v.Card = s.pipeCard(store.PipeRow{Instance: instance, ID: id, Status: info.Status, Created: info.Created, WebURL: info.WebURL}, jobs, rows, zone(r))
 	}
 	for _, j := range jobs {
 		if v.GitLabURL == "" {
@@ -115,7 +115,7 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 				v.Title = b.Title
 			}
 		}
-		it := s.item(b, st.usual)
+		it := s.item(b, st.usual, zone(r))
 		switch it.Status.Key {
 		case "cached":
 			v.Cached = append(v.Cached, it)
@@ -137,7 +137,7 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(rows) > 0 {
-		v.Started = clock(t0, s.now())
+		v.Started = clockStamp(t0, inZone(s.now(), zone(r)))
 		v.Ready = duration(t1.Sub(t0))
 		v.Sentence = pipelineSentence(v)
 	}
@@ -314,8 +314,8 @@ type JobView struct {
 	Result       string
 	Waited       string
 	Ran          string
-	Started      string
-	Finished     string
+	Started      Stamp
+	Finished     Stamp
 	Runner       string
 	Node         string
 	StartedBy    string
@@ -351,10 +351,10 @@ func jobFacts(v *JobView, j *store.JobInfo, now time.Time) {
 		v.Ran = "running for " + duration(now.Sub(j.Started))
 	}
 	if !j.Started.IsZero() {
-		v.Started = when(j.Started)
+		v.Started = when(j.Started, now.Location())
 	}
 	if !j.Finished.IsZero() {
-		v.Finished = when(j.Finished)
+		v.Finished = when(j.Finished, now.Location())
 	}
 	v.Runner, v.Node, v.StartedBy, v.AllowFailure = j.Runner, j.Node, j.StartedBy, j.AllowFailure
 }
@@ -394,7 +394,7 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	}
 	pinProject(&sh, instance, j.ProjectID)
 	v := &JobView{Name: j.Name, Stage: j.Stage, GitLabURL: webURL(j.URL)}
-	jobFacts(v, j, s.now())
+	jobFacts(v, j, inZone(s.now(), zone(r)))
 	if j.PipelineID != 0 {
 		v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(instance, j.PipelineID), "#"+strconv.FormatUint(j.PipelineID, 10)
 	}
@@ -451,7 +451,7 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.As(err, &rl):
 		w.WriteHeader(http.StatusTooManyRequests)
-		fmt.Fprintf(w, "GitLab asks the console to wait until %s.", rl.Until.UTC().Format("15:04:05 UTC"))
+		fmt.Fprintf(w, "GitLab asks the console to wait until %s.", stampOf(rl.Until, zone(r), "15:04:05"))
 		return
 	case err != nil:
 		s.log.Warn("job log", "job", id, "err", err)

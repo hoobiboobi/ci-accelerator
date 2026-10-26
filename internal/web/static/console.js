@@ -788,7 +788,7 @@
         if (q) { q.focus({ preventScroll: true }); q.setSelectionRange(typing[0], typing[1]); }
       }
       // In UTC, like every time the console shows.
-      if (status) status.textContent = "Updated " + new Date().toISOString().slice(11, 19);
+      if (status) status.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
     } finally {
       busy = false;
     }

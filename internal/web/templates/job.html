@@ -9,8 +9,8 @@
       {{if .Stage}}<dt>Stage</dt><dd>{{.Stage}}</dd>{{end}}
       {{if .Waited}}<dt>Waited for a runner</dt><dd>{{.Waited}}</dd>{{end}}
       {{if .Ran}}<dt>Ran</dt><dd>{{.Ran}}{{if .Approx}} <span class="muted">(from the job pod: approximate)</span>{{end}}</dd>{{end}}
-      {{if .Started}}<dt>Started</dt><dd>{{.Started}}</dd>{{end}}
-      {{if .Finished}}<dt>Finished</dt><dd>{{.Finished}}</dd>{{end}}
+      {{if .Started.Text}}<dt>Started</dt><dd title="{{.Started.UTC}}">{{.Started}}</dd>{{end}}
+      {{if .Finished.Text}}<dt>Finished</dt><dd title="{{.Finished.UTC}}">{{.Finished}}</dd>{{end}}
       {{if .Runner}}<dt>Runner</dt><dd>{{.Runner}}</dd>{{end}}
       {{if .Node}}<dt>Node</dt><dd><span class="mono">{{.Node}}</span></dd>{{end}}
       {{if .StartedBy}}<dt>Started by</dt><dd>{{.StartedBy}}</dd>{{end}}
