@@ -11,11 +11,36 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Added
+
+- The pipeline timeline's names column can be widened: drag its border,
+  double-click it to fit the longest name (again to go back), or use the
+  arrow keys; the width is remembered in the browser. A cut-off name shows
+  whole on hover.
+- A job's log reads in parts: the last 500 lines first, then "500 earlier
+  lines" as often as needed back to the first line, and "Read new lines"
+  for what was added since. Only the parts are read from GitLab (byte
+  ranges), not the whole log every time.
+
 ### Changed
 
+- The console shows every time in the reader's time zone (the browser's),
+  with the moment in UTC on hover; the pipelines filter's dates are the
+  reader's days. The image page's year chart stays per UTC day and says
+  so. Without cookies the pages show UTC and say so.
 - docs/architecture.md: the components and namespaces diagram is an image
   (docs/images/components-and-namespaces.svg) instead of ASCII art, and
   shows which certificates the release's CA signs.
+
+### Fixed
+
+- Opening a pipeline no longer shows every step for a moment before folding
+  them (and the build page's cached stages likewise): the server sends the
+  folded rows hidden.
+- The mouse wheel over the pipeline timeline goes on to the page once the
+  timeline has scrolled to its end (it was trapped inside it).
+- Bar labels near the timeline's right edge are moved before their bars
+  instead of being cut off.
 
 ## 0.2.4 - 2026-10-25
 
