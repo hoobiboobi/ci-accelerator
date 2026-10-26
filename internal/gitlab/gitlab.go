@@ -259,7 +259,12 @@ func (c *Client) JobLogPart(ctx context.Context, cred Credential, instance strin
 		}
 		if f+int64(len(d)) == r.size && len(d) <= logWindowMax {
 			end := lastLineEnd(d)
-			part = LogPart{Text: CleanLog(string(d[:end])), Start: f, End: f + int64(end), Size: r.size}
+			// The line before it, for a run of empty lines across the parts.
+			prev, pf, err := r.read(max(0, f-logWindow), f)
+			if err != nil {
+				return part, err
+			}
+			part = LogPart{Text: cleanPart(string(d[:end]), prevShownEmpty(prev, len(prev), pf)), Start: f, End: f + int64(end), Size: r.size}
 			return part, nil
 		}
 		// Too much is new: the last lines of the log instead.
@@ -306,7 +311,7 @@ func (c *Client) JobLogPart(ctx context.Context, cred Credential, instance strin
 			}
 		}
 	}
-	part.Text = CleanLog(string(data[begin:end]))
+	part.Text = cleanPart(string(data[begin:end]), prevShownEmpty(data, begin, from))
 	part.Start, part.End, part.Size = from+int64(begin), from+int64(end), r.size
 	return part, nil
 }
@@ -481,14 +486,7 @@ func CleanLog(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	var out []string
 	for _, l := range strings.Split(s, "\n") {
-		cont := false
-		if m := logStamp.FindStringSubmatch(l); m != nil {
-			l, cont = l[len(m[0]):], m[1] == "+"
-		}
-		// What a carriage return overwrote is not shown either.
-		if j := strings.LastIndex(l, "\r"); j >= 0 {
-			l = l[j+1:]
-		}
+		l, cont := cleanLine(l)
 		// No empty piece around a section marker, no run of empty lines.
 		if l == "" && (cont || (len(out) > 0 && out[len(out)-1] == "")) {
 			continue
@@ -496,6 +494,71 @@ func CleanLog(s string) string {
 		out = append(out, l)
 	}
 	return strings.Join(out, "\n")
+}
+
+// cleanLine is one line as shown (markers, colours and what a carriage
+// return overwrote taken out), and whether the runner marked it as the
+// continuation of the line before ("+").
+func cleanLine(l string) (string, bool) {
+	l = strings.TrimSuffix(l, "\r")
+	l = logSection.ReplaceAllString(l, "")
+	l = logANSI.ReplaceAllString(l, "")
+	cont := false
+	if m := logStamp.FindStringSubmatch(l); m != nil {
+		l, cont = l[len(m[0]):], m[1] == "+"
+	}
+	if j := strings.LastIndex(l, "\r"); j >= 0 {
+		l = l[j+1:]
+	}
+	return l, cont
+}
+
+// cleanPart cleans whole lines of a log (raw ends with a newline, or is
+// empty) exactly as CleanLog cleans them within the whole log: prevEmpty
+// says that the last line shown before them is empty (see prevShownEmpty),
+// so parts read one by one join into what the whole log shows.
+func cleanPart(raw string, prevEmpty bool) string {
+	var b strings.Builder
+	last := ""
+	if prevEmpty {
+		last = "\x00empty" // a run of empty lines goes on across the parts
+	}
+	shown := 0
+	for _, l := range strings.SplitAfter(raw, "\n") {
+		if l == "" {
+			continue
+		}
+		c, cont := cleanLine(strings.TrimSuffix(l, "\n"))
+		if c == "" && (cont || last == "" && shown > 0 || last == "\x00empty") {
+			continue
+		}
+		b.WriteString(c)
+		b.WriteByte('\n')
+		last = c
+		shown++
+	}
+	return b.String()
+}
+
+// prevShownEmpty says whether, in the whole log, the last line shown before
+// byte begin of data (which starts at byte from of the log) is empty. Lines
+// marked as continuations are never shown when empty and are skipped; when
+// the answer lies before data, it is "no" (or the log's start).
+func prevShownEmpty(data []byte, begin int, from int64) bool {
+	i := begin - 1 // data[i] ends the line before begin
+	for i >= 0 {
+		j := bytes.LastIndexByte(data[:i], '\n') + 1
+		if j == 0 && from > 0 {
+			return false // that line may start before data
+		}
+		c, cont := cleanLine(string(data[j:i]))
+		if c == "" && cont {
+			i = j - 1
+			continue
+		}
+		return c == ""
+	}
+	return false
 }
 
 // retryAfter reads how long GitLab asks to wait: Retry-After (seconds), or
