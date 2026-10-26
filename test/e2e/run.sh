@@ -1406,11 +1406,16 @@ box_split() {
   wpod=$(kc -n "$BOX_NS" get pods -l "app.kubernetes.io/name=console-web,app.kubernetes.io/instance=$BOX_REL" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
   kc -n "$BOX_NS" debug "pod/$wpod" --image="$IMAGE" --container=e2e-api-probe --profile=general -- \
     sh -c "wget -q -T 5 -O- $api 2>&1; sleep 1" >/dev/null 2>&1
-  web_reach() { kc -n "$BOX_NS" logs "$wpod" -c e2e-api-probe 2>/dev/null | grep -q "400"; }
+  web_reach() { case "$(kc -n "$BOX_NS" logs "$wpod" -c e2e-api-probe 2>/dev/null)" in *" 400 "*) return 0 ;; esac; return 1; }
   check "the web's pods reach the controller's API (control)" eventually 30 web_reach
+  # wget exits 1 on the 400, so its output is caught first: in a pipe
+  # with pipefail that exit status would hide grep's match.
   api_reach() {
-    local c=(); [ -n "$3" ] && c=(-c "$3")
-    kc -n "$1" exec "$2" "${c[@]}" -- wget -q -T 5 -O- "$api" 2>&1 | grep -q "400"
+    local c=() out
+    [ -n "$3" ] && c=(-c "$3")
+    out=$(kc -n "$1" exec "$2" ${c[@]+"${c[@]}"} -- wget -q -T 5 -O- "$api" 2>&1)
+    case "$out" in *" 400 "*) return 0 ;; esac
+    return 1
   }
   check "a pod in another namespace cannot reach the controller's API" eval '! api_reach "$JOBS_NS" client-build ""'
   local daemon
