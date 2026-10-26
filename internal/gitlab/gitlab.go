@@ -117,6 +117,17 @@ func (c *Client) doRange(ctx context.Context, cred Credential, u, rng string) (*
 // Knows says whether instance is one of the client's GitLab instances.
 func (c *Client) Knows(instance string) bool { return c.bases[instance] != "" }
 
+// Instances lists the trace-id prefixes of the GitLabs the client reads,
+// sorted.
+func (c *Client) Instances() []string {
+	out := make([]string, 0, len(c.bases))
+	for k := range c.bases {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // RateLimited is returned while GitLab asks the console to wait.
 type RateLimited struct{ Until time.Time }
 
