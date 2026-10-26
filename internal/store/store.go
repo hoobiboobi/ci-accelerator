@@ -45,7 +45,7 @@ type Store struct {
 	outputs  map[int]*outputFile // by day, yyyymmdd
 	daemonID map[string]int64
 
-	changes changes
+	changes Changes
 }
 
 // ErrNewerSchema is returned for a database written by a newer version.
