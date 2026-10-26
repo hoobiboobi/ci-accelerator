@@ -31,8 +31,8 @@ const settleEvery = 30 * time.Second
 // background with the reader's GitLab credential, at most once per
 // settleEvery.
 func (s *Server) settleLater(r *http.Request, p store.ProjectKey) {
-	api, cred := s.api(r)
-	if api == nil || p.ID == 0 || !api.Client.Knows(p.Instance) {
+	api := s.api(r)
+	if api == nil || p.ID == 0 || !api.Knows(p.Instance) {
 		return
 	}
 	s.settleMu.Lock()
@@ -46,9 +46,11 @@ func (s *Server) settleLater(r *http.Request, p store.ProjectKey) {
 	s.settling[p] = time.Time{} // running
 	s.settleMu.Unlock()
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		// The page's values (whose token GitLab is read with) without its
+		// deadline: the page is answered long before this ends.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Minute)
 		defer cancel()
-		n, err := s.settle(ctx, api, cred, p, 0, settleBatch)
+		n, err := s.settle(ctx, api, p, 0, settleBatch)
 		if err != nil {
 			s.log.Warn("settling rebuilds with GitLab", "project", p.String(), "err", err)
 		} else if n > 0 {
@@ -66,8 +68,8 @@ func (s *Server) settleLater(r *http.Request, p store.ProjectKey) {
 // settle decides a project's CacheElsewhere builds (only build only, when
 // not 0), asking GitLab at most calls times; it returns how many it
 // settled either way.
-func (s *Server) settle(ctx context.Context, api *gitlab.Fetcher, cred gitlab.Credential, p store.ProjectKey, only int64, calls int) (int, error) {
-	pending, err := s.store.Elsewhere(ctx, p, s.now().Add(-31*24*time.Hour), 2000)
+func (s *Server) settle(ctx context.Context, api GitLab, p store.ProjectKey, only int64, calls int) (int, error) {
+	pending, err := s.data.Elsewhere(ctx, p, s.now().Add(-31*24*time.Hour), 2000)
 	if err != nil {
 		return 0, err
 	}
@@ -99,7 +101,7 @@ func (s *Server) settle(ctx context.Context, api *gitlab.Fetcher, cred gitlab.Cr
 				continue
 			}
 			calls--
-			files, complete, err := api.Changed(ctx, cred, p.Instance, p.ID, k.from, k.to)
+			files, complete, err := api.Changed(ctx, p.Instance, p.ID, k.from, k.to)
 			var rl *gitlab.RateLimited
 			if errors.As(err, &rl) || ctx.Err() != nil {
 				stop = err
@@ -110,7 +112,7 @@ func (s *Server) settle(ctx context.Context, api *gitlab.Fetcher, cred gitlab.Cr
 		}
 		out = append(out, decideByDiff(e, d.files, d.complete, d.err))
 	}
-	if err := s.store.SettleElsewhere(ctx, out); err != nil {
+	if err := s.data.SettleElsewhere(ctx, out); err != nil {
 		return 0, err
 	}
 	return len(out), stop

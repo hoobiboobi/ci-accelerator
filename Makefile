@@ -319,6 +319,8 @@ component-test: ## The GitLab CI component's job script against a fake buildctl,
 .PHONY: ui-test
 ui-test: $(NODE) ## Browser checks of the console's pages on its fixtures (needs Chrome; CHROME=<path> to pick one)
 	@UI_TEST=1 NODE=$(NODE) $(GO_RUN) test -count=1 -v -run '^TestUI(SignedIn)?$$' -timeout 15m ./internal/web/
+	@echo "==> the same pages through the controller's API (split console)"
+	@UI_TEST=1 WEB_TEST_SPLIT=1 NODE=$(NODE) $(GO_RUN) test -count=1 -v -run '^TestUI(SignedIn)?$$' -timeout 15m ./internal/web/
 
 .PHONY: ui-shots
 ui-shots: $(NODE) ## Screenshots of the console's pages on its fixtures at 1400 and 390 px into .ui-shots/ (open its index.html)
@@ -330,11 +332,15 @@ console-dev: ## The console on its fixtures at CONSOLE_DEV (127.0.0.1:8095), pag
 	@CONSOLE_DEV=$${CONSOLE_DEV:-127.0.0.1:8095} $(GO_RUN) test -count=1 -v -run '^TestDevServer$$' -timeout 0 ./internal/web/
 
 .PHONY: go-test
-go-test: ## Go: gofmt, go vet and the tests of internal/ (history model fixtures included)
-	@out=$$("$$($(GO_RUN) env GOROOT)/bin/gofmt" -l internal); \
+go-test: ## Go: gofmt, go vet and the tests (the pages twice: with the controller in the process, and through its API)
+	@out=$$("$$($(GO_RUN) env GOROOT)/bin/gofmt" -l internal cmd); \
 		if [ -n "$$out" ]; then echo "not gofmt-formatted: $$out" >&2; exit 1; fi
 	@$(GO_RUN) vet ./...
 	@$(GO_RUN) test -count=1 ./...
+	@WEB_TEST_SPLIT=1 $(GO_RUN) test -count=1 ./internal/web/
+
+.PHONY: quick
+quick: lint unittest go-test ## The checks to run before every push (validate, e2e and the browser checks run in CI)
 
 .PHONY: validate
 validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (our charts, gitlab-runner + fragment) against Kubernetes schemas

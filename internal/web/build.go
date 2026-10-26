@@ -30,7 +30,7 @@ type built struct {
 
 // readBuild loads a build with the names of the builds it waited for.
 func (s *Server) readBuild(ctx context.Context, id int64) (*built, error) {
-	p, err := s.store.BuildPage(ctx, id)
+	p, err := s.data.BuildPage(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 	for _, st := range b.Steps {
 		refs = append(refs, st.ReceivedFrom)
 	}
-	known, err := s.store.Refs(ctx, refs)
+	known, err := s.data.Refs(ctx, refs)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	p, err := s.store.BuildPage(ctx, id)
+	p, err := s.data.BuildPage(ctx, id)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !s.mayBuild(r, p)) {
 		s.notFound(w, r, "build")
 		return
@@ -173,7 +173,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.ensureAPI(r, p.Pipeline) {
-		if p, err = s.store.BuildPage(ctx, id); err != nil {
+		if p, err = s.data.BuildPage(ctx, id); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -182,12 +182,12 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	// now for this build, in the background for the project's others.
 	if p.Reason.Kind == history.CacheElsewhere && p.Via == "" && p.Pipeline != nil && p.Pipeline.ProjectID != 0 {
 		key := store.ProjectKey{Instance: p.Pipeline.Instance, ID: p.Pipeline.ProjectID}
-		if api, cred := s.api(r); api != nil && api.Client.Knows(key.Instance) {
+		if api := s.api(r); api != nil && api.Knows(key.Instance) {
 			sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			n, _ := s.settle(sctx, api, cred, key, id, 1)
+			n, _ := s.settle(sctx, api, key, id, 1)
 			cancel()
 			if n > 0 {
-				if p, err = s.store.BuildPage(ctx, id); err != nil {
+				if p, err = s.data.BuildPage(ctx, id); err != nil {
 					s.fail(w, err)
 					return
 				}
@@ -246,7 +246,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(pl.Instance, pl.ID), "#"+strconv.FormatUint(pl.ID, 10)
 		v.Commit, v.SHA, v.Ref = pl.CommitTitle, short(pl.SHA, 8), pl.Ref
 	}
-	if api, _ := s.api(r); api != nil && job.ID != 0 && api.Client.Knows(a.Instance) && job.ProjectID != 0 {
+	if api := s.api(r); api != nil && job.ID != 0 && api.Knows(a.Instance) && job.ProjectID != 0 {
 		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", a.Instance, job.ID)
 	}
 	// The usual time of builds like this one: from the cache, or rebuilt.
@@ -260,7 +260,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		usual, _ = st.usual[b.Target].of(d.Built > 0)
 	}
 	if usual == 0 {
-		if usual, err = s.store.Usual(ctx, b, project); err != nil {
+		if usual, err = s.data.Usual(ctx, b, project); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -274,7 +274,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	v.Blocks = blocksOf(b, d.Views)
 	v.Gantt, v.GanttSkip = gantt(v.Blocks)
 	v.StepCount = len(b.Steps)
-	prev, _, err := s.store.Previous(ctx, b)
+	prev, _, err := s.data.Previous(ctx, b)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -291,8 +291,9 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	nodeHost := map[string]string{}
-	if s.opt.Live != nil {
-		for _, dm := range s.opt.Live.Daemons() {
+	// Without the daemons' live state (none known) nothing is said gone.
+	if daemons := s.data.Daemons(); len(daemons) > 0 {
+		for _, dm := range daemons {
 			nodeHost[dm.Name] = dm.Inspection.Node
 		}
 		// The daemon that held the cache was replaced since.
@@ -339,7 +340,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Details = append(v.Details, KV{"Record", b.Ref}, KV{"API", fmt.Sprintf("GET /api/v1/builds?limit=50 (this build is id %d)", id)})
 	if a.State == history.Attributed {
-		ids, err := s.store.JobBuilds(ctx, a.Instance, a.Job)
+		ids, err := s.data.JobBuilds(ctx, a.Instance, a.Job)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -371,7 +372,7 @@ func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stor
 	pb := prev.Build
 	var out []Change
 	if pa, a := pb.Attribution, b.Attribution; pa.State == history.Attributed && a.State == history.Attributed && pa.Pipeline != a.Pipeline {
-		before, err := s.store.PipelineInfo(ctx, pa.Instance, pa.Pipeline)
+		before, err := s.data.PipelineInfo(ctx, pa.Instance, pa.Pipeline)
 		if err != nil {
 			return nil, err
 		}
@@ -564,7 +565,7 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 		sd.JobURL = fmt.Sprintf("/builds/%d", id)
 	}
 	if v.HasOutput {
-		out, err := s.store.Output(ctx, id, idx)
+		out, err := s.data.Output(ctx, id, idx)
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -599,7 +600,7 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 			sd.OutNote = "Output is kept for a few days; this build's is gone."
 		}
 	}
-	runs, err := s.store.StepHistory(ctx, id, idx, 12)
+	runs, err := s.data.StepHistory(ctx, id, idx, 12)
 	if err != nil {
 		s.fail(w, err)
 		return

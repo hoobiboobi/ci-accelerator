@@ -161,15 +161,12 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	sh.LiveNodes = true
 	sh.Title = "Build nodes"
 	v := &NodesView{Release: s.opt.Release}
-	counts, err := s.store.DaemonCounts(ctx, s.now().Add(-24*time.Hour))
+	counts, err := s.data.DaemonCounts(ctx, s.now().Add(-24*time.Hour))
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	var daemons []collector.DaemonState
-	if s.opt.Live != nil {
-		daemons = s.opt.Live.Daemons()
-	}
+	daemons := s.data.Daemons()
 	images := map[string][]int64{}
 	var gc []collector.GCRule
 	shown := map[string]bool{}
@@ -270,8 +267,8 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if s.opt.API != nil {
-		if until, err := s.opt.API.Status(); err != nil {
+	if s.opt.GitLab != nil {
+		if until, err := s.opt.GitLab.Status(); err != nil {
 			v.APIStatus = "GitLab API: " + err.Error()
 			if until.After(s.now()) {
 				v.APIStatus += " (paused until " + stampOf(until, loc, "15:04").Text + ")"
@@ -347,7 +344,7 @@ func keepText(d time.Duration) string {
 // bucket sums what the runners' S3 cache holds for a project; nil when no
 // cache is listed.
 func (s *Server) bucket(ctx context.Context, p store.ProjectKey, loc *time.Location) (*BucketView, error) {
-	objs, stores, err := s.store.ProjectCache(ctx, p)
+	objs, stores, err := s.data.ProjectCache(ctx, p)
 	if err != nil || len(stores) == 0 {
 		return nil, err
 	}

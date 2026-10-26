@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	cryptotls "crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -28,6 +29,7 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/api"
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
+	"github.com/hoobiboobi/ci-accelerator/internal/control"
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -52,6 +54,12 @@ type config struct {
 	daemons, gitlabURLs                        []string
 	keepDays, keepOutputDays                   int
 	diskProbePort                              int
+
+	// The controller role (split): its API for the web.
+	split                     bool
+	apiListen, apiTLSDir      string
+	apiTokenFile, apiAudience string
+	apiAllow                  []string
 }
 
 // version and commit are set at build time (-ldflags -X main.version=...);
@@ -69,58 +77,91 @@ func versionString() string {
 	return version
 }
 
+// The console is one binary with roles:
+//
+//	console [flags]             controller and pages in one process
+//	console controller [flags]  the store, collector and sessions, and the API the web reads
+//	console web [flags]         the pages, reading the controller
+//	console disk-probe [flags]  the sidecar next to a daemon that reports its cache's free space
 func main() {
-	// `console disk-probe`: the sidecar next to a daemon that reports its
-	// cache's free space (the buildkit chart's diskProbe).
-	if len(os.Args) > 1 && os.Args[1] == "disk-probe" {
-		fs := flag.NewFlagSet("disk-probe", flag.ExitOnError)
-		dir := fs.String("dir", "/var/lib/buildkit", "directory whose filesystem is reported")
-		listen := fs.String("listen", ":9180", "address of GET /disk and /healthz")
-		fs.Parse(os.Args[2:])
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		slog.Info("disk probe", "dir", *dir, "listen", *listen, "version", versionString())
-		if err := diskprobe.Serve(ctx, *listen, *dir); err != nil {
-			slog.Error("disk probe", "err", err)
-			os.Exit(1)
-		}
-		return
+	role, args := "", os.Args[1:]
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		role, args = args[0], args[1:]
 	}
+	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	var err error
+	switch role {
+	case "disk-probe":
+		err = diskProbe(args)
+	case "", "console":
+		err = controllerMain(args, false, log)
+	case "controller":
+		err = controllerMain(args, true, log)
+	case "web":
+		err = webMain(args, log)
+	default:
+		fmt.Fprintf(os.Stderr, "console: no role %q (console, controller, web, disk-probe)\n", role)
+		os.Exit(2)
+	}
+	if err != nil {
+		log.Error("console", "role", role, "err", err)
+		os.Exit(1)
+	}
+}
+
+func diskProbe(args []string) error {
+	fs := flag.NewFlagSet("disk-probe", flag.ExitOnError)
+	dir := fs.String("dir", "/var/lib/buildkit", "directory whose filesystem is reported")
+	listen := fs.String("listen", ":9180", "address of GET /disk and /healthz")
+	fs.Parse(args)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	slog.Info("disk probe", "dir", *dir, "listen", *listen, "version", versionString())
+	return diskprobe.Serve(ctx, *listen, *dir)
+}
+
+func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
 	var c config
-	var daemons, gitlabURLs list
-	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.StringVar(&c.data, "data", "/data", "directory of the store")
-	flag.StringVar(&c.discover, "discover", "", "headless Service host:port; every address it resolves to is a daemon")
-	flag.Var(&daemons, "daemon", "a daemon's address, tcp://host:port (repeatable; instead of -discover)")
-	flag.StringVar(&c.tlsDir, "tls-dir", "/certs", "directory with ca.crt, tls.crt and tls.key (the client certificate)")
-	flag.StringVar(&c.serverName, "server-name", "", "name in the daemons' certificate (default: the host of -discover)")
-	flag.Var(&gitlabURLs, "gitlab-url", "URL of a GitLab instance, exactly as the runner has it (repeatable; also $GITLAB_URLS, comma-separated)")
-	flag.StringVar(&c.jobsNamespace, "jobs-namespace", "", "namespace of the CI job pods; empty: jobs are not watched")
-	flag.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig outside a cluster (default: the pod's service account)")
-	flag.StringVar(&c.kubeContext, "kube-context", "", "context of -kubeconfig")
-	flag.StringVar(&c.listen, "listen", ":8080", "address of the pages, the API and the health check")
-	flag.StringVar(&c.gitlabTokenFile, "gitlab-token-file", "", "file with a GitLab token that can read the projects' jobs; empty: no job times from GitLab")
-	flag.StringVar(&c.release, "release", "", "name of the installation, shown on the nodes page")
-	flag.StringVar(&c.devAssets, "dev-assets", "", "directory with templates/ and static/ (internal/web) read for every page instead of the built-in ones; for working on the pages")
-	flag.StringVar(&c.caches, "caches", "", "JSON file listing the S3 folders the runners keep GitLab's cache: in (sizes per project on the nodes page); empty: none")
-	flag.StringVar(&c.namespace, "namespace", os.Getenv("POD_NAMESPACE"), "namespace of the Secrets with the caches' keys (default $POD_NAMESPACE)")
-	flag.DurationVar(&c.cacheEvery, "cache-every", 10*time.Minute, "how often the caches are listed")
-	flag.StringVar(&c.signIn, "sign-in", "", "JSON file configuring sign-in through GitLab; empty: no sign-in (keep the console inside the cluster)")
-	flag.IntVar(&c.diskProbePort, "disk-probe-port", 0, "port of the disk probe next to each daemon (the buildkit chart's diskProbe); 0: none")
-	flag.IntVar(&c.keepDays, "keep-days", 30, "days builds are kept")
-	flag.IntVar(&c.keepOutputDays, "keep-output-days", 7, "days step output is kept")
-	flag.Parse()
+	var daemons, gitlabURLs, allow list
+	fs := flag.NewFlagSet("console", flag.ExitOnError)
+	showVersion := fs.Bool("version", false, "print the version and exit")
+	fs.StringVar(&c.data, "data", "/data", "directory of the store")
+	fs.StringVar(&c.discover, "discover", "", "headless Service host:port; every address it resolves to is a daemon")
+	fs.Var(&daemons, "daemon", "a daemon's address, tcp://host:port (repeatable; instead of -discover)")
+	fs.StringVar(&c.tlsDir, "tls-dir", "/certs", "directory with ca.crt, tls.crt and tls.key (the client certificate)")
+	fs.StringVar(&c.serverName, "server-name", "", "name in the daemons' certificate (default: the host of -discover)")
+	fs.Var(&gitlabURLs, "gitlab-url", "URL of a GitLab instance, exactly as the runner has it (repeatable; also $GITLAB_URLS, comma-separated)")
+	fs.StringVar(&c.jobsNamespace, "jobs-namespace", "", "namespace of the CI job pods; empty: jobs are not watched")
+	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig outside a cluster (default: the pod's service account)")
+	fs.StringVar(&c.kubeContext, "kube-context", "", "context of -kubeconfig")
+	fs.StringVar(&c.gitlabTokenFile, "gitlab-token-file", "", "file with a GitLab token that can read the projects' jobs; empty: no job times from GitLab")
+	fs.StringVar(&c.release, "release", "", "name of the installation, shown on the nodes page")
+	fs.StringVar(&c.caches, "caches", "", "JSON file listing the S3 folders the runners keep GitLab's cache: in (sizes per project on the nodes page); empty: none")
+	fs.StringVar(&c.namespace, "namespace", os.Getenv("POD_NAMESPACE"), "namespace of the Secrets with the caches' keys (default $POD_NAMESPACE)")
+	fs.DurationVar(&c.cacheEvery, "cache-every", 10*time.Minute, "how often the caches are listed")
+	fs.StringVar(&c.signIn, "sign-in", "", "JSON file configuring sign-in through GitLab; empty: no sign-in (keep the console inside the cluster)")
+	fs.IntVar(&c.diskProbePort, "disk-probe-port", 0, "port of the disk probe next to each daemon (the buildkit chart's diskProbe); 0: none")
+	fs.IntVar(&c.keepDays, "keep-days", 30, "days builds are kept")
+	fs.IntVar(&c.keepOutputDays, "keep-output-days", 7, "days step output is kept")
+	if splitRole {
+		fs.StringVar(&c.apiListen, "api-listen", ":8443", "address of the API the web reads (HTTPS)")
+		fs.StringVar(&c.apiTLSDir, "api-tls-dir", "/api-tls", "directory with tls.crt and tls.key of the API (read again when they change)")
+		fs.StringVar(&c.apiAudience, "api-audience", control.Audience, "audience of the callers' ServiceAccount tokens")
+		fs.Var(&allow, "api-allow", "a ServiceAccount that may call the API, namespace/name (repeatable)")
+		fs.StringVar(&c.apiTokenFile, "api-token-file", "", "file with a static token the callers send instead of ServiceAccount tokens (outside a cluster)")
+	} else {
+		fs.StringVar(&c.listen, "listen", ":8080", "address of the pages, the API and the health check")
+		fs.StringVar(&c.devAssets, "dev-assets", "", "directory with templates/ and static/ (internal/web) read for every page instead of the built-in ones; for working on the pages")
+	}
+	fs.Parse(args)
 	if *showVersion {
 		fmt.Println("ci-accelerator console " + versionString())
-		return
+		return nil
 	}
 	c.daemons = daemons
 	c.gitlabURLs = append(gitlabURLs, split(os.Getenv("GITLAB_URLS"))...)
-	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	if err := run(c, log); err != nil {
-		log.Error("console", "err", err)
-		os.Exit(1)
-	}
+	c.split, c.apiAllow = splitRole, allow
+	return run(c, log)
 }
 
 func split(s string) []string {
@@ -144,6 +185,9 @@ func run(c config, log *slog.Logger) error {
 	if c.caches != "" && c.cacheEvery < 10*time.Second {
 		// Listing a bucket is not free: 0s would list it without pause.
 		return errors.New("-cache-every must be at least 10s")
+	}
+	if c.split && c.apiTokenFile == "" && len(c.apiAllow) == 0 {
+		return errors.New("the controller's API needs callers: -api-allow (ServiceAccounts) or -api-token-file")
 	}
 	if c.serverName == "" {
 		host, _, err := net.SplitHostPort(c.discover)
@@ -182,7 +226,7 @@ func run(c config, log *slog.Logger) error {
 	}
 	col.OnLiveChange(func() { st.Announce("") })
 	var kube kubernetes.Interface
-	if c.jobsNamespace != "" || c.caches != "" {
+	if c.jobsNamespace != "" || c.caches != "" || (c.split && c.apiTokenFile == "") {
 		if kube, err = kubeClient(c); err != nil {
 			return err
 		}
@@ -199,11 +243,8 @@ func run(c config, log *slog.Logger) error {
 		}
 		go scanCaches(ctx, c, kube, st, log)
 	}
-	opt := web.Options{Live: col, Release: c.release, Version: versionString()}
-	if c.devAssets != "" {
-		opt.Assets = os.DirFS(c.devAssets)
-	}
 	var signIn *auth.Auth
+	var gl *control.LocalGitLab
 	if c.signIn != "" {
 		if c.gitlabTokenFile != "" {
 			return errors.New("-gitlab-token-file and -sign-in exclude each other: with sign-in GitLab is read with each person's own token")
@@ -212,8 +253,7 @@ func run(c config, log *slog.Logger) error {
 		if signIn, err = loadSignIn(c.signIn, c.gitlabURLs, st, client, log); err != nil {
 			return err
 		}
-		opt.Auth = signIn
-		opt.API = &gitlab.Fetcher{Client: client, Store: st, Log: log}
+		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: client, Store: st, Log: log}, Auth: signIn}
 		for _, ch := range signIn.Instances() {
 			log.Info("sign-in through GitLab", "gitlab", ch.Host, "redirect_uri", signIn.RedirectURL(ch.Instance))
 		}
@@ -223,30 +263,91 @@ func run(c config, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		opt.API = &gitlab.Fetcher{Client: gitlab.New(c.gitlabURLs), Store: st, Log: log}
-		opt.Token = gitlab.Token(strings.TrimSpace(string(token)))
+		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: gitlab.New(c.gitlabURLs), Store: st, Log: log},
+			Token: gitlab.Token(strings.TrimSpace(string(token)))}
 	}
-	pages, err := web.New(st, log, opt)
-	if err != nil {
-		return err
-	}
-	mux := http.NewServeMux()
-	apiRoutes := api.Handler(st)
-	mux.Handle("GET /healthz", apiRoutes)
-	mux.Handle("GET /api/", apiRoutes)
-	pages.Register(mux)
-	srv := &http.Server{Addr: c.listen, Handler: web.Secure(pages.Gate(mux)), ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("http", "err", err)
-			stop()
+	local := &control.Local{Store: st, Live: col}
+	var srv *http.Server
+	if c.split {
+		authorize, err := apiAuthorizer(c, kube)
+		if err != nil {
+			return err
 		}
-	}()
+		certs, err := control.ReloadingCert(filepath.Join(c.apiTLSDir, "tls.crt"), filepath.Join(c.apiTLSDir, "tls.key"))
+		if err != nil {
+			return err
+		}
+		api := &control.Server{Local: local, GitLab: gl, Auth: signIn, Log: log, Authorize: authorize,
+			Config: control.ConfigFor(versionString(), c.release, gl, signIn)}
+		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second,
+			TLSConfig: &cryptotls.Config{MinVersion: cryptotls.VersionTLS12, GetCertificate: certs}}
+		srv.RegisterOnShutdown(api.Stop)
+		go func() {
+			if err := srv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("controller API", "err", err)
+				stop()
+			}
+		}()
+		log.Info("controller", "api", c.apiListen, "version", versionString())
+	} else {
+		opt := web.Options{Release: c.release, Version: versionString()}
+		if c.devAssets != "" {
+			opt.Assets = os.DirFS(c.devAssets)
+		}
+		if gl != nil {
+			opt.GitLab, opt.InstallToken = gl, gl.Token != nil
+		}
+		if signIn != nil {
+			opt.Auth = signIn
+		}
+		pages, err := web.New(local, log, opt)
+		if err != nil {
+			return err
+		}
+		mux := http.NewServeMux()
+		apiRoutes := api.Handler(st)
+		mux.Handle("GET /healthz", apiRoutes)
+		mux.Handle("GET /api/", apiRoutes)
+		pages.Register(mux)
+		srv = &http.Server{Addr: c.listen, Handler: web.Secure(pages.Gate(mux)), ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("http", "err", err)
+				stop()
+			}
+		}()
+	}
 	go prune(ctx, st, signIn, log)
 	sup.Run(ctx)
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(sctx)
+}
+
+// apiAuthorizer says who may call the controller: a static token from a
+// file, or the ServiceAccounts named, checked with Kubernetes.
+func apiAuthorizer(c config, kube kubernetes.Interface) (func(*http.Request) error, error) {
+	if c.apiTokenFile != "" {
+		b, err := os.ReadFile(c.apiTokenFile)
+		if err != nil {
+			return nil, err
+		}
+		t := strings.TrimSpace(string(b))
+		if len(t) < 16 {
+			return nil, errors.New("-api-token-file: the token must be at least 16 characters")
+		}
+		return control.StaticToken(t), nil
+	}
+	allow := map[string]bool{}
+	for _, a := range c.apiAllow {
+		ns, name, ok := strings.Cut(a, "/")
+		if !ok || ns == "" || name == "" {
+			return nil, fmt.Errorf("-api-allow %q: give namespace/name", a)
+		}
+		allow[a] = true
+	}
+	r := &control.TokenReviewer{Kube: kube, Audience: c.apiAudience, Allow: allow}
+	return r.Authorize, nil
 }
 
 // resolve returns the daemons' addresses: given, or every address the

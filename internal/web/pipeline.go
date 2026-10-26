@@ -52,7 +52,7 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 	}
 	instance := r.PathValue("instance")
 	ctx := r.Context()
-	project, err := s.store.PipelineProject(ctx, instance, id)
+	project, err := s.data.PipelineProject(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -70,18 +70,18 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 	pinProject(&sh, instance, project)
 	s.settleLater(r, store.ProjectKey{Instance: instance, ID: project})
 	// GitLab says when each job waited and ran: read it, briefly, first.
-	info, err := s.store.PipelineInfo(ctx, instance, id)
+	info, err := s.data.PipelineInfo(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	if info != nil && s.ensureAPI(r, info) {
-		if info, err = s.store.PipelineInfo(ctx, instance, id); err != nil {
+		if info, err = s.data.PipelineInfo(ctx, instance, id); err != nil {
 			s.fail(w, err)
 			return
 		}
 	}
-	rows, err := s.store.Builds(ctx, store.BuildQuery{Project: store.ProjectKey{Instance: instance, ID: project}, Pipeline: id})
+	rows, err := s.data.Builds(ctx, store.BuildQuery{Project: store.ProjectKey{Instance: instance, ID: project}, Pipeline: id})
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -92,7 +92,7 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := &PipelineView{Key: key, ID: id, Title: fmt.Sprintf("Pipeline #%d", id), NoBuilds: len(rows) == 0}
-	jobs, err := s.store.PipelineJobs(ctx, instance, id)
+	jobs, err := s.data.PipelineJobs(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -169,7 +169,7 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []sto
 	}
 	var wjobs []wfJob
 	for i := len(rows) - 1; i >= 0; i-- {
-		page, err := s.store.BuildPage(ctx, rows[i].ID)
+		page, err := s.data.BuildPage(ctx, rows[i].ID)
 		if err != nil {
 			return nil, "", CritPath{}, 0, err
 		}
@@ -367,7 +367,7 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	}
 	instance := r.PathValue("instance")
 	ctx := r.Context()
-	ids, err := s.store.JobBuilds(ctx, instance, id)
+	ids, err := s.data.JobBuilds(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -378,7 +378,7 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, fmt.Sprintf("/builds/%d?via=log", ids[len(ids)-1]), http.StatusFound)
 		return
 	}
-	j, err := s.store.Job(ctx, instance, id)
+	j, err := s.data.Job(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -398,7 +398,7 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	if j.PipelineID != 0 {
 		v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(instance, j.PipelineID), "#"+strconv.FormatUint(j.PipelineID, 10)
 	}
-	if api, _ := s.api(r); api != nil && api.Client.Knows(instance) && j.ProjectID != 0 {
+	if api := s.api(r); api != nil && api.Knows(instance) && j.ProjectID != 0 {
 		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", instance, id)
 	}
 	sh.Title = v.Name
@@ -417,14 +417,14 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	j, err := s.store.Job(r.Context(), instance, id)
+	j, err := s.data.Job(r.Context(), instance, id)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	api, cred := s.api(r)
+	api := s.api(r)
 	if j == nil || api == nil || !s.may(r, instance, j.ProjectID) {
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprint(w, "The console has no GitLab token, or does not know this job.")
@@ -446,7 +446,7 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	part, err := api.JobLogPart(ctx, cred, instance, j.ProjectID, id, q)
+	part, err := api.JobLogPart(ctx, instance, j.ProjectID, id, q)
 	var rl *gitlab.RateLimited
 	switch {
 	case errors.As(err, &rl):

@@ -57,7 +57,7 @@ func (s *Server) recent(ctx context.Context, p store.ProjectKey) (*cachedStats, 
 	if c != nil && s.now().Sub(c.at) < statsFresh {
 		return c, nil
 	}
-	bs, err := s.store.Builds(ctx, store.BuildQuery{Project: p, Since: s.now().Add(-statsFor), Light: true})
+	bs, err := s.data.Builds(ctx, store.BuildQuery{Project: p, Since: s.now().Add(-statsFor), Light: true})
 	if err != nil {
 		return nil, err
 	}
@@ -283,11 +283,11 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 		v.Outcomes = append(v.Outcomes, Option{Value: k, Label: outcomeLabels[k], On: f.Outcome == k})
 	}
 	month := s.now().Add(-30 * 24 * time.Hour)
-	if v.Branches, err = s.store.Branches(ctx, sh.Project.ProjectKey, month); err != nil {
+	if v.Branches, err = s.data.Branches(ctx, sh.Project.ProjectKey, month); err != nil {
 		s.fail(w, err)
 		return
 	}
-	if v.Targets, err = s.store.Targets(ctx, sh.Project.ProjectKey, month); err != nil {
+	if v.Targets, err = s.data.Targets(ctx, sh.Project.ProjectKey, month); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -301,7 +301,7 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 			q.Author = sh.Viewer.Username
 		}
 	}
-	rows, err := s.store.Builds(ctx, q)
+	rows, err := s.data.Builds(ctx, q)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -758,15 +758,15 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		days []store.ImageDay
 	)
 	if year {
-		days, err = s.store.ImageDays(ctx, sh.Project.ProjectKey, target, since)
+		days, err = s.data.ImageDays(ctx, sh.Project.ProjectKey, target, since)
 	} else {
-		bs, err = s.store.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, Since: since, Light: true})
+		bs, err = s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, Since: since, Light: true})
 	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	targets, err := s.store.Targets(ctx, sh.Project.ProjectKey, s.now().Add(-30*24*time.Hour))
+	targets, err := s.data.Targets(ctx, sh.Project.ProjectKey, s.now().Add(-30*24*time.Hour))
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -783,7 +783,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 			if p.ProjectKey == sh.Project.ProjectKey {
 				continue
 			}
-			ts, err := s.store.Targets(ctx, p.ProjectKey, s.now().Add(-30*24*time.Hour))
+			ts, err := s.data.Targets(ctx, p.ProjectKey, s.now().Add(-30*24*time.Hour))
 			if err != nil {
 				s.fail(w, err)
 				return
@@ -843,7 +843,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		since = first
 	}
 	v.Chart = s.chart(bs, since, ut.Rebuilt, zone(r))
-	counts, err := s.store.StepCounts(ctx, sh.Project.ProjectKey, target, since, 8)
+	counts, err := s.data.StepCounts(ctx, sh.Project.ProjectKey, target, since, 8)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -856,7 +856,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		v.Steps = append(v.Steps, StepRowView{Name: c.Name, Ran: c.Ran, Of: v.Builds, Time: duration(c.RanTime), W: c.Ran * 100 / most})
 	}
 	v.Reasons = s.reasons(bs, v.Window, 5, zone(r))
-	latest, err := s.store.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, Limit: 10})
+	latest, err := s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, Limit: 10})
 	if err != nil {
 		s.fail(w, err)
 		return

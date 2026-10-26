@@ -49,7 +49,7 @@ func TestUI(t *testing.T) {
 	}
 	long.WriteString("$ helm upgrade app\ndeployed " + evil + "\n")
 	f, _ := fakeGitLab(t, long.String())
-	ts, st, _, _ := consoleWith(t, Options{Live: daemons, Release: "box", API: f, Token: gitlab.Token("t")})
+	ts, st, _, _ := consoleWith(t, testOpts{Live: daemons, Release: "box", API: f, Token: gitlab.Token("t")})
 	f.Store = st
 	// A job that built nothing, with a log to read.
 	inst, key := seedJob(t, st)
@@ -103,7 +103,7 @@ func TestUISignedIn(t *testing.T) {
 	via := &http.Client{Transport: rewrite{to}, Timeout: 10 * time.Second}
 	const gl = "https://gitlab.example.com/"
 	inst := history.InstancePrefix(gl)
-	ts, st, _, _ := consoleBuild(t, func(st *store.Store) Options {
+	ts, st, _, _ := consoleBuild(t, func(st *store.Store) testOpts {
 		client := gitlab.New([]string{gl})
 		client.HTTP = via
 		a, err := auth.New(auth.Config{PublicURL: "http://localhost", Key: make([]byte, 32), HTTP: via,
@@ -111,7 +111,7 @@ func TestUISignedIn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return Options{Auth: a, API: &gitlab.Fetcher{Client: client, Store: st}}
+		return testOpts{Auth: a, API: &gitlab.Fetcher{Client: client, Store: st}}
 	}, httptest.NewServer)
 	_, key := seedJob(t, st)
 	// Sign in as alice the way a browser would; Go's cookie jar keeps no
@@ -169,8 +169,8 @@ func TestDevServer(t *testing.T) {
 	daemons := live{{Name: "box-buildkit-abcde", Connected: true, InspectedAt: time.Now(),
 		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1"}}}
 	f, _ := fakeGitLab(t, "Running with gitlab-runner\n$ make\nok\n")
-	_, st, _, _ := consoleBuild(t, func(*store.Store) Options {
-		return Options{Live: daemons, Release: "dev", API: f, Token: gitlab.Token("t"), Assets: os.DirFS(".")}
+	_, st, _, _ := consoleBuild(t, func(*store.Store) testOpts {
+		return testOpts{Live: daemons, Release: "dev", API: f, Token: gitlab.Token("t"), Assets: os.DirFS(".")}
 	}, start)
 	f.Store = st
 	seedJob(t, st)

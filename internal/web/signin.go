@@ -60,7 +60,12 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 			http.Error(w, "The console's JSON API answers admins only.", http.StatusForbidden)
 			return
 		}
-		csrf.Handler(h).ServeHTTP(w, r.WithContext(auth.With(r.Context(), v)))
+		ctx := auth.With(r.Context(), v)
+		if c, err := r.Cookie(auth.SessionCookie); err == nil {
+			// For a backend in another process: it finds the person by it.
+			ctx = auth.WithCookie(ctx, c.Value)
+		}
+		csrf.Handler(h).ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

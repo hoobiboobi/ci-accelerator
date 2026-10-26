@@ -634,6 +634,10 @@ func (v *Viewer) Renew(ctx context.Context, refused string) (string, error) {
 	return v.a.refresh(ctx, v, refused)
 }
 
+// Usable says whether the viewer can give a token: a viewer another
+// process sent (its fields only) cannot.
+func (v *Viewer) Usable() bool { return v != nil && v.a != nil }
+
 // Who names the viewer for GitLab's rate limits.
 func (v *Viewer) Who() string { return fmt.Sprintf("%s/%d", v.Instance, v.UserID) }
 
