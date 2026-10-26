@@ -5,6 +5,8 @@
 #   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator
 #   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
 #     --no-server --client runner      # one more client from the same CA
+#   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
+#     --console-api bk-console         # the console API's server certificate
 #
 # --name is the chart's full name (<release>-buildkit, or the release name
 # when it already contains "buildkit"); the chart prints it when
@@ -15,6 +17,8 @@
 #   <out>/ca/ca.crt, ca.key       the CA; keep ca.key offline, it signs clients
 #   <out>/server/                 tls.crt, tls.key, ca.crt for the daemons
 #   <out>/<client>/               tls.crt, tls.key, ca.crt for buildctl --tlsdir
+#   <out>/console-api/            tls.crt, tls.key, ca.crt for the console's
+#                                 api.tls.existingSecret (with --console-api)
 # An existing CA in <out>/ca is reused; certificates are reissued.
 #
 # Any certificate signed by this CA can control the daemons: use the CA for
@@ -25,7 +29,7 @@
 
 set -euo pipefail
 
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 die() { echo "buildkit-certs: $*" >&2; exit 1; }
 
 NAME=""
@@ -37,6 +41,7 @@ SERVER=1
 CA_DAYS=3650
 DAYS=365
 EXTRA_SANS=""
+CONSOLE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,6 +52,7 @@ while [ $# -gt 0 ]; do
     --san) EXTRA_SANS="$EXTRA_SANS ${2:-}"; shift 2 ;;
     --client) CLIENT=${2:-}; shift 2 ;;
     --no-server) SERVER=0; shift ;;
+    --console-api) CONSOLE=${2:-}; shift 2 ;;
     --ca-days) CA_DAYS=${2:-}; shift 2 ;;
     --days) DAYS=${2:-}; shift 2 ;;
     -h|--help) usage 0 ;;
@@ -62,6 +68,13 @@ if [ "$SERVER" = 1 ]; then
   printf '%s' "$NAMESPACE" | grep -Eq "$dns_label" || die "--namespace: not a DNS label: $NAMESPACE"
 fi
 printf '%s' "$CLIENT" | grep -Eq "$dns_label" || die "--client: not a DNS label: $CLIENT"
+if [ -n "$CONSOLE" ]; then
+  # Only the console API's certificate: no daemon certificate, no client.
+  printf '%s' "$CONSOLE" | grep -Eq "$dns_label" || die "--console-api: not a DNS label: $CONSOLE"
+  [ -n "$NAMESPACE" ] || die "--namespace is required for the console API's certificate"
+  printf '%s' "$NAMESPACE" | grep -Eq "$dns_label" || die "--namespace: not a DNS label: $NAMESPACE"
+  SERVER=0
+fi
 [ "$CLIENT" != ca ] && [ "$CLIENT" != server ] || die "--client: '$CLIENT' is reserved"
 case "$CA_DAYS$DAYS" in *[!0-9]*) die "--ca-days and --days take a number of days" ;; esac
 for san in $EXTRA_SANS; do
@@ -128,6 +141,24 @@ issue() {
   cp "$CA_CRT" "$dir/ca.crt"
   openssl verify -CAfile "$CA_CRT" "$dir/tls.crt" >/dev/null || die "verification of $dir/tls.crt failed"
 }
+
+if [ -n "$CONSOLE" ]; then
+  # The console chart's API Service: <console full name>-api, cut to 63.
+  api=${CONSOLE}-api; api=${api:0:63}; api=${api%-}
+  i=0
+  for suffix in "" ".$NAMESPACE" ".$NAMESPACE.svc" ".$NAMESPACE.svc.$CLUSTER_DOMAIN"; do
+    i=$((i + 1)); echo "DNS.$i = $api$suffix" >>"$WORK/ext.cnf"
+  done
+  # Server auth only: the daemons take clients whose certificates are for
+  # client auth, so this one can never drive them.
+  issue "$OUT/console-api" "$api.$NAMESPACE.svc" server
+  echo "issued the console API's certificate $OUT/console-api/tls.crt (valid $DAYS days)"
+  echo
+  echo "Console API Secret (set api.tls.existingSecret=$api in the console's values):"
+  echo "  kubectl create secret generic $api -n $NAMESPACE \\"
+  echo "    --from-file=$OUT/console-api/tls.crt --from-file=$OUT/console-api/tls.key --from-file=$OUT/console-api/ca.crt"
+  exit 0
+fi
 
 if [ "$SERVER" = 1 ]; then
   # The chart's headless Service name: <name> cut to 54 characters, one

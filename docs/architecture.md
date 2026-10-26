@@ -14,7 +14,8 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 | Disk probe | A container in each daemon pod (box) | The console's image; reports the cache disk's size and free space (statfs) |
 | gitlab-runner manager | Box namespace, any non-build node | Polls GitLab, creates job pods |
 | CI job pods | Jobs namespace, build nodes | Thin clients: `buildctl` and the build context |
-| Console (optional) | Box namespace, any non-build node | Reads the daemons' build history and the job pods |
+| Console controller (optional) | Box namespace, any non-build node | One pod: reads the daemons' build history and the job pods, holds the store and the sessions |
+| Console web (optional) | Box namespace, any non-build node | Two pods by default: serve the pages, reading the controller's API |
 | CA, server and client certificates | cert-manager | The CA lives in cert-manager's namespace |
 
 The jobs namespace is separate because job pods run untrusted code and the
@@ -162,8 +163,28 @@ Each daemon names itself in two ways:
 
 ## The console
 
-The console (`console.enabled`, on by default) is one pod in the box
-namespace. It only reads; nothing it does changes a build.
+The console (`console.enabled`, on by default) runs in the box namespace
+as two parts of one image. It only reads; nothing it does changes a build.
+
+- **The controller** (Deployment `<release>-console`, one pod, `Recreate`)
+  owns everything with state: the store, the reading of the daemons and the
+  job pods, the sessions of people signed in and every GitLab token.
+- **The web** (Deployment `<release>-console-web`, two pods by default)
+  serves the pages and the JSON API on the Service `<release>-console`. It
+  keeps nothing: it reads the controller's API over HTTPS
+  (`<release>-console-api`, port 8443), so it scales and rolls without a
+  pause, and a controller restart shows as an error page for a moment, not
+  a lost session. The writes the pages cause (GitLab's answers, settled
+  reasons, sessions) are done by the controller.
+- **Between them.** The controller's API certificate comes from the daemons'
+  CA with server authentication only: the daemons accept client
+  certificates, so it can never drive them. The web proves who it is with a
+  ServiceAccount token that Kubernetes projects into its pods for the
+  controller's audience; the controller checks it with a TokenReview (its
+  only cluster-wide right). Its NetworkPolicy admits the web's pods alone:
+  CI jobs and RUN steps cannot reach the API.
+
+What the controller does:
 
 - **Build history from the daemons.** It finds the daemons through the
   headless Service and reads each one's build history over the daemons'
@@ -188,8 +209,8 @@ namespace. It only reads; nothing it does changes a build.
   someone asks for it. It waits when GitLab rate-limits. GitLab never needs
   to reach the console: there are no webhooks, and with sign-in the browser
   carries the redirects.
-- **Its store** is SQLite on a ReadWriteOnce volume (one replica,
-  `Recreate`). Builds are kept in full for 30 days (`retention.days`);
+- **Its store** is SQLite on a ReadWriteOnce volume (the controller: one
+  replica, `Recreate`). Builds are kept in full for 30 days (`retention.days`);
   each image's daily figures (builds by outcome, build times) for a year;
   step output for 7 days. The volume is kept when the release is removed.
 

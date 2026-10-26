@@ -169,6 +169,9 @@ is not meant for production: one node, no high availability.
   their own, so under node pressure the kubelet evicts CI jobs before them.
   Without that permission set `buildkit.priorityClass.create=false`, or name
   an existing class in `buildkit.priorityClassName`.
+- **Permission to create a ClusterRole and its binding** for the console:
+  its controller checks the tokens of its web pods with a TokenReview, its
+  only cluster-wide right.
 - **Daemon resources:** the defaults (500m CPU, 512Mi requested) only keep
   the daemons out of BestEffort; size `buildkit.resources` to your build
   nodes (the chart's values list sizes).
@@ -294,8 +297,12 @@ job's credentials.
 
 ### The console
 
-The console is on by default and works in three levels; each adds to the
-previous one, and the install notes say which is on.
+The console is on by default. It runs as a controller (one pod: the store,
+the sessions, every GitLab token) and a web (two pods serving the pages),
+which reads the controller's API; see
+[the architecture](docs/architecture.md#the-console). It works in three
+levels; each adds to the previous one, and the install notes say which is
+on.
 
 | | by itself (default) | with a GitLab token | with sign-in |
 |---|---|---|---|

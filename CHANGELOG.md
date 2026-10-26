@@ -9,7 +9,37 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- The console becomes two Deployments. `<release>-console` keeps its name,
+  its volume and its data, and becomes the controller; the pages move to
+  the new `<release>-console-web` (two pods). The Service
+  `<release>-console` now points at the web, so port-forwards, Ingresses
+  and `global.console.url` keep working. The upgrade restarts the console
+  once, never the daemons. Values from 0.2.x keep their meaning (the
+  console's keys are the controller's); `console.web.*` and `console.api.*`
+  are new.
+- The controller checks the web's ServiceAccount tokens with a
+  TokenReview: the chart adds a ClusterRole that allows only that, and its
+  binding. Whoever installs the chart needs the right to create them.
+- Without cert-manager (`console.tls.existingSecret`), the controller's API
+  needs a server certificate too: `console.api.tls.existingSecret`, a
+  Secret with `tls.crt`, `tls.key` and `ca.crt`. `scripts/buildkit-certs.sh
+  --console-api <release>-console` makes one from the daemons' CA. With
+  cert-manager it is issued like the console's client certificate.
+- Sessions of people signed in survive the upgrade (they are in the
+  controller's store); nobody has to sign in again.
+
+### Changed
+
+- The console runs as a controller (one pod: the store, reading the
+  daemons and the job pods, the sessions, every GitLab token) and a web
+  (the pages, any number of pods, nothing kept), from one image. The web
+  reads the controller's API over HTTPS with a server-auth-only
+  certificate from the daemons' CA and proves who it is with a projected
+  ServiceAccount token; the controller's NetworkPolicy admits the web's
+  pods only. A page whose controller does not answer says so (502) instead
+  of showing an empty console; the web rolls without a pause.
+- The console binary has roles: `console controller`, `console web`, and
+  the default `console` with both in one process (for development).
 
 ## 0.2.5 - 2026-10-26
 

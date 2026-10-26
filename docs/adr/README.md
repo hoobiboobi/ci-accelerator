@@ -47,3 +47,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0041](0041-security-patch-exception.md) | Security patches skip the two-weeks wait |
 | [0042](0042-gitlab-ci-component.md) | A GitLab CI component, included by URL from the release tag |
 | [0043](0043-daemon-priority-and-disk-probe.md) | The daemons' priority, default requests and disk probe |
+| [0044](0044-console-controller-and-web.md) | The console as a controller and a web |
