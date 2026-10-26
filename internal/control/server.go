@@ -2,7 +2,9 @@ package control
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +39,11 @@ import (
 // SessionHeader carries the session cookie of the page a call serves.
 const SessionHeader = "X-CI-Session"
 
+// SetupHeader carries the setup the web started with (Config.Setup). A
+// controller set up otherwise (sign-in turned on, a token added) answers
+// 409: the web must start again, never serve pages under an old setup.
+const SetupHeader = "X-CI-Setup"
+
 // Config is what the web needs to know about the controller's setup.
 type Config struct {
 	Version string
@@ -53,6 +60,17 @@ type Config struct {
 	PublicURL string
 	Instances []auth.Choice
 	Idle      time.Duration
+}
+
+// Setup is a digest of what decides how the web serves the pages: sign-in
+// and its GitLabs, GitLab's API and whose token, the GitLabs read. Not the
+// version: a web and a controller of two releases still speak.
+func (c Config) Setup() string {
+	cp := c
+	cp.Version = ""
+	b, _ := json.Marshal(cp)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
 }
 
 // Server serves the controller's API.
@@ -172,6 +190,10 @@ func (s *Server) authorized(h http.Handler) http.Handler {
 				http.Error(w, err.Error(), status)
 				return
 			}
+		}
+		if got := r.Header.Get(SetupHeader); got != "" && got != s.Config.Setup() {
+			http.Error(w, "the controller's setup changed: the web must start again", http.StatusConflict)
+			return
 		}
 		h.ServeHTTP(w, r)
 	})

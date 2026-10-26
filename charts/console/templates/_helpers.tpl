@@ -293,3 +293,11 @@ ci-accelerator.io/component: console-web
 {{- if not $v }}{{ $v = get .root.Values .key }}{{ end }}
 {{- with $v }}{{ toYaml . }}{{ end }}
 {{- end }}
+
+{{/* What the web reads from the controller at start, as a checksum. */}}
+{{- define "console.setupChecksum" -}}
+{{- $signIn := include "console.signIn" . }}
+{{- $setup := dict "signIn" $signIn "token" (ne (dig "token" "existingSecret" "" .Values.gitlab) "") "urls" (default (list) .Values.gitlab.urls) "urlsFrom" (include "console.urlsConfigMap" .) }}
+{{- if $signIn }}{{ $_ := set $setup "signInConfig" (include "console.signInConfig" .) }}{{ end }}
+{{- toJson $setup | sha256sum | trunc 16 }}
+{{- end }}

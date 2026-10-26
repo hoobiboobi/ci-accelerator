@@ -166,3 +166,26 @@ tests:
       web.replica: 2
     asserts:
       - failedTemplate: {}
+
+  # The web reads the controller's setup at start: turning sign-in on (or
+  # adding a token) must roll it.
+  - it: rolls the web when sign-in is turned on
+    template: web.yaml
+    documentIndex: 0
+    set:
+      signIn: { enabled: true, url: https://ci.example.com, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
+    asserts:
+      # Not the value without sign-in (2d5723f5587376cb, below).
+      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/controller-setup"]', value: 6fed5b8810430f8d }
+  - it: has a setup checksum without sign-in
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/controller-setup"]', value: 2d5723f5587376cb }
+  - it: rolls the web when a GitLab token is added
+    template: web.yaml
+    documentIndex: 0
+    set:
+      gitlab.token: { existingSecret: tok }
+    asserts:
+      - notEqual: { path: 'spec.template.metadata.annotations["ci-accelerator.io/controller-setup"]', value: 2d5723f5587376cb }
