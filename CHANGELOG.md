@@ -11,6 +11,15 @@ workflow copies them into the GitHub release.
 
 None.
 
+## 0.2.5 - 2026-10-26
+
+### Upgrade notes
+
+- None to do. Upgrading from 0.2.4 restarts only the console, never the
+  daemons (their pod template is unchanged).
+- The console sets a cookie named `tz` (the browser's time zone) to show
+  times in it; with cookies blocked it shows UTC and says so.
+
 ### Added
 
 - The pipeline timeline's names column can be widened: drag its border,
