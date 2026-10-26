@@ -14,7 +14,7 @@ tests:
         template: caches.yaml
       - notContains: {path: 'spec.template.spec.containers[0].args', content: "-caches=/caches/caches.json"}
         template: deployment.yaml
-      - equal: {path: spec.template.spec.automountServiceAccountToken, value: false}
+      - notContains: {path: spec.template.spec.volumes, content: {name: caches, configMap: {name: c-console-caches}}}
         template: deployment.yaml
   - it: writes the folders, with the GitLab's id, and may read only their Secrets
     set:

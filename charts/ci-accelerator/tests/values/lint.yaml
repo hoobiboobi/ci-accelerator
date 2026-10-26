@@ -13,3 +13,9 @@ buildkit:
   networkPolicy:
     ingress:
       namespaces: [ci-accelerator-jobs]
+console:
+  tls:
+    existingSecret: lint-console-client
+  api:
+    tls:
+      existingSecret: lint-console-api

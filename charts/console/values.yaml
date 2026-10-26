@@ -148,8 +148,45 @@ persistence:
   storageClass: ""
   existingClaim: ""
 
+# -- The port of the pages and the JSON API (Service <release>-console,
+# served by the web's pods).
 service:
   port: 8080
+
+# The pages run in their own pods (the web), apart from the controller,
+# which holds the store, the collector and the sessions. The web keeps
+# nothing: any number of its pods can run, and it reads everything from the
+# controller's API.
+web:
+  # -- Pods serving the pages.
+  replicas: 2
+  resources:
+    requests:
+      cpu: 20m
+      memory: 48Mi
+    limits:
+      memory: 256Mi
+  # -- Placement of the web's pods; empty: the controller's (nodeSelector,
+  # tolerations, affinity below).
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podLabels: {}
+  podAnnotations: {}
+
+# The controller's API, which the web reads over HTTPS (Service
+# <release>-console-api). Callers prove themselves with a ServiceAccount
+# token the controller checks with Kubernetes (TokenReview).
+api:
+  # -- The API's port.
+  port: 8443
+  # -- Cluster domain in the API certificate's names.
+  clusterDomain: cluster.local
+  tls:
+    # -- Secret with the API's server certificate (tls.crt, tls.key, and
+    # ca.crt that it chains to); empty: issued by cert-manager from the
+    # daemons' CA (server auth only). Needed with tls.existingSecret.
+    existingSecret: ""
 
 # Who may connect to the console. CI jobs and their builds (RUN steps share
 # the daemons' network) run untrusted code in the same cluster, and without
@@ -171,6 +208,7 @@ networkPolicy:
   # the node addresses when the Ingress controller runs on the host network.
   extraFrom: []
 
+# -- The controller's resources (the web's are under web.resources).
 resources:
   requests:
     cpu: 50m
@@ -178,6 +216,8 @@ resources:
   limits:
     memory: 1Gi
 
+# -- Placement of the controller (and of the web unless web.* says
+# otherwise).
 nodeSelector: {}
 tolerations: []
 affinity: {}

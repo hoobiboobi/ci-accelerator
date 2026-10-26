@@ -5,7 +5,7 @@ HELM   ?= helm
 CHARTS := charts/buildkit
 # The console chart needs its own required values.
 CONSOLE := charts/console
-CONSOLE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set jobs.namespace=ci-jobs
+CONSOLE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set api.tls.existingSecret=lint-api --set jobs.namespace=ci-jobs
 CONSOLE_SIGN_IN_SET := --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["root"]}]'
 CONSOLE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1
 # Extra values files every chart check also renders with.

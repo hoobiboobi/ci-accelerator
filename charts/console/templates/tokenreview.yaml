@@ -1,0 +1,27 @@
+# The controller asks Kubernetes whose ServiceAccount token a caller of its
+# API sent (TokenReview): nothing else cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-%s-tokenreview" .Release.Namespace (include "console.fullname" .) }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-%s-tokenreview" .Release.Namespace (include "console.fullname" .) }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-%s-tokenreview" .Release.Namespace (include "console.fullname" .) }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "console.fullname" . }}
+    namespace: {{ .Release.Namespace }}

@@ -215,7 +215,81 @@ Checks that fail the render with a message naming the value to set.
 {{- fail "console: gitlab.token and sign-in exclude each other: with sign-in GitLab is read with each person's own token" }}
 {{- end }}
 {{- end }}
+{{- if and .Values.tls.existingSecret (not (dig "tls" "existingSecret" "" (default (dict) .Values.api))) }}
+{{- fail "console: with tls.existingSecret (no cert-manager) the controller's API needs api.tls.existingSecret too: a Secret with tls.crt, tls.key and ca.crt for the name <release>-console-api" }}
+{{- end }}
+{{- if eq (int (include "console.apiPort" .)) (int .Values.service.port) }}
+{{- fail "console: api.port and service.port must differ" }}
+{{- end }}
 {{- if or (lt (int .Values.retention.days) 1) (lt (int .Values.retention.outputDays) 1) (gt (int .Values.retention.outputDays) (int .Values.retention.days)) }}
 {{- fail "console: retention.days and retention.outputDays must be at least 1, and output kept no longer than builds" }}
 {{- end }}
+{{- end }}
+
+{{/*
+The console runs as two Deployments: the controller (the store, the
+collector, the sessions; one pod) and the web (the pages; any number of
+pods, nothing kept). The web reads the controller's API over HTTPS.
+*/}}
+{{- define "console.webName" -}}
+{{- printf "%s-web" (include "console.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "console.apiName" -}}
+{{- printf "%s-api" (include "console.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+The web's selector: its own name, so neither Deployment nor Service ever
+selects the other's pods.
+*/}}
+{{- define "console.webSelectorLabels" -}}
+app.kubernetes.io/name: {{ printf "%s-web" (include "console.name" .) | trunc 63 | trimSuffix "-" }}
+app.kubernetes.io/instance: {{ .Release.Name | quote }}
+{{- end }}
+
+{{/*
+console-web: the daemons' NetworkPolicy admits the controller (console),
+never the pages.
+*/}}
+{{- define "console.webComponentLabels" -}}
+app.kubernetes.io/part-of: ci-accelerator
+ci-accelerator.io/component: console-web
+{{- end }}
+
+{{- define "console.webLabels" -}}
+{{- $own := merge
+  (include "console.webSelectorLabels" . | fromYaml)
+  (include "console.webComponentLabels" . | fromYaml)
+  (dict
+    "helm.sh/chart" (include "console.chart" .)
+    "app.kubernetes.io/version" .Chart.AppVersion
+    "app.kubernetes.io/managed-by" .Release.Service) }}
+{{- toYaml (merge $own (default (dict) .Values.commonLabels)) }}
+{{- end }}
+
+{{- define "console.webPodLabels" -}}
+{{- $own := merge
+  (include "console.webSelectorLabels" . | fromYaml)
+  (include "console.webComponentLabels" . | fromYaml) }}
+{{- toYaml (merge $own (dig "podLabels" (dict) (default (dict) .Values.web)) (default (dict) .Values.commonLabels)) }}
+{{- end }}
+
+{{/* The controller API's port. Read with dig: values from 0.2.x have no api. */}}
+{{- define "console.apiPort" -}}
+{{- int (dig "port" 8443 (default (dict) .Values.api)) }}
+{{- end }}
+
+{{/* Secret with the API's certificate (tls.crt, tls.key, ca.crt). */}}
+{{- define "console.apiSecretName" -}}
+{{- $s := dig "tls" "existingSecret" "" (default (dict) .Values.api) }}
+{{- default (include "console.apiName" .) $s }}
+{{- end }}
+
+{{/* The web's setting k, else the controller's (placement follows it). */}}
+{{- define "console.webValue" -}}
+{{- $w := default (dict) .root.Values.web }}
+{{- $v := get $w .key }}
+{{- if not $v }}{{ $v = get .root.Values .key }}{{ end }}
+{{- with $v }}{{ toYaml . }}{{ end }}
 {{- end }}

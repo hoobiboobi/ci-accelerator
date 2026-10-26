@@ -174,6 +174,28 @@
       "required": ["port"],
       "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } }
     },
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "resources": { "type": "object", "additionalProperties": false, "properties": { "limits": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "requests": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "claims": { "type": "array" } } },
+        "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+        "tolerations": { "type": "array", "items": { "type": "object" } },
+        "affinity": { "type": "object" },
+        "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+        "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "clusterDomain": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" },
+        "tls": { "type": "object", "additionalProperties": false, "properties": { "existingSecret": { "type": "string" } } }
+      }
+    },
     "networkPolicy": {
       "type": "object",
       "additionalProperties": false,

@@ -4,24 +4,23 @@
 {{- $denied := list .Release.Namespace }}
 {{- with include "console.jobsNamespace" . }}{{ $denied = append $denied . }}{{ end }}
 {{- range (dig "deniedNamespaces" (list) $np) }}{{ $denied = append $denied (tpl . $) }}{{ end }}
-# Who may open the console. CI jobs and their builds run untrusted code in
-# the same cluster, and without sign-in the console shows every project to
-# whoever reaches it: the jobs namespace and the daemons (RUN steps share
-# their network) are kept out; Ingress controllers and other namespaces,
-# and kubectl port-forward (it enters the pod from the node), still reach
-# it. Only ingress is limited: the console's own connections (daemons, the
-# API server, GitLab, S3) stay open.
+# Who may open the console's pages. CI jobs and their builds run untrusted
+# code in the same cluster, and without sign-in the console shows every
+# project to whoever reaches it: the jobs namespace and the daemons (RUN
+# steps share their network) are kept out; Ingress controllers and other
+# namespaces, and kubectl port-forward (it enters the pod from the node),
+# still reach it. Only ingress is limited.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "console.fullname" . }}
+  name: {{ include "console.webName" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "console.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "console.selectorLabels" . | nindent 6 }}
+      {{- include "console.webSelectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
@@ -50,4 +49,29 @@ spec:
         {{- with (dig "extraFrom" (list) $np) }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+---
+# Who may call the controller: the web's pods, nothing else (the kubelet's
+# probes come from the node, which a NetworkPolicy does not limit). Its
+# own connections (daemons, the API server, GitLab, S3) stay open.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "console.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "console.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: api
+          protocol: TCP
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "console.webSelectorLabels" . | nindent 14 }}
 {{- end }}

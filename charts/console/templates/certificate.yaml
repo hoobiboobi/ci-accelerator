@@ -29,3 +29,42 @@ spec:
       {{- include "console.selectorLabels" . | nindent 6 }}
       {{- include "console.componentLabels" . | nindent 6 }}
 {{- end }}
+{{- if not (dig "tls" "existingSecret" "" (default (dict) .Values.api)) }}
+{{- if not (.Capabilities.APIVersions.Has "cert-manager.io/v1") }}
+{{- fail "console: the controller's API certificate is issued with cert-manager, whose API (cert-manager.io/v1) this cluster does not have. Install cert-manager, or set api.tls.existingSecret to a Secret with tls.crt, tls.key and ca.crt. For an offline render pass --api-versions cert-manager.io/v1." }}
+{{- end }}
+---
+# The controller API's server certificate, from the daemons' CA. Server
+# auth only: daemons accept clients whose certificates are for client
+# auth, so this one can never drive them.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "console.apiName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "console.apiName" . }}
+  dnsNames:
+    {{- $n := include "console.apiName" . }}
+    - {{ $n }}
+    - {{ $n }}.{{ .Release.Namespace }}
+    - {{ $n }}.{{ .Release.Namespace }}.svc
+    - {{ $n }}.{{ .Release.Namespace }}.svc.{{ dig "clusterDomain" "cluster.local" (default (dict) .Values.api) }}
+  usages:
+    - server auth
+    - digital signature
+  duration: {{ .Values.tls.certManager.duration }}
+  renewBeforePercentage: {{ int .Values.tls.certManager.renewBeforePercentage }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    {{- include "console.issuerRef" . | nindent 4 }}
+  secretTemplate:
+    labels:
+      {{- include "console.selectorLabels" . | nindent 6 }}
+      {{- include "console.componentLabels" . | nindent 6 }}
+{{- end }}

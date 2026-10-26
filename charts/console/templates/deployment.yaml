@@ -12,8 +12,8 @@ metadata:
   labels:
     {{- include "console.labels" . | nindent 4 }}
 spec:
-  # One writer: SQLite on a ReadWriteOnce volume. Recreate, so the old pod
-  # is gone before the new one opens the store.
+  # The controller. One writer: SQLite on a ReadWriteOnce volume. Recreate,
+  # so the old pod is gone before the new one opens the store.
   replicas: 1
   strategy:
     type: Recreate
@@ -37,9 +37,9 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "console.fullname" . }}
-      # The token is needed only to watch the job pods and read the
-      # caches' keys.
-      automountServiceAccountToken: {{ or (ne $jobs "") (ne $caches "") }}
+      # The token checks the web's tokens (TokenReview), watches the job
+      # pods and reads the caches' keys.
+      automountServiceAccountToken: true
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -56,9 +56,12 @@ spec:
           image: {{ include "console.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
+            - controller
             - -data=/data
             - -tls-dir=/certs
-            - -listen=:{{ .Values.service.port }}
+            - -api-listen=:{{ include "console.apiPort" . }}
+            - -api-tls-dir=/api-tls
+            - -api-allow={{ .Release.Namespace }}/{{ include "console.webName" . }}
             - -discover={{ include "console.discover" . }}
             {{- with .Values.daemons.serverName }}
             - -server-name={{ tpl . $ }}
@@ -103,18 +106,20 @@ spec:
             {{- end }}
           {{- end }}
           ports:
-            - name: http
-              containerPort: {{ .Values.service.port }}
+            - name: api
+              containerPort: {{ include "console.apiPort" . }}
           readinessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: api
+              scheme: HTTPS
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: api
+              scheme: HTTPS
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 6
@@ -132,6 +137,9 @@ spec:
               mountPath: /data
             - name: certs
               mountPath: /certs
+              readOnly: true
+            - name: api-tls
+              mountPath: /api-tls
               readOnly: true
             # SQLite's temporary files.
             - name: tmp
@@ -167,6 +175,15 @@ spec:
           secret:
             secretName: {{ include "console.tlsSecretName" . }}
             defaultMode: 0440
+        - name: api-tls
+          secret:
+            secretName: {{ include "console.apiSecretName" . }}
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
         - name: tmp
           emptyDir: {}
         {{- if $token }}
