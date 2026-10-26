@@ -480,3 +480,60 @@ func TestRateLimitPerCredential(t *testing.T) {
 
 // readTail keeps the end of a log much larger than what it keeps, from
 // the start of a line.
+
+// Empty lines are shown at most once in a row, and a runner's empty
+// continuation pieces never: that depends on the line before, so a part
+// must know the line before it. Parts of every size join into exactly what
+// the whole log shows.
+func TestJobLogPartsKeepEmptyLines(t *testing.T) {
+	var b strings.Builder
+	for i := 1; i <= 400; i++ {
+		switch {
+		case i%37 == 0:
+			b.WriteString("2026-10-21T20:44:56Z 00O+\n") // an empty continuation piece
+		case i%11 == 0:
+			b.WriteString("\n\n\n") // a run of empty lines
+		case i%7 == 0:
+			b.WriteString("2026-10-21T20:44:56Z 01O \r\n") // an empty stamped line, CRLF
+		default:
+			fmt.Fprintf(&b, "2026-10-21T20:44:56Z 01O line %03d\n", i)
+		}
+	}
+	log := b.String()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "trace", time.Time{}, strings.NewReader(log))
+	}))
+	defer srv.Close()
+	c := New([]string{srv.URL})
+	inst := history.InstancePrefix(srv.URL)
+	read := func(q LogQuery) LogPart {
+		t.Helper()
+		p, err := c.JobLogPart(context.Background(), Token("tok"), inst, 42, 77, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	whole := read(LogQuery{Lines: 1 << 20})
+	if whole.Start != 0 || whole.Text != CleanLog(log) {
+		t.Fatalf("the whole log as a part differs from CleanLog:\n%q\nvs\n%q", whole.Text[:120], CleanLog(log)[:120])
+	}
+	for _, n := range []int{1, 2, 3, 5, 13, 50} {
+		p := read(LogQuery{Lines: n})
+		joined := p.Text
+		for p.Start > 0 {
+			p = read(LogQuery{Lines: n, Before: p.Start})
+			joined = p.Text + joined
+		}
+		if joined != whole.Text {
+			t.Errorf("parts of %d lines: %d bytes joined, %d whole", n, len(joined), len(whole.Text))
+		}
+	}
+	// New lines after a part that ends with an empty line.
+	cut := strings.LastIndex(log[:len(log)-1], "\n\n\n") + 2
+	first := read(LogQuery{Lines: 1 << 20, Before: int64(cut)})
+	more := read(LogQuery{Lines: 1 << 20, After: int64(cut), Since: true})
+	if first.Text+more.Text != whole.Text {
+		t.Errorf("a part and the lines after it: %d + %d bytes, whole %d", len(first.Text), len(more.Text), len(whole.Text))
+	}
+}
