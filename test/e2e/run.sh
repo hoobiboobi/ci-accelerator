@@ -80,9 +80,9 @@ RUNNER_CHART_VERSION=0.93.0
 RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 # The last published release, which the upgrade scenario installs from the
 # registry and upgrades to this tree. Bump both with every release.
-UPGRADE_FROM=0.2.4
-UPGRADE_FROM_SHA256=c0776fd4743664c5bbf74e66450a94b4d5dcfa28a389cb568afb71b8deede389
-UPGRADE_FROM_BUILDKIT_SHA256=c44b27f79790df9528c72706091c2fcc9389ebcbc31943b316e9867b690195c5
+UPGRADE_FROM=0.2.5
+UPGRADE_FROM_SHA256=44bc28794b084dd259e4f16431f8597b0eca9326151716e570bcd26c49394e82
+UPGRADE_FROM_BUILDKIT_SHA256=d6a8f227450d0224992a868cefc4fc3d24b48172c07d8c08915bcc00c32f40e5
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
 # then restarts every daemon; say so in the upgrade notes). 0 since 0.2.4:
