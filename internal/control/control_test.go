@@ -323,3 +323,37 @@ func writePair(t *testing.T, dir string, c tls.Certificate) {
 		t.Fatal(err)
 	}
 }
+
+// TestSetupChange: a controller whose setup changed (sign-in turned on)
+// refuses the web that started under the old one, and the web learns it.
+func TestSetupChange(t *testing.T) {
+	st := newStore(t)
+	srv := &Server{Local: &Local{Store: st}, Config: Config{Release: "box"}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	c, err := Dial(ctx, ClientOptions{URL: ts.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := make(chan struct{})
+	c.OnSetupChange(func() { close(changed) })
+	if err := c.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Only the version differs: still the same setup.
+	srv.Config.Version = "v9"
+	if err := c.Ping(ctx); err != nil {
+		t.Fatalf("another version: %v", err)
+	}
+	srv.Config.SignIn, srv.Config.PublicURL = true, "https://ci.example.com"
+	_, err = c.Projects(ctx)
+	var away interface{ Unavailable() bool }
+	if !errors.As(err, &away) {
+		t.Fatalf("a call under the old setup: %v", err)
+	}
+	select {
+	case <-changed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the web was not told the setup changed")
+	}
+}

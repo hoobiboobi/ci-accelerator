@@ -81,6 +81,11 @@ func webMain(args []string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// A controller set up otherwise than when the web started (sign-in
+	// turned on, say) makes the web start again rather than serve under
+	// the old setup.
+	changed := make(chan struct{})
+	client.OnSetupChange(func() { close(changed) })
 	cfg := client.Config()
 	if cfg.Version != versionString() {
 		log.Warn("the web and the controller are of different versions", "web", versionString(), "controller", cfg.Version)
@@ -111,8 +116,14 @@ func webMain(args []string, log *slog.Logger) error {
 	ready := web.Secure(pages.Gate(mux))
 	handler.Store(&ready)
 	log.Info("web", "listen", *listen, "controller", *controller, "version", versionString(), "sign_in", cfg.SignIn)
-	<-ctx.Done()
+	var err2 error
+	select {
+	case <-ctx.Done():
+	case <-changed:
+		err2 = errors.New("the controller's setup changed: starting again")
+	}
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return srv.Shutdown(sctx)
+	srv.Shutdown(sctx)
+	return err2
 }

@@ -19,10 +19,15 @@ spec:
     metadata:
       labels:
         {{- include "console.webPodLabels" . | nindent 8 }}
-      {{- with (dig "podAnnotations" (dict) $web) }}
       annotations:
+        {{- with (dig "podAnnotations" (dict) $web) }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
+        # How the controller is set up for the pages (sign-in, GitLab's
+        # token, the GitLabs): a change rolls the web, which reads it at
+        # start. (A web that missed it is refused by the controller and
+        # starts again.)
+        ci-accelerator.io/controller-setup: {{ include "console.setupChecksum" . }}
     spec:
       serviceAccountName: {{ include "console.webName" . }}
       # No Kubernetes API access: the web's only token is the projected one

@@ -53,6 +53,24 @@ type Client struct {
 
 	readMu sync.Mutex
 	reads  map[string]readAnswer
+
+	setup     string
+	onChange  func()
+	changeOne sync.Once
+}
+
+// OnSetupChange calls f once when the controller's setup is no longer the
+// one the client started with (sign-in turned on, a token added): the web
+// must start again with the new one.
+func (c *Client) OnSetupChange(f func()) { c.onChange = f }
+
+func (c *Client) setupChanged() {
+	c.changeOne.Do(func() {
+		c.log.Error("the controller's setup changed; the web starts again to take it")
+		if c.onChange != nil {
+			go c.onChange()
+		}
+	})
 }
 
 type readAnswer struct {
@@ -101,6 +119,7 @@ func Dial(ctx context.Context, o ClientOptions) (*Client, error) {
 		}
 		delay = min(delay*2, 5*time.Second)
 	}
+	c.setup = c.cfg.Setup()
 	c.known = map[string]bool{}
 	for _, k := range c.cfg.Known {
 		c.known[k] = true
@@ -125,6 +144,9 @@ func (c *Client) request(ctx context.Context, method, path string, body io.Reade
 	}
 	if raw := auth.CookieFrom(ctx); raw != "" {
 		req.Header.Set(SessionHeader, raw)
+	}
+	if c.setup != "" {
+		req.Header.Set(SetupHeader, c.setup)
 	}
 	return req, nil
 }
@@ -172,7 +194,10 @@ func (c *Client) call(ctx context.Context, method string, args []any, outs ...an
 	if res.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(res.Body, 512))
 		err := fmt.Errorf("controller: %s: %s", res.Status, strings.TrimSpace(string(msg)))
-		if res.StatusCode >= 500 {
+		if res.StatusCode == http.StatusConflict {
+			c.setupChanged()
+		}
+		if res.StatusCode >= 500 || res.StatusCode == http.StatusConflict {
 			err = fmt.Errorf("%w: %v", ErrUnavailable, err)
 		}
 		return err
@@ -253,6 +278,9 @@ func (c *Client) follow(ctx context.Context) error {
 		return err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusConflict {
+		c.setupChanged()
+	}
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("events: %s", res.Status)
 	}
