@@ -76,7 +76,7 @@ kubectl -n ci-accelerator get secret gitlab-runner-token \
 | Runner pod in `ContainerCreating`, event `FailedMount ... non-existent secret key: runner-registration-token` | The empty key is missing | `kubectl -n ci-accelerator patch secret gitlab-runner-token --type merge -p '{"data":{"runner-registration-token":""}}'` |
 | Log `Verifying runner... is not valid` | Wrong or placeholder token, or the runner was deleted in GitLab | Fix the Secret, then `kubectl -n ci-accelerator rollout restart deploy/ci-accelerator-gitlab-runner` (the token is read at start) |
 | The runner is online, jobs stay pending or run elsewhere | Tags: a runner with tags that does not run untagged jobs only takes jobs with matching `tags:`. On gitlab.com untagged jobs go to the shared runners, which have no `BUILDKIT_*` variables | Add `tags:` to the job, or allow untagged jobs on the runner |
-| Runner pod `Pending` (`Unschedulable`), `helm install --wait` times out on the runner Deployment; the same for the console pod | Every node is a tainted build node: the runner manager and the console do not tolerate the build-node taint | Keep one node without the taint, or add tolerations: `gitlab-runner.tolerations`, `console.tolerations` |
+| Runner pod `Pending` (`Unschedulable`), `helm install --wait` times out on the runner Deployment; the same for the console's pods | Every node is a tainted build node: the runner manager and the console do not tolerate the build-node taint | Keep one node without the taint, or add tolerations: `gitlab-runner.tolerations`, `console.tolerations` (the web follows them unless `console.web.tolerations` is set) |
 | Job pod `Pending` | It cannot go to a build node: missing toleration or node selector in a hand-made runner configuration | Use the configuration from the umbrella or `integrations/gitlab-runner` |
 | Job fails pulling `gitlab-runner-helper:x86_64-...` with `no match for platform` | arm64 build nodes, but the runner assumed amd64 | `global.jobs.architecture=arm64` (or `kubernetes.io/arch` in the fragment's node selector) |
 | Jobs rejected by Pod Security | The jobs namespace enforces `restricted` | Use `baseline` |
@@ -212,6 +212,23 @@ limit on build nodes.
 
 ## The console
 
+- **Pages answer "The console's controller is not reachable" (502).** The
+  web pods serve the pages; the controller (`deploy/<release>-console`)
+  holds the data. During a controller restart this lasts a few seconds.
+  If it stays: `kubectl logs deploy/<release>-console` for the controller,
+  `kubectl logs deploy/<release>-console-web` for the web's side
+  ("controller API refused a call" means its token or NetworkPolicy).
+- **The web's pods are not ready, "The console is starting".** A web pod
+  waits for the controller's first answer (its setup) before it serves.
+  Check that `<release>-console-api` has an endpoint, that the Secret
+  `<release>-console-api` exists (cert-manager issues it; without
+  cert-manager `console.api.tls.existingSecret`), and that the controller
+  may create TokenReviews (the ClusterRole `<namespace>-<release>-console-tokenreview`).
+- **The controller refuses the web (401/403 in its log).** The web's token
+  is projected for the audience `ci-accelerator-console` and its
+  ServiceAccount must be `<release>-console-web` in the release's
+  namespace; the controller checks both with Kubernetes (TokenReview).
+  The answers are kept for 5 minutes, refusals for 10 seconds.
 - **No pipelines on the pages.** The console lists builds of CI jobs it can
   attribute: the job pods must carry the runner's annotations (the box's
   runner configuration or `integrations/gitlab-runner/values.yaml`), and
