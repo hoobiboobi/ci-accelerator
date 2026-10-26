@@ -36,36 +36,39 @@ func (sub *Subscription) Take() []string {
 	return out
 }
 
-type changes struct {
+// Changes hands change notifications to subscribers. The store has one;
+// a process that reads another process's store keeps its own and feeds it
+// from that store's stream.
+type Changes struct {
 	mu   sync.Mutex
 	subs map[*Subscription]bool
 }
 
 // Subscribe starts receiving changes; Unsubscribe ends it.
-func (s *Store) Subscribe() *Subscription {
-	c := make(chan struct{}, 1)
-	sub := &Subscription{C: c, c: c, pending: map[string]bool{}}
-	s.changes.mu.Lock()
-	defer s.changes.mu.Unlock()
-	if s.changes.subs == nil {
-		s.changes.subs = map[*Subscription]bool{}
+func (c *Changes) Subscribe() *Subscription {
+	ch := make(chan struct{}, 1)
+	sub := &Subscription{C: ch, c: ch, pending: map[string]bool{}}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.subs == nil {
+		c.subs = map[*Subscription]bool{}
 	}
-	s.changes.subs[sub] = true
+	c.subs[sub] = true
 	return sub
 }
 
-func (s *Store) Unsubscribe(sub *Subscription) {
-	s.changes.mu.Lock()
-	defer s.changes.mu.Unlock()
-	delete(s.changes.subs, sub)
+// Unsubscribe ends sub.
+func (c *Changes) Unsubscribe(sub *Subscription) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.subs, sub)
 }
 
-// changed tells the subscribers, after a commit, which pipelines changed.
-// Builds without a pipeline are on no page that updates itself.
-func (s *Store) changed(keys ...string) {
-	s.changes.mu.Lock()
-	defer s.changes.mu.Unlock()
-	for sub := range s.changes.subs {
+// Announce tells every subscriber that keys changed.
+func (c *Changes) Announce(keys ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for sub := range c.subs {
 		sub.mu.Lock()
 		for _, k := range keys {
 			sub.pending[k] = true
@@ -77,3 +80,13 @@ func (s *Store) changed(keys ...string) {
 		}
 	}
 }
+
+// Subscribe starts receiving the store's changes; Unsubscribe ends it.
+func (s *Store) Subscribe() *Subscription { return s.changes.Subscribe() }
+
+// Unsubscribe ends sub.
+func (s *Store) Unsubscribe(sub *Subscription) { s.changes.Unsubscribe(sub) }
+
+// changed tells the subscribers, after a commit, which pipelines changed.
+// Builds without a pipeline are on no page that updates itself.
+func (s *Store) changed(keys ...string) { s.changes.Announce(keys...) }

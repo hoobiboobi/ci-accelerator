@@ -317,94 +317,147 @@ func SafePath(to string) string {
 // Begin sends the browser to instance's GitLab to sign in; after it, the
 // person lands on to.
 func (a *Auth) Begin(w http.ResponseWriter, r *http.Request, instance, to string) error {
+	authURL, login, err := a.BeginWith(instance, to)
+	if err != nil {
+		return err
+	}
+	SetLoginCookie(w, login)
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, authURL, http.StatusFound)
+	return nil
+}
+
+// BeginWith starts a sign-in on instance without a browser at hand: it
+// returns GitLab's address to send the browser to and the value of the
+// login cookie that binds GitLab's answer to that browser. Whoever serves
+// the browser sets the cookie (SetLoginCookie).
+func (a *Auth) BeginWith(instance, to string) (authURL, loginCookie string, err error) {
 	x := a.insts[instance]
 	if x == nil {
-		return ErrSignIn
+		return "", "", ErrSignIn
 	}
 	p := pending{State: base64.RawURLEncoding.EncodeToString(random()), Verifier: oauth2.GenerateVerifier(),
 		Instance: instance, To: SafePath(to), Expires: a.cfg.Now().Add(10 * time.Minute).Unix()}
 	b, err := json.Marshal(p)
 	if err != nil {
-		return err
+		return "", "", err
 	}
-	http.SetCookie(w, &http.Cookie{Name: LoginCookie, Value: base64.RawURLEncoding.EncodeToString(a.seal(b, loginAD)),
-		Path: "/", MaxAge: 600, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, x.oauth.AuthCodeURL(p.State, oauth2.S256ChallengeOption(p.Verifier)), http.StatusFound)
-	return nil
+	return x.oauth.AuthCodeURL(p.State, oauth2.S256ChallengeOption(p.Verifier)), base64.RawURLEncoding.EncodeToString(a.seal(b, loginAD)), nil
 }
+
+// SetLoginCookie sets the cookie of a sign-in in progress.
+func SetLoginCookie(w http.ResponseWriter, value string) {
+	http.SetCookie(w, &http.Cookie{Name: LoginCookie, Value: value, Path: "/", MaxAge: 600, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+}
+
+// ClearLoginCookie removes the cookie of a sign-in in progress.
+func ClearLoginCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: LoginCookie, Value: "", Path: "/", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+}
+
+// SetSessionCookie sets the session cookie for idle (how long an unused
+// session lasts).
+func SetSessionCookie(w http.ResponseWriter, value string, idle time.Duration) {
+	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: value, Path: "/",
+		MaxAge: int(idle.Seconds()), Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+}
+
+// ClearSessionCookie removes the session cookie.
+func ClearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+}
+
+// Idle is how long an unused session lasts.
+func (a *Auth) Idle() time.Duration { return a.cfg.Idle }
 
 // Finish completes a sign-in on instance's callback: it checks GitLab's
 // answer against the browser's sign-in, exchanges the code, starts a
 // session and returns where the person goes next.
 func (a *Auth) Finish(w http.ResponseWriter, r *http.Request, instance string) (string, error) {
-	c, err := r.Cookie(LoginCookie)
-	http.SetCookie(w, &http.Cookie{Name: LoginCookie, Value: "", Path: "/", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	if err != nil {
-		return "/", fmt.Errorf("%w: no sign-in started in this browser", ErrSignIn)
+	login := ""
+	if c, err := r.Cookie(LoginCookie); err == nil {
+		login = c.Value
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(c.Value)
+	ClearLoginCookie(w)
+	old := ""
+	if c, err := r.Cookie(SessionCookie); err == nil {
+		old = c.Value
+	}
+	to, session, err := a.FinishWith(r.Context(), instance, login, r.URL.Query(), old)
 	if err != nil {
-		return "/", ErrSignIn
+		return to, err
+	}
+	SetSessionCookie(w, session, a.cfg.Idle)
+	return to, nil
+}
+
+// FinishWith completes a sign-in without a browser at hand: login is the
+// login cookie's value, q GitLab's answer (state, code, error), old the
+// session cookie the browser had. It returns where the person goes next
+// and the new session cookie's value.
+func (a *Auth) FinishWith(ctx context.Context, instance, login string, q url.Values, old string) (string, string, error) {
+	if login == "" {
+		return "/", "", fmt.Errorf("%w: no sign-in started in this browser", ErrSignIn)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(login)
+	if err != nil {
+		return "/", "", ErrSignIn
 	}
 	plain, err := a.open(raw, loginAD)
 	var p pending
 	if err != nil || json.Unmarshal(plain, &p) != nil {
-		return "/", ErrSignIn
+		return "/", "", ErrSignIn
 	}
-	q := r.URL.Query()
 	x := a.insts[instance]
 	switch {
 	case x == nil || p.Instance != instance:
 		// GitLab's answer came back to another GitLab's address.
-		return "/", fmt.Errorf("%w: the answer came from another GitLab", ErrSignIn)
+		return "/", "", fmt.Errorf("%w: the answer came from another GitLab", ErrSignIn)
 	case a.cfg.Now().Unix() > p.Expires:
-		return p.To, fmt.Errorf("%w: it took too long", ErrSignIn)
+		return p.To, "", fmt.Errorf("%w: it took too long", ErrSignIn)
 	case subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(p.State)) != 1:
-		return p.To, fmt.Errorf("%w: the answer is not for this sign-in", ErrSignIn)
+		return p.To, "", fmt.Errorf("%w: the answer is not for this sign-in", ErrSignIn)
 	case q.Get("error") != "":
-		return p.To, ErrDenied
+		return p.To, "", ErrDenied
 	case q.Get("code") == "":
-		return p.To, ErrSignIn
+		return p.To, "", ErrSignIn
 	}
-	ctx := context.WithValue(r.Context(), oauth2.HTTPClient, a.cfg.HTTP)
-	tok, err := x.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(p.Verifier))
+	octx := context.WithValue(ctx, oauth2.HTTPClient, a.cfg.HTTP)
+	tok, err := x.oauth.Exchange(octx, q.Get("code"), oauth2.VerifierOption(p.Verifier))
 	if err != nil {
-		return p.To, fmt.Errorf("%w: %v", ErrSignIn, redactErr(err))
+		return p.To, "", fmt.Errorf("%w: %v", ErrSignIn, redactErr(err))
 	}
-	u, err := a.client.User(ctx, gitlab.Token(tok.AccessToken), instance)
+	u, err := a.client.User(octx, gitlab.Token(tok.AccessToken), instance)
 	if err != nil {
-		return p.To, fmt.Errorf("%w: %v", ErrSignIn, err)
+		return p.To, "", fmt.Errorf("%w: %v", ErrSignIn, err)
 	}
 	// A new session every time: an id from before the sign-in is never
 	// carried over, and its token is revoked rather than left valid at
 	// GitLab with nobody holding it.
-	if old, err := r.Cookie(SessionCookie); err == nil {
-		if b, err := base64.RawURLEncoding.DecodeString(old.Value); err == nil {
-			a.end(r.Context(), hash(b))
+	if old != "" {
+		if b, err := base64.RawURLEncoding.DecodeString(old); err == nil {
+			a.end(ctx, hash(b))
 		}
 	}
 	cookie := random()
 	id := hash(cookie)
 	sealed, err := a.sealTokens(id, instance, tokens{Access: tok.AccessToken, Refresh: tok.RefreshToken, Expiry: a.expiry(tok)})
 	if err != nil {
-		return p.To, err
+		return p.To, "", err
 	}
 	now := a.cfg.Now()
-	if err := a.store.SaveSession(r.Context(), store.Session{ID: id, Instance: instance, UserID: u.ID, Username: u.Username,
+	if err := a.store.SaveSession(ctx, store.Session{ID: id, Instance: instance, UserID: u.ID, Username: u.Username,
 		Name: u.Name, Token: sealed, Created: now, Seen: now}); err != nil {
-		return p.To, err
+		return p.To, "", err
 	}
-	a.setSession(w, cookie)
 	if a.log != nil {
 		a.log.Info("signed in", "gitlab", x.host, "user", u.Username)
 	}
-	return p.To, nil
+	return p.To, base64.RawURLEncoding.EncodeToString(cookie), nil
 }
 
 func (a *Auth) setSession(w http.ResponseWriter, cookie []byte) {
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: base64.RawURLEncoding.EncodeToString(cookie), Path: "/",
-		MaxAge: int(a.cfg.Idle.Seconds()), Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	SetSessionCookie(w, base64.RawURLEncoding.EncodeToString(cookie), a.cfg.Idle)
 }
 
 // redactErr keeps an OAuth error's code and drops the response body.
@@ -448,50 +501,66 @@ func (a *Auth) Load(w http.ResponseWriter, r *http.Request) (*Viewer, error) {
 	if err != nil {
 		return nil, nil
 	}
-	cookie, err := base64.RawURLEncoding.DecodeString(c.Value)
+	v, touched, err := a.LoadCookie(r.Context(), c.Value)
+	if touched {
+		SetSessionCookie(w, c.Value, a.cfg.Idle)
+	}
+	return v, err
+}
+
+// LoadCookie returns the person whose session cookie has the value raw,
+// or nil; touched says the session's last use was written and the cookie
+// should be set again (its lifetime starts anew).
+func (a *Auth) LoadCookie(ctx context.Context, raw string) (v *Viewer, touched bool, err error) {
+	cookie, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil || len(cookie) != 32 {
-		return nil, nil
+		return nil, false, nil
 	}
 	id := hash(cookie)
-	x, err := a.store.Session(r.Context(), id)
+	x, err := a.store.Session(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	now := a.cfg.Now()
 	in := a.insts[x.Instance]
 	if in == nil || now.Sub(x.Seen) > a.cfg.Idle || now.Sub(x.Created) > a.cfg.MaxAge {
-		return nil, a.store.DeleteSession(r.Context(), id)
+		return nil, false, a.store.DeleteSession(ctx, id)
 	}
 	if _, err := a.openTokens(id, x.Instance, x.Token); err != nil {
 		// Sealed with another key: the key was changed.
-		return nil, a.store.DeleteSession(r.Context(), id)
+		return nil, false, a.store.DeleteSession(ctx, id)
 	}
 	if now.Sub(x.Seen) > touchEvery {
-		if err := a.store.TouchSession(r.Context(), id, now); err != nil {
-			return nil, err
+		if err := a.store.TouchSession(ctx, id, now); err != nil {
+			return nil, false, err
 		}
-		a.setSession(w, cookie)
+		touched = true
 	}
 	return &Viewer{Instance: x.Instance, Host: in.host, UserID: x.UserID, Username: x.Username, Name: x.Name,
-		Admin: in.admins[strings.ToLower(x.Username)], a: a, id: id}, nil
+		Admin: in.admins[strings.ToLower(x.Username)], a: a, id: id}, touched, nil
 }
 
 // SignOut ends the session on r: the token is revoked at GitLab (so it
 // opens nothing any more), the session deleted and the cookie cleared.
 func (a *Auth) SignOut(w http.ResponseWriter, r *http.Request) error {
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	ClearSessionCookie(w)
 	c, err := r.Cookie(SessionCookie)
 	if err != nil {
 		return nil
 	}
-	cookie, err := base64.RawURLEncoding.DecodeString(c.Value)
+	return a.EndCookie(r.Context(), c.Value)
+}
+
+// EndCookie ends the session whose cookie has the value raw.
+func (a *Auth) EndCookie(ctx context.Context, raw string) error {
+	cookie, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
 		return nil
 	}
-	return a.end(r.Context(), hash(cookie))
+	return a.end(ctx, hash(cookie))
 }
 
 // end revokes a session's token at GitLab and deletes the session.
@@ -742,6 +811,21 @@ type ctxKey struct{}
 
 // With returns ctx carrying v.
 func With(ctx context.Context, v *Viewer) context.Context { return context.WithValue(ctx, ctxKey{}, v) }
+
+// WithCookie returns ctx carrying the session cookie's value of the
+// request it serves: another process (the controller) finds the person
+// with it.
+func WithCookie(ctx context.Context, raw string) context.Context {
+	return context.WithValue(ctx, cookieKey{}, raw)
+}
+
+// CookieFrom returns the session cookie's value ctx carries, or "".
+func CookieFrom(ctx context.Context) string {
+	s, _ := ctx.Value(cookieKey{}).(string)
+	return s
+}
+
+type cookieKey struct{}
 
 // From returns the viewer ctx carries, or nil.
 func From(ctx context.Context) *Viewer {
