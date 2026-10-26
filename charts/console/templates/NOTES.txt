@@ -41,5 +41,8 @@ for a runner, settles "files or node" by comparing commits, and shows the
 end of a job's log on request.
 {{- end }}
 
+The console runs as a controller (deploy/{{ include "console.fullname" . }}: the store, the
+sessions, GitLab) and a web of {{ int (dig "replicas" 2 (default (dict) .Values.web)) }} pods (deploy/{{ include "console.webName" . }}: the
+pages), which reads the controller's API ({{ include "console.apiName" . }}, HTTPS).
 The store is on the PersistentVolumeClaim {{ include "console.pvcName" . }}
 {{- if not .Values.persistence.existingClaim }}, which is kept when the release is removed{{ end }}.

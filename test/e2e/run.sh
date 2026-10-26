@@ -1088,6 +1088,7 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
   box_disk
   box_console_policy
+  box_split
   box_settle
   box_ui
   box_cache
@@ -1364,6 +1365,76 @@ box_console_policy() {
     quiet kc -n "$JOBS_NS" exec client-build -- wget -q -T 5 -O- "$url"
 }
 
+# box_split: the console runs as a controller (the store and the sessions,
+# one pod) and a web (the pages, two pods) that reads the controller's API
+# over HTTPS and proves who it is with a ServiceAccount token the
+# controller checks with Kubernetes.
+box_split() {
+  check "the web runs as two pods apart from the controller" \
+    eval '[ "$(kc -n "$BOX_NS" get deploy "$BOX_REL-console-web" -o jsonpath="{.status.readyReplicas}" 2>/dev/null)" = 2 ]'
+  # Who may call: through a port-forward, which a NetworkPolicy does not see.
+  local port=$((${E2E_UI_PORT:-18431} + 7)) pf
+  kc -n "$BOX_NS" port-forward "deploy/$BOX_REL-console" "$port:8443" >"$LOGS/box-api-port-forward.log" 2>&1 &
+  pf=$!
+  eventually 15 quiet curl -ksS -o /dev/null "https://127.0.0.1:$port/healthz" \
+    || { fail "no port-forward to the controller's API"; kill "$pf" 2>/dev/null; return; }
+  api_status() {
+    if [ -n "$1" ]; then
+      curl -ks -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $1" "https://127.0.0.1:$port/internal/v1/config"
+    else
+      curl -ks -o /dev/null -w '%{http_code}' "https://127.0.0.1:$port/internal/v1/config"
+    fi
+  }
+  check "the controller's health check answers without a token (the kubelet's probe)" \
+    test "$(curl -ks -o /dev/null -w '%{http_code}' "https://127.0.0.1:$port/healthz")" = 200
+  check "the controller's API refuses a call without a token" test "$(api_status "")" = 401
+  local web other wrong
+  web=$(kc -n "$BOX_NS" create token "$BOX_REL-console-web" --audience ci-accelerator-console --duration 10m 2>/dev/null)
+  other=$(kc -n "$BOX_NS" create token default --audience ci-accelerator-console --duration 10m 2>/dev/null)
+  wrong=$(kc -n "$BOX_NS" create token "$BOX_REL-console-web" --duration 10m 2>/dev/null)
+  check "the controller's API answers the web's ServiceAccount" test "$(api_status "$web")" = 200
+  check "the controller's API refuses another ServiceAccount of its namespace" test "$(api_status "$other")" = 403
+  check "the controller's API refuses the web's token made for another audience" test "$(api_status "$wrong")" = 401
+  kill "$pf" 2>/dev/null
+  # Its certificate can never act as a client of the daemons.
+  kc -n "$BOX_NS" get secret "$BOX_REL-console-api" -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d >"$LOGS/box-api.crt" 2>/dev/null
+  check "the API's certificate is for server auth only" \
+    eval 'openssl x509 -in "$LOGS/box-api.crt" -noout -text 2>/dev/null | grep -A1 "Extended Key Usage" | grep -q "Server Authentication" && ! openssl x509 -in "$LOGS/box-api.crt" -noout -text | grep -A1 "Extended Key Usage" | grep -q "Client Authentication"'
+  # Who may connect (NetworkPolicy): the web's pods only. An HTTP request
+  # to the HTTPS port gets Go's 400 when it arrives, nothing when refused.
+  local api="http://$BOX_REL-console-api.$BOX_NS.svc:8443/healthz" wpod
+  wpod=$(kc -n "$BOX_NS" get pods -l "app.kubernetes.io/name=console-web,app.kubernetes.io/instance=$BOX_REL" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  kc -n "$BOX_NS" debug "pod/$wpod" --image="$IMAGE" --container=e2e-api-probe --profile=general -- \
+    sh -c "wget -q -T 5 -O- $api 2>&1; sleep 1" >/dev/null 2>&1
+  web_reach() { kc -n "$BOX_NS" logs "$wpod" -c e2e-api-probe 2>/dev/null | grep -q "400"; }
+  check "the web's pods reach the controller's API (control)" eventually 30 web_reach
+  api_reach() {
+    local c=(); [ -n "$3" ] && c=(-c "$3")
+    kc -n "$1" exec "$2" "${c[@]}" -- wget -q -T 5 -O- "$api" 2>&1 | grep -q "400"
+  }
+  check "a pod in another namespace cannot reach the controller's API" eval '! api_reach "$JOBS_NS" client-build ""'
+  local daemon
+  daemon=$(kc -n "$BOX_NS" get pods -l app.kubernetes.io/instance="$BOX_REL",ci-accelerator.io/component=buildkit \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  check "a daemon (and so every RUN step) cannot reach the controller's API" eval '! api_reach "$BOX_NS" "$daemon" buildkitd'
+  # The web keeps nothing: a rolling restart of it loses nothing; the
+  # controller keeps its store across a restart, and the web follows it.
+  local before after
+  before=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
+    | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["builds"]))' 2>/dev/null)
+  kc -n "$BOX_NS" rollout restart deploy/"$BOX_REL-console-web" >/dev/null 2>&1
+  check "a rolling restart of the web completes" quiet kc -n "$BOX_NS" rollout status deploy/"$BOX_REL-console-web" --timeout=120s
+  kc -n "$BOX_NS" rollout restart deploy/"$BOX_REL-console" >/dev/null 2>&1
+  check "a restart of the controller completes" quiet kc -n "$BOX_NS" rollout status deploy/"$BOX_REL-console" --timeout=180s
+  box_builds_kept() {
+    after=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
+      | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["builds"]))' 2>/dev/null)
+    [ -n "$before" ] && [ -n "$after" ] && [ "$after" -ge "$before" ] && [ "$before" -gt 0 ]
+  }
+  check "the pages show every build again after both restarts (${before:-?} kept)" eventually 90 box_builds_kept
+  check "the job's page is there again" eventually 30 quiet box_console_page
+}
+
 # refused_console <namespace> <pod> <container or ""> <url>: wget from that
 # pod gets no answer within 5 s.
 refused_console() {
@@ -1437,6 +1508,17 @@ s_upgrade() {
   JOB_SPEC=$(job_spec 901)
   run_job upgrade-before "$UPG_JOBS_NS"
   check "a CI job on $UPGRADE_FROM succeeds" test "$(cat "$LOGS/job-upgrade-before.state")" = success
+  # The console's store must outlive the upgrade and the rollback: the
+  # build of the job before, as the old console stored it.
+  upg_has_job() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$UPG_REL-console.$UPG_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
+      | python3 -c 'import json,sys; b=json.load(sys.stdin)["builds"]; sys.exit(0 if any(x.get("job") == int(sys.argv[1]) for x in b) else 1)' "$1"
+  }
+  local upg_console=""
+  if [ -n "$(kc -n "$UPG_NS" get deploy "$UPG_REL-console" -o name --ignore-not-found 2>/dev/null)" ]; then
+    upg_console=1
+    check "the $UPGRADE_FROM console stores the job's build" eventually 90 upg_has_job "$(job_id upgrade-before)"
+  fi
   gen0=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
   uids0=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
 
@@ -1464,6 +1546,15 @@ s_upgrade() {
   else
     check "--reuse-values keeps the console off (the old values have no such key)" \
       eval '! kc -n "$UPG_NS" get deploy "$UPG_REL-console" >/dev/null 2>&1' 
+  fi
+  if [ -n "$upg_console" ]; then
+    # The console of this tree: the old Deployment runs the controller on
+    # the old volume, the pages move to the web.
+    check "the console's web runs after the upgrade" \
+      eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-console-web --timeout=120s >/dev/null'
+    check "the controller took over the old store without a restart" \
+      eval '[ "$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/name=console,app.kubernetes.io/instance=$UPG_REL" -o jsonpath="{.items[*].status.containerStatuses[0].restartCount}")" = 0 ] && ! kc -n "$UPG_NS" logs deploy/"$UPG_REL"-console 2>/dev/null | grep -qi "database is locked"'
+    check "the build the old console stored is shown by the new one" eventually 90 upg_has_job "$(job_id upgrade-before)"
   fi
   gen1=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
   uids1=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
@@ -1515,6 +1606,11 @@ s_upgrade() {
   fi
   run_job upgrade-rolled-back "$UPG_JOBS_NS"
   check "a CI job after the rollback succeeds" test "$(cat "$LOGS/job-upgrade-rolled-back.state")" = success
+  if [ -n "$upg_console" ]; then
+    check "after the rollback the old console runs again, on the same store" \
+      eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-console --timeout=120s >/dev/null && ! kc -n "$UPG_NS" get deploy "$UPG_REL-console-web" >/dev/null 2>&1'
+    check "and shows the build from before the upgrade" eventually 90 upg_has_job "$(job_id upgrade-before)"
+  fi
 
   hc uninstall "$UPG_REL" -n "$UPG_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the upgraded release"
 
