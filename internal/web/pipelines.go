@@ -43,7 +43,7 @@ type PipelinesView struct {
 type PipeCard struct {
 	URL, GitLabURL         string
 	Title, Ref, SHA, Who   string
-	When                   string
+	When                   Stamp
 	State                  PipeState
 	Dur                    string
 	Jobs, NotRun           int
@@ -131,15 +131,15 @@ func pipeFilter(q url.Values, now time.Time, v *PipelinesView, pq *store.PipeQue
 	if v.Period == "custom" {
 		v.From, v.To = q.Get("from"), q.Get("to")
 		if v.From != "" {
-			if t, err := time.Parse(time.DateOnly, v.From); err == nil {
+			if t, err := time.ParseInLocation(time.DateOnly, v.From, now.Location()); err == nil {
 				pq.Since = t
 			} else {
 				v.BadDates = true
 			}
 		}
 		if v.To != "" {
-			if t, err := time.Parse(time.DateOnly, v.To); err == nil {
-				pq.Until = t.Add(24 * time.Hour)
+			if t, err := time.ParseInLocation(time.DateOnly, v.To, now.Location()); err == nil {
+				pq.Until = t.AddDate(0, 0, 1) // the day included, as long as it is there
 			} else {
 				v.BadDates = true
 			}
@@ -180,7 +180,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	v := &PipelinesView{Branch: q.Get("branch"), Mine: q.Get("mine") == "1", CanMine: sh.Viewer != nil}
 	pq := store.PipeQuery{Project: sh.Project.ProjectKey, Ref: v.Branch, Limit: pipePage}
-	pipeFilter(q, s.now(), v, &pq)
+	pipeFilter(q, inZone(s.now(), zone(r)), v, &pq)
 	if sh.Project.ID == 0 {
 		v.Shell = sh
 		s.render(w, "pipelines", http.StatusOK, v)
@@ -252,7 +252,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, p := range list {
-		v.Cards = append(v.Cards, s.pipeCard(p, jobs[p.ID], builds[p.ID]))
+		v.Cards = append(v.Cards, s.pipeCard(p, jobs[p.ID], builds[p.ID], zone(r)))
 	}
 	if len(list) == pipePage {
 		v.Older = pipeLink(v, url.Values{"before": {strconv.FormatInt(list[len(list)-1].Created.UnixMilli(), 10)}})
@@ -263,9 +263,9 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 }
 
 // pipeCard lays a pipeline's jobs out by stage on its time axis.
-func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.BuildRow) PipeCard {
+func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.BuildRow, loc *time.Location) PipeCard {
 	c := PipeCard{URL: "/pipelines/" + store.PipelineKey(p.Instance, p.ID), GitLabURL: webURL(p.WebURL),
-		Title: p.Title, Ref: p.Ref, SHA: short(p.SHA, 8), When: clock(p.Created, s.now())}
+		Title: p.Title, Ref: p.Ref, SHA: short(p.SHA, 8), When: clockStamp(p.Created, inZone(s.now(), loc))}
 	if c.Title == "" {
 		c.Title = fmt.Sprintf("Pipeline #%d", p.ID)
 	}

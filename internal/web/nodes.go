@@ -151,6 +151,7 @@ type BucketView struct {
 }
 
 func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
+	loc := zone(r)
 	ctx := r.Context()
 	sh, err := s.shell(r, "nodes", "")
 	if err != nil {
@@ -189,7 +190,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		if d.Connected {
 			v.Ready++
 		} else {
-			card.Since = "unreachable since " + ago(d.Since)
+			card.Since = "unreachable since " + ago(d.Since, loc)
 		}
 		v.Total++
 		if card.Running == 0 {
@@ -220,7 +221,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 			}
 			val := bytesText(m.Size)
 			if keep > 0 && !m.LastUsed.IsZero() {
-				val += " · kept until " + m.LastUsed.Add(keep).UTC().Format("2 Jan")
+				val += " · kept until " + m.LastUsed.Add(keep).In(loc).Format("2 Jan")
 			}
 			card.MountRows = append(card.MountRows, KV{mountName(m.Description), val})
 		}
@@ -231,7 +232,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 			gc = d.Inspection.GC
 		}
 		if !d.InspectedAt.IsZero() {
-			v.Measured = "Read from the running daemons at " + d.InspectedAt.UTC().Format("15:04:05 UTC")
+			v.Measured = "Read from the running daemons at " + stampOf(d.InspectedAt, loc, "15:04:05").Text
 		}
 		card.Disk = diskView(d.Inspection)
 		v.Cards = append(v.Cards, card)
@@ -265,7 +266,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 			v.Caps = append(v.Caps, KV{"Keep free on disk", bytesText(capped.MinFree)})
 		}
 	}
-	if v.Cache, err = s.bucket(ctx, sh.Project.ProjectKey); err != nil {
+	if v.Cache, err = s.bucket(ctx, sh.Project.ProjectKey, loc); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -273,7 +274,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		if until, err := s.opt.API.Status(); err != nil {
 			v.APIStatus = "GitLab API: " + err.Error()
 			if until.After(s.now()) {
-				v.APIStatus += " (paused until " + until.UTC().Format("15:04 UTC") + ")"
+				v.APIStatus += " (paused until " + stampOf(until, loc, "15:04").Text + ")"
 			}
 		} else {
 			v.APIStatus = "GitLab API: reachable"
@@ -345,7 +346,7 @@ func keepText(d time.Duration) string {
 
 // bucket sums what the runners' S3 cache holds for a project; nil when no
 // cache is listed.
-func (s *Server) bucket(ctx context.Context, p store.ProjectKey) (*BucketView, error) {
+func (s *Server) bucket(ctx context.Context, p store.ProjectKey, loc *time.Location) (*BucketView, error) {
 	objs, stores, err := s.store.ProjectCache(ctx, p)
 	if err != nil || len(stores) == 0 {
 		return nil, err
@@ -366,6 +367,6 @@ func (s *Server) bucket(ctx context.Context, p store.ProjectKey) (*BucketView, e
 			v.Err = st.Err
 		}
 	}
-	v.Scanned = ago(at)
+	v.Scanned = ago(at, loc)
 	return v, nil
 }

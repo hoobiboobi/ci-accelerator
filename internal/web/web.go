@@ -276,6 +276,9 @@ type Shell struct {
 	Viewer *auth.Viewer
 	// NoProjects: the person signed in may see no project here.
 	NoProjects bool
+	// Zone is the time zone the page shows times in (theme.js compares it
+	// with the browser's).
+	Zone string
 }
 
 // NotFound is the page for an address with nothing behind it.
@@ -300,7 +303,7 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {
 // shell resolves the project the pages show: the request's, the one chosen
 // before, or the most recently built.
 func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
-	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r), Version: s.opt.Version}
+	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r), Version: s.opt.Version, Zone: zone(r).String()}
 	ps, err := s.store.Projects(r.Context())
 	if err != nil {
 		return sh, err
@@ -484,12 +487,6 @@ var funcs = template.FuncMap{
 		return s
 	},
 	"add": func(a, b int) int { return a + b },
-	"ago": func(t time.Time) string {
-		if t.IsZero() {
-			return ""
-		}
-		return t.UTC().Format("2 Jan 15:04 UTC")
-	},
 }
 
 func short(s string, n int) string {

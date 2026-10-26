@@ -514,6 +514,32 @@ async function jobPage(s, pages) {
   check(`${p} no errors`, s.take().length === 0);
 }
 
+// Times in the reader's zone: a browser in Tokyo without the zone cookie
+// gets the page once more before it paints (and only once), then every
+// page names Tokyo and shows its times there, with UTC in the tooltip.
+async function readersZone(s, pages) {
+  const list = pages.find(p => p === "/builds") || "/builds";
+  const other = pages.find(p => /^\/pipelines\/[^/]+\/\d+$/.test(p)) || "/";
+  await s.send("Network.deleteCookies", { name: "tz", url: base + "/" });
+  await s.eval(`(() => { try { sessionStorage.clear(); } catch (e) {} })()`);
+  await s.send("Emulation.setTimezoneOverride", { timezoneId: "Asia/Tokyo" });
+  try {
+    await s.go(list, 400);
+    const first = await s.eval(`({ tz: document.documentElement.dataset.tz, nav: performance.getEntriesByType("navigation")[0].type,
+      when: [...document.querySelectorAll(".brow .bt")].slice(0, 5).map(e => [e.textContent, e.title]) })`);
+    check(`zone: a browser in Tokyo gets its page in Tokyo time, reloaded once before painting`,
+      first.tz === "Asia/Tokyo" && first.nav === "reload", JSON.stringify(first).slice(0, 200));
+    check(`zone: list times without "UTC", the UTC moment in their tooltip`,
+      first.when.length > 0 && first.when.every(([t, u]) => !/UTC/.test(t) && / UTC$/.test(u)), JSON.stringify(first.when));
+    await s.go(other, 300);
+    const next = await s.eval(`({ tz: document.documentElement.dataset.tz, nav: performance.getEntriesByType("navigation")[0].type })`);
+    check(`zone: the next page needs no reload`, next.tz === "Asia/Tokyo" && next.nav === "navigate", JSON.stringify(next));
+  } finally {
+    await s.send("Emulation.setTimezoneOverride", { timezoneId: "" }).catch(() => {});
+  }
+  check("zone: no errors", s.take().length === 0);
+}
+
 async function keys(s, pages) {
   const b = pages.find(p => /^\/builds\/\d+$/.test(p)) || "/";
   await s.go(b);
@@ -616,6 +642,7 @@ try {
   await pipelinesPage(s);
   await buildList(s);
   await jobPage(s, pages);
+  await readersZone(s, pages);
   await keys(s, pages);
   await notFound(s);
   if (args.live) await liveUpdate(s, args.live);

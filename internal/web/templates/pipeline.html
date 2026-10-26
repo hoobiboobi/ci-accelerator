@@ -4,7 +4,7 @@
   <header class="phead"><div class="crumbs"><a href="/pipelines" data-back aria-label="Back to pipelines">{{icon "back" 12}}</a><a href="/pipelines">Pipelines</a><span class="sepr">/</span><span>#{{.ID}}</span></div>
     <div class="titlerow"><h1 class="t" tabindex="-1">{{.Title}}</h1>{{with .Card.State.Key}}<span class="pstate ps-{{.}}">{{icon $.Card.State.Icon 12}}{{$.Card.State.Label}}</span>{{end}}
       {{if .GitLabURL}}<div class="tools"><a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab pipeline</span></a></div>{{end}}</div>
-    <div class="sub">{{with .Ref}}<span>{{.}}</span>{{end}}{{with .SHA}}<span class="mono">{{.}}</span>{{end}}{{with .Started}}<span>{{.}}</span>{{end}}</div></header>
+    <div class="sub">{{with .Ref}}<span>{{.}}</span>{{end}}{{with .SHA}}<span class="mono">{{.}}</span>{{end}}{{if .Started.Text}}<span title="{{.Started.UTC}}">{{.Started}}</span>{{end}}</div></header>
   {{if .NoBuilds}}
   <div class="empty"><b>No job of this pipeline built an image on the box.</b><p>Its jobs are GitLab's to show{{if .GitLabURL}}: <a class="link" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">the pipeline in GitLab</a>{{end}}.</p></div>
   {{else}}
