@@ -98,6 +98,7 @@
     $$("[data-pane]", main).forEach(p => { p.hidden = p.dataset.pane !== name; });
     const dg = $(".dgrid", main);
     if (dg) dg.classList.toggle("wide", name !== "steps");
+    refitWaterfalls();
   }
   function setupTabs() {
     $$("[data-tab]", main).forEach(t => t.addEventListener("click", ev => {
@@ -293,10 +294,118 @@
   }
 
   // ---- the waterfall ----
+  // The names column's width (--tw) is the reader's: dragged, fitted to
+  // the longest visible name, or set with the arrow keys, remembered in
+  // this browser for every timeline. The bars keep at least wfBarsMin.
+  const wfMinTW = 160, wfBarsMin = 460;
+  function wfWidthLimit(wf) {
+    const box = $(".wfbox", wf);
+    if (!box || box.clientWidth === 0) return Infinity; // not laid out (a hidden tab)
+    return Math.max(wfMinTW, box.clientWidth - wfBarsMin);
+  }
+  // Again once laid out: a timeline in a tab that was hidden.
+  function refitWaterfalls() {
+    $$("[data-wf]", main).forEach(wf => {
+      const saved = parseInt(store.get("wf-tw") || "", 10);
+      if (saved > 0) setTW(wf, saved, false); else fitLabels(wf);
+    });
+  }
+  function setTW(wf, px, keep, noFit) {
+    if (px === null) {
+      wf.style.removeProperty("--tw");
+      if (keep) store.del("wf-tw");
+    } else {
+      px = Math.round(Math.min(Math.max(px, wfMinTW), wfWidthLimit(wf)));
+      wf.style.setProperty("--tw", px + "px");
+      if (keep) store.set("wf-tw", String(px));
+    }
+    if (!noFit) fitLabels(wf);
+  }
+  function currentTW(wf) {
+    const h = $(".wfax .h", wf);
+    return h ? h.getBoundingClientRect().width : 250;
+  }
+  // The width that shows every visible name whole.
+  function fittedTW(wf) {
+    let need = 0;
+    $$(".row:not([hidden]) .tc", wf).forEach(tc => {
+      const nm = $(".nm", tc);
+      if (!nm) return;
+      need = Math.max(need, tc.getBoundingClientRect().width + (nm.scrollWidth - nm.clientWidth));
+    });
+    return Math.ceil(need) + 2;
+  }
+  function setupColumn(wf) {
+    const grip = $(".wgrip", wf);
+    const saved = parseInt(store.get("wf-tw") || "", 10);
+    if (saved > 0) setTW(wf, saved, false);
+    if (!grip) return;
+    grip.addEventListener("pointerdown", ev => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      const x0 = ev.clientX, w0 = currentTW(wf);
+      grip.setPointerCapture(ev.pointerId);
+      wf.classList.add("resizing");
+      const move = e => setTW(wf, w0 + e.clientX - x0, false, true); // labels: once, on release
+      const up = e => {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        grip.removeEventListener("pointercancel", up);
+        wf.classList.remove("resizing");
+        setTW(wf, w0 + e.clientX - x0, true);
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+      grip.addEventListener("pointercancel", up);
+    });
+    // Fit the longest name; at that width already, back to the default.
+    grip.addEventListener("dblclick", () => {
+      const fit = Math.min(Math.max(fittedTW(wf), wfMinTW), wfWidthLimit(wf));
+      if (wf.style.getPropertyValue("--tw") && Math.abs(currentTW(wf) - fit) < 2) setTW(wf, null, true);
+      else setTW(wf, fit, true);
+    });
+    grip.addEventListener("keydown", ev => {
+      const step = ev.shiftKey ? 64 : 16;
+      if (ev.key === "ArrowRight") { ev.preventDefault(); setTW(wf, currentTW(wf) + step, true); }
+      if (ev.key === "ArrowLeft") { ev.preventDefault(); setTW(wf, currentTW(wf) - step, true); }
+      if (ev.key === "Home") { ev.preventDefault(); setTW(wf, null, true); }
+      if (ev.key === "Enter") { ev.preventDefault(); grip.dispatchEvent(new MouseEvent("dblclick")); }
+    });
+  }
+  // A label that would run off the track's right edge is put before its
+  // bars instead (or over them at the right edge when they start early),
+  // as the server does for the ones it can tell; widths are only known
+  // here, and change with the column and the window.
+  function fitLabels(wf) {
+    $$(".row:not([hidden]) .trk", wf).forEach(trk => {
+      const lab = $(".lab", trk);
+      if (!lab) return;
+      if (lab.dataset.l === undefined) {
+        if (lab.classList.contains("end")) return; // the server placed it
+        lab.dataset.l = lab.style.left;
+      }
+      lab.classList.remove("end", "over");
+      lab.style.right = "";
+      lab.style.left = lab.dataset.l;
+      const t = trk.getBoundingClientRect(), r = lab.getBoundingClientRect();
+      if (r.right <= t.right || t.width === 0) return;
+      let lo = 100;
+      $$(".bar", trk).forEach(b => { lo = Math.min(lo, parseFloat(b.style.left) || 0); });
+      lab.style.left = "";
+      lab.style.right = (lo < 40 ? 0 : 100 - lo + 0.6).toFixed(2) + "%";
+      lab.classList.add("end", "over");
+    });
+  }
+  let wfResizeT = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(wfResizeT);
+    wfResizeT = setTimeout(refitWaterfalls, 120);
+  }, { passive: true });
   // What the reader set in each waterfall survives live updates of the page.
   const wfState = [];
   function setupWaterfall() {
     $$("[data-wf]", main).forEach((wf, wi) => {
+      setupColumn(wf);
       const saved = wfState[wi] || (wfState[wi] = {});
       const rows = $$(".row", wf);
       const byId = new Map(rows.map(r => [r.dataset.id, r]));
@@ -316,6 +425,7 @@
       function render() {
         if (filter === "all" && !q) {
           rows.forEach(r => { r.hidden = !shown(r); });
+          fitLabels(wf);
           return;
         }
         const keep = new Set();
@@ -328,6 +438,7 @@
           }
         });
         rows.forEach(r => { r.hidden = !keep.has(r.dataset.id); });
+        fitLabels(wf);
       }
       function toggle(r, open) {
         if (!r.hasAttribute("aria-expanded")) return;

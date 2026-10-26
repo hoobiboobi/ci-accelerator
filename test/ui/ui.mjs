@@ -355,6 +355,67 @@ async function pipelinePage(s, pages) {
   check(`${p} no errors`, s.take().length === 0);
 }
 
+// The timeline's names column: dragged wider it stays wider (after a
+// reload too), double-click fits the longest name and then goes back, the
+// keys move it; labels never run off the track; the wheel inside the box
+// reaches the page once the box is at its end.
+async function timelineColumn(s, pages) {
+  let p = null;
+  for (const x of pages.filter(x => /^\/pipelines\/[^/]+\/\d+$/.test(x))) {
+    await s.go(x);
+    if (await s.eval(`!!document.querySelector("[data-wf] .wgrip")`)) { p = x; break; }
+  }
+  if (!p) return check("a timeline with a resizable names column", false, "none found");
+  await s.eval(`localStorage.removeItem("ci-accelerator-wf-tw")`);
+  await s.go(p);
+  await s.click('[data-wf-depth="steps"]');
+  const tw = () => s.eval(`Math.round(document.querySelector("[data-wf] .wfax .h").getBoundingClientRect().width)`);
+  check(`${p} the wheel goes on to the page at the timeline's end`,
+    (await s.eval(`getComputedStyle(document.querySelector("[data-wf] .wfbox")).overscrollBehaviorY`)) === "auto");
+  const w0 = await tw();
+  const g = await s.eval(`(() => { const b = document.querySelector("[data-wf] .wgrip").getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
+  await s.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: g[0], y: g[1] });
+  await s.send("Input.dispatchMouseEvent", { type: "mousePressed", x: g[0], y: g[1], button: "left", buttons: 1, clickCount: 1 });
+  for (const dx of [40, 80, 120]) await s.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: g[0] + dx, y: g[1], button: "left", buttons: 1 });
+  await s.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: g[0] + 120, y: g[1], button: "left", buttons: 0, clickCount: 1 });
+  await sleep(200);
+  const w1 = await tw();
+  check(`${p} dragging the column's border widens it`, Math.abs(w1 - w0 - 120) <= 3, `${w0} -> ${w1}`);
+  // Every row follows the header (one column for the whole timeline).
+  check(`${p} every row follows the column`, await s.eval(`[...document.querySelectorAll("[data-wf] .row:not([hidden]) .tc")].every(t => Math.abs(t.getBoundingClientRect().width - ${w1}) <= 1)`));
+  await s.go(p);
+  check(`${p} the width is kept after a reload`, Math.abs((await tw()) - w1) <= 1, `${await tw()} vs ${w1}`);
+  await s.click('[data-wf-depth="steps"]');
+  await s.eval(`document.querySelector("[data-wf] .wgrip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+  await sleep(150);
+  const fit = await s.eval(`(() => { const box = document.querySelector("[data-wf] .wfbox"); const w = document.querySelector("[data-wf] .wfax .h").getBoundingClientRect().width;
+    const cut = [...document.querySelectorAll("[data-wf] .row:not([hidden]) .nm")].filter(n => n.scrollWidth > n.clientWidth + 1).length;
+    return { w: Math.round(w), cut, atLimit: w >= box.clientWidth - 460 - 1 }; })()`);
+  check(`${p} double-click fits the longest name`, fit.cut === 0 || fit.atLimit, JSON.stringify(fit));
+  await s.eval(`document.querySelector("[data-wf] .wgrip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+  await sleep(150);
+  check(`${p} double-click again: back to the default width`,
+    (await s.eval(`document.querySelector("[data-wf]").style.getPropertyValue("--tw") === "" && localStorage.getItem("ci-accelerator-wf-tw") === null`)), `${await tw()}`);
+  await s.eval(`document.querySelector("[data-wf] .wgrip").focus()`);
+  const k0 = await tw();
+  await s.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await s.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await sleep(150);
+  check(`${p} the arrow keys move the column`, (await tw()) === k0 + 16, `${k0} -> ${await tw()}`);
+  // Labels: none runs off the right edge of its track, at any depth, even
+  // with the column as wide as it goes (the bars' track at its narrowest,
+  // where long labels overflow unless the script moves them).
+  await s.eval(`localStorage.setItem("ci-accelerator-wf-tw", "5000")`);
+  await s.go(p);
+  for (const d of ["jobs", "steps"]) {
+    await s.click(`[data-wf-depth="${d}"]`);
+    const off = await s.eval(`[...document.querySelectorAll("[data-wf] .row:not([hidden]) .trk")].filter(t => { const l = t.querySelector(".lab"); return l && l.getBoundingClientRect().right > t.getBoundingClientRect().right + 1; }).length`);
+    check(`${p} no label runs off the timeline (${d})`, off === 0, `${off} labels`);
+  }
+  await s.eval(`localStorage.removeItem("ci-accelerator-wf-tw")`);
+  check(`${p} column: no errors`, s.take().length === 0);
+}
+
 // The pipelines: one card each with its jobs by stage; a card opens its
 // pipeline.
 async function pipelinesPage(s) {
@@ -529,6 +590,7 @@ try {
   await navigationBurst(s, pages);
   await buildPage(s, pages);
   await pipelinePage(s, pages);
+  await timelineColumn(s, pages);
   await pipelinesPage(s);
   await buildList(s);
   await jobPage(s, pages);
