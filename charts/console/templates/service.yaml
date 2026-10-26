@@ -1,3 +1,4 @@
+# The pages and the JSON API: the web's pods.
 apiVersion: v1
 kind: Service
 metadata:
@@ -8,8 +9,27 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    {{- include "console.selectorLabels" . | nindent 4 }}
+    {{- include "console.webSelectorLabels" . | nindent 4 }}
   ports:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
+---
+# The controller's API, for the web (HTTPS; callers prove themselves with
+# a ServiceAccount token).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "console.apiName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "console.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: api
+      port: {{ include "console.apiPort" . }}
+      targetPort: api
+      appProtocol: https

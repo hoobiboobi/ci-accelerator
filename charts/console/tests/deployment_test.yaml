@@ -20,9 +20,12 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].args
           value:
+            - controller
             - -data=/data
             - -tls-dir=/certs
-            - -listen=:8080
+            - -api-listen=:8443
+            - -api-tls-dir=/api-tls
+            - -api-allow=ci-accelerator/c-console-web
             - -discover=buildkit-headless.ci-accelerator.svc:1234
             - -gitlab-url=https://gitlab.example.com/
             - -gitlab-url=https://other.example.com/
@@ -54,9 +57,10 @@ tests:
       - notContains: { path: "spec.template.spec.containers[0].args", content: -gitlab-url=https://gitlab.example.com/ }
 
   # The token only to watch job pods.
-  - it: mounts the service account token only when it watches job pods
+  # The controller checks the web's tokens with Kubernetes (TokenReview).
+  - it: mounts the service account token
     asserts:
-      - equal: { path: spec.template.spec.automountServiceAccountToken, value: false }
+      - equal: { path: spec.template.spec.automountServiceAccountToken, value: true }
   - it: mounts the token with a jobs namespace
     set:
       jobs.namespace: ci-jobs
@@ -74,7 +78,10 @@ tests:
     asserts:
       - equal: { path: "spec.template.spec.volumes[0].persistentVolumeClaim.claimName", value: c-console-data }
       - equal: { path: "spec.template.spec.volumes[1].secret", value: { secretName: console-client, defaultMode: 0440 } }
-      - equal: { path: "spec.template.spec.volumes[2]", value: { name: tmp, emptyDir: {} } }
+      - equal:
+          path: "spec.template.spec.volumes[2]"
+          value: { name: api-tls, secret: { secretName: console-api, defaultMode: 0440, items: [{ key: tls.crt, path: tls.crt }, { key: tls.key, path: tls.key }] } }
+      - equal: { path: "spec.template.spec.volumes[3]", value: { name: tmp, emptyDir: {} } }
 
   - it: uses an existing claim when given
     set:
@@ -100,8 +107,12 @@ tests:
 
   - it: probes /healthz
     asserts:
-      - equal: { path: "spec.template.spec.containers[0].readinessProbe.httpGet", value: { path: /healthz, port: http } }
-      - equal: { path: "spec.template.spec.containers[0].livenessProbe.httpGet", value: { path: /healthz, port: http } }
+      - equal: { path: "spec.template.spec.containers[0].readinessProbe.httpGet", value: { path: /healthz, port: api, scheme: HTTPS } }
+      - equal: { path: "spec.template.spec.containers[0].livenessProbe.httpGet", value: { path: /healthz, port: api, scheme: HTTPS } }
+  - it: serves only the API (the pages are the web's)
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].ports", value: [{ name: api, containerPort: 8443 }] }
+      - notContains: { path: "spec.template.spec.containers[0].args", content: -listen=:8080 }
 
   # GitLab's API for job times: a Secret's key mounted as a file, only when
   # given.

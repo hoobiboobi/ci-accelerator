@@ -116,8 +116,9 @@ tests:
   # namespace and its daemons kept out.
   - it: keeps the box's jobs and builds away from the console
     template: charts/console/templates/networkpolicy.yaml
+    documentIndex: 0
     asserts:
-      - hasDocuments: { count: 1 }
+      - hasDocuments: { count: 2 }
       - equal:
           path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
           value: [ci-accelerator, ci-accelerator-jobs]
@@ -126,6 +127,7 @@ tests:
           value: [buildkit]
   - it: follows a renamed jobs namespace
     template: charts/console/templates/networkpolicy.yaml
+    documentIndex: 0
     set:
       global.jobs.namespace: ci-builds
       gitlab-runner.runners.jobNamespace: ci-builds
@@ -133,3 +135,19 @@ tests:
       - equal:
           path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
           value: [ci-accelerator, ci-builds]
+
+  # The box's daemons admit the controller (it reads their history), never
+  # the pages; the controller admits the web only.
+  - it: lets the controller, not the web, reach the daemons
+    template: charts/buildkit/templates/networkpolicy.yaml
+    asserts:
+      - contains:
+          path: spec.ingress[0].from
+          content: { podSelector: { matchLabels: { ci-accelerator.io/component: console } } }
+  - it: issues the controller API's certificate from the box's CA
+    template: charts/console/templates/certificate.yaml
+    documentIndex: 1
+    asserts:
+      - equal: { path: metadata.name, value: box-console-api }
+      - equal: { path: spec.issuerRef.name, value: ci-accelerator-box-buildkit-ca }
+      - equal: { path: spec.usages, value: [server auth, digital signature] }

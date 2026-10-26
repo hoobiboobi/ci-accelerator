@@ -1,0 +1,168 @@
+suite: the web (pages) and the controller's API
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  - it: runs the pages as their own Deployment, reading the controller
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - isKind: { of: Deployment }
+      - equal: { path: metadata.name, value: c-console-web }
+      - equal: { path: spec.replicas, value: 2 }
+      - isNull: { path: spec.strategy }
+      - equal: { path: spec.selector.matchLabels, value: { app.kubernetes.io/name: console-web, app.kubernetes.io/instance: c } }
+      - equal: { path: 'spec.template.metadata.labels["ci-accelerator.io/component"]', value: console-web }
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - web
+            - -listen=:8080
+            - -controller=https://c-console-api.ci-accelerator.svc:8443
+            - -controller-ca=/api-tls/ca.crt
+            - -token-file=/var/run/secrets/ci-accelerator/token
+
+  # The web holds no key and no Kubernetes access: the CA alone, and a token
+  # only the controller accepts.
+  - it: gives the web the API's CA and a projected token, nothing else
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - equal: { path: spec.template.spec.automountServiceAccountToken, value: false }
+      - equal: { path: spec.template.spec.serviceAccountName, value: c-console-web }
+      - equal:
+          path: spec.template.spec.volumes[0]
+          value: { name: api-ca, secret: { secretName: console-api, defaultMode: 0444, items: [{ key: ca.crt, path: ca.crt }] } }
+      - equal:
+          path: spec.template.spec.volumes[1].projected.sources
+          value: [{ serviceAccountToken: { audience: ci-accelerator-console, expirationSeconds: 3600, path: token } }]
+      - lengthEqual: { path: spec.template.spec.volumes, count: 2 }
+      - notExists: { path: "spec.template.spec.containers[0].env" }
+
+  - it: runs the web as non-root with a read-only root file system
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - equal: { path: spec.template.spec.securityContext.runAsNonRoot, value: true }
+      - equal: { path: "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem", value: true }
+      - equal: { path: "spec.template.spec.containers[0].securityContext.capabilities.drop", value: [ALL] }
+      - equal: { path: "spec.template.spec.containers[0].readinessProbe.httpGet", value: { path: /healthz, port: http } }
+      - equal: { path: "spec.template.spec.containers[0].livenessProbe.httpGet", value: { path: /livez, port: http } }
+
+  - it: places the web like the controller unless told otherwise
+    template: web.yaml
+    documentIndex: 0
+    set:
+      tolerations: [{ key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule }]
+      nodeSelector: { disk: ssd }
+    asserts:
+      - equal: { path: spec.template.spec.tolerations, value: [{ key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule }] }
+      - equal: { path: spec.template.spec.nodeSelector, value: { disk: ssd } }
+  - it: places the web by its own settings when given
+    template: web.yaml
+    documentIndex: 0
+    set:
+      nodeSelector: { disk: ssd }
+      web: { replicas: 3, nodeSelector: { pool: web }, resources: { requests: { cpu: 5m } }, podLabels: { team: x } }
+    asserts:
+      - equal: { path: spec.replicas, value: 3 }
+      - equal: { path: spec.template.spec.nodeSelector, value: { pool: web } }
+      - equal: { path: "spec.template.spec.containers[0].resources.requests.cpu", value: 5m }
+      - equal: { path: spec.template.metadata.labels.team, value: x }
+
+  # Values reused from 0.2.x (--reuse-values) have no web and no api.
+  - it: renders with values from 0.2.x
+    template: web.yaml
+    documentIndex: 0
+    set:
+      web: null
+      api: { tls: { existingSecret: console-api } }
+    asserts:
+      - equal: { path: spec.replicas, value: 2 }
+      - equal: { path: "spec.template.spec.containers[0].resources", value: { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 256Mi } } }
+
+  - it: has a ServiceAccount of its own
+    template: web.yaml
+    documentIndex: 1
+    asserts:
+      - isKind: { of: ServiceAccount }
+      - equal: { path: metadata.name, value: c-console-web }
+      - equal: { path: automountServiceAccountToken, value: false }
+
+  # The Service the users (port-forward, Ingress) know keeps its name and
+  # now selects the web; the API has a Service of its own.
+  - it: points the console's Service at the web and the API Service at the controller
+    template: service.yaml
+    asserts:
+      - equal: { path: metadata.name, value: c-console }
+        documentIndex: 0
+      - equal: { path: spec.selector, value: { app.kubernetes.io/name: console-web, app.kubernetes.io/instance: c } }
+        documentIndex: 0
+      - equal: { path: spec.ports, value: [{ name: http, port: 8080, targetPort: http }] }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: c-console-api }
+        documentIndex: 1
+      - equal: { path: spec.selector, value: { app.kubernetes.io/name: console, app.kubernetes.io/instance: c } }
+        documentIndex: 1
+      - equal: { path: spec.ports, value: [{ name: api, port: 8443, targetPort: api, appProtocol: https }] }
+        documentIndex: 1
+
+  - it: lets the controller check tokens, and nothing else cluster-wide
+    template: tokenreview.yaml
+    asserts:
+      - equal: { path: metadata.name, value: ci-accelerator-c-console-tokenreview }
+      - equal: { path: rules, value: [{ apiGroups: [authentication.k8s.io], resources: [tokenreviews], verbs: [create] }] }
+        documentIndex: 0
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: c-console, namespace: ci-accelerator }] }
+        documentIndex: 1
+
+  - it: issues the API's certificate for server auth only, for the API Service's names
+    template: certificate.yaml
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    set:
+      tls.existingSecret: ""
+      api.tls.existingSecret: ""
+      global.tls.issuerRef.name: box-ca
+    documentIndex: 1
+    asserts:
+      - equal: { path: metadata.name, value: c-console-api }
+      - equal: { path: spec.secretName, value: c-console-api }
+      - equal: { path: spec.usages, value: [server auth, digital signature] }
+      - equal:
+          path: spec.dnsNames
+          value: [c-console-api, c-console-api.ci-accelerator, c-console-api.ci-accelerator.svc, c-console-api.ci-accelerator.svc.cluster.local]
+      - equal: { path: spec.issuerRef, value: { name: box-ca, kind: ClusterIssuer, group: cert-manager.io } }
+  - it: mounts the issued API Secret when none is given
+    template: deployment.yaml
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    set:
+      tls.existingSecret: ""
+      api.tls.existingSecret: ""
+      global.tls.issuerRef.name: box-ca
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: api-tls, secret: { secretName: c-console-api, defaultMode: 0440, items: [{ key: tls.crt, path: tls.crt }, { key: tls.key, path: tls.key }] } }
+
+  - it: needs the API's Secret when there is no cert-manager
+    template: deployment.yaml
+    set:
+      api.tls.existingSecret: ""
+    asserts:
+      - failedTemplate: { errorPattern: "the controller's API needs api.tls.existingSecret too" }
+  - it: refuses the same port for the pages and the API
+    template: deployment.yaml
+    set:
+      api.port: 8080
+    asserts:
+      - failedTemplate: { errorPattern: "api.port and service.port must differ" }
+  - it: refuses an unknown web key
+    template: web.yaml
+    set:
+      web.replica: 2
+    asserts:
+      - failedTemplate: {}

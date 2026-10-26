@@ -17,6 +17,9 @@ Kubernetes: `>=1.34.0-0`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | affinity | object | `{}` |  |
+| api.clusterDomain | string | `"cluster.local"` | Cluster domain in the API certificate's names. |
+| api.port | int | `8443` | The API's port. |
+| api.tls.existingSecret | string | `""` | Secret with the API's server certificate (tls.crt, tls.key, and ca.crt that it chains to); empty: issued by cert-manager from the daemons' CA (server auth only). Needed with tls.existingSecret. |
 | caches | object | `{"every":"10m","fromConfigMap":"","key":"caches.json","stores":[]}` | The runners' S3 cache (GitLab's cache: keyword): the console lists its folders now and then and shows each project's cache size and key count on the Nodes page, with a warning when the bucket has no lifecycle rule (the runners never delete a cache). Either the folders here (a Secret with the keys accesskey and secretkey per folder; keys that may only read are enough), or a ConfigMap with them as JSON (the box writes one). The console may read only the Secrets named here. |
 | caches.every | string | `"10m"` | How often the folders are listed. |
 | caches.fromConfigMap | string | `""` | Or the name of a ConfigMap whose key holds the list (fields server, bucket, region, path, instance, secret, insecure, pathStyle); the Role to read its Secrets is then the writer's to make. Rendered with tpl. |
@@ -45,16 +48,14 @@ Kubernetes: `>=1.34.0-0`
 | networkPolicy.deniedNamespaces | list | `[]` | More namespaces whose pods may not connect (the jobs namespace is always one when jobs.namespace is set). Rendered with tpl. |
 | networkPolicy.enabled | bool | `false` | Render a NetworkPolicy that admits connections from every namespace except this one, the jobs namespace and deniedNamespaces, and from pods of this namespace except deniedComponents. Only ingress is limited. |
 | networkPolicy.extraFrom | list | `[]` | More NetworkPolicyPeer entries that may connect, e.g. an ipBlock with the node addresses when the Ingress controller runs on the host network. |
-| nodeSelector | object | `{}` |  |
+| nodeSelector | object | `{}` | Placement of the controller (and of the web unless web.* says otherwise). |
 | persistence | object | `{"existingClaim":"","size":"10Gi","storageClass":""}` | The store. SQLite needs block storage (ReadWriteOnce): never NFS or another shared file system. |
 | podAnnotations | object | `{}` |  |
 | podLabels | object | `{}` |  |
-| resources.limits.memory | string | `"1Gi"` |  |
-| resources.requests.cpu | string | `"50m"` |  |
-| resources.requests.memory | string | `"128Mi"` |  |
+| resources | object | `{"limits":{"memory":"1Gi"},"requests":{"cpu":"50m","memory":"128Mi"}}` | The controller's resources (the web's are under web.resources). |
 | retention.days | int | `30` | Days builds are kept in full (steps, reasons). Each image's daily figures (builds by outcome, build times) are kept a year regardless. At 150 pipelines a day with 15 image builds each, a project takes about 0.25 GB per 30 days. |
 | retention.outputDays | int | `7` | Days the steps' output is kept. |
-| service.port | int | `8080` |  |
+| service | object | `{"port":8080}` | The port of the pages and the JSON API (Service <release>-console, served by the web's pods). |
 | signIn | object | `{"enabled":false,"gitlab":[],"sessionKey":{"existingSecret":"","key":"key"},"url":""}` | Sign-in through GitLab. Each person signs in with a GitLab the runners serve and sees the projects whose jobs GitLab lets them read (Reporter or more, or public pipelines); GitLab is read with their own token. GitLab never calls the console: the browser carries the redirects. |
 | signIn.gitlab | list | `[]` | One OAuth application per GitLab (User or Group Settings > Applications, or Admin > Applications on your own GitLab): confidential, scopes openid and read_api, redirect URI <url>/auth/callback/<id> (the NOTES and the console's log print it).   url: exactly as the runners have it; may be left empty when the        console serves one GitLab   existingSecret: a Secret with the keys client-id and client-secret   admins: GitLab usernames who see everything (builds of no known        project, the JSON API) |
 | signIn.sessionKey | object | `{"existingSecret":"","key":"key"}` | A Secret holding 32 random bytes in base64 (openssl rand -base64 32); it seals each session's GitLab token. Changing it signs everyone out. |
@@ -62,4 +63,13 @@ Kubernetes: `>=1.34.0-0`
 | tls | object | `{"certManager":{"duration":"8760h","issuerRef":{"group":"cert-manager.io","kind":"ClusterIssuer","name":""},"renewBeforePercentage":33},"existingSecret":""}` | The client certificate the console presents to the daemons. Either a Secret with ca.crt, tls.crt and tls.key, or one cert-manager issues from the daemons' CA. |
 | tls.certManager.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | Default: global.tls.issuerRef. Rendered with tpl. |
 | tolerations | list | `[]` |  |
+| web.affinity | object | `{}` |  |
+| web.nodeSelector | object | `{}` | Placement of the web's pods; empty: the controller's (nodeSelector, tolerations, affinity below). |
+| web.podAnnotations | object | `{}` |  |
+| web.podLabels | object | `{}` |  |
+| web.replicas | int | `2` | Pods serving the pages. |
+| web.resources.limits.memory | string | `"256Mi"` |  |
+| web.resources.requests.cpu | string | `"20m"` |  |
+| web.resources.requests.memory | string | `"48Mi"` |  |
+| web.tolerations | list | `[]` |  |
 
