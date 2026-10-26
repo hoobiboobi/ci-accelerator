@@ -385,17 +385,22 @@ async function timelineColumn(s, pages) {
   check(`${p} every row follows the column`, await s.eval(`[...document.querySelectorAll("[data-wf] .row:not([hidden]) .tc")].every(t => Math.abs(t.getBoundingClientRect().width - ${w1}) <= 1)`));
   await s.go(p);
   check(`${p} the width is kept after a reload`, Math.abs((await tw()) - w1) <= 1, `${await tw()} vs ${w1}`);
+  // Short names, so the fit is below the limit: the second double-click
+  // must then go back, not measure again (that widened it by its margin;
+  // found by the e2e on real data, where names are shorter).
   await s.click('[data-wf-depth="steps"]');
+  await s.eval(`document.querySelectorAll("[data-wf] .row .nm").forEach(n => { n.textContent = n.textContent.slice(0, 14); })`);
   await s.eval(`document.querySelector("[data-wf] .wgrip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
   await sleep(150);
   const fit = await s.eval(`(() => { const box = document.querySelector("[data-wf] .wfbox"); const w = document.querySelector("[data-wf] .wfax .h").getBoundingClientRect().width;
     const cut = [...document.querySelectorAll("[data-wf] .row:not([hidden]) .nm")].filter(n => n.scrollWidth > n.clientWidth + 1).length;
     return { w: Math.round(w), cut, atLimit: w >= box.clientWidth - 460 - 1 }; })()`);
-  check(`${p} double-click fits the longest name`, fit.cut === 0 || fit.atLimit, JSON.stringify(fit));
+  check(`${p} double-click fits the longest name (below the limit)`, fit.cut === 0 && !fit.atLimit, JSON.stringify(fit));
   await s.eval(`document.querySelector("[data-wf] .wgrip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
   await sleep(150);
   check(`${p} double-click again: back to the default width`,
     (await s.eval(`document.querySelector("[data-wf]").style.getPropertyValue("--tw") === "" && localStorage.getItem("ci-accelerator-wf-tw") === null`)), `${await tw()}`);
+  await s.go(p);
   await s.eval(`document.querySelector("[data-wf] .wgrip").focus()`);
   const k0 = await tw();
   await s.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });

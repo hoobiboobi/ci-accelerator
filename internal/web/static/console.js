@@ -409,11 +409,17 @@
       grip.addEventListener("pointerup", up);
       grip.addEventListener("pointercancel", up);
     });
-    // Fit the longest name; at that width already, back to the default.
+    // Fit the longest name; again right after, back to the default. The
+    // fitted width is remembered: measured again once nothing is cut off,
+    // it would only add its margin.
     grip.addEventListener("dblclick", () => {
-      const fit = Math.min(Math.max(fittedTW(wf), wfMinTW), wfWidthLimit(wf));
-      if (wf.style.getPropertyValue("--tw") && Math.abs(currentTW(wf) - fit) < 2) setTW(wf, null, true);
-      else setTW(wf, fit, true);
+      if (wf.dataset.fitted && wf.style.getPropertyValue("--tw") === wf.dataset.fitted) {
+        delete wf.dataset.fitted;
+        setTW(wf, null, true);
+        return;
+      }
+      setTW(wf, Math.min(Math.max(fittedTW(wf), wfMinTW), wfWidthLimit(wf)), true);
+      wf.dataset.fitted = wf.style.getPropertyValue("--tw");
     });
     grip.addEventListener("keydown", ev => {
       const step = ev.shiftKey ? 64 : 16;
