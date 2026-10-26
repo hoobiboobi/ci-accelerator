@@ -38,17 +38,17 @@ type WFRow struct {
 	// Hidden: a parent starts folded. Rendered by the server, so the first
 	// paint is already the folded tree (folding in the script after load
 	// flashed every row open for a moment).
-	Hidden bool
-	Kids   bool
-	Bars       []WFBar
-	Label      template.HTML
-	LabelL     string // where the label sits, percent
-	LabelEnd   string // or, near the right edge, how far from it the label ends
-	State      string // for the filters: built, cached, received, image
-	Link       string
-	Step       string // build/step for the step panel
-	Text       string // what the search matches
-	OnCrit     bool   // part of the job that sets the pipeline's time
+	Hidden   bool
+	Kids     bool
+	Bars     []WFBar
+	Label    template.HTML
+	LabelL   string // where the label sits, percent
+	LabelEnd string // or, near the right edge, how far from it the label ends
+	State    string // for the filters: built, cached, received, image
+	Link     string
+	Step     string // build/step for the step panel
+	Text     string // what the search matches
+	OnCrit   bool   // part of the job that sets the pipeline's time
 }
 
 // Waterfall is a pipeline (or one job of it) on a time axis.

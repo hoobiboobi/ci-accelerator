@@ -1,7 +1,7 @@
 // Browser checks of the console's pages: what a tester would do by hand.
 //
 //   node test/ui/ui.mjs --base http://localhost:8080 [--chrome PATH]
-//        [--live /pipelines/<instance>/<id>] [--cookie NAME=VALUE]
+//        [--live /pipelines/<instance>/<id>] [--cookie NAME=VALUE] [--job /jobs/<instance>/<id>]
 //
 // It starts a headless Chrome of its own and talks to it over the DevTools
 // protocol (Node >= 22: WebSocket is built in; no packages). It visits every
@@ -474,13 +474,15 @@ async function buildList(s) {
 
 // A job that built no image: its page reads the end of its log from
 // GitLab when asked, as text.
+// --job names a job page with a log to read (a job without a build is
+// not always reachable by following links).
 async function jobPage(s, pages) {
   let p = null;
-  for (const x of pages.filter(x => /^\/jobs\/[^/]+\/\d+$/.test(x))) {
+  for (const x of (args.job ? [args.job] : []).concat(pages.filter(x => /^\/jobs\/[^/]+\/\d+$/.test(x)))) {
     await s.go(x);
     if (await s.eval(`!!document.querySelector('[data-act="showlog"]')`)) { p = x; break; }
   }
-  if (!p) return check("a job page offers its log", true, "none here (no GitLab token)");
+  if (!p) return check("a job page offers its log", !args.job, args.job ? `${args.job} has no log button` : "none here (no GitLab token)");
   await s.click('[data-act="showlog"]', 300);
   let text = "";
   for (let i = 0; i < 30 && !text; i++) {
@@ -489,6 +491,26 @@ async function jobPage(s, pages) {
   }
   check(`${p} shows the end of its log`, text.length > 0 && !/\x1b/.test(text), JSON.stringify(text.slice(0, 60)));
   check(`${p} log: secrets masked, markup shown as text`, !/glpat-/.test(text) && !(await s.eval(`!!document.querySelector("[data-log] script, [data-log] img")`)));
+  // Earlier parts above the end, until the log's first line; the lines
+  // already shown keep their place; nothing new reads as "No new lines".
+  const lines = () => s.eval(`document.querySelector("[data-log]").textContent.split("\\n").filter(Boolean).length`);
+  const n0 = await lines();
+  if (await s.visible('[data-act="logearlier"]')) {
+    const top = await s.eval(`(() => { const pre = document.querySelector("[data-log]"); pre.scrollTop = 0; return pre.textContent.split("\\n")[0]; })()`);
+    let guard = 0;
+    while ((await s.visible('[data-act="logearlier"]')) && guard++ < 10) await s.click('[data-act="logearlier"]', 600);
+    const all = await s.eval(`document.querySelector("[data-log]").textContent`);
+    const first = all.split("\n")[0];
+    check(`${p} earlier parts reach the log's first line`, n0 === 500 && /^Running with gitlab-runner/.test(first) && all.includes("\n" + top + "\n"),
+      `${n0} lines first, then ${await lines()}; first line ${JSON.stringify(first)}`);
+    check(`${p} the whole log once read back to its start`, /The whole log, \d+ lines/.test(await s.eval(`document.querySelector("[data-log-note]").textContent`)));
+    const nums = all.split("\n").map(l => (l.match(/^test (\d{4})/) || [])[1]).filter(Boolean).map(Number);
+    check(`${p} the parts join without a gap or a repeat`, nums.length === 1200 && nums.every((n, i) => n === i + 1), `${nums.length} numbered lines`);
+  } else {
+    check(`${p} a log longer than one part offers earlier lines`, false, `${n0} lines, no button`);
+  }
+  await s.click('[data-act="lognew"]', 600);
+  check(`${p} reading new lines when there are none says so`, /No new lines/.test(await s.eval(`document.querySelector("[data-log-note]").textContent`)));
   check(`${p} no errors`, s.take().length === 0);
 }
 

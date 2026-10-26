@@ -132,28 +132,79 @@
     if (lbl) lbl.textContent = open ? "Fold cached" : "Expand all";
   }
 
-  // A job's log, read from GitLab when the reader asks; shown as text.
+  // A job's log, read from GitLab when the reader asks, in parts of whole
+  // lines: its end first, then earlier parts above it on request, and the
+  // lines added since below it. The server says where each part sits
+  // (X-Log-Start/End, bytes of the log as GitLab stores it).
   function setupLog() {
-    const b = $('[data-act="showlog"]', main), pre = $("[data-log]", main), note = $("[data-log-note]", main);
+    const box = $(".logbox", main);
+    if (!box) return;
+    const b = $('[data-act="showlog"]', box), pre = $("[data-log]", box), note = $("[data-log-note]", box);
+    const earlier = $('[data-act="logearlier"]', box), newer = $('[data-act="lognew"]', box);
     if (!b || !pre) return;
-    b.addEventListener("click", async () => {
-      b.disabled = true;
-      if (note) note.textContent = "Reading from GitLab…";
+    let start = -1, end = -1;
+    const say = t => { if (note) note.textContent = t; };
+    async function part(query) {
+      [b, earlier, newer].forEach(x => { if (x) x.disabled = true; });
+      say("Reading from GitLab…");
       try {
-        const res = await fetch(b.dataset.url, { cache: "no-store" });
+        const res = await fetch(b.dataset.url + query, { cache: "no-store" });
         const text = await res.text();
-        if (!res.ok) { if (note) note.textContent = text; return; }
-        pre.textContent = text || "The log is empty.";
-        pre.hidden = false;
-        pre.scrollTop = pre.scrollHeight;
-        if (note) note.textContent = "Its last 100 lines, as GitLab has them now; secrets masked.";
-        const lbl = $("span", b);
-        if (lbl) lbl.textContent = "Read it again";
+        if (!res.ok) { say(text); return null; }
+        const h = k => parseInt(res.headers.get(k) || "", 10);
+        return { text, start: h("X-Log-Start"), end: h("X-Log-End"), gap: res.headers.get("X-Log-Gap") === "1" };
       } catch (e) {
-        if (note) note.textContent = "The console did not answer.";
+        say("The console did not answer.");
+        return null;
       } finally {
-        b.disabled = false;
+        [b, earlier, newer].forEach(x => { if (x) x.disabled = false; });
       }
+    }
+    function shown(extra) {
+      const t = pre.textContent;
+      const lines = t ? t.split("\n").length - (t.endsWith("\n") ? 1 : 0) : 0;
+      const what = !lines ? "The log is empty so far" : start === 0 ? `The whole log, ${lines} lines` : `Its last ${lines} lines`;
+      say(`${what}, as GitLab has them now; secrets masked.${extra ? " " + extra : ""}`);
+      if (earlier) earlier.hidden = !(start > 0);
+      if (newer) newer.hidden = false;
+      pre.hidden = !lines;
+    }
+    b.addEventListener("click", async () => {
+      const p = await part("");
+      if (!p) return;
+      pre.textContent = p.text;
+      start = p.start;
+      end = p.end;
+      b.hidden = true;
+      shown();
+      pre.scrollTop = pre.scrollHeight;
+    });
+    if (earlier) earlier.addEventListener("click", async () => {
+      if (!(start > 0)) return;
+      const p = await part("?before=" + start);
+      if (!p) return;
+      // Above what is shown; what the reader was looking at stays put.
+      const h0 = pre.scrollHeight;
+      pre.textContent = p.text + pre.textContent;
+      pre.scrollTop += pre.scrollHeight - h0;
+      start = p.start;
+      shown();
+    });
+    if (newer) newer.addEventListener("click", async () => {
+      if (end < 0) return;
+      const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4;
+      const p = await part("?after=" + end);
+      if (!p) return;
+      if (p.gap) {
+        // More was added than one part holds: its end, from where it starts.
+        pre.textContent = p.text;
+        start = p.start;
+      } else {
+        pre.textContent += p.text;
+      }
+      end = p.end;
+      shown(p.gap ? "Many lines were added: the earlier ones are skipped." : p.text ? "" : "No new lines.");
+      if (atEnd || p.gap) pre.scrollTop = pre.scrollHeight;
     });
   }
 
