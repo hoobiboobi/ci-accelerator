@@ -589,6 +589,21 @@ func TestJobPages(t *testing.T) {
 	if lg.status != 200 || *asked != "/api/v4/projects/42/jobs/9100002/trace" || strings.Contains(lg.body, "glpat-") || !strings.Contains(lg.body, "[masked]") {
 		t.Errorf("log: %d %q, asked %q", lg.status, lg.body, *asked)
 	}
+	// The part says where it sits, so the page can ask for the lines before
+	// it or added since; a short log is whole: it starts at 0.
+	size := strconv.Itoa(len("Running with gitlab-runner\n$ make test\ntoken glpat-AbCdEfGhIjKlMnOpQrSt12 used\nok\n"))
+	if lg.header.Get("X-Log-Start") != "0" || lg.header.Get("X-Log-End") != size || lg.header.Get("X-Log-Size") != size || lg.header.Get("X-Log-Gap") != "" {
+		t.Errorf("log part headers: %v", lg.header)
+	}
+	if again := get(t, ts, fmt.Sprintf("/jobs/%s/9100002/log?after=%s", inst, size)); again.status != 200 || again.body != "" || again.header.Get("X-Log-End") != size {
+		t.Errorf("nothing new after the end: %d %q %v", again.status, again.body, again.header)
+	}
+	if two := get(t, ts, fmt.Sprintf("/jobs/%s/9100002/log?lines=2", inst)); two.body != "token [masked] used\nok\n" || two.header.Get("X-Log-Start") == "0" {
+		t.Errorf("the last 2 lines: %q from %s", two.body, two.header.Get("X-Log-Start"))
+	}
+	if bad := get(t, ts, fmt.Sprintf("/jobs/%s/9100002/log?before=x", inst)); bad.status != http.StatusBadRequest {
+		t.Errorf("a bad part: %d", bad.status)
+	}
 	// A job seen as a pod: its page says what the pod told (approximate),
 	// and the pipeline's timeline links the job to this page, not to GitLab.
 	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 9_100_003, PipelineID: pid, ProjectID: 42, Name: "unit-tests", Stage: "test",

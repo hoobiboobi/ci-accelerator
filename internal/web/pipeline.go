@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -405,8 +406,10 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "job", http.StatusOK, v)
 }
 
-// jobLog answers "Show the end of the log": the job's last lines from
-// GitLab, secrets masked, as plain text. GitLab is read only then.
+// jobLog answers the log box: a part of the job's log from GitLab (its
+// last lines, the lines before a part, or the lines added since one),
+// secrets masked, as plain text with the part's place in X-Log-* headers.
+// GitLab is read only then.
 func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
 	instance := r.PathValue("instance")
@@ -435,9 +438,15 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "The console is reading other job logs; try again in a moment.")
 		return
 	}
+	q, ok := logQuery(r.URL.Query())
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, "lines, before and after must be numbers.")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	text, err := api.JobLog(ctx, cred, instance, j.ProjectID, id, 100)
+	part, err := api.JobLogPart(ctx, cred, instance, j.ProjectID, id, q)
 	var rl *gitlab.RateLimited
 	switch {
 	case errors.As(err, &rl):
@@ -450,5 +459,39 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "GitLab did not give the log. It may be gone, or the token may not read this project.")
 		return
 	}
-	fmt.Fprint(w, history.MaskSecrets(text))
+	// Where the part sits in the log, for the next part the page asks for.
+	w.Header().Set("X-Log-Start", strconv.FormatInt(part.Start, 10))
+	w.Header().Set("X-Log-End", strconv.FormatInt(part.End, 10))
+	w.Header().Set("X-Log-Size", strconv.FormatInt(part.Size, 10))
+	if part.Gap {
+		w.Header().Set("X-Log-Gap", "1")
+	}
+	fmt.Fprint(w, history.MaskSecrets(part.Text))
+}
+
+// logLines is how many lines of a job's log one part holds at most.
+const logLines = 500
+
+// logQuery reads what part of a job's log a page asks for: ?lines=N (at
+// most logLines), ?before=<a part's start>, ?after=<a part's end>.
+func logQuery(v url.Values) (gitlab.LogQuery, bool) {
+	q := gitlab.LogQuery{Lines: logLines}
+	num := func(k string) (int64, bool) {
+		if v.Get(k) == "" {
+			return 0, true
+		}
+		n, err := strconv.ParseInt(v.Get(k), 10, 64)
+		return n, err == nil && n >= 0
+	}
+	n, ok1 := num("lines")
+	b, ok2 := num("before")
+	a, ok3 := num("after")
+	if n > 0 && n < logLines {
+		q.Lines = int(n)
+	}
+	q.Before = b
+	if v.Get("after") != "" {
+		q.After, q.Since = a, true
+	}
+	return q, ok1 && ok2 && ok3
 }

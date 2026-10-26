@@ -220,19 +220,19 @@ func TestJobLog(t *testing.T) {
 	defer srv.Close()
 	c := New([]string{srv.URL})
 	inst := history.InstancePrefix(srv.URL)
-	got, err := c.JobLog(context.Background(), Token("tok"), inst, 42, 77, 3)
+	got, err := c.JobLogPart(context.Background(), Token("tok"), inst, 42, 77, LogQuery{Lines: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if asked != "/api/v4/projects/42/jobs/77/trace Bearer tok" {
 		t.Errorf("asked %q", asked)
 	}
-	if want := "Downloading 100%\n$ helm upgrade app ./chart\ndeployed"; got != want {
-		t.Errorf("tail:\n%q\nwant\n%q", got, want)
+	if want := "Downloading 100%\n$ helm upgrade app ./chart\ndeployed\n"; got.Text != want {
+		t.Errorf("tail:\n%q\nwant\n%q", got.Text, want)
 	}
-	all, _ := c.JobLog(context.Background(), Token("tok"), inst, 42, 77, 100)
-	if strings.Contains(all, "section_") || strings.Contains(all, "\x1b") || strings.Contains(all, "\r") || !strings.Contains(all, "Preparing environment") {
-		t.Errorf("not cleaned: %q", all)
+	all, _ := c.JobLogPart(context.Background(), Token("tok"), inst, 42, 77, LogQuery{Lines: 100})
+	if all.Start != 0 || strings.Contains(all.Text, "section_") || strings.Contains(all.Text, "\x1b") || strings.Contains(all.Text, "\r") || !strings.Contains(all.Text, "Preparing environment") {
+		t.Errorf("not cleaned: %+v", all)
 	}
 	// A runner 19 log: time, stream and O/E before every line, "+"
 	// continuing the line before.
@@ -247,12 +247,110 @@ func TestJobLog(t *testing.T) {
 	}
 	f := &Fetcher{Client: c}
 	f.until = map[string]time.Time{"token": time.Now().Add(time.Minute)}
-	if _, err := f.JobLog(context.Background(), Token("tok"), inst, 42, 77, 10); err == nil {
+	if _, err := f.JobLogPart(context.Background(), Token("tok"), inst, 42, 77, LogQuery{Lines: 10}); err == nil {
 		t.Error("read while rate limited")
 	}
-	if _, err := (&Fetcher{Client: c}).JobLog(context.Background(), Token("tok"), inst, 0, 77, 10); err == nil {
+	if _, err := (&Fetcher{Client: c}).JobLogPart(context.Background(), Token("tok"), inst, 0, 77, LogQuery{Lines: 10}); err == nil {
 		t.Error("read without a project")
 	}
+}
+
+// A long log read in parts, from its end back to its start, is the whole
+// log, whether GitLab serves byte ranges (only the parts travel) or always
+// the whole log; lines added later come as one more part, or, when too many
+// are new, as the end of the log with a gap.
+func TestJobLogParts(t *testing.T) {
+	var mu sync.Mutex
+	var b strings.Builder
+	for i := 1; i <= 6000; i++ {
+		fmt.Fprintf(&b, "2026-10-21T20:44:53.051755Z 01O line %05d of the job log\n", i)
+	}
+	logText := b.String()
+	clean := func(from, to int) string { // lines from..to, 1-based, as cleaned
+		var s strings.Builder
+		for i := from; i <= to; i++ {
+			fmt.Fprintf(&s, "line %05d of the job log\n", i)
+		}
+		return s.String()
+	}
+	for _, ranges := range []bool{true, false} {
+		var bytesSent atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			body := logText
+			mu.Unlock()
+			if !ranges || r.Header.Get("Range") == "" {
+				bytesSent.Add(int64(len(body)))
+				fmt.Fprint(w, body)
+				return
+			}
+			http.ServeContent(w, r, "trace", time.Time{}, &countingReader{strings.NewReader(body), &bytesSent})
+		}))
+		c := New([]string{srv.URL})
+		inst := history.InstancePrefix(srv.URL)
+		read := func(q LogQuery) LogPart {
+			t.Helper()
+			p, err := c.JobLogPart(context.Background(), Token("tok"), inst, 42, 77, q)
+			if err != nil {
+				t.Fatalf("ranges=%v %+v: %v", ranges, q, err)
+			}
+			return p
+		}
+		end := read(LogQuery{Lines: 500})
+		if end.Text != clean(5501, 6000) || end.End != end.Size || end.Size != int64(len(logText)) || end.Gap {
+			t.Fatalf("ranges=%v: the end: %d bytes from %d, %q...", ranges, len(end.Text), end.Start, end.Text[:min(40, len(end.Text))])
+		}
+		whole, p := end.Text, end
+		for p.Start > 0 {
+			p = read(LogQuery{Lines: 500, Before: p.Start})
+			whole = p.Text + whole
+		}
+		if whole != clean(1, 6000) {
+			t.Errorf("ranges=%v: the parts do not make the log (%d of %d bytes)", ranges, len(whole), len(clean(1, 6000)))
+		}
+		if ranges && bytesSent.Load() > 3*int64(len(logText)) {
+			t.Errorf("ranges: %d bytes travelled for a %d byte log read in parts", bytesSent.Load(), len(logText))
+		}
+		// Nothing new yet; then two lines, one still being written.
+		if p := read(LogQuery{Lines: 500, After: end.End, Since: true}); p.Text != "" || p.End != end.End {
+			t.Errorf("ranges=%v: nothing new: %+v", ranges, p)
+		}
+		mu.Lock()
+		logText += "2026-10-21T20:44:54Z 01O line 06001 of the job log\n2026-10-21T20:44:54Z 01O line 06002 of the jo"
+		mu.Unlock()
+		more := read(LogQuery{Lines: 500, After: end.End, Since: true})
+		if more.Text != clean(6001, 6001) || more.Start != end.End || more.Gap {
+			t.Errorf("ranges=%v: new lines: %+v", ranges, more)
+		}
+		// Far more than one part is new: the end, marked as a gap.
+		mu.Lock()
+		logText = logText[:len(logText)-len("2026-10-21T20:44:54Z 01O line 06002 of the jo")]
+		var big strings.Builder
+		for i := 6002; i <= 6002+120000; i++ {
+			fmt.Fprintf(&big, "2026-10-21T20:44:55Z 01O line %06d of the job log\n", i)
+		}
+		logText += big.String()
+		mu.Unlock()
+		gap := read(LogQuery{Lines: 3, After: more.End, Since: true})
+		if !gap.Gap || gap.End != gap.Size || !strings.HasSuffix(gap.Text, "line 126002 of the job log\n") || strings.Count(gap.Text, "\n") != 3 {
+			t.Errorf("ranges=%v: a gap: %+v", ranges, gap)
+		}
+		mu.Lock()
+		logText = b.String()
+		mu.Unlock()
+		srv.Close()
+	}
+}
+
+type countingReader struct {
+	*strings.Reader
+	n *atomic.Int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	k, err := c.Reader.Read(p)
+	c.n.Add(int64(k))
+	return k, err
 }
 
 func TestAllowFailureRead(t *testing.T) {
@@ -365,14 +463,14 @@ func TestRateLimitPerCredential(t *testing.T) {
 	inst := history.InstancePrefix(srv.URL)
 	f := &Fetcher{Client: c}
 	busy, other := &person{who: "busy", tokens: []string{"busy"}}, &person{who: "other", tokens: []string{"ok"}}
-	if _, err := f.JobLog(context.Background(), busy, inst, 42, 1, 10); err == nil {
+	if _, err := f.JobLogPart(context.Background(), busy, inst, 42, 1, LogQuery{Lines: 10}); err == nil {
 		t.Fatal("429 not reported")
 	}
-	if _, err := f.JobLog(context.Background(), other, inst, 42, 1, 10); err != nil {
+	if _, err := f.JobLogPart(context.Background(), other, inst, 42, 1, LogQuery{Lines: 10}); err != nil {
 		t.Errorf("another person waits for the busy one: %v", err)
 	}
 	var rl *RateLimited
-	if _, err := f.JobLog(context.Background(), busy, inst, 42, 1, 10); !errors.As(err, &rl) {
+	if _, err := f.JobLogPart(context.Background(), busy, inst, 42, 1, LogQuery{Lines: 10}); !errors.As(err, &rl) {
 		t.Errorf("busy person asked GitLab again: %v", err)
 	}
 	if until, _ := f.Status(); time.Until(until) < 50*time.Second {
@@ -382,16 +480,3 @@ func TestRateLimitPerCredential(t *testing.T) {
 
 // readTail keeps the end of a log much larger than what it keeps, from
 // the start of a line.
-func TestReadTail(t *testing.T) {
-	var b strings.Builder
-	for i := 0; i < 200000; i++ {
-		fmt.Fprintf(&b, "line %d\n", i)
-	}
-	out, err := readTail(strings.NewReader(b.String()), 4096)
-	if err != nil || len(out) > 4096 || !strings.HasPrefix(string(out), "line ") || !strings.HasSuffix(string(out), "line 199999\n") {
-		t.Fatalf("tail of %d bytes: %d bytes, %q...%q, %v", b.Len(), len(out), string(out[:min(20, len(out))]), string(out[max(0, len(out)-20):]), err)
-	}
-	if short, _ := readTail(strings.NewReader("a\nb\n"), 4096); string(short) != "a\nb\n" {
-		t.Errorf("a short log: %q", short)
-	}
-}

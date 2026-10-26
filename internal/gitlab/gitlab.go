@@ -74,6 +74,11 @@ var ErrRefused = errors.New("gitlab: the token was refused")
 // do sends a GET with cred's token, and once more with a renewed token
 // when GitLab refuses the first. The caller closes the body.
 func (c *Client) do(ctx context.Context, cred Credential, u string) (*http.Response, error) {
+	return c.doRange(ctx, cred, u, "")
+}
+
+// doRange is do with an HTTP Range header (none when rng is empty).
+func (c *Client) doRange(ctx context.Context, cred Credential, u, rng string) (*http.Response, error) {
 	if cred == nil {
 		return nil, ErrRefused
 	}
@@ -88,6 +93,9 @@ func (c *Client) do(ctx context.Context, cred Credential, u string) (*http.Respo
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
 		req.Header.Set("Accept", "application/json")
+		if rng != "" {
+			req.Header.Set("Range", rng)
+		}
 		res, err := c.HTTP.Do(req)
 		if err != nil {
 			return nil, err
@@ -196,68 +204,206 @@ func (c *Client) get(ctx context.Context, cred Credential, u string) ([]apiJob, 
 	return jobs, next, nil
 }
 
-// JobLog returns the end of a job's log, at most lines lines, as plain
-// text: terminal colours, GitLab's section markers and lines a progress
-// bar overwrote are taken out. Secrets are not masked here. The whole log
-// is read, but only its last TailBytes are kept.
-func (c *Client) JobLog(ctx context.Context, cred Credential, instance string, project, job uint64, lines int) (string, error) {
-	base := c.bases[instance]
-	if base == "" {
-		return "", fmt.Errorf("gitlab: unknown instance %s", instance)
-	}
-	u := fmt.Sprintf("%s/projects/%d/jobs/%d/trace", base, project, job)
-	res, err := c.do(ctx, cred, u)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	if res.StatusCode == http.StatusTooManyRequests {
-		return "", &RateLimited{Until: retryAfter(res.Header, time.Now())}
-	}
-	if res.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(res.Body, 1<<16))
-		return "", fmt.Errorf("gitlab: %s: %s", redact(u), res.Status)
-	}
-	raw, err := readTail(io.LimitReader(res.Body, MaxTrace), TailBytes)
-	if err != nil {
-		return "", err
-	}
-	return tail(CleanLog(string(raw)), lines), nil
+// LogQuery picks a part of a job's log, in whole lines: the last Lines
+// lines (Before and After unset), the Lines lines that end at byte Before
+// (a part's Start), or the lines added since byte After (a part's End).
+type LogQuery struct {
+	Lines  int
+	Before int64 // > 0: the lines before this byte
+	After  int64 // > 0, or Since: the lines from this byte to the end
+	Since  bool  // After is set (0 is a valid After)
 }
 
-// MaxTrace bounds how much of a job's log is read; TailBytes, how much of
-// its end is kept.
+// LogPart is a part of a job's log: its whole lines from byte Start to byte
+// End of the log as GitLab stores it (Size bytes when read), cleaned (see
+// CleanLog), not masked. Gap: more lines were added since After than one
+// part holds; Text is their end and Start where it begins.
+type LogPart struct {
+	Text             string
+	Start, End, Size int64
+	Gap              bool
+}
+
+// MaxTrace bounds how much of a job's log is read when GitLab sends all of
+// it (no range support: a log still being written, some installations);
+// logWindow is the first window of a ranged read, grown up to logWindowMax
+// while it holds fewer lines than asked.
 const (
-	MaxTrace  = 32 << 20
-	TailBytes = 1 << 20
+	MaxTrace     = 32 << 20
+	logWindow    = 64 << 10
+	logWindowMax = 4 << 20
 )
 
-// readTail reads r to its end and returns its last n bytes, starting at a
-// line: memory stays at n whatever the log's size.
-func readTail(r io.Reader, n int) ([]byte, error) {
-	buf := make([]byte, 0, 2*n)
-	chunk := make([]byte, 64<<10)
-	cut := false
-	for {
-		k, err := r.Read(chunk)
-		buf = append(buf, chunk[:k]...)
-		if len(buf) > n {
-			buf = append(buf[:0], buf[len(buf)-n:]...)
-			cut = true
-		}
-		if err == io.EOF {
-			break
-		}
+// JobLogPart reads a part of a job's log. GitLab serves ranges of an
+// archived log, so only the bytes of the part travel; when it answers with
+// the whole log instead, the part is cut from it here.
+func (c *Client) JobLogPart(ctx context.Context, cred Credential, instance string, project, job uint64, q LogQuery) (LogPart, error) {
+	base := c.bases[instance]
+	if base == "" {
+		return LogPart{}, fmt.Errorf("gitlab: unknown instance %s", instance)
+	}
+	if q.Lines <= 0 {
+		q.Lines = 500
+	}
+	r := &logReader{c: c, ctx: ctx, cred: cred, u: fmt.Sprintf("%s/projects/%d/jobs/%d/trace", base, project, job)}
+	var (
+		data  []byte
+		from  int64
+		part  LogPart
+		limit = q.Before // the end of the window, or -1: the log's end
+	)
+	if q.Since {
+		d, f, err := r.read(q.After, -1)
 		if err != nil {
-			return nil, err
+			return part, err
+		}
+		if f+int64(len(d)) == r.size && len(d) <= logWindowMax {
+			end := lastLineEnd(d)
+			part = LogPart{Text: CleanLog(string(d[:end])), Start: f, End: f + int64(end), Size: r.size}
+			return part, nil
+		}
+		// Too much is new: the last lines of the log instead.
+		limit, part.Gap = -1, true
+	}
+	if limit == 0 {
+		limit = -1
+	}
+	for w := int64(logWindow); data == nil; w *= 4 {
+		lo := int64(0)
+		if limit > 0 {
+			lo = max(0, limit-w)
+		} else {
+			lo = -w // the last w bytes
+		}
+		d, f, err := r.read(lo, limit)
+		if err != nil {
+			return part, err
+		}
+		if f == 0 || w >= logWindowMax || bytes.Count(d, []byte{'\n'}) > q.Lines {
+			data, from = d, f
 		}
 	}
-	if cut {
-		if i := bytes.IndexByte(buf, '\n'); i >= 0 {
-			buf = buf[i+1:]
+	end := lastLineEnd(data)
+	if limit > 0 {
+		end = len(data) // ends at a part's start: a line's start
+	}
+	begin := 0
+	if from > 0 {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 && i < end {
+			begin = i + 1 // not a piece of a line
 		}
 	}
-	return buf, nil
+	// The last Lines lines before end.
+	n, i := 0, end-1
+	if i >= begin && data[i] == '\n' {
+		i--
+	}
+	for ; i >= begin; i-- {
+		if data[i] == '\n' {
+			if n++; n == q.Lines {
+				begin = i + 1
+				break
+			}
+		}
+	}
+	part.Text = CleanLog(string(data[begin:end]))
+	part.Start, part.End, part.Size = from+int64(begin), from+int64(end), r.size
+	return part, nil
+}
+
+// lastLineEnd is where the last whole line of b ends: a line still being
+// written comes with the next read.
+func lastLineEnd(b []byte) int {
+	return bytes.LastIndexByte(b, '\n') + 1
+}
+
+// contentRange reads "bytes first-last/size" (or "bytes */size": first 0).
+func contentRange(h string) (first, size int64, ok bool) {
+	r, total, found := strings.Cut(strings.TrimPrefix(h, "bytes "), "/")
+	if !found {
+		return 0, 0, false
+	}
+	size, err := strconv.ParseInt(total, 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	if r == "*" {
+		return 0, size, true
+	}
+	a, _, found := strings.Cut(r, "-")
+	if first, err = strconv.ParseInt(a, 10, 64); !found || err != nil {
+		return 0, 0, false
+	}
+	return first, size, true
+}
+
+// logReader reads byte ranges of one job's log: ranged requests while
+// GitLab honours them, else the whole log once, kept for the next reads.
+type logReader struct {
+	c    *Client
+	ctx  context.Context
+	cred Credential
+	u    string
+	all  []byte // the whole log, once GitLab sent it
+	size int64
+}
+
+// read returns the bytes from from (< 0: the last -from bytes) to to (< 0:
+// the log's end), and where they start.
+func (r *logReader) read(from, to int64) ([]byte, int64, error) {
+	if r.all == nil {
+		rng := ""
+		switch {
+		case from < 0:
+			rng = fmt.Sprintf("bytes=%d", from)
+		case to < 0:
+			rng = fmt.Sprintf("bytes=%d-", from)
+		case to > from:
+			rng = fmt.Sprintf("bytes=%d-%d", from, to-1)
+		default:
+			return nil, max(from, 0), nil
+		}
+		res, err := r.c.doRange(r.ctx, r.cred, r.u, rng)
+		if err != nil {
+			return nil, 0, err
+		}
+		defer res.Body.Close()
+		switch res.StatusCode {
+		case http.StatusPartialContent:
+			first, size, ok := contentRange(res.Header.Get("Content-Range"))
+			if !ok {
+				return nil, 0, fmt.Errorf("gitlab: %s: Content-Range %q", redact(r.u), res.Header.Get("Content-Range"))
+			}
+			r.size = size
+			b, err := io.ReadAll(io.LimitReader(res.Body, logWindowMax+1<<20))
+			return b, first, err
+		case http.StatusRequestedRangeNotSatisfiable: // nothing from there on
+			_, r.size, _ = contentRange(res.Header.Get("Content-Range"))
+			return nil, max(from, 0), nil
+		case http.StatusOK:
+			b, err := io.ReadAll(io.LimitReader(res.Body, MaxTrace))
+			if err != nil {
+				return nil, 0, err
+			}
+			r.all, r.size = b, int64(len(b))
+		case http.StatusTooManyRequests:
+			return nil, 0, &RateLimited{Until: retryAfter(res.Header, time.Now())}
+		default:
+			io.Copy(io.Discard, io.LimitReader(res.Body, 1<<16))
+			return nil, 0, fmt.Errorf("gitlab: %s: %s", redact(r.u), res.Status)
+		}
+	}
+	n := int64(len(r.all))
+	if from < 0 {
+		from = max(0, n+from)
+	}
+	if to < 0 || to > n {
+		to = n
+	}
+	if from > to {
+		from = to
+	}
+	return r.all[from:to], from, nil
 }
 
 // CanReadJobs asks GitLab whether cred may read a project's jobs: the jobs
@@ -350,15 +496,6 @@ func CleanLog(s string) string {
 		out = append(out, l)
 	}
 	return strings.Join(out, "\n")
-}
-
-func tail(s string, n int) string {
-	s = strings.TrimRight(s, "\n")
-	lines := strings.Split(s, "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
 }
 
 // retryAfter reads how long GitLab asks to wait: Retry-After (seconds), or
@@ -519,19 +656,19 @@ func (f *Fetcher) read(key string, cred Credential, instance string, project, pi
 	}
 }
 
-// JobLog reads the end of a job's log while a person asks for it, nothing
-// while GitLab rate limits.
-func (f *Fetcher) JobLog(ctx context.Context, cred Credential, instance string, project, job uint64, lines int) (string, error) {
+// JobLogPart reads a part of a job's log, unless GitLab asked this
+// credential to wait.
+func (f *Fetcher) JobLogPart(ctx context.Context, cred Credential, instance string, project, job uint64, q LogQuery) (LogPart, error) {
 	if f == nil || cred == nil || !f.Client.Knows(instance) || project == 0 {
-		return "", errors.New("gitlab: no token for this GitLab, or the job's project is not known")
+		return LogPart{}, errors.New("gitlab: no token for this GitLab, or the job's project is not known")
 	}
 	f.mu.Lock()
 	until := f.limited(cred)
 	f.mu.Unlock()
 	if time.Now().Before(until) {
-		return "", &RateLimited{Until: until}
+		return LogPart{}, &RateLimited{Until: until}
 	}
-	out, err := f.Client.JobLog(ctx, cred, instance, project, job, lines)
+	out, err := f.Client.JobLogPart(ctx, cred, instance, project, job, q)
 	f.mu.Lock()
 	f.wait(cred, err)
 	f.mu.Unlock()

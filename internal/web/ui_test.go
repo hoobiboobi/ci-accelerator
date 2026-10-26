@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -40,12 +41,19 @@ func TestUI(t *testing.T) {
 			Usage: collector.Usage{Total: 300 << 20, Images: 200 << 20, Layers: 90 << 20, Mounts: 10 << 20}},
 		Active: []collector.Active{{Daemon: "box-buildkit-abcde", Target: "api" + evil, Started: started}}},
 		{Name: "box-buildkit-fghij", Connected: false}}
-	f, _ := fakeGitLab(t, "Running with gitlab-runner\n$ helm upgrade app\ndeployed "+evil+"\n")
+	// A log longer than one part (500 lines): the page reads it in parts.
+	var long strings.Builder
+	long.WriteString("Running with gitlab-runner\n")
+	for i := 1; i <= 1200; i++ {
+		fmt.Fprintf(&long, "test %04d passed\n", i)
+	}
+	long.WriteString("$ helm upgrade app\ndeployed " + evil + "\n")
+	f, _ := fakeGitLab(t, long.String())
 	ts, st, _, _ := consoleWith(t, Options{Live: daemons, Release: "box", API: f, Token: gitlab.Token("t")})
 	f.Store = st
 	// A job that built nothing, with a log to read.
-	_, key := seedJob(t, st)
-	browse(t, node, st, ts.URL, key)
+	inst, key := seedJob(t, st)
+	browse(t, node, st, ts.URL, key, "--job", "/jobs/"+inst+"/6003")
 }
 
 // browse runs the browser checks against base while the pipeline key keeps

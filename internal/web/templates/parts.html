@@ -22,4 +22,4 @@
 {{define "strip"}}<span class="strip">{{range .}}<a class="sq st-{{.Status.Key}}" href="{{.URL}}" title="{{.Title}}" aria-label="{{.Title}}"></a>{{end}}</span>{{end}}
 
 {{/* The end of a job's log, read from GitLab only when asked. */}}
-{{define "logbox"}}<div class="logbox"><button class="btn" type="button" data-act="showlog" data-url="{{.}}">{{icon "log" 13}}<span>Show the end of the job log</span></button><p class="muted note0" data-log-note>Read from GitLab when you ask, nothing before.</p><pre class="logb" data-log hidden></pre></div>{{end}}
+{{define "logbox"}}<div class="logbox"><button class="btn" type="button" data-act="showlog" data-url="{{.}}">{{icon "log" 13}}<span>Show the end of the job log</span></button><p class="muted note0" data-log-note>Read from GitLab when you ask, nothing before.</p><button class="btn" type="button" data-act="logearlier" hidden>{{icon "chev" 13}}<span>500 earlier lines</span></button><pre class="logb" data-log hidden></pre><button class="btn" type="button" data-act="lognew" hidden>{{icon "log" 13}}<span>Read new lines</span></button></div>{{end}}
