@@ -79,10 +79,12 @@ type Server struct {
 	GitLab *LocalGitLab // nil: no GitLab API
 	Auth   *auth.Auth   // nil: no sign-in
 	Config Config
-	// Authorize checks the caller of every request but the health check;
-	// nil lets everyone through (tests only).
-	Authorize func(r *http.Request) error
-	Log       *slog.Logger
+	// Authorize checks the caller of every request but the health check
+	// and says its role; nil lets everyone through (tests only).
+	Authorize func(r *http.Request) (Role, error)
+	// Routes serves the build routers; nil: none.
+	Routes *Routes
+	Log    *slog.Logger
 	// Heartbeat keeps an idle event stream open.
 	Heartbeat time.Duration
 
@@ -169,19 +171,27 @@ func (s *Server) Handler() http.Handler {
 		}
 		fmt.Fprint(w, "ok")
 	})
-	mux.Handle("POST /internal/v1/call/{method}", s.authorized(http.HandlerFunc(s.call)))
-	mux.Handle("GET /internal/v1/events", s.authorized(http.HandlerFunc(s.events)))
-	mux.Handle("GET /internal/v1/config", s.authorized(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /internal/v1/call/{method}", s.authorized(RoleWeb, http.HandlerFunc(s.call)))
+	mux.Handle("GET /internal/v1/events", s.authorized(RoleWeb, http.HandlerFunc(s.events)))
+	mux.Handle("GET /internal/v1/config", s.authorized(RoleWeb, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.Config)
 	})))
+	if s.Routes != nil {
+		mux.Handle("GET /internal/v1/route/warm", s.authorized(RoleRouter, http.HandlerFunc(s.Routes.warm)))
+		mux.Handle("POST /internal/v1/route/decisions", s.authorized(RoleRouter, http.HandlerFunc(s.Routes.decisions)))
+	}
 	return mux
 }
 
-func (s *Server) authorized(h http.Handler) http.Handler {
+func (s *Server) authorized(want Role, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.Authorize != nil {
-			if err := s.Authorize(r); err != nil {
+			role, err := s.Authorize(r)
+			if err == nil && !role.may(want) {
+				err = fmt.Errorf("%w: a %s may not call %s", ErrForbidden, role, r.URL.Path)
+			}
+			if err != nil {
 				status := http.StatusUnauthorized
 				if errors.Is(err, ErrForbidden) {
 					status = http.StatusForbidden

@@ -60,7 +60,7 @@ type config struct {
 	split                     bool
 	apiListen, apiTLSDir      string
 	apiTokenFile, apiAudience string
-	apiAllow                  []string
+	apiAllow, apiAllowRouter  []string
 }
 
 // version and commit are set at build time (-ldflags -X main.version=...);
@@ -83,6 +83,7 @@ func versionString() string {
 //	ci-accelerator [all] [flags]        controller and web in one process (development)
 //	ci-accelerator controller [flags]   the store, collector and sessions, and the API the web reads
 //	ci-accelerator web [flags]          the console's pages, reading the controller
+//	ci-accelerator router [flags]       the proxy that sends each CI job to the daemon where its project is warm
 //	ci-accelerator disk-probe [flags]   the sidecar next to a daemon that reports its cache's free space
 func main() {
 	role, args := "", os.Args[1:]
@@ -100,8 +101,10 @@ func main() {
 		err = controllerMain(args, true, log)
 	case "web":
 		err = webMain(args, log)
+	case "router":
+		err = routerMain(args, log)
 	default:
-		fmt.Fprintf(os.Stderr, "ci-accelerator: no role %q (all, controller, web, disk-probe)\n", role)
+		fmt.Fprintf(os.Stderr, "ci-accelerator: no role %q (all, controller, web, router, disk-probe)\n", role)
 		os.Exit(2)
 	}
 	if err != nil {
@@ -123,7 +126,7 @@ func diskProbe(args []string) error {
 
 func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
 	var c config
-	var daemons, gitlabURLs, allow list
+	var daemons, gitlabURLs, allow, allowRouter list
 	fs := flag.NewFlagSet("controller", flag.ExitOnError)
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	fs.StringVar(&c.data, "data", "/data", "directory of the store")
@@ -148,7 +151,8 @@ func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
 		fs.StringVar(&c.apiListen, "api-listen", ":8443", "address of the API the web reads (HTTPS)")
 		fs.StringVar(&c.apiTLSDir, "api-tls-dir", "/api-tls", "directory with tls.crt and tls.key of the API (read again when they change)")
 		fs.StringVar(&c.apiAudience, "api-audience", control.Audience, "audience of the callers' ServiceAccount tokens")
-		fs.Var(&allow, "api-allow", "a ServiceAccount that may call the API, namespace/name (repeatable)")
+		fs.Var(&allow, "api-allow", "a ServiceAccount of the web, which may read the pages' data, namespace/name (repeatable)")
+		fs.Var(&allowRouter, "api-allow-router", "a ServiceAccount of the build routers, which may read where projects are warm and report decisions, namespace/name (repeatable)")
 		fs.StringVar(&c.apiTokenFile, "api-token-file", "", "file with a static token the callers send instead of ServiceAccount tokens (outside a cluster)")
 	} else {
 		fs.StringVar(&c.listen, "listen", ":8080", "address of the pages, the API and the health check")
@@ -161,7 +165,7 @@ func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
 	}
 	c.daemons = daemons
 	c.gitlabURLs = append(gitlabURLs, split(os.Getenv("GITLAB_URLS"))...)
-	c.split, c.apiAllow = splitRole, allow
+	c.split, c.apiAllow, c.apiAllowRouter = splitRole, allow, allowRouter
 	return run(c, log)
 }
 
@@ -279,6 +283,7 @@ func run(c config, log *slog.Logger) error {
 			return err
 		}
 		api := &control.Server{Local: local, GitLab: gl, Auth: signIn, Log: log, Authorize: authorize,
+			Routes: &control.Routes{Store: st, Live: col, Log: log},
 			Config: control.ConfigFor(versionString(), c.release, gl, signIn)}
 		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second,
 			TLSConfig: &cryptotls.Config{MinVersion: cryptotls.VersionTLS12, GetCertificate: certs}}
@@ -327,7 +332,7 @@ func run(c config, log *slog.Logger) error {
 
 // apiAuthorizer says who may call the controller: a static token from a
 // file, or the ServiceAccounts named, checked with Kubernetes.
-func apiAuthorizer(c config, kube kubernetes.Interface) (func(*http.Request) error, error) {
+func apiAuthorizer(c config, kube kubernetes.Interface) (func(*http.Request) (control.Role, error), error) {
 	if c.apiTokenFile != "" {
 		b, err := os.ReadFile(c.apiTokenFile)
 		if err != nil {
@@ -339,13 +344,18 @@ func apiAuthorizer(c config, kube kubernetes.Interface) (func(*http.Request) err
 		}
 		return control.StaticToken(t), nil
 	}
-	allow := map[string]bool{}
-	for _, a := range c.apiAllow {
-		ns, name, ok := strings.Cut(a, "/")
-		if !ok || ns == "" || name == "" {
-			return nil, fmt.Errorf("-api-allow %q: give namespace/name", a)
+	allow := map[string]control.Role{}
+	for role, list := range map[control.Role][]string{control.RoleWeb: c.apiAllow, control.RoleRouter: c.apiAllowRouter} {
+		for _, a := range list {
+			ns, name, ok := strings.Cut(a, "/")
+			if !ok || ns == "" || name == "" {
+				return nil, fmt.Errorf("-api-allow %q: give namespace/name", a)
+			}
+			if allow[a] != "" {
+				return nil, fmt.Errorf("-api-allow %q: one ServiceAccount, one role", a)
+			}
+			allow[a] = role
 		}
-		allow[a] = true
 	}
 	r := &control.TokenReviewer{Kube: kube, Audience: c.apiAudience, Allow: allow}
 	return r.Authorize, nil

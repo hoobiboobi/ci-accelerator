@@ -195,12 +195,21 @@ func (c *Collector) OnLiveChange(fn func()) {
 
 // inspect describes src's daemon now and every InspectEvery until ctx ends.
 func (c *Collector) inspect(ctx context.Context, name string, in Inspector) {
+	node := ""
 	for {
 		ictx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		info, err := in.Inspect(ictx)
 		cancel()
 		if ctx.Err() != nil {
 			return
+		}
+		if err == nil && info.Node != "" && info.Node != node {
+			// The routers keep a project where its cache is: on the node.
+			if serr := c.store.SetDaemonNode(ctx, name, info.Node); serr != nil {
+				c.log.Warn("daemon's node not stored", "daemon", name, "err", serr)
+			} else {
+				node = info.Node
+			}
 		}
 		c.live.inspected(name, info, err)
 		select {

@@ -37,6 +37,7 @@ func (s *Store) Prune(ctx context.Context) (int64, error) {
 	}
 	for _, q := range []string{
 		"DELETE FROM step_defs WHERE last_seen < ?",
+		"DELETE FROM route_decisions WHERE at < ?",
 		"DELETE FROM dockerfiles WHERE last_seen < ? AND NOT EXISTS (SELECT 1 FROM builds WHERE dockerfile_id = dockerfiles.id)",
 		// A job by the earliest time known of it, else when the console
 		// first heard of it (a manual job never started has no other).
