@@ -105,13 +105,13 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 // previous build of the target, the steps; the rest under Details.
 type BuildView struct {
 	Shell
-	ID      int64
+	ID int64
 	// Warnings are the Dockerfile build checks that failed (BuildKit's).
 	Warnings []history.Warning
-	Name    string
-	Target  string
-	Status  Status
-	Verdict Verdict
+	Name     string
+	Target   string
+	Status   Status
+	Verdict  Verdict
 	// At most three numbers under the verdict.
 	Dur, Delta string
 	Slower     bool
