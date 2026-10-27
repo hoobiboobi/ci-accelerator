@@ -146,6 +146,45 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 	return Reason{}, false
 }
 
+// FailedStep explains a failed build by the step that failed. BuildKit
+// records no provenance for a failed build, so FirstRebuild cannot compare
+// it, but the steps' text is known: the failed step is compared with the
+// step in the same place (stage, position and step count) of the previous
+// build of the image. NewStep: there was none, and no step of the previous
+// build has its text; StepChanged: the text there differs (Old, New). ok
+// is false when the same step was there, or moved: it passed then.
+func FailedStep(prev, cur *Build) (Reason, bool) {
+	if prev == nil || cur.Error == "" {
+		return Reason{}, false
+	}
+	var failed *Step
+	for i := range cur.Steps {
+		s := &cur.Steps[i]
+		// Steps stopped because another one failed say "canceled".
+		if s.State == Built && s.Error != "" && !strings.Contains(s.Error, "context canceled") {
+			failed = s
+			break
+		}
+	}
+	if failed == nil {
+		return Reason{}, false
+	}
+	for _, p := range prev.Steps {
+		if p.Key == failed.Key {
+			if p.Name == failed.Name {
+				return Reason{}, false
+			}
+			return Reason{Kind: StepChanged, Step: *failed, Old: p.Name, New: failed.Name}, true
+		}
+	}
+	for _, p := range prev.Steps {
+		if p.Name == failed.Name {
+			return Reason{}, false
+		}
+	}
+	return Reason{Kind: NewStep, Step: *failed}, true
+}
+
 // rebuiltAny reports whether the build executed a step other than resolving
 // an image (which happens in every build): only then is there a rebuild to
 // explain.

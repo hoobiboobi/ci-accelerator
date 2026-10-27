@@ -74,7 +74,17 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 			Detail: template.HTML("The job was canceled, or its client went away, while BuildKit was building: nothing in the Dockerfile failed. BuildKit said: " + e(b.Error) + ".")}
 	}
 	if b.Error != "" {
-		return Verdict{Tone: "failed", Kicker: "Failed", Title: template.HTML("The build failed."), Detail: template.HTML(e(b.Error))}
+		v := Verdict{Tone: "failed", Kicker: "Failed", Title: template.HTML("The build failed."), Detail: template.HTML(e(b.Error))}
+		switch r.Kind {
+		case history.StepChanged:
+			v.Title = template.HTML(fmt.Sprintf("The build failed at %s, a step this build changed.", code(r.Step.Name)))
+			if r.Old != "" && r.Old != r.New {
+				v.Diff = []string{r.Old, r.New}
+			}
+		case history.NewStep:
+			v.Title = template.HTML(fmt.Sprintf("The build failed at %s, a step new in this build.", code(r.Step.Name)))
+		}
+		return v
 	}
 	at := ""
 	if r.Step.Line > 0 {

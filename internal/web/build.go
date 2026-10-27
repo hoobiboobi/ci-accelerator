@@ -279,7 +279,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 		v.UsualOf = fmt.Sprintf("The median of up to 10 earlier builds of %s.", orDefault(b.Target))
 	}
-	if usual > 0 && !running {
+	if usual > 0 && !running && b.Error == "" {
 		v.Usual = duration(usual)
 		if b.Error == "" && d.Built > 0 {
 			v.Delta, v.Slower = delta(b.Completed.Sub(b.Started), usual)

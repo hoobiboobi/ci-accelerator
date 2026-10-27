@@ -200,6 +200,14 @@ func TestVerdicts(t *testing.T) {
 	}
 	failed := *b
 	failed.Error = "exit code: 1 <b>"
+	fs := history.Step{Key: "[web 2/3]", Name: "RUN make && <false>"}
+	if v := verdictFor(&failed, history.Reason{Kind: history.StepChanged, Step: fs, Old: "RUN make", New: fs.Name}, "", 0, 0, nil); v.Tone != "failed" ||
+		!strings.Contains(string(v.Title), "a step this build changed") || !strings.Contains(string(v.Title), "&lt;false&gt;") || len(v.Diff) != 2 || v.Diff[0] != "RUN make" {
+		t.Errorf("failed at a changed step: %+v", v)
+	}
+	if v := verdictFor(&failed, history.Reason{Kind: history.NewStep, Step: fs}, "", 0, 0, nil); !strings.Contains(string(v.Title), "a step new in this build") || v.Diff != nil {
+		t.Errorf("failed at a new step: %+v", v)
+	}
 	if v := verdictFor(&failed, history.Reason{}, "", 0, 0, nil); v.Tone != "failed" || !strings.Contains(string(v.Detail), "&lt;b&gt;") {
 		t.Errorf("failed: %+v", v)
 	}
