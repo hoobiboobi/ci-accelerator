@@ -335,3 +335,41 @@ func TestContextSize(t *testing.T) {
 		t.Errorf("context bytes api %d, test %d: the test target copies the whole context", api.ContextBytes, test.ContextBytes)
 	}
 }
+
+// A failed build has no provenance; its failed step is compared by its
+// text with the step in the same place of the previous build.
+func TestFailedStep(t *testing.T) {
+	step := func(key, name, state, err string) Step {
+		return Step{Key: key, Name: name, State: StepState(state), Error: err}
+	}
+	prev := &Build{Steps: []Step{step("[web 1/3]", "COPY services/web/ /src/web/", "built", ""),
+		step("[web 2/3]", "RUN make", "built", ""), step("[web 3/3]", "RUN echo built", "built", "")}}
+	failed := func(steps ...Step) *Build { return &Build{Error: "exit code: 1", Steps: steps} }
+	for _, c := range []struct {
+		name string
+		cur  *Build
+		kind ReasonKind
+		ok   bool
+	}{
+		{"changed", failed(step("[web 1/3]", "COPY services/web/ /src/web/", "cached", ""), step("[web 2/3]", "RUN make && false", "built", "exit code: 1")), StepChanged, true},
+		{"the same step", failed(step("[web 2/3]", "RUN make", "built", "exit code: 1")), "", false},
+		{"moved by an inserted step", failed(step("[web 3/4]", "RUN make", "built", "exit code: 1")), "", false},
+		{"new", failed(step("[web 3/4]", "RUN make test", "built", "exit code: 1")), NewStep, true},
+		{"only canceled steps", failed(step("[web 2/3]", "RUN make && x", "built", "context canceled")), "", false},
+		{"canceled first, then the failed one", failed(step("[web 1/3]", "COPY x /x", "built", "context canceled"), step("[web 2/3]", "RUN make && false", "built", "exit code: 1")), StepChanged, true},
+	} {
+		r, ok := FailedStep(prev, c.cur)
+		if ok != c.ok || r.Kind != c.kind {
+			t.Errorf("%s: %v %+v", c.name, ok, r)
+		}
+		if c.kind == StepChanged && (r.Old != "RUN make" || r.New != "RUN make && false") {
+			t.Errorf("%s: old %q new %q", c.name, r.Old, r.New)
+		}
+	}
+	if _, ok := FailedStep(nil, failed(step("[web 2/3]", "RUN make", "built", "exit code: 1"))); ok {
+		t.Error("explained without a previous build")
+	}
+	if _, ok := FailedStep(prev, prev); ok {
+		t.Error("explained a build that did not fail")
+	}
+}

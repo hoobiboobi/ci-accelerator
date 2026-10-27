@@ -304,7 +304,10 @@ func (c *Collector) reason(ctx context.Context, b *history.Build) (history.Reaso
 	if prev != nil {
 		p = prev.Build
 	}
-	r, _ := history.FirstRebuild(p, b)
+	r, ok := history.FirstRebuild(p, b)
+	if !ok && b.Error != "" {
+		r, _ = history.FailedStep(p, b)
+	}
 	return r, nil
 }
 
