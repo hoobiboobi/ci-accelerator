@@ -394,7 +394,15 @@ func (r *logReader) read(from, to int64) ([]byte, int64, error) {
 			b, err := io.ReadAll(io.LimitReader(res.Body, logWindowMax+1<<20))
 			return b, first, err
 		case http.StatusRequestedRangeNotSatisfiable: // nothing from there on
-			_, r.size, _ = contentRange(res.Header.Get("Content-Range"))
+			io.Copy(io.Discard, io.LimitReader(res.Body, 1<<16))
+			var ok bool
+			if _, r.size, ok = contentRange(res.Header.Get("Content-Range")); !ok {
+				// gitlab.com's object storage leaves Content-Range out of a
+				// 416 when the request accepts gzip (Go's always does): the
+				// log ends where the range began (a log only grows, and
+				// from is the end of a part read before).
+				r.size = max(from, 0)
+			}
 			return nil, max(from, 0), nil
 		case http.StatusOK:
 			b, err := io.ReadAll(io.LimitReader(res.Body, MaxTrace))
