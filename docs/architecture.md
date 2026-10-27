@@ -6,7 +6,7 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 
 ## Components and namespaces
 
-[![The box namespace holds the gitlab-runner manager, the buildkit Service and headless Service, the daemon DaemonSet, the optional control plane (controller and web) and the daemons' NetworkPolicy. The runner creates CI job pods in the jobs namespace, which reach the daemons' Service over mutual TLS. The release's CA in cert-manager's namespace signs the daemons' server certificate and the jobs' client certificate.](images/components-and-namespaces.svg)](images/components-and-namespaces.svg)
+[![The box namespace holds the gitlab-runner manager, the build router's Service, the daemons' headless Service, the daemon DaemonSet, the control plane (controller, web and router) and the daemons' NetworkPolicy. The runner creates CI job pods in the jobs namespace, which reach the daemons through the router over mutual TLS. The release's CA in cert-manager's namespace signs the daemons' server certificate and the jobs' client certificate.](images/components-and-namespaces.svg)](images/components-and-namespaces.svg)
 
 | Part | Where | Notes |
 |---|---|---|
@@ -14,6 +14,7 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 | Disk probe | A container in each daemon pod (box) | The ci-accelerator image; reports the cache disk's size and free space (statfs) |
 | gitlab-runner manager | Box namespace, any non-build node | Polls GitLab, creates job pods |
 | CI job pods | Jobs namespace, build nodes | Thin clients: `buildctl` and the build context |
+| Build router (control plane) | DaemonSet on build nodes | Passes each job's connection to the daemon where its project is warm; no key, no state |
 | Controller (control plane, optional) | Box namespace, any non-build node | One pod: reads the daemons' build history and the job pods, holds the store and the sessions |
 | Web (control plane, optional) | Box namespace, any non-build node | Two pods by default: serve the console's pages, reading the controller's API |
 | CA, server and client certificates | cert-manager | The CA lives in cert-manager's namespace |
@@ -32,15 +33,27 @@ a running job to get scheduled) and default requests of 500m CPU and 512Mi
 ## The path of a build
 
 1. **The runner creates a job pod** in the jobs namespace, on a build node.
-   It sets `BUILDKIT_REMOTE_ADDR=tcp://<release>-buildkit.<namespace>.svc:1234`
+   It sets `BUILDKIT_REMOTE_ADDR=tcp://<release>-router.<namespace>.svc:1234`
    and mounts the client certificate at `BUILDKIT_TLS_DIR`.
-2. **`buildctl build` connects to the Service.** With
-   `trafficDistribution: PreferSameNode`, kube-proxy sends the connection
-   to the daemon on the job's own node. If that daemon is not ready, the
-   connection goes to another node's daemon.
-3. **Mutual TLS.** The client checks the daemon's certificate, whose names
-   cover the Service. The daemon requires a client certificate from the
-   installation's CA.
+2. **`buildctl build` connects to the router** on the job's own node
+   (`trafficDistribution: PreferSameNode`; another node's router when it
+   is not ready). The router knows the job by its pod's address and picks
+   the daemon ([ADR-0045](adr/0045-build-router.md)):
+   - the job's own node, if the project built there in the last week;
+   - else the node of its zone that built it most recently;
+   - else the project's node by a rendezvous hash over the zone's ready
+     daemons: every router agrees, so a new project's parallel jobs meet
+     on one daemon and BuildKit runs their common steps once;
+   - else another zone's daemon (or none, with `crossZone: false`).
+
+   A connection from a pod that is no CI job goes to its own node's
+   daemon. The routers learn where projects built from the controller
+   (and keep routing on their last view while it is away); the build page
+   says why its node was chosen.
+3. **Mutual TLS, end to end.** The router passes the bytes through. The
+   client checks the daemon's certificate, whose names cover the daemons'
+   Services and the router's. The daemon requires a client certificate
+   from the installation's CA.
 4. **The build runs in the daemon:**
    - `buildctl` streams the build context and Dockerfile from the job pod;
    - the daemon resolves and pulls base images;
@@ -74,11 +87,17 @@ Each daemon names itself in two ways:
 ## The cache
 
 - **Per daemon.** Each daemon has its own cache; nothing is shared between
-  nodes. A project's first build on each node is cold, and a fallback to
-  another node's daemon builds with that daemon's cache. Sticky routing of a
-  project to one daemon is planned. Until then:
-  - fewer, larger build nodes give more cache hits;
-  - so does pinning a project's jobs to one node through runner tags.
+  nodes. The router keeps a project on the node where it built last, so its
+  cache warms up once; a job sent elsewhere (that daemon not ready, another
+  zone) builds with the other daemon's cache. Warmth is kept by node: a
+  daemon's restart on hostPath keeps its projects.
+- **Shared between projects.** Identical steps of different projects reuse
+  each other's layers, and cache mounts are shared
+  ([ADR-0046](adr/0046-cache-reuse.md)).
+- **Whose it is.** The controller attributes each layer to the build that
+  made it (the step it executed when the layer appeared) and the Nodes page
+  shows each node's cache by project; an admin can remove what a project
+  made alone on a node ([ADR-0047](adr/0047-cache-by-project.md)).
 - **Persistence:**
   - **`hostPath`** (production, on a dedicated disk): the cache survives
     restarts, rollouts and uninstall.
@@ -165,8 +184,9 @@ Each daemon names itself in two ways:
 
 The console is served by the control plane (chart `control-plane`,
 `control-plane.enabled`, on by default), which runs in the box namespace as
-two roles of one image, `ci-accelerator`. It only reads; nothing it does
-changes a build.
+roles of one image, `ci-accelerator`: the controller, the web and the build
+router. Besides routing, it only reads; the one change it makes is removing
+a project's cache from a node when an admin asks.
 
 - **The controller** (Deployment `<release>-controller`, one pod,
   `Recreate`) owns everything with state: the store, the reading of the
@@ -184,8 +204,10 @@ changes a build.
   certificates, so it can never drive them. The web proves who it is with a
   ServiceAccount token that Kubernetes projects into its pods for the
   controller's audience; the controller checks it with a TokenReview (its
-  only cluster-wide right). Its NetworkPolicy admits the web's pods alone:
-  CI jobs and RUN steps cannot reach the API.
+  only cluster-wide right). The routers prove themselves the same way and
+  may only read their view and report decisions. Its NetworkPolicy admits
+  the web's and the routers' pods alone: CI jobs and RUN steps cannot
+  reach the API.
 
 What the controller does:
 

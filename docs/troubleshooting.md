@@ -95,13 +95,21 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" debug worke
 | Error | Cause |
 |---|---|
 | `x509: certificate signed by unknown authority` | The client's `ca.crt` is from another CA than the daemons' certificate (a Secret from another installation, or a CA that was replaced) |
-| `certificate is valid for ..., not <host>` | The address is not among the certificate's names (custom DNS names, IPs, NodePort clients): `buildkit.tls.certManager.extraDnsNames` / `ipAddresses`, or `--tlsservername` |
+| `certificate is valid for ..., not <host>` | The address is not among the certificate's names (custom DNS names, IPs, NodePort clients): `buildkit.tls.certManager.extraDnsNames` / `ipAddresses`, or `--tlsservername`. Not valid for `<release>-router...`: the daemons' certificate predates the router; with `buildkit.tls.source=existingSecret` make it again with `scripts/buildkit-certs.sh --router <release>` and restart the daemons |
 | `tls: certificate required`, or `broken pipe` / `connection reset by peer` right after connecting | No client certificate, or one from another CA: the client Secret is not mounted or comes from the wrong namespace. TLS 1.3 often reports a missing certificate only as a reset |
 | `certificate has expired` | The daemons still serve an old certificate after a renewal: restart them (`kubectl -n ci-accelerator rollout restart ds/ci-accelerator-buildkit`) |
-| `i/o timeout`, `context deadline exceeded` | Network, not TLS: the NetworkPolicy does not admit the job's namespace (`tls.client.namespaces` / `networkPolicy.ingress.namespaces`), or routing is `Local` and the node has no ready daemon, or the job pod is not on a build node |
+| `i/o timeout`, `context deadline exceeded` | Network, not TLS: the NetworkPolicy does not admit the job's namespace (the routers' `control-plane.router.clientNamespaces`, or without the router `tls.client.namespaces` / `networkPolicy.ingress.namespaces`), or routing is `Local` and the node has no ready router or daemon, or the job pod is not on a build node. A job that connects to a daemon around the router times out by design |
+| The connection closes at once, without a TLS error | The router found no ready daemon (`kubectl -n ci-accelerator logs ds/ci-accelerator-router`: "connection refused: no daemon"), or none in the job's zone with `control-plane.router.crossZone=false` |
 | `Unavailable ... connection refused` | No daemon is listening: all daemons down, or a wrong address |
 
 ## Builds are slow or not cached
+
+**Where did the router send it?** The build page's details say "Routed by
+the build router" and why: the job's own node that built the project
+before, the node that built it most recently, or the project's node by
+hash (nobody built it in the last week). No such line: the router did not
+know the job (its pod was not a CI job of the jobs namespace, or a CNI
+changed its source address) and sent it to its own node's daemon.
 
 1. **Which daemon built it?** The job's `debug workers -v` prints
    `worker.hostname`; metrics and traces sent to your backend carry
@@ -384,7 +392,15 @@ to upgrade a 0.2.x release in place, so install it again:
    kubectl -n ci-accelerator wait --for=delete pod -l app.kubernetes.io/instance=ci-accelerator --timeout=10m
    ```
    The jobs namespace goes with the release (running jobs fail); the
-   daemons' cache on a hostPath stays.
+   daemons' cache on a hostPath stays. Then delete the daemons' certificate
+   Secret: it outlives the release, and 0.3.0's names the build router
+   (the daemons read their certificate only at start):
+   ```sh
+   kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls
+   ```
+   Without cert-manager, make the daemons' certificate again with
+   `scripts/buildkit-certs.sh --name ci-accelerator-buildkit --namespace
+   ci-accelerator --router ci-accelerator` and replace the Secret.
 2. In your values, move everything under `console:` to `control-plane:`.
    The controller's pod settings and volume go under
    `control-plane.controller` (`resources`, `nodeSelector`, `tolerations`,

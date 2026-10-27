@@ -34,8 +34,8 @@
   <text x="56" y="113" class="sub">polls GitLab for jobs</text>
 
   <rect class="card" x="40" y="140" width="508" height="52" rx="8"/>
-  <text x="56" y="162" class="mono">Service &lt;release&gt;-buildkit :1234</text>
-  <text x="56" y="181" class="sub">PreferSameNode: the daemon on the job’s own node</text>
+  <text x="56" y="162" class="mono">Service &lt;release&gt;-router :1234</text>
+  <text x="56" y="181" class="sub">build router: to the node where the project is warm</text>
 
   <rect class="card" x="40" y="204" width="508" height="52" rx="8"/>
   <text x="56" y="226" class="mono">Service &lt;release&gt;-buildkit-headless</text>
@@ -50,11 +50,11 @@
 
   <rect class="card" x="40" y="402" width="508" height="52" rx="8"/>
   <text x="56" y="424" class="mono">Deployments &lt;release&gt;-controller, -web<tspan class="sub" font-family="system-ui, sans-serif"> (optional)</tspan></text>
-  <text x="56" y="443" class="sub">the control plane: reads every build, serves the console</text>
+  <text x="56" y="443" class="sub">the control plane: routes jobs, reads builds, serves the console</text>
 
   <rect class="card" x="40" y="466" width="508" height="52" rx="8"/>
   <text x="56" y="488" class="name">NetworkPolicy for the daemons</text>
-  <text x="56" y="507" class="sub">ingress from the jobs namespace and the controller</text>
+  <text x="56" y="507" class="sub">ingress from the routers and the controller</text>
 
   <!-- The jobs namespace -->
   <text x="644" y="38"><tspan class="ns">namespace ci-accelerator-jobs</tspan><tspan class="ns-note"> · baseline</tspan></text>
