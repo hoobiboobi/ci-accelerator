@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Provenance is the part of a record's SLSA v1 provenance the console uses.
@@ -30,6 +31,17 @@ type Provenance struct {
 	Args map[string]string
 	// Identity of every step: stable across builds (see identity).
 	Identity map[string]string
+	// Usage is what each executed step's processes used, by step id.
+	Usage map[string]Usage
+}
+
+// Usage is what a step's processes used, from the cgroup counters BuildKit
+// samples while it runs and once when it ends: totals, not estimates.
+type Usage struct {
+	CPU        time.Duration // user + system time of every process
+	Throttled  time.Duration // time the CPU limit held them back
+	ReadBytes  int64         // read from block devices
+	WriteBytes int64         // written to block devices
 }
 
 // LineRange is a range of Dockerfile lines, both ends included.
@@ -54,9 +66,21 @@ type rawProvenance struct {
 		InternalParameters struct {
 			BuildConfig struct {
 				LLBDefinition []struct {
-					ID     string          `json:"id"`
-					Op     json.RawMessage `json:"op"`
-					Inputs []string        `json:"inputs"`
+					ID            string          `json:"id"`
+					Op            json.RawMessage `json:"op"`
+					Inputs        []string        `json:"inputs"`
+					ResourceUsage *struct {
+						Samples []struct {
+							CPUStat *struct {
+								UsageNanos     int64 `json:"usageNanos"`
+								ThrottledNanos int64 `json:"throttledNanos"`
+							} `json:"cpuStat"`
+							IOStat *struct {
+								ReadBytes  int64 `json:"readBytes"`
+								WriteBytes int64 `json:"writeBytes"`
+							} `json:"ioStat"`
+						} `json:"samples"`
+					} `json:"resourceUsage"`
 				} `json:"llbDefinition"`
 				DigestMapping map[string]string `json:"digestMapping"`
 			} `json:"buildConfig"`
@@ -106,6 +130,7 @@ func ParseProvenance(data []byte, key []byte) (*Provenance, error) {
 		Ranges:        map[string][]LineRange{},
 		Args:          raw.BuildDefinition.ExternalParameters.Request.Args,
 		Identity:      map[string]string{},
+		Usage:         map[string]Usage{},
 	}
 	for _, s := range bc.LLBDefinition {
 		inputs := make([]string, 0, len(s.Inputs))
@@ -114,6 +139,20 @@ func ParseProvenance(data []byte, key []byte) (*Provenance, error) {
 			inputs = append(inputs, id)
 		}
 		p.Steps[s.ID] = ProvStep{ID: s.ID, Inputs: inputs, Op: normalizeOp(s.Op, key)}
+		if ru := s.ResourceUsage; ru != nil && len(ru.Samples) > 0 {
+			// The counters only grow: the largest sample is the total.
+			var u Usage
+			for _, x := range ru.Samples {
+				if c := x.CPUStat; c != nil {
+					u.CPU = max(u.CPU, time.Duration(c.UsageNanos))
+					u.Throttled = max(u.Throttled, time.Duration(c.ThrottledNanos))
+				}
+				if io := x.IOStat; io != nil {
+					u.ReadBytes, u.WriteBytes = max(u.ReadBytes, io.ReadBytes), max(u.WriteBytes, io.WriteBytes)
+				}
+			}
+			p.Usage[s.ID] = u
+		}
 	}
 	src := raw.RunDetails.Metadata.BuildKit.Source
 	dockerfile := 0 // the first source, unless one is marked as a Dockerfile

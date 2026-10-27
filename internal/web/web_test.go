@@ -792,8 +792,8 @@ func TestNodes(t *testing.T) {
 	ts, _, _, _ := consoleWith(t, testOpts{Live: daemons, Release: "box"})
 	nodes := get(t, ts, "/nodes")
 	nodes.safe(t)
-	for _, want := range []string{"1 ready of 2", "on node-1", "300 MB", "/root/.cache/pip cache mount", "Duplicate cache",
-		"python:3.13-slim", "Keep cache up to", "40.0 GB per node", "14 days after last use", "Running now", "Unreachable", "release <code>box</code>",
+	for _, want := range []string{"1 ready of 2", "on node-1", "300 MiB", "/root/.cache/pip cache mount", "Duplicate cache",
+		"python:3.13-slim", "Keep cache up to", "40.0 GiB per node", "14 days after last use", "Running now", "Unreachable", "release <code>box</code>",
 		"replaced since"} {
 		if !strings.Contains(nodes.body, want) {
 			t.Errorf("nodes page lacks %q", want)

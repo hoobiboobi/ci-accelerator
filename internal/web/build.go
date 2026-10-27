@@ -567,6 +567,7 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 		sd.Facts = append(sd.Facts, KV{"Started", "+" + duration(v.Offset) + " into the build"})
 	}
 	sd.Facts = append(sd.Facts, KV{"Node", shortDaemon(b.Daemon)})
+	sd.Facts = append(sd.Facts, usageFacts(st.Usage, st.Duration())...)
 	if p.Job != nil {
 		sd.JobURL = fmt.Sprintf("/builds/%d", id)
 	}
@@ -708,4 +709,25 @@ func routeText(d store.Decision) string {
 		return fmt.Sprintf("the build router: %s, in another zone: no daemon of the job's zone was ready", node)
 	}
 	return fmt.Sprintf("the build router: %s (%s)", node, d.Reason)
+}
+
+// usageFacts says what an executed step's processes used, from the cgroup
+// totals BuildKit records: CPU time (and how many cores that averages over
+// the step's run), time a CPU limit held them back, disk read and written.
+func usageFacts(u history.Usage, d time.Duration) []KV {
+	var out []KV
+	if u.CPU > 0 {
+		v := duration(u.CPU)
+		if d > 0 {
+			v += fmt.Sprintf(" — %.1f cores busy on average over the step's %s", u.CPU.Seconds()/d.Seconds(), duration(d))
+		}
+		out = append(out, KV{"CPU time", v})
+	}
+	if u.Throttled > 0 {
+		out = append(out, KV{"Held back by a CPU limit", duration(u.Throttled)})
+	}
+	if u.ReadBytes > 0 || u.WriteBytes > 0 {
+		out = append(out, KV{"Disk", "read " + bytesText(u.ReadBytes) + ", wrote " + bytesText(u.WriteBytes)})
+	}
+	return out
 }

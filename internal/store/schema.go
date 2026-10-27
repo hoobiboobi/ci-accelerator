@@ -232,6 +232,13 @@ DROP INDEX builds_completed;
 -- The Dockerfile build checks that failed (BuildKit's own warnings), JSON.
 ALTER TABLE builds ADD COLUMN warnings TEXT NOT NULL DEFAULT '[]';
 
+-- What an executed step's processes used (cgroup totals): CPU time, time
+-- held back by a CPU limit, bytes read from and written to disk.
+ALTER TABLE steps ADD COLUMN cpu_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE steps ADD COLUMN throttled_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE steps ADD COLUMN read_bytes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE steps ADD COLUMN write_bytes INTEGER NOT NULL DEFAULT 0;
+
 `,
 }
 
