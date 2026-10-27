@@ -7,45 +7,43 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/route"
 )
 
-// A store of the previous schema opens with its builds and gains the
-// router's tables.
+// A store written by 0.2.x (schema 1) opens with its builds and gains
+// the router's tables and the builds' warnings.
 func TestMigrationKeepsBuilds(t *testing.T) {
 	dir := t.TempDir()
 	all := migrations
 	migrations = all[:1]
 	c := &clock{time.Now()}
 	s, err := Open(ctx, dir, Options{Now: c.now})
-	if err != nil {
-		migrations = all
-		t.Fatal(err)
-	}
-	bs := fixtures(t, s.SecretKey())
-	saveJobs(t, s, bs)
-	for _, b := range bs {
-		if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1}); err != nil {
-			migrations = all
-			t.Fatal(err)
-		}
-	}
-	before, err := s.Recent(ctx, 100)
-	s.Close()
 	migrations = all
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Rows as 0.2.x wrote them: only schema-1 columns.
+	for _, q := range []string{
+		"INSERT INTO daemons (id, name) VALUES (1, 'daemon-a')",
+		"INSERT INTO projects (instance, project_id, path) VALUES (1, 42, 'example/app')",
+		`INSERT INTO builds (daemon_id, ref, generation, attribution, instance, pipeline_id, job_id, project_id, target, started_at, completed_at)
+			VALUES (1, 'ref-1', 1, 1, 1, 7, 8, 42, 'api', 1000, 2000)`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
 	s = open(t, dir, c)
 	var version int
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
 		t.Fatalf("schema %d (%v), want %d", version, err, len(migrations))
 	}
 	after, err := s.Recent(ctx, 100)
-	if err != nil || len(after) != len(before) || len(after) == 0 {
-		t.Fatalf("%d builds before, %d after (%v)", len(before), len(after), err)
+	if err != nil || len(after) != 1 || after[0].Build.Ref != "ref-1" || len(after[0].Build.Warnings) != 0 {
+		t.Fatalf("builds after the migration: %+v (%v)", after, err)
 	}
 	if err := s.SetDaemonNode(ctx, "daemon-a", "node-1", false); err != nil {
 		t.Fatal(err)
 	}
-	w, err := s.Warm(ctx, c.t.Add(-365*24*time.Hour), nil)
+	w, err := s.Warm(ctx, time.UnixMilli(0), nil)
 	if err != nil || len(w) != 1 {
 		t.Fatalf("warmth %v, %v", w, err)
 	}

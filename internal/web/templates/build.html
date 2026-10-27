@@ -26,6 +26,13 @@
   {{else}}<p class="muted pad">No earlier build of {{if .Target}}{{.Target}}{{else}}this target{{end}} on record.</p>{{end}}
 </section>
 
+{{with .Warnings}}<section class="box" aria-labelledby="wcT"><div class="boxh"><h2 class="h" id="wcT">Dockerfile checks</h2><span class="muted">{{len .}} of BuildKit's build checks failed{{if $.DfName}} in {{$.DfName}}{{end}}</span></div>
+  <div class="tbox"><table><thead><tr><th class="num">Line</th><th>Check</th><th>What it says</th></tr></thead><tbody>
+  {{range .}}<tr><td class="ln">{{if .Line}}{{.Line}}{{end}}</td><td><a class="link" href="{{.URL}}" target="_blank" rel="noopener">{{.Rule}}</a></td><td>{{.Message}}{{with .Detail}}<div class="muted sm">{{.}}</div>{{end}}</td></tr>{{end}}
+  </tbody></table></div>
+  <p class="muted sm pad">Reported by BuildKit's Dockerfile frontend on every build; to silence a check on purpose, add <code># check=skip=&lt;rule&gt;</code> at the top of the Dockerfile.</p>
+</section>{{end}}
+
 <section class="box" aria-labelledby="stT">
   <div class="boxh"><h2 class="h" id="stT">Steps</h2>
     {{if .Blocks}}<nav class="seg" role="tablist" aria-label="Steps as"><a role="tab" href="#steps" data-tab="steps" aria-selected="true">List</a>{{if .Gantt}}<a role="tab" href="#timeline" data-tab="timeline" aria-selected="false">Timeline</a>{{end}}{{if .Lines}}<a role="tab" href="#dockerfile" data-tab="dockerfile" aria-selected="false">Dockerfile</a>{{end}}</nav>

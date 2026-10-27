@@ -103,6 +103,7 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 	}
 	argsJSON, _ := json.Marshal(args)
 	images, _ := json.Marshal(nonNil(b.Images))
+	warnings, _ := json.Marshal(nonNil(b.Warnings))
 	outputs := map[int]string{}
 	for i, st := range b.Steps {
 		if st.Output != "" && i < MaxSteps {
@@ -147,8 +148,9 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO builds (daemon_id, ref, generation, attribution, instance, pipeline_id, job_id, project_id,
 			target, dockerfile_id, build_args, started_at, completed_at, error, context_bytes, images,
-			reason_kind, reason_step, reason_old, reason_new, reason_arg, reason_paths, reason_by, saved_ms, output_day, built, built_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			reason_kind, reason_step, reason_old, reason_new, reason_arg, reason_paths, reason_by, saved_ms, output_day, built, built_ms,
+			warnings)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (ref, daemon_id) DO UPDATE SET generation = excluded.generation,
 			attribution = excluded.attribution, instance = excluded.instance, pipeline_id = excluded.pipeline_id,
 			job_id = excluded.job_id, project_id = COALESCE(excluded.project_id, builds.project_id),
@@ -159,12 +161,13 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			reason_new = excluded.reason_new, reason_arg = excluded.reason_arg, reason_paths = excluded.reason_paths,
 			reason_by = excluded.reason_by, reason_via = '', saved_ms = excluded.saved_ms,
 			output_day = COALESCE(excluded.output_day, builds.output_day),
-			built = excluded.built, built_ms = excluded.built_ms
+			built = excluded.built, built_ms = excluded.built_ms, warnings = excluded.warnings
 		WHERE excluded.generation >= builds.generation
 		RETURNING id`,
 		daemon, b.Ref, b.Generation, attributions[a.State], instance, pipeline, job, project,
 		b.Target, dockerfile, string(argsJSON), b.Started.UnixMilli(), nullTime(b.Completed), b.Error, b.ContextBytes, string(images),
 		string(r.Kind), reasonStep, r.Old, r.New, r.Arg, string(paths), reasonBy, saved.Milliseconds(), outDay, built, builtMs,
+		string(warnings),
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A newer generation is stored already.

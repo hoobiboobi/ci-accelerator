@@ -34,7 +34,7 @@ type Stored struct {
 const buildColumns = `b.id, b.generation, d.name, b.ref, b.attribution, b.instance, b.pipeline_id, b.job_id,
 	b.target, b.build_args, b.started_at, b.completed_at, b.error, b.context_bytes, b.images,
 	b.reason_kind, b.reason_step, b.reason_old, b.reason_new, b.reason_arg, b.reason_paths,
-	(SELECT ref FROM builds x WHERE x.id = b.reason_by), b.saved_ms, b.reason_via`
+	(SELECT ref FROM builds x WHERE x.id = b.reason_by), b.saved_ms, b.reason_via, b.warnings`
 
 // Previous returns the latest build of the same project and target that
 // started before b, restored for FirstRebuild; nil when there is none.
@@ -164,13 +164,13 @@ func (s *Store) scanBuilds(ctx context.Context, rows *sql.Rows) ([]*Stored, erro
 			b                                         history.Build
 			attribution                               int
 			instance, pipeline, job, completed, rstep sql.NullInt64
-			args, images, kind, paths                 string
+			args, images, kind, paths, warnings       string
 			started, saved                            int64
 			by                                        sql.NullString
 		)
 		if err := rows.Scan(&st.ID, &st.Generation, &b.Daemon, &b.Ref, &attribution, &instance, &pipeline, &job,
 			&b.Target, &args, &started, &completed, &b.Error, &b.ContextBytes, &images,
-			&kind, &rstep, &st.Reason.Old, &st.Reason.New, &st.Reason.Arg, &paths, &by, &saved, &st.Via); err != nil {
+			&kind, &rstep, &st.Reason.Old, &st.Reason.New, &st.Reason.Arg, &paths, &by, &saved, &st.Via, &warnings); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -184,6 +184,7 @@ func (s *Store) scanBuilds(ctx context.Context, rows *sql.Rows) ([]*Stored, erro
 		}
 		_ = json.Unmarshal([]byte(args), &b.BuildArgs)
 		_ = json.Unmarshal([]byte(images), &b.Images)
+		_ = json.Unmarshal([]byte(warnings), &b.Warnings)
 		st.Reason.Kind = history.ReasonKind(kind)
 		_ = json.Unmarshal([]byte(paths), &st.Reason.Paths)
 		if len(st.Reason.Paths) == 0 {

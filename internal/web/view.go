@@ -55,6 +55,8 @@ type Line struct {
 	Stage  string
 	Head   bool   // the FROM line of a stage
 	Showed string // duration text on the step's first line
+	// Warnings are the build checks that failed on this line.
+	Warnings []history.Warning
 }
 
 func isFrom(s history.Step) bool { return strings.HasPrefix(s.Name, "FROM ") }
@@ -201,11 +203,19 @@ func dockerfile(text string, stepViews []StepView, b *history.Build) []Line {
 	}
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	out := make([]Line, len(lines))
+	// A build check names the line it is about (the Dockerfile's, not
+	// one of a frontend's own files).
+	warned := map[int][]history.Warning{}
+	for _, w := range b.Warnings {
+		if w.Line > 0 && w.Line <= len(lines) {
+			warned[w.Line] = append(warned[w.Line], w)
+		}
+	}
 	stage, cont := "", false
 	opened := map[int]bool{}
 	for i, raw := range lines {
 		n := i + 1
-		l := Line{N: n, Step: -1, HTML: highlight(raw, cont)}
+		l := Line{N: n, Step: -1, HTML: highlight(raw, cont), Warnings: warned[n]}
 		if m := fromAs.FindStringSubmatch(raw); m != nil {
 			stage = strings.ToLower(m[1]) // as in BuildKit's step names
 		} else if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(raw)), "FROM ") {

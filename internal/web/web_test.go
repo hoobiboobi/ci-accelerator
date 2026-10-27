@@ -100,6 +100,9 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 	// what a Dockerfile author wrote.
 	last := bs[len(bs)-1]
 	last.Steps[len(last.Steps)-1].Name = "RUN echo '" + evil + "'"
+	// It also breaks one of BuildKit's build checks (on line 1).
+	last.Warnings = []history.Warning{{Rule: "JSONArgsRecommended", Message: "JSON arguments recommended for CMD " + evil,
+		Detail: "signals", URL: "https://docs.docker.com/go/dockerfile/rule/json-args-recommended/", File: "Dockerfile", Line: 1, EndLine: 1}}
 	history.Link(bs)
 	for _, b := range bs {
 		a := b.Attribution
@@ -881,6 +884,38 @@ func TestGoneDaemon(t *testing.T) {
 	}
 	if page := get(t, ts, fmt.Sprintf("/builds/%d", row.ID)); !strings.Contains(page.body, "<b>old12</b> is gone") {
 		t.Errorf("no note that the daemon is gone")
+	}
+}
+
+// The Dockerfile build checks BuildKit reported: listed on the build page,
+// and marked on their lines of the Dockerfile, each linking its rule.
+func TestBuildCheckWarningsShown(t *testing.T) {
+	ts, st, _ := console(t)
+	recent, err := st.Recent(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	with, without := int64(0), int64(0)
+	for _, b := range recent {
+		if len(b.Build.Warnings) > 0 {
+			with = b.ID
+		} else if without == 0 {
+			without = b.ID
+		}
+	}
+	if with == 0 || without == 0 {
+		t.Fatalf("fixtures: build with warnings %d, without %d", with, without)
+	}
+	page := get(t, ts, fmt.Sprintf("/builds/%d", with))
+	page.safe(t)
+	for _, want := range []string{"Dockerfile checks", ">JSONArgsRecommended</a>",
+		`class="wtag" href="https://docs.docker.com/go/dockerfile/rule/json-args-recommended/"`} {
+		if !strings.Contains(page.body, want) {
+			t.Errorf("the build page lacks %q", want)
+		}
+	}
+	if page := get(t, ts, fmt.Sprintf("/builds/%d", without)); strings.Contains(page.body, "Dockerfile checks") {
+		t.Errorf("a build without warnings shows the checks section")
 	}
 }
 
