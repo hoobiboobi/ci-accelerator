@@ -48,10 +48,12 @@ type Usage struct {
 
 // Inspection is what a daemon says about itself.
 type Inspection struct {
-	Node    string // the Kubernetes node, when the daemon is labelled with it
-	Version string
-	GC      []GCRule
-	Usage   Usage
+	Node string // the Kubernetes node, when the daemon is labelled with it
+	// Persists: the daemon's cache survives its restart (hostPath).
+	Persists bool
+	Version  string
+	GC       []GCRule
+	Usage    Usage
 	// Disk is the cache's filesystem, from the disk probe next to the
 	// daemon; nil without one. DiskErr: the probe did not answer.
 	Disk    *diskprobe.Disk
@@ -195,7 +197,7 @@ func (c *Collector) OnLiveChange(fn func()) {
 
 // inspect describes src's daemon now and every InspectEvery until ctx ends.
 func (c *Collector) inspect(ctx context.Context, name string, in Inspector) {
-	node := ""
+	node, persists := "", false
 	for {
 		ictx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		info, err := in.Inspect(ictx)
@@ -203,12 +205,14 @@ func (c *Collector) inspect(ctx context.Context, name string, in Inspector) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err == nil && info.Node != "" && info.Node != node {
+		// The workers' labels come first: stored even when the cache could
+		// not be read this time.
+		if info.Node != "" && (info.Node != node || info.Persists != persists) {
 			// The routers keep a project where its cache is: on the node.
-			if serr := c.store.SetDaemonNode(ctx, name, info.Node); serr != nil {
+			if serr := c.store.SetDaemonNode(ctx, name, info.Node, info.Persists); serr != nil {
 				c.log.Warn("daemon's node not stored", "daemon", name, "err", serr)
 			} else {
-				node = info.Node
+				node, persists = info.Node, info.Persists
 			}
 		}
 		c.live.inspected(name, info, err)

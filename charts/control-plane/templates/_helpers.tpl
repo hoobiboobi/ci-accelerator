@@ -29,8 +29,11 @@ to stay a valid name.
 {{- printf "%s-router" (include "control-plane.prefix" .) }}
 {{- end }}
 
+{{/* The router runs: router.enabled, else global.router.enabled. */}}
 {{- define "control-plane.router" -}}
-{{- if dig "router" "enabled" false .Values.AsMap }}true{{ end }}
+{{- $on := dig "router" "enabled" nil .Values.AsMap }}
+{{- if kindIs "invalid" $on }}{{ $on = dig "router" "enabled" false (.Values.global | default dict) }}{{ end }}
+{{- if eq (toString $on) "true" }}true{{ end }}
 {{- end }}
 
 {{/*
@@ -279,8 +282,16 @@ Checks that fail the render with a message naming the value to set.
 {{- if not (include "control-plane.jobsNamespace" .) }}
 {{- fail "control-plane: the router knows each CI job by its pod: set jobs.namespace" }}
 {{- end }}
-{{- if eq (int .Values.router.port) (int .Values.router.healthPort) }}
-{{- fail "control-plane: router.port and router.healthPort must differ" }}
+{{- if eq 1234 (int .Values.router.healthPort) }}
+{{- fail "control-plane: router.healthPort must not be 1234, the port the jobs connect to" }}
+{{- end }}
+{{- if gt (int .Values.router.warmDays) (int .Values.retention.days) }}
+{{- fail (printf "control-plane: router.warmDays (%d) cannot exceed retention.days (%d): older builds are deleted" (int .Values.router.warmDays) (int .Values.retention.days)) }}
+{{- end }}
+{{- with dig "router" "service" "" (.Values.global | default dict) }}
+{{- if ne (tpl . $) (include "control-plane.routerName" $) }}
+{{- fail (printf "control-plane: global.router.service (%s) names another Service than the router's, %s: the daemons' certificate would not name the router" (tpl . $) (include "control-plane.routerName" $)) }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if eq (int .Values.controller.api.port) (int .Values.web.port) }}

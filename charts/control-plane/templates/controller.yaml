@@ -66,6 +66,7 @@ spec:
             - -api-allow={{ .Release.Namespace }}/{{ include "control-plane.webName" . }}
             {{- if include "control-plane.router" . }}
             - -api-allow-router={{ .Release.Namespace }}/{{ include "control-plane.routerName" . }}
+            - -warm-for={{ mul (int .Values.router.warmDays) 24 }}h
             {{- end }}
             - -discover={{ include "control-plane.discover" . }}
             {{- with .Values.daemons.serverName }}
@@ -76,12 +77,6 @@ spec:
             {{- end }}
             {{- with $jobs }}
             - -jobs-namespace={{ . }}
-            {{- end }}
-            {{- with .Values.daemons.diskProbePort }}
-            - -disk-probe-port={{ int . }}
-            {{- end }}
-            {{- if dig "cachePersists" false (.Values.daemons | default dict) }}
-            - -cache-persists=true
             {{- end }}
             - -keep-days={{ int .Values.retention.days }}
             - -keep-output-days={{ int .Values.retention.outputDays }}

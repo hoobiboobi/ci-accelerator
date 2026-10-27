@@ -42,6 +42,12 @@ spec:
                 values:
                   {{- toYaml . | nindent 18 }}
         {{- end }}
+        {{- if include "buildkit.routerService" . }}
+        # The build router, through which the CI jobs come.
+        - podSelector:
+            matchLabels:
+              ci-accelerator.io/component: router
+        {{- end }}
         {{- with $np.ingress.extraFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

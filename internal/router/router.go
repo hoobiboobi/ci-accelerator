@@ -105,24 +105,31 @@ func (r *Router) Serve(ctx context.Context, ln net.Listener, drain time.Duration
 		<-ctx.Done()
 		ln.Close()
 	}()
+	// A connection accepted before SIGTERM is a running build: it gets
+	// its daemon whatever happens to ctx; the drain time bounds it.
+	conns, stop := context.WithCancel(context.Background())
+	defer stop()
+	var backoff time.Duration
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				break
 			}
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				continue
-			}
-			return err
+			// Out of file descriptors and the like pass: wait and go on, as
+			// net/http does, rather than cut every running build.
+			backoff = min(max(2*backoff, 5*time.Millisecond), time.Second)
+			r.Log.Warn("accept", "err", err, "retry_in", backoff.String())
+			time.Sleep(backoff)
+			continue
 		}
+		backoff = 0
 		r.track(c, true)
 		r.wg.Add(1)
 		go func() {
 			defer r.wg.Done()
 			defer r.track(c, false)
-			r.handle(ctx, c)
+			r.handle(conns, c)
 		}()
 	}
 	done := make(chan struct{})

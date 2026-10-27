@@ -24,10 +24,11 @@ tests:
           path: spec.template.spec.containers[1].image
           pattern: '^ghcr\.io/hoobiboobi/ci-accelerator:v'
         template: charts/buildkit/templates/daemonset.yaml
+      # The daemons tell the controller the probe's port.
       - contains:
           path: spec.template.spec.containers[0].args
-          content: -disk-probe-port=9180
-        template: charts/control-plane/templates/controller.yaml
+          content: ci-accelerator.io/disk-probe-port=9180
+        template: charts/buildkit/templates/daemonset.yaml
 
   - it: gives the daemons their PriorityClass
     asserts:
@@ -47,19 +48,3 @@ tests:
     asserts:
       - hasDocuments:
           count: 0
-
-  - it: refuses ports that disagree
-    template: validate.yaml
-    set:
-      buildkit.diskProbe.port: 9300
-    asserts:
-      - failedTemplate:
-          errorPattern: "control-plane.daemons.diskProbePort \\(9180\\) must equal buildkit.diskProbe.port \\(9300\\)"
-
-  - it: refuses a port for a probe that is off
-    template: validate.yaml
-    set:
-      buildkit.diskProbe.enabled: false
-    asserts:
-      - failedTemplate:
-          errorPattern: "diskProbePort is set but buildkit.diskProbe.enabled is false"

@@ -250,7 +250,8 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].args
-          value: [--config, /etc/buildkitd/buildkitd.toml, --oci-worker-labels, "ci-accelerator.io/node=$(CI_ACCELERATOR_NODE_NAME)"]
+          value: [--config, /etc/buildkitd/buildkitd.toml, --oci-worker-labels, "ci-accelerator.io/node=$(CI_ACCELERATOR_NODE_NAME)",
+            --oci-worker-labels, "ci-accelerator.io/cache-persists=false"]
       - equal:
           path: spec.template.spec.containers[0].ports
           value:
@@ -536,3 +537,16 @@ tests:
     asserts:
       - notExists:
           path: metadata.annotations
+
+  # The daemons tell the control plane what it must know about them, so
+  # the box needs no second copy of these values.
+  - it: says in its worker labels whether the cache survives and where the disk probe is
+    template: daemonset.yaml
+    set:
+      storage.type: hostPath
+      storage.hostPath.path: /var/lib/ci-accelerator/buildkit
+      diskProbe.enabled: true
+      diskProbe.port: 9190
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: "ci-accelerator.io/cache-persists=true" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "ci-accelerator.io/disk-probe-port=9190" }

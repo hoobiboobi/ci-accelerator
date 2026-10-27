@@ -115,12 +115,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["discover", "serverName"],
-      "properties": {
-        "discover": { "type": "string" },
-        "serverName": { "type": "string" },
-        "diskProbePort": { "type": "integer", "minimum": 0, "maximum": 65535 },
-        "cachePersists": { "type": "boolean" }
-      }
+      "properties": { "discover": { "type": "string" }, "serverName": { "type": "string" } }
     },
     "tls": {
       "type": "object",
@@ -254,8 +249,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean" },
-        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "enabled": { "type": ["boolean", "null"] },
         "healthPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "routing": { "enum": ["PreferSameNode", "Local", "Cluster"] },
         "zones": { "type": "boolean" },
@@ -285,8 +279,6 @@
         }
       },
       "required": [
-        "enabled",
-        "port",
         "healthPort",
         "routing",
         "crossZone",
@@ -300,7 +292,8 @@
         "tolerations",
         "podLabels",
         "podAnnotations",
-        "clientNamespaces"
+        "clientNamespaces",
+        "zones"
       ]
     },
     "networkPolicy": {

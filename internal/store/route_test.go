@@ -42,10 +42,10 @@ func TestMigrationKeepsBuilds(t *testing.T) {
 	if err != nil || len(after) != len(before) || len(after) == 0 {
 		t.Fatalf("%d builds before, %d after (%v)", len(before), len(after), err)
 	}
-	if err := s.SetDaemonNode(ctx, "daemon-a", "node-1"); err != nil {
+	if err := s.SetDaemonNode(ctx, "daemon-a", "node-1", false); err != nil {
 		t.Fatal(err)
 	}
-	w, err := s.Warm(ctx, c.t.Add(-365*24*time.Hour), nil, false)
+	w, err := s.Warm(ctx, c.t.Add(-365*24*time.Hour), nil)
 	if err != nil || len(w) != 1 {
 		t.Fatalf("warmth %v, %v", w, err)
 	}
@@ -68,29 +68,32 @@ func TestWarmAndDecisions(t *testing.T) {
 	p := route.Project{Instance: inst, ID: 42}
 
 	// The daemon's node is not known yet: no warmth.
-	if w, err := s.Warm(ctx, since, nil, false); err != nil || len(w) != 0 {
+	if w, err := s.Warm(ctx, since, nil); err != nil || len(w) != 0 {
 		t.Fatalf("without nodes: %v, %v", w, err)
 	}
-	if err := s.SetDaemonNode(ctx, "daemon-a", "node-1"); err != nil {
+	if err := s.SetDaemonNode(ctx, "daemon-a", "node-1", false); err != nil {
 		t.Fatal(err)
 	}
-	w, err := s.Warm(ctx, since, nil, false)
+	w, err := s.Warm(ctx, since, nil)
 	if err != nil || len(w[p]) != 1 || w[p][0].Node != "node-1" || !w[p][0].At.Equal(last.Started.Truncate(time.Millisecond)) {
 		t.Fatalf("warmth %v, %v", w, err)
 	}
 	// The daemon was replaced (a new pod): its cache went with it unless
-	// it persists on the node.
-	if w, _ := s.Warm(ctx, since, []string{"daemon-b"}, false); len(w[p]) != 0 {
+	// it persists on the node, as the daemon's worker label says.
+	if w, _ := s.Warm(ctx, since, []string{"daemon-b"}); len(w[p]) != 0 {
 		t.Errorf("an emptied cache still warm: %v", w[p])
 	}
-	if w, _ := s.Warm(ctx, since, []string{"daemon-b"}, true); len(w[p]) != 1 {
-		t.Errorf("a cache on the node forgotten with its pod: %v", w[p])
-	}
-	if w, _ := s.Warm(ctx, since, []string{"daemon-a"}, false); len(w[p]) != 1 {
+	if w, _ := s.Warm(ctx, since, []string{"daemon-a"}); len(w[p]) != 1 {
 		t.Errorf("the live daemon's builds: %v", w[p])
 	}
+	if err := s.SetDaemonNode(ctx, "daemon-a", "node-1", true); err != nil {
+		t.Fatal(err)
+	}
+	if w, _ := s.Warm(ctx, since, []string{"daemon-b"}); len(w[p]) != 1 {
+		t.Errorf("a cache on the node forgotten with its pod: %v", w[p])
+	}
 	// Warmth expires with the window.
-	if w, _ := s.Warm(ctx, last.Started.Add(time.Minute), nil, true); len(w[p]) != 0 {
+	if w, _ := s.Warm(ctx, last.Started.Add(time.Minute), nil); len(w[p]) != 0 {
 		t.Errorf("builds before the window still warm: %v", w[p])
 	}
 
@@ -102,23 +105,16 @@ func TestWarmAndDecisions(t *testing.T) {
 	if err := s.SaveDecisions(ctx, []Decision{d, old}); err != nil {
 		t.Fatal(err)
 	}
-	w, err = s.Warm(ctx, since, []string{"bk-x"}, false)
+	w, err = s.Warm(ctx, since, []string{"bk-x"})
 	if err != nil || len(w[q]) != 1 || w[q][0].Node != "node-2" || !w[q][0].At.Equal(d.At.Truncate(time.Millisecond)) {
 		t.Fatalf("decision warmth %v, %v", w[q], err)
 	}
-	if w, _ := s.Warm(ctx, since, []string{"bk-y"}, true); len(w[q]) != 0 {
+	if w, _ := s.Warm(ctx, since, []string{"bk-y"}); len(w[q]) != 0 {
 		t.Errorf("a decision for a daemon replaced since still warm: %v", w[q])
 	}
 	got, err := s.JobRoutes(ctx, inst, 900)
 	if err != nil || len(got) != 1 || got[0].Daemon != "bk-x" || got[0].Reason != route.ZoneHash || got[0].Cands != 3 || got[0].JobNode != "node-1" || got[0].Project != q {
 		t.Fatalf("job routes %+v, %v", got, err)
-	}
-	if err := s.SetDaemonNode(ctx, "daemon-b", "node-1"); err != nil {
-		t.Fatal(err)
-	}
-	nodes, err := s.DaemonNodes(ctx)
-	if err != nil || nodes["daemon-a"] != "node-1" || nodes["daemon-b"] != "node-1" {
-		t.Fatalf("nodes %v, %v", nodes, err)
 	}
 
 	// Decisions go with the builds' retention.

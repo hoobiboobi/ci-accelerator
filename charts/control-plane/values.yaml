@@ -111,13 +111,7 @@ daemons:
   discover: ""
   # -- Name in the daemons' certificate. Default: the host of discover.
   serverName: ""
-  # -- Port of the disk probe next to each daemon (the buildkit chart's
-  # diskProbe), for the free space on the Nodes page. 0: not read.
-  diskProbePort: 0
-  # -- The daemons' cache survives their restart (buildkit storage.type
-  # hostPath): a node stays warm for the projects that built there after
-  # a rollout. false (emptyDir): a restarted daemon starts cold.
-  cachePersists: false
+
 
 # The certificates: the controller's client certificate for the daemons
 # and its API's server certificate, both from the daemons' CA.
@@ -217,11 +211,11 @@ web:
 # holds no key. It knows a job by its pod's address; a connection from
 # another pod goes to its own node's daemon.
 router:
-  # -- Run the router (the box does). The runners must then use
-  # tcp://<release>-router.<namespace>.svc:1234.
-  enabled: false
-  # -- The port the jobs connect to.
-  port: 1234
+  # -- Run the router; default: global.router.enabled (the box sets it).
+  # The runners then use tcp://<release>-router.<namespace>.svc:1234, and
+  # the daemons' certificate must name that Service (the buildkit chart
+  # does with global.router.service).
+  enabled: null
   # -- The port of /livez and /readyz.
   healthPort: 8080
   # -- How the Service picks a router: PreferSameNode (the job's node, any
@@ -238,8 +232,8 @@ router:
   # -- Skip a daemon running this many builds when another one is free; 0:
   # never (a busy warm daemon is usually still faster than a cold one).
   overloadBuilds: 0
-  # -- A project's layers unused for this many days no longer make their
-  # node warm for it.
+  # -- Days a build keeps its project warm on its node (at most
+  # retention.days: older builds are gone).
   warmDays: 7
   # -- Seconds open connections (running builds) may finish when a router
   # stops; the pod's grace period is this plus preStopSleepSeconds and 10.
@@ -289,6 +283,12 @@ networkPolicy:
   extraFrom: []
 
 global:
+  # The build router, shared with the buildkit chart (the box sets it).
+  router:
+    enabled: false
+    # -- The router's Service, for the daemons' certificate; when set it
+    # must be this chart's <prefix>-router. Rendered with tpl.
+    service: ""
   # Dedicated build nodes (label and taint them before install); the router
   # runs there, next to the daemons and the CI jobs.
   buildNodes:

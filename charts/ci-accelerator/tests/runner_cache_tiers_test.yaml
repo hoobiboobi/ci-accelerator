@@ -318,8 +318,6 @@ tests:
       control-plane.enabled: true
       control-plane.fullnameOverride: ci
       global.router.enabled: false
-      control-plane.router.enabled: false
-      buildkit.networkPolicy.ingress.clientNamespaces: true
       gitlab-runner.runners.cache:
         secretName: runner-cache
         s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}

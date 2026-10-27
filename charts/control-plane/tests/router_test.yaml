@@ -25,13 +25,48 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: the router knows each CI job by its pod
-  - it: refuses one port for jobs and health
+  - it: refuses the jobs' port for health
     template: controller.yaml
     set:
       router.healthPort: 1234
     asserts:
       - failedTemplate:
-          errorPattern: router.port and router.healthPort must differ
+          errorPattern: router.healthPort must not be 1234
+  - it: refuses a warmth window longer than builds are kept
+    template: controller.yaml
+    set:
+      router.warmDays: 40
+    asserts:
+      - failedTemplate:
+          errorPattern: router.warmDays \(40\) cannot exceed retention.days \(30\)
+  - it: gives the controller the warmth window
+    template: controller.yaml
+    set:
+      router.warmDays: 3
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-warm-for=72h" }
+  - it: runs with global.router.enabled when router.enabled is not set
+    template: router.yaml
+    set:
+      router.enabled: null
+      global.router.enabled: true
+    asserts:
+      - hasDocuments: { count: 7 }
+  - it: refuses a router Service name the daemons' certificate would not carry
+    template: controller.yaml
+    set:
+      global.router.enabled: true
+      global.router.service: other-router
+    asserts:
+      - failedTemplate:
+          errorPattern: global.router.service \(other-router\) names another Service than the router's, box-router
+  - it: accepts the router's own Service name
+    template: controller.yaml
+    set:
+      global.router.enabled: true
+      global.router.service: "{{ .Release.Name }}-router"
+    asserts:
+      - notFailedTemplate: {}
 
   - it: runs on every build node, passing the jobs through to the daemons
     template: router.yaml
@@ -57,7 +92,6 @@ tests:
             - -zones=true
             - -cross-zone=true
             - -overload=0
-            - -warm-for=168h
             - -drain=300s
       # The pod's grace covers the drain: running builds finish.
       - equal: { path: spec.template.spec.terminationGracePeriodSeconds, value: 315 }
@@ -89,7 +123,6 @@ tests:
       - contains: { path: "spec.template.spec.containers[0].args", content: "-cross-zone=false" }
       - contains: { path: "spec.template.spec.containers[0].args", content: "-zones=false" }
       - contains: { path: "spec.template.spec.containers[0].args", content: "-overload=6" }
-      - contains: { path: "spec.template.spec.containers[0].args", content: "-warm-for=72h" }
       - contains: { path: "spec.template.spec.containers[0].args", content: "-drain=1200s" }
       - equal: { path: spec.template.spec.terminationGracePeriodSeconds, value: 1210 }
       - notExists: { path: 'spec.template.spec.containers[0].lifecycle' }

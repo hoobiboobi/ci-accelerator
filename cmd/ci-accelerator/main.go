@@ -54,14 +54,13 @@ type config struct {
 	cacheEvery                                 time.Duration
 	daemons, gitlabURLs                        []string
 	keepDays, keepOutputDays                   int
-	diskProbePort                              int
 
 	// The controller role (split): its API for the web.
 	split                     bool
 	apiListen, apiTLSDir      string
 	apiTokenFile, apiAudience string
 	apiAllow, apiAllowRouter  []string
-	cachePersists             bool
+	warmFor                   time.Duration
 }
 
 // version and commit are set at build time (-ldflags -X main.version=...);
@@ -145,7 +144,6 @@ func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
 	fs.StringVar(&c.namespace, "namespace", os.Getenv("POD_NAMESPACE"), "namespace of the Secrets with the caches' keys (default $POD_NAMESPACE)")
 	fs.DurationVar(&c.cacheEvery, "cache-every", 10*time.Minute, "how often the caches are listed")
 	fs.StringVar(&c.signIn, "sign-in", "", "JSON file configuring sign-in through GitLab; empty: no sign-in (keep the console inside the cluster)")
-	fs.IntVar(&c.diskProbePort, "disk-probe-port", 0, "port of the disk probe next to each daemon (the buildkit chart's diskProbe); 0: none")
 	fs.IntVar(&c.keepDays, "keep-days", 30, "days builds are kept")
 	fs.IntVar(&c.keepOutputDays, "keep-output-days", 7, "days step output is kept")
 	if splitRole {
@@ -154,7 +152,7 @@ func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
 		fs.StringVar(&c.apiAudience, "api-audience", control.Audience, "audience of the callers' ServiceAccount tokens")
 		fs.Var(&allow, "api-allow", "a ServiceAccount of the web, which may read the pages' data, namespace/name (repeatable)")
 		fs.Var(&allowRouter, "api-allow-router", "a ServiceAccount of the build routers, which may read where projects are warm and report decisions, namespace/name (repeatable)")
-		fs.BoolVar(&c.cachePersists, "cache-persists", false, "the daemons' cache survives their restart (hostPath): builds of daemons replaced since still make their node warm for the build router")
+		fs.DurationVar(&c.warmFor, "warm-for", 7*24*time.Hour, "how long a build keeps its project warm on its node, for the build router")
 		fs.StringVar(&c.apiTokenFile, "api-token-file", "", "file with a static token the callers send instead of ServiceAccount tokens (outside a cluster)")
 	} else {
 		fs.StringVar(&c.listen, "listen", ":8080", "address of the pages, the API and the health check")
@@ -223,11 +221,7 @@ func run(c config, log *slog.Logger) error {
 		Dial: func(ctx context.Context, addr string) (collector.Source, error) {
 			dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-			d, err := collector.Dial(dctx, addr, tls)
-			if err == nil && c.diskProbePort > 0 {
-				d.DiskProbe(c.diskProbePort)
-			}
-			return d, err
+			return collector.Dial(dctx, addr, tls)
 		},
 		Resolve: func(ctx context.Context) ([]string, error) { return resolve(ctx, c) },
 	}
@@ -285,7 +279,7 @@ func run(c config, log *slog.Logger) error {
 			return err
 		}
 		api := &control.Server{Local: local, GitLab: gl, Auth: signIn, Log: log, Authorize: authorize,
-			Routes: &control.Routes{Store: st, Live: col, Log: log, CachePersists: c.cachePersists},
+			Routes: &control.Routes{Store: st, Live: col, Log: log, Window: c.warmFor},
 			Config: control.ConfigFor(versionString(), c.release, gl, signIn)}
 		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second,
 			TLSConfig: &cryptotls.Config{MinVersion: cryptotls.VersionTLS12, GetCertificate: certs}}

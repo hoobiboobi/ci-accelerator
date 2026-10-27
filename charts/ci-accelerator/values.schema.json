@@ -28,9 +28,10 @@
         "router": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["enabled"],
+          "required": ["enabled", "service"],
           "properties": {
-            "enabled": { "type": "boolean", "description": "CI jobs connect to the build router; keep equal to control-plane.router.enabled." }
+            "enabled": { "type": "boolean", "description": "CI jobs connect to the build router (the control plane's)." },
+            "service": { "type": "string", "description": "The router's Service, for the daemons' certificate; the default names the control plane's router." }
           }
         },
         "console": {

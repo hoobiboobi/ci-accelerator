@@ -49,9 +49,6 @@ type Routes struct {
 	// Window is how far back a build warms its node (default a week);
 	// Every is how long an answer is reused (default 2 s).
 	Window, Every time.Duration
-	// CachePersists: the daemons' cache survives a restart (hostPath), so
-	// builds of daemons replaced since still warm their node.
-	CachePersists bool
 	Now           func() time.Time
 
 	mu   sync.Mutex
@@ -90,7 +87,7 @@ func (rt *Routes) Snapshot(r *http.Request) (Warm, []byte, error) {
 			live = append(live, d.Name)
 		}
 	}
-	warmth, err := rt.Store.Warm(r.Context(), now.Add(-window), live, rt.CachePersists)
+	warmth, err := rt.Store.Warm(r.Context(), now.Add(-window), live)
 	if err != nil {
 		return Warm{}, nil, err
 	}

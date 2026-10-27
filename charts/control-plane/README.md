@@ -33,9 +33,7 @@ Kubernetes: `>=1.34.0-0`
 | controller.resources.requests.cpu | string | `"50m"` |  |
 | controller.resources.requests.memory | string | `"128Mi"` |  |
 | controller.tolerations | list | `[]` |  |
-| daemons.cachePersists | bool | `false` | The daemons' cache survives their restart (buildkit storage.type hostPath): a node stays warm for the projects that built there after a rollout. false (emptyDir): a restarted daemon starts cold. |
 | daemons.discover | string | `""` | host:port of the BuildKit chart's headless Service; every address it resolves to is a daemon. Rendered with tpl. |
-| daemons.diskProbePort | int | `0` | Port of the disk probe next to each daemon (the buildkit chart's diskProbe), for the free space on the Nodes page. 0: not read. |
 | daemons.serverName | string | `""` | Name in the daemons' certificate. Default: the host of discover. |
 | enabled | bool | `false` | The switch the box uses (control-plane.enabled). Installed on its own, this chart ignores it. |
 | fullnameOverride | string | `""` | Prefix of every object's name. Default: the release name, so objects are <release>-controller and <release>-web. |
@@ -49,6 +47,8 @@ Kubernetes: `>=1.34.0-0`
 | global.buildNodes.tolerations[0].operator | string | `"Equal"` |  |
 | global.buildNodes.tolerations[0].value | string | `"build"` |  |
 | global.console.url | string | `""` | Where browsers reach the console; the default of signIn.url. |
+| global.router.enabled | bool | `false` |  |
+| global.router.service | string | `""` | The router's Service, for the daemons' certificate; when set it must be this chart's <prefix>-router. Rendered with tpl. |
 | global.tls.issuerRef.group | string | `"cert-manager.io"` |  |
 | global.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
 | global.tls.issuerRef.name | string | `""` |  |
@@ -69,13 +69,12 @@ Kubernetes: `>=1.34.0-0`
 | router.clientNamespaces | list | `[]` | Namespaces whose pods may connect to the router; default: the jobs namespace. Rendered with tpl. |
 | router.crossZone | bool | `true` | When no daemon of the job's zone is ready: true sends the job to another zone's daemon, false refuses the connection. |
 | router.drainSeconds | int | `300` | Seconds open connections (running builds) may finish when a router stops; the pod's grace period is this plus preStopSleepSeconds and 10. |
-| router.enabled | bool | `false` | Run the router (the box does). The runners must then use tcp://<release>-router.<namespace>.svc:1234. |
+| router.enabled | string | `nil` | Run the router; default: global.router.enabled (the box sets it). The runners then use tcp://<release>-router.<namespace>.svc:1234, and the daemons' certificate must name that Service (the buildkit chart does with global.router.service). |
 | router.healthPort | int | `8080` | The port of /livez and /readyz. |
 | router.nodeSelector | object | `{}` | Merged over global.buildNodes.selector. |
 | router.overloadBuilds | int | `0` | Skip a daemon running this many builds when another one is free; 0: never (a busy warm daemon is usually still faster than a cold one). |
 | router.podAnnotations | object | `{}` |  |
 | router.podLabels | object | `{}` |  |
-| router.port | int | `1234` | The port the jobs connect to. |
 | router.preStopSleepSeconds | int | `5` | Seconds a stopping router keeps accepting while the Service drops it. |
 | router.priorityClassName | string | `""` | PriorityClass of the router pods; the box gives them the daemons'. |
 | router.resources.limits.memory | string | `"256Mi"` |  |
@@ -83,7 +82,7 @@ Kubernetes: `>=1.34.0-0`
 | router.resources.requests.memory | string | `"32Mi"` |  |
 | router.routing | string | `"PreferSameNode"` | How the Service picks a router: PreferSameNode (the job's node, any other when it has none ready), Local (the job's node only) or Cluster. |
 | router.tolerations | list | `[]` | Appended to global.buildNodes.tolerations. |
-| router.warmDays | int | `7` | A project's layers unused for this many days no longer make their node warm for it. |
+| router.warmDays | int | `7` | Days a build keeps its project warm on its node (at most retention.days: older builds are gone). |
 | router.zones | bool | `true` | Keep a job's builds in its zone (topology.kubernetes.io/zone of the daemons' nodes): a project then warms up once per zone. false: every daemon is one zone (zones close enough that crossing them costs nothing, or one zone label per node). |
 | signIn | object | `{"enabled":false,"gitlab":[],"sessionKey":{"existingSecret":"","key":"key"},"url":""}` | Sign-in through GitLab. Each person signs in with a GitLab the runners serve and sees the projects whose jobs GitLab lets them read (Reporter or more, or public pipelines); GitLab is read with their own token. GitLab never calls the console: the browser carries the redirects. |
 | signIn.gitlab | list | `[]` | One OAuth application per GitLab (User or Group Settings > Applications, or Admin > Applications on your own GitLab): confidential, scopes openid and read_api, redirect URI <url>/auth/callback/<id> (the NOTES and the controller's log print it).   url: exactly as the runners have it; may be left empty when the        console serves one GitLab   existingSecret: a Secret with the keys client-id and client-secret   admins: GitLab usernames who see everything (builds of no known        project, the JSON API) |

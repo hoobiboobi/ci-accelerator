@@ -1721,10 +1721,6 @@ s_upgrade() {
     --set "global.jobs.architecture=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')"
     --set-json "global.buildNodes.selector={\"ci-accelerator.io/node-role\":\"build\",\"kubernetes.io/hostname\":\"$BUILD_NODE\"}"
     --set buildkit.storage.type=hostPath --set "buildkit.storage.hostPath.path=$state")
-  # This tree's box wants to know the cache survives restarts; 0.2.x has
-  # no such key.
-  UPG_NEW_ARGS=("${UPG_ARGS[@]}" --set control-plane.daemons.cachePersists=true)
-  case "$UPGRADE_FROM" in 0.2.*) ;; *) UPG_ARGS=("${UPG_NEW_ARGS[@]}") ;; esac
   local old_values=(-f "$ROOT/test/e2e/box-values.yaml")
   for c in $UPGRADE_FROM_VALUES; do old_values+=(-f "$c"); done
   if ! hc install "$UPG_REL" "$old_chart" -n "$UPG_NS" "${old_values[@]}" "${UPG_ARGS[@]}" --wait --timeout 8m >"$LOGS/upgrade-install.log" 2>&1; then
@@ -1799,7 +1795,7 @@ upgrade_refused() {
   # This tree's defaults and the user's values in the new shape: the
   # release itself still runs the old console.
   if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" -f "$ROOT/test/e2e/box-values.yaml" \
-      -f "$ROOT/test/e2e/box-control-plane-values.yaml" "${UPG_NEW_ARGS[@]}" --wait --timeout 5m >"$LOGS/upgrade-reset.log" 2>&1; then
+      -f "$ROOT/test/e2e/box-control-plane-values.yaml" "${UPG_ARGS[@]}" --wait --timeout 5m >"$LOGS/upgrade-reset.log" 2>&1; then
     fail "helm upgrade from $UPGRADE_FROM with new values was accepted"
   else
     check "helm upgrade from $UPGRADE_FROM with values in the new shape is refused too" \
@@ -1817,7 +1813,7 @@ upgrade_refused() {
   check "the message names the daemons' certificate Secret to delete" grep -qF "delete secret $UPG_REL-buildkit-tls" "$LOGS/upgrade-reuse.log"
   kc -n "$UPG_NS" delete secret "$UPG_REL-buildkit-tls" --ignore-not-found >/dev/null
   if hc install "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" -f "$ROOT/test/e2e/box-values.yaml" \
-      -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${UPG_NEW_ARGS[@]}" \
+      -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${UPG_ARGS[@]}" \
       --wait --timeout 8m >"$LOGS/upgrade-reinstall.log" 2>&1; then
     pass "after helm uninstall this tree installs in the same namespace"
   else

@@ -53,8 +53,8 @@ a running job to get scheduled) and default requests of 500m CPU and 512Mi
    (zones close enough that crossing them costs nothing).
 
    Warmth is the project's builds on the node in the last week (builds of
-   a daemon replaced since count only when the cache survives restarts,
-   `control-plane.daemons.cachePersists`, i.e. hostPath) and the routers'
+   a daemon replaced since count only when its cache survives restarts:
+   hostPath, which the daemon states in a worker label) and the routers'
    decisions of the last hour. A connection from a pod that is no CI job
    goes to its own node's daemon. The routers learn where projects built from the controller
    (and keep routing on their last view while it is away); the build page
@@ -227,7 +227,8 @@ What the controller does:
 - **Disk space from the disk probes.** BuildKit reports what the cache
   holds, not how much room its disk has left. Once a minute, with each
   daemon's inspection, the controller asks the probe next to it (plain HTTP on
-  the daemon pod's address, port `diskProbePort`, 9180) for the size, free
+  the daemon pod's address, on the port the daemon states in a worker
+  label, 9180 by default) for the size, free
   space and inodes of the cache's filesystem. The daemons' NetworkPolicy
   opens that port to the same peers as the TLS port. The Nodes page shows
   it against BuildKit's keep-free floor and the kubelet's eviction
