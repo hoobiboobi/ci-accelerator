@@ -10,13 +10,15 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/route"
 )
 
-// SetDaemonNode records the node a daemon runs on (from its worker label).
-func (s *Store) SetDaemonNode(ctx context.Context, name, node string) error {
+// SetDaemonNode records the node a daemon runs on and whether its cache
+// survives a restart (from its worker labels).
+func (s *Store) SetDaemonNode(ctx context.Context, name, node string, persists bool) error {
 	if node == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO daemons (name, node) VALUES (?, ?)
-		ON CONFLICT (name) DO UPDATE SET node = excluded.node WHERE daemons.node != excluded.node`, name, node)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO daemons (name, node, persists) VALUES (?, ?, ?)
+		ON CONFLICT (name) DO UPDATE SET node = excluded.node, persists = excluded.persists
+		WHERE daemons.node != excluded.node OR daemons.persists != excluded.persists`, name, node, persists)
 	return err
 }
 
@@ -54,27 +56,20 @@ func (s *Store) SaveDecisions(ctx context.Context, ds []Decision) error {
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.changed(RouteKey)
-	return nil
+	return tx.Commit()
 }
-
-// RouteKey is announced when the routers' view of warmth may have changed.
-const RouteKey = "route"
 
 // Warmth is where each project's cache is: the nodes where its builds ran
 // and the routers' decisions of the last hour (a job the router sent
 // somewhere warms that node before its build is stored).
 type Warmth map[route.Project][]route.Activity
 
-// Warm reads where projects are warm: builds since since, and decisions
-// of the last hour. live names the daemon pods running now: a decision
-// for another (replaced since) does not count, and unless persists (the
-// cache survives a daemon's restart: hostPath) neither does a build of
-// another, as its cache went with it. live nil: every daemon counts.
-func (s *Store) Warm(ctx context.Context, since time.Time, live []string, persists bool) (Warmth, error) {
+// Warm reads where projects are warm: builds since since, and decisions of
+// the last hour. live names the daemon pods running now: a decision for
+// another (replaced since) does not count, and neither does a build of
+// another unless that daemon's cache survives restarts (hostPath). live
+// nil: every daemon counts.
+func (s *Store) Warm(ctx context.Context, since time.Time, live []string) (Warmth, error) {
 	recent := s.opts.Now().Add(-time.Hour)
 	if recent.Before(since) {
 		recent = since
@@ -85,16 +80,17 @@ func (s *Store) Warm(ctx context.Context, since time.Time, live []string, persis
 		liveJSON = string(b)
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT b.instance, b.project_id, d.node, MAX(b.started_at) FROM builds b JOIN daemons d ON d.id = b.daemon_id
+		SELECT b.instance, b.project_id, d.node, MAX(b.started_at) FROM builds b INDEXED BY builds_started
+			JOIN daemons d ON d.id = b.daemon_id
 		WHERE b.started_at >= ? AND b.instance IS NOT NULL AND b.project_id IS NOT NULL AND d.node != ''
-			AND (? OR json_type(?) = 'null' OR d.name IN (SELECT value FROM json_each(?)))
+			AND (d.persists OR json_type(?) = 'null' OR d.name IN (SELECT value FROM json_each(?)))
 		GROUP BY b.instance, b.project_id, d.node
 		UNION ALL
 		SELECT instance, project_id, node, MAX(at) FROM route_decisions
 		WHERE at >= ? AND instance IS NOT NULL AND project_id IS NOT NULL
 			AND (json_type(?) = 'null' OR daemon IN (SELECT value FROM json_each(?)))
 		GROUP BY instance, project_id, node`,
-		since.UnixMilli(), persists, liveJSON, liveJSON, recent.UnixMilli(), liveJSON, liveJSON)
+		since.UnixMilli(), liveJSON, liveJSON, recent.UnixMilli(), liveJSON, liveJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -132,24 +128,6 @@ func (s *Store) JobRoutes(ctx context.Context, instance string, job uint64) ([]D
 		}
 		d.Project.ID, d.At = uint64(project.Int64), time.UnixMilli(at).UTC()
 		out = append(out, d)
-	}
-	return out, rows.Err()
-}
-
-// DaemonNodes maps the daemons' pod names to their nodes.
-func (s *Store) DaemonNodes(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT name, node FROM daemons WHERE node != ''")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]string{}
-	for rows.Next() {
-		var name, node string
-		if err := rows.Scan(&name, &node); err != nil {
-			return nil, err
-		}
-		out[name] = node
 	}
 	return out, rows.Err()
 }

@@ -121,9 +121,14 @@ func (d *Daemon) Blob(ctx context.Context, desc *controlapi.Descriptor) ([]byte,
 	return content.ReadBlob(ctx, store, ocispecs.Descriptor{MediaType: desc.MediaType, Digest: dg, Size: desc.Size})
 }
 
-// NodeLabel is the worker label carrying the Kubernetes node a daemon runs
-// on; the buildkit chart sets it from the downward API.
-const NodeLabel = "ci-accelerator.io/node"
+// The worker labels the buildkit chart gives each daemon: the Kubernetes
+// node it runs on (from the downward API), whether its cache survives a
+// restart (hostPath), and the port of the disk probe next to it.
+const (
+	NodeLabel          = "ci-accelerator.io/node"
+	PersistsLabel      = "ci-accelerator.io/cache-persists"
+	DiskProbePortLabel = "ci-accelerator.io/disk-probe-port"
+)
 
 // Inspect describes the daemon: its node, version, cache policies and what
 // its cache holds.
@@ -136,6 +141,12 @@ func (d *Daemon) Inspect(ctx context.Context) (Inspection, error) {
 	for _, w := range workers {
 		if in.Node == "" {
 			in.Node = w.Labels[NodeLabel]
+		}
+		if w.Labels[PersistsLabel] == "true" {
+			in.Persists = true
+		}
+		if port, err := strconv.Atoi(w.Labels[DiskProbePortLabel]); err == nil && d.probe == "" {
+			d.DiskProbe(port)
 		}
 		if in.Version == "" {
 			in.Version = w.BuildkitVersion.Version

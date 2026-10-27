@@ -29,8 +29,6 @@ tests:
     set:
       control-plane.enabled: false
       global.router.enabled: false
-      control-plane.router.enabled: false
-      buildkit.networkPolicy.ingress.clientNamespaces: true
     asserts:
       - hasDocuments: { count: 0 }
 

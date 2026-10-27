@@ -31,8 +31,6 @@ tests:
     documentSelector: { path: metadata.name, value: box-buildkit-tls }
     set:
       global.router.enabled: false
-      control-plane.router.enabled: false
-      buildkit.networkPolicy.ingress.clientNamespaces: true
     asserts:
       - notContains: { path: spec.dnsNames, content: box-router }
       - notContains: { path: spec.dnsNames, content: "" }
@@ -45,14 +43,12 @@ tests:
       - equal:
           path: spec.ingress[0].from
           value:
-            - podSelector: { matchLabels: { ci-accelerator.io/component: controller } }
             - podSelector: { matchLabels: { ci-accelerator.io/component: router } }
+            - podSelector: { matchLabels: { ci-accelerator.io/component: controller } }
   - it: admits the jobs namespace to the daemons without the router
     template: charts/buildkit/templates/networkpolicy.yaml
     set:
       global.router.enabled: false
-      control-plane.router.enabled: false
-      buildkit.networkPolicy.ingress.clientNamespaces: true
     asserts:
       - contains:
           path: spec.ingress[0].from
@@ -64,8 +60,6 @@ tests:
     template: charts/gitlab-runner/templates/configmap.yaml
     set:
       global.router.enabled: false
-      control-plane.router.enabled: false
-      buildkit.networkPolicy.ingress.clientNamespaces: true
     asserts:
       - matchRegex:
           path: data["config.template.toml"]
@@ -99,52 +93,48 @@ tests:
           path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
           value: [ci-accelerator-jobs]
 
-  - it: refuses the router switches when they differ
-    template: validate.yaml
-    set:
-      control-plane.router.enabled: false
-    asserts:
-      - failedTemplate:
-          errorPattern: global.router.enabled \(true\) and control-plane.router.enabled \(false\) must be equal
   - it: refuses the router without the control plane
     template: validate.yaml
     set:
       control-plane.enabled: false
     asserts:
       - failedTemplate:
-          errorPattern: the build router is part of the control plane
+          errorPattern: 'with control-plane.enabled=false set global.router.enabled=false too'
+  # The control plane checks the name the box gives the daemons' certificate.
   - it: refuses a renamed control plane with the router
-    template: validate.yaml
+    template: charts/control-plane/templates/controller.yaml
     set:
       control-plane.fullnameOverride: cp
     asserts:
       - failedTemplate:
-          errorPattern: control-plane.fullnameOverride and nameOverride are not supported with the router
-  - it: refuses to keep the jobs away from the daemons without the router
+          errorPattern: global.router.service \(box-router\) names another Service than the router's, cp-router
+  - it: gives the router no PriorityClass the daemons do not have
+    template: validate.yaml
+    set:
+      buildkit.priorityClass.create: false
+    asserts:
+      - failedTemplate:
+          errorPattern: the router runs with the daemons' PriorityClass
+  - it: accepts the router's own PriorityClass with the daemons' left out
+    template: validate.yaml
+    set:
+      buildkit.priorityClass.create: false
+      control-plane.router.priorityClassName: ""
+    asserts:
+      - notFailedTemplate: {}
+  # The daemons tell the controller whether their cache survives a
+  # restart: no value to keep equal by hand.
+  - it: renders a hostPath box without anything more
+    template: validate.yaml
+    set:
+      buildkit.storage.type: hostPath
+      buildkit.storage.hostPath.path: /var/lib/ci-accelerator/buildkit
+    asserts:
+      - notFailedTemplate: {}
+  - it: turns the router off with one switch (and the control plane with one more)
     template: validate.yaml
     set:
       global.router.enabled: false
-      control-plane.router.enabled: false
+      control-plane.enabled: false
     asserts:
-      - failedTemplate:
-          errorPattern: set buildkit.networkPolicy.ingress.clientNamespaces=true
-  - it: refuses a hostPath cache the router is not told about
-    template: validate.yaml
-    set:
-      buildkit.storage.type: hostPath
-      buildkit.storage.hostPath.path: /var/lib/ci-accelerator/buildkit
-    asserts:
-      - failedTemplate:
-          errorPattern: control-plane.daemons.cachePersists must be true with buildkit.storage.type=hostPath
-  - it: tells the controller the cache survives restarts with hostPath
-    template: charts/control-plane/templates/controller.yaml
-    set:
-      buildkit.storage.type: hostPath
-      buildkit.storage.hostPath.path: /var/lib/ci-accelerator/buildkit
-      control-plane.daemons.cachePersists: true
-    asserts:
-      - contains: { path: "spec.template.spec.containers[0].args", content: "-cache-persists=true" }
-  - it: tells the controller nothing of a cache that dies with its daemon
-    template: charts/control-plane/templates/controller.yaml
-    asserts:
-      - notContains: { path: "spec.template.spec.containers[0].args", content: "-cache-persists=true" }
+      - notFailedTemplate: {}

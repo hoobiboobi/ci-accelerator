@@ -22,6 +22,10 @@ type Reporter struct {
 
 	mu      sync.Mutex
 	pending []store.Decision
+	// base is how many decisions left the front of pending so far (sent
+	// or dropped): a batch is cut by position, not by count, so drops while
+	// it is in flight never cost unsent decisions.
+	base    int
 	kick    chan struct{}
 	dropped int
 }
@@ -42,6 +46,7 @@ func (r *Reporter) Add(d store.Decision) {
 	}
 	if len(r.pending) >= max {
 		r.pending = r.pending[1:]
+		r.base++
 		r.dropped++
 	}
 	r.pending = append(r.pending, d)
@@ -93,6 +98,7 @@ func (r *Reporter) flush(ctx context.Context) {
 		batch = batch[:1000]
 	}
 	batch = append([]store.Decision(nil), batch...)
+	end := r.base + len(batch)
 	dropped := r.dropped
 	r.dropped = 0
 	r.mu.Unlock()
@@ -109,13 +115,12 @@ func (r *Reporter) flush(ctx context.Context) {
 		return
 	}
 	r.mu.Lock()
-	// Add may have dropped from the front meanwhile; what was sent is
-	// what is still at the front, if anything.
-	n := len(batch)
-	if n > len(r.pending) {
-		n = len(r.pending)
+	// Remove what was sent and is still queued: Add may have dropped some
+	// of it from the front meanwhile.
+	if n := min(end-r.base, len(r.pending)); n > 0 {
+		r.pending = r.pending[n:]
+		r.base += n
 	}
-	r.pending = r.pending[n:]
 	r.mu.Unlock()
 }
 

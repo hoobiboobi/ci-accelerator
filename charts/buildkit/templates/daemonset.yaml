@@ -65,10 +65,18 @@ spec:
           args:
             - --config
             - {{ include "buildkit.configDir" . }}/buildkitd.toml
-            # The node, as a worker label: tools that read the daemons
-            # (the console) show which node each one runs on.
+            # Facts about this daemon, as worker labels, for tools that read
+            # the daemons (the control plane): the node it runs on, whether
+            # its cache survives a restart (hostPath), and the port of the
+            # disk probe next to it.
             - --oci-worker-labels
             - ci-accelerator.io/node=$(CI_ACCELERATOR_NODE_NAME)
+            - --oci-worker-labels
+            - ci-accelerator.io/cache-persists={{ eq (toString .Values.storage.type) "hostPath" }}
+            {{- if dig "enabled" false (.Values.diskProbe | default dict) }}
+            - --oci-worker-labels
+            - ci-accelerator.io/disk-probe-port={{ int (default 9180 .Values.diskProbe.port) }}
+            {{- end }}
           securityContext:
             # Rootful daemon: RUN steps run in runc sandboxes inside it. The
             # rootless variant is not supported yet.

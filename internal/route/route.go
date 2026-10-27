@@ -69,8 +69,9 @@ type Policy struct {
 	// Overload skips a daemon running this many builds or more, when
 	// another one is free (0: never).
 	Overload int
-	// WarmFor is how long a build keeps a project warm on a node (default
-	// a week).
+	// WarmFor is how long activity keeps a project warm on a node; 0: as
+	// long as it is listed (the controller already keeps only the window it
+	// was told).
 	WarmFor time.Duration
 }
 
@@ -124,13 +125,9 @@ func Decide(r Request, daemons []Daemon, warm []Activity, p Policy, now time.Tim
 		return Decision{Daemon: d, Reason: UnknownHash, Candidates: n}, nil
 	}
 	key := r.Project.Key()
-	warmFor := p.WarmFor
-	if warmFor == 0 {
-		warmFor = 7 * 24 * time.Hour
-	}
 	last := map[string]time.Time{}
 	for _, a := range warm {
-		if now.Sub(a.At) <= warmFor && a.At.After(last[a.Node]) {
+		if (p.WarmFor == 0 || now.Sub(a.At) <= p.WarmFor) && a.At.After(last[a.Node]) {
 			last[a.Node] = a.At
 		}
 	}

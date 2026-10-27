@@ -53,9 +53,7 @@ workflow copies them into the GitHub release.
   `buildkit.tls.source=existingSecret`, make it again with
   `scripts/buildkit-certs.sh --router <release>`. The daemons admit only
   the routers and the controller. To keep jobs talking to the daemons
-  directly, set `global.router.enabled=false`,
-  `control-plane.router.enabled=false` and
-  `buildkit.networkPolicy.ingress.clientNamespaces=true`.
+  directly, set `global.router.enabled=false`.
 - The controller checks the web's ServiceAccount tokens with a
   TokenReview: the chart adds a ClusterRole that allows only that, and its
   binding. Whoever installs the chart needs the right to create them.

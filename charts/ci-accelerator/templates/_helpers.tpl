@@ -19,34 +19,19 @@ are refused below).
 {{- end }}
 
 {{/*
-The build router's Service (the control-plane subchart's rule; its name
-overrides are refused), and the address CI jobs use: the router's, or the
+The address CI jobs use: the build router's Service (global.router.service,
+the control-plane subchart's name; its name overrides are refused), or the
 daemons' Service without it.
 */}}
 {{- define "ci-accelerator.routerName" -}}
-{{- printf "%s-router" (.Release.Name | trunc 40 | trimSuffix "-") }}
+{{- tpl (toString (dig "router" "service" "" .Values.global)) . }}
 {{- end }}
 
 {{- define "ci-accelerator.daemonsAddress" -}}
-{{- if dig "router" "enabled" false (.Values.global | default dict) -}}
+{{- if eq (toString (dig "router" "enabled" false (.Values.global | default dict))) "true" -}}
 tcp://{{ include "ci-accelerator.routerName" . }}.{{ .Release.Namespace }}.svc:1234
 {{- else -}}
 tcp://{{ include "ci-accelerator.buildkitName" . }}.{{ .Release.Namespace }}.svc:1234
-{{- end }}
-{{- end }}
-
-{{/*
-The router's names in the daemons' certificate (the jobs' TLS passes
-through the router, and buildctl checks the name it dialled), rendered by
-the buildkit subchart with tpl; empty without the router.
-*/}}
-{{- define "ci-accelerator.routerDnsName" -}}
-{{- $root := .root }}
-{{- if dig "router" "enabled" false ($root.Values.global | default dict) }}
-{{- $n := include "ci-accelerator.routerName" $root }}
-{{- $ns := $root.Release.Namespace }}
-{{- $domain := dig "tls" "certManager" "clusterDomain" "cluster.local" $root.Values.AsMap }}
-{{- index (list $n (printf "%s.%s" $n $ns) (printf "%s.%s.svc" $n $ns) (printf "%s.%s.svc.%s" $n $ns $domain)) (int .i) }}
 {{- end }}
 {{- end }}
 
@@ -159,29 +144,22 @@ running with no [[runners]] and takes no jobs). */}}
 {{- end }}
 {{- end }}
 {{- include "ci-accelerator.checkTiers" . }}
-{{- include "ci-accelerator.checkDiskProbe" . }}
 {{- include "ci-accelerator.preflightJobsNamespace" . }}
 {{- if and (dig "control-plane" "enabled" false .Values.AsMap) (eq (toString .Values.buildkit.tls.source) "existingSecret") (not (dig "control-plane" "tls" "existingSecret" "" .Values.AsMap)) }}
 {{- fail "control-plane.enabled with buildkit.tls.source=existingSecret: give the controller its own client certificate signed by the daemons' CA, control-plane.tls.existingSecret (a Secret with ca.crt, tls.crt and tls.key in the release namespace), and its API a server certificate, control-plane.controller.api.tls.existingSecret." }}
 {{- end }}
 {{- $cp := index .Values "control-plane" | default dict }}
-{{- $router := dig "router" "enabled" false .Values.global }}
-{{- if ne (toString $router) (toString (dig "router" "enabled" false $cp)) }}
-{{- fail (printf "global.router.enabled (%v) and control-plane.router.enabled (%v) must be equal: the runners' address follows the first, the router's DaemonSet the second." $router (dig "router" "enabled" false $cp)) }}
-{{- end }}
+{{- $router := eq (toString (dig "router" "enabled" false .Values.global)) "true" }}
 {{- if and $router (not $cp.enabled) }}
-{{- fail "the build router is part of the control plane: with control-plane.enabled=false set global.router.enabled=false and control-plane.router.enabled=false too." }}
+{{- fail "the build router is part of the control plane: with control-plane.enabled=false set global.router.enabled=false too (the CI jobs then connect to the daemons' Service)." }}
 {{- end }}
 {{- if and $router (or $cp.fullnameOverride $cp.nameOverride) }}
 {{- fail "control-plane.fullnameOverride and nameOverride are not supported with the router: the runner configuration derives the router's address from the release name." }}
 {{- end }}
-{{- $persists := eq (toString (dig "storage" "type" "emptyDir" .Values.buildkit)) "hostPath" }}
-{{- if and $cp.enabled $router (ne (toString (dig "daemons" "cachePersists" false $cp)) (toString $persists)) }}
-{{- fail (printf "control-plane.daemons.cachePersists must be %v with buildkit.storage.type=%s: the router keeps a node warm for a project after a daemon restart only when the cache survived it." $persists (dig "storage" "type" "emptyDir" .Values.buildkit)) }}
-{{- end }}
-{{- $clientNs := dig "networkPolicy" "ingress" "clientNamespaces" true .Values.buildkit }}
-{{- if and .Values.buildkit.networkPolicy.enabled (not $router) (eq (toString $clientNs) "false") }}
-{{- fail "without the router the CI jobs connect to the daemons themselves: set buildkit.networkPolicy.ingress.clientNamespaces=true." }}
+{{- /* The router gets the daemons' PriorityClass by name: it must exist. */}}
+{{- $pc := dig "router" "priorityClassName" "" $cp }}
+{{- if and $router (contains "ci-accelerator.buildkitName" $pc) (or .Values.buildkit.priorityClassName (not (dig "create" true (.Values.buildkit.priorityClass | default dict)))) }}
+{{- fail "the router runs with the daemons' PriorityClass, which buildkit.priorityClass.create=false or buildkit.priorityClassName leaves out: set control-plane.router.priorityClassName to an existing class (the daemons' own), or \"\" for none." }}
 {{- end }}
 {{- if or .Values.buildkit.fullnameOverride .Values.buildkit.nameOverride }}
 {{- fail "buildkit.fullnameOverride and buildkit.nameOverride are not supported in this chart: the runner configuration derives the daemons' address from the release name." }}
@@ -238,26 +216,6 @@ lookup is empty offline, so the check is skipped there.
 {{- if and $token (not (regexMatch "^[A-Za-z0-9._-]+$" $token)) }}
 {{- fail (printf "Secret %s/%s (gitlab-runner.runners.secret): runner-token does not look like a token (it contains spaces or characters outside A-Z, a-z, 0-9, '.', '_' and '-'; a copied placeholder?). Re-create it with the token from GitLab." $ns $name) }}
 {{- end }}
-{{- end }}
-{{- end }}
-{{- end }}
-
-{{/*
-The controller reads each daemon's disk probe on its port: the two port
-values must agree. The probe's image is its own pin (charts/buildkit
-diskProbeImage): it need not equal the control plane's, whose tag moves
-with every release while the probe program does not.
-*/}}
-{{- define "ci-accelerator.checkDiskProbe" -}}
-{{- $probe := .Values.buildkit.diskProbe | default dict }}
-{{- $cp := index .Values "control-plane" | default dict }}
-{{- $port := int (dig "daemons" "diskProbePort" 0 $cp) }}
-{{- if $cp.enabled }}
-{{- if and $probe.enabled (ne $port (int (default 9180 $probe.port))) }}
-{{- fail (printf "control-plane.daemons.diskProbePort (%d) must equal buildkit.diskProbe.port (%d)." $port (int (default 9180 $probe.port))) }}
-{{- end }}
-{{- if and (not $probe.enabled) (gt $port 0) }}
-{{- fail "control-plane.daemons.diskProbePort is set but buildkit.diskProbe.enabled is false: enable the probe, or set the port to 0." }}
 {{- end }}
 {{- end }}
 {{- end }}

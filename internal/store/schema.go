@@ -208,6 +208,9 @@ CREATE TABLE cache_stores (
 	// called after a restart) and the routers' decisions.
 	`
 ALTER TABLE daemons ADD COLUMN node TEXT NOT NULL DEFAULT '';
+-- persists: the daemon's cache survives its restart (hostPath), so its
+-- builds keep warming the node after the pod is replaced.
+ALTER TABLE daemons ADD COLUMN persists INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE route_decisions (
 	id         INTEGER PRIMARY KEY,

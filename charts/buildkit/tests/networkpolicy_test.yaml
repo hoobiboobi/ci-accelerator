@@ -181,14 +181,14 @@ tests:
           path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
           value: [builds-jobs]
 
-  # Clients through a proxy: their namespaces keep their certificates but
-  # not the way in.
-  - it: leaves the client certificate namespaces out with clientNamespaces=false
+  # Clients through the build router: their namespaces keep their
+  # certificates but not the way in; the router's pods are admitted.
+  - it: admits the router instead of the client namespaces with global.router
     template: networkpolicy.yaml
     set:
       networkPolicy.enabled: true
-      networkPolicy.ingress.clientNamespaces: false
-      networkPolicy.ingress.extraFrom: [{ podSelector: { matchLabels: { ci-accelerator.io/component: router } } }]
+      global.router.enabled: true
+      global.router.service: "{{ .Release.Name }}-router"
       tls.source: certManager
       tls.client.namespaces: [ci-jobs]
     capabilities:
@@ -197,18 +197,21 @@ tests:
       - equal:
           path: spec.ingress[0].from
           value: [{ podSelector: { matchLabels: { ci-accelerator.io/component: router } } }]
-  - it: refuses clientNamespaces=false with no other peer
-    template: daemonset.yaml
+  - it: keeps the client namespaces while the router is off
+    template: networkpolicy.yaml
     set:
       networkPolicy.enabled: true
-      networkPolicy.ingress.clientNamespaces: false
+      global.router.enabled: false
+      global.router.service: "{{ .Release.Name }}-router"
       tls.source: certManager
       tls.client.namespaces: [ci-jobs]
     capabilities:
       apiVersions: [cert-manager.io/v1]
     asserts:
-      - failedTemplate:
-          errorPattern: 'networkPolicy.enabled: no client could reach the daemons'
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-jobs]
+      - lengthEqual: { path: "spec.ingress[0].from", count: 1 }
 
   # A parent chart allows its own backends by release-derived labels.
   - it: renders extra egress rules through tpl

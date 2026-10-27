@@ -115,6 +115,15 @@ global:
       name: ""
       kind: ClusterIssuer
       group: cert-manager.io
+  # The ci-accelerator build router (the box sets it): CI jobs reach the
+  # daemons through it. With it the daemons' certificate names its Service
+  # and only its pods (and extraFrom) may connect, not the clients'
+  # namespaces: the jobs keep their certificate, which the daemons check
+  # through the router.
+  router:
+    enabled: false
+    # -- The router's Service in this namespace. Rendered with tpl.
+    service: ""
   # Dedicated build nodes: label and taint them before install.
   buildNodes:
     # -- false: ignore selector/tolerations below and run on any Linux node.
@@ -162,11 +171,6 @@ networkPolicy:
   # -- Render a NetworkPolicy for the daemon pods.
   enabled: false
   ingress:
-    # -- The namespaces of tls.client.namespaces may connect to port 1234.
-    # false when the clients reach the daemons through a proxy (the
-    # ci-accelerator build router, admitted by extraFrom): they still hold
-    # their certificate, which the daemons check through the proxy.
-    clientNamespaces: true
     # -- Namespaces whose pods may connect to port 1234, in addition to
     # tls.client.namespaces.
     namespaces: []
@@ -431,7 +435,8 @@ priorityClass:
 diskProbe:
   # -- Run the probe. Off here (no controller to read it); the box turns it on.
   enabled: false
-  # -- Its port (GET /disk, /healthz); the control plane's daemons.diskProbePort.
+  # -- Its port (GET /disk, /healthz); the daemons tell it to the control
+  # plane as a worker label.
   port: 9180
   image:
     # -- The ci-accelerator image: mirror it together with the control plane's.

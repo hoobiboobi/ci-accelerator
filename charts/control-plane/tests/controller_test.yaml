@@ -134,21 +134,6 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts
           content: { name: gitlab-token, mountPath: /gitlab, readOnly: true }
 
-  - it: reads no disk probe unless its port is set
-    asserts:
-      - notContains:
-          path: spec.template.spec.containers[0].args
-          content: -disk-probe-port=9180
-          any: true
-
-  - it: reads the disk probe on the port given
-    set:
-      daemons.diskProbePort: 9180
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: -disk-probe-port=9180
-
   - it: names the controller's objects after its role, and selects by it
     asserts:
       - equal: { path: metadata.name, value: c-controller }

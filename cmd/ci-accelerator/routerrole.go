@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -41,7 +40,6 @@ func routerMain(args []string, log *slog.Logger) error {
 	crossZone := fs.Bool("cross-zone", true, "send a job to another zone's daemon when its zone has none ready")
 	zones := fs.Bool("zones", true, "keep jobs in their zone (topology.kubernetes.io/zone of the daemons' nodes); false: all daemons are one zone")
 	overload := fs.Int("overload", 0, "skip a daemon running this many builds when another is free (0: never)")
-	warmFor := fs.Duration("warm-for", 7*24*time.Hour, "how long a build keeps its project warm on a node")
 	drain := fs.Duration("drain", 300*time.Second, "how long open connections may finish after SIGTERM")
 	fs.Parse(args)
 	if *showVersion {
@@ -73,8 +71,10 @@ func routerMain(args []string, log *slog.Logger) error {
 	go func() { watchErr <- view.Watch(wctx, kube, *namespace, *service, *jobs) }()
 
 	r := &router.Router{View: view, Node: *node, Port: *port, Log: log, IgnoreZones: !*zones,
-		Policy: route.Policy{CrossZone: *crossZone, Overload: *overload, WarmFor: *warmFor}}
+		Policy: route.Policy{CrossZone: *crossZone, Overload: *overload}}
 	var rep *router.Reporter
+	repDone := make(chan struct{})
+	cancelReport := func() {}
 	if *controller != "" {
 		ca, err := os.ReadFile(*caFile)
 		if err != nil {
@@ -93,13 +93,18 @@ func routerMain(args []string, log *slog.Logger) error {
 			view.Decided(d.Project, d.Node, d.At)
 			rep.Add(d)
 		}
-		// Decisions keep being reported until the drain is over.
-		rctx, cancelReport := context.WithCancel(context.Background())
-		defer cancelReport()
-		go rep.Run(rctx)
+		// Decisions keep being reported until the drain is over, and the
+		// last of them are sent before the process ends.
+		var rctx context.Context
+		var stopReport context.CancelFunc
+		rctx, stopReport = context.WithCancel(context.Background())
+		defer stopReport()
+		cancelReport = stopReport
+		go func() { rep.Run(rctx); close(repDone) }()
 		go router.FollowWarm(ctx, rc, view, 5*time.Second, log)
 	} else {
 		r.Report = func(d store.Decision) { view.Decided(d.Project, d.Node, d.At) }
+		close(repDone)
 	}
 
 	mux := http.NewServeMux()
@@ -132,12 +137,10 @@ func routerMain(args []string, log *slog.Logger) error {
 		}
 	}()
 	err = r.Serve(ctx, ln, *drain)
+	cancelReport()
+	<-repDone
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	hs.Shutdown(sctx)
-	var ne *net.OpError
-	if errors.As(err, &ne) {
-		return fmt.Errorf("listener: %w", err)
-	}
 	return err
 }

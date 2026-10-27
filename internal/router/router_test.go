@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -438,5 +439,80 @@ func TestZones(t *testing.T) {
 	r.IgnoreZones = true
 	if d, _, _ := r.Decide("10.1.1.1"); d.Daemon.Node != "n2" || d.Reason != route.ZoneWarm {
 		t.Errorf("zones ignored: %+v", d)
+	}
+}
+
+// A connection accepted just before SIGTERM, still waiting for its pod in
+// the watch, is routed and served, not dropped.
+func TestDrainServesAConnectionStillWaitingForItsPod(t *testing.T) {
+	v := &view{jobs: map[string]Job{}}
+	b1 := newBackend(t, "d1")
+	v.daemons = []route.Daemon{{Name: "bk-1", Node: "n1", Addr: "10.9.0.1", Ready: true}}
+	r := &Router{View: v, Node: "n1", Port: "1234", IdentityWait: time.Second,
+		Dial: func(ctx context.Context, addr string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", b1.ln.Addr().String())
+		}}
+	ln, err := Listen(context.Background(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Serve(ctx, ln, 5*time.Second) }()
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	time.Sleep(50 * time.Millisecond)
+	cancel() // SIGTERM while the connection waits for its pod
+	c.Write([]byte("late"))
+	c.(*net.TCPConn).CloseWrite()
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	got, err := io.ReadAll(c)
+	if err != nil || string(got) != "d1:LATE" {
+		t.Fatalf("the connection got %q (%v)", got, err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not end")
+	}
+}
+
+// Decisions dropped (the queue full) while a batch is on its way never
+// cost decisions that were not sent.
+func TestReporterKeepsUnsentWhenDroppingDuringASend(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var sent []uint64
+	r := &Reporter{Every: time.Hour, Max: 4, Send: func(_ context.Context, ds []store.Decision) error {
+		<-release
+		mu.Lock()
+		defer mu.Unlock()
+		for _, d := range ds {
+			sent = append(sent, d.JobID)
+		}
+		return nil
+	}}
+	for i := 1; i <= 4; i++ {
+		r.Add(store.Decision{JobID: uint64(i)})
+	}
+	go r.flush(context.Background()) // sends 1-4, held
+	time.Sleep(50 * time.Millisecond)
+	for i := 5; i <= 7; i++ {
+		r.Add(store.Decision{JobID: uint64(i)}) // drops 1, 2, 3
+	}
+	close(release)
+	time.Sleep(50 * time.Millisecond)
+	r.mu.Lock()
+	var left []uint64
+	for _, d := range r.pending {
+		left = append(left, d.JobID)
+	}
+	r.mu.Unlock()
+	if fmt.Sprint(left) != "[5 6 7]" {
+		t.Errorf("left after the send %v, want [5 6 7]", left)
 	}
 }

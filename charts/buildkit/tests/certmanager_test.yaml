@@ -208,6 +208,24 @@ tests:
           path: spec.dnsNames
           count: 9
 
+  # The router passes the jobs' TLS through: buildctl checks the router's
+  # name, so the daemons' certificate carries it whatever extraDnsNames
+  # the user lists.
+  - it: names the build router in the daemons' certificate
+    template: certificates.yaml
+    documentSelector:
+      path: metadata.name
+      value: bk-buildkit-tls
+    set:
+      global.router.enabled: true
+      global.router.service: "{{ .Release.Name }}-router"
+      tls.certManager.extraDnsNames: [buildkit.example.com]
+    asserts:
+      - contains: { path: spec.dnsNames, content: bk-router }
+      - contains: { path: spec.dnsNames, content: bk-router.builds.svc.cluster.local }
+      - contains: { path: spec.dnsNames, content: buildkit.example.com }
+      - lengthEqual: { path: spec.dnsNames, count: 13 }
+
   - it: issues a client certificate into every listed namespace
     template: certificates.yaml
     set:

@@ -33,7 +33,6 @@ names the fix; the common ones:
 | `global.buildNodes.selector has kubernetes.io/arch=...` | Set `global.jobs.architecture` to the same architecture |
 | `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
 | `priorityclasses.scheduling.k8s.io is forbidden` | The installer may not create cluster-scoped objects: `buildkit.priorityClass.create=false`, or name an existing class in `buildkit.priorityClassName` |
-| `control-plane.daemons.diskProbePort (...) must equal buildkit.diskProbe.port` | Set the same port in both, or switch the probe off and set the port to 0 |
 | `ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place`, or `release ... has the console of ci-accelerator 0.2.x` | 0.3.0 renamed every object and value of the console: uninstall, wait for the pods, install again ([below](#upgrading-from-02x-to-030)) |
 | `values under console: are the 0.2.x console's` | Move them under `control-plane:` (pod settings and volume under `control-plane.controller`, the web's under `control-plane.web`) |
 

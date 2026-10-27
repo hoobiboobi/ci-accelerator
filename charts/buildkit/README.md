@@ -40,7 +40,7 @@ Kubernetes: `>=1.34.0-0`
 | diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
 | diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator"` | The ci-accelerator image: mirror it together with the control plane's. |
 | diskProbe.image.tag | string | `""` | Default: v0.3.0, the release that last changed the probe program or its image; pinned, so a chart release alone does not restart every daemon. |
-| diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the control plane's daemons.diskProbePort. |
+| diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the daemons tell it to the control plane as a worker label. |
 | diskProbe.resources | object | `{"limits":{"memory":"32Mi"},"requests":{"cpu":"5m","memory":"16Mi"}}` | The probe's resources (it reads one number a minute). |
 | extraEnv | list | `[]` | Extra environment variables for the daemon container. |
 | fullnameOverride | string | `""` | Override the full resource name (<release>-<chart> by default). Install-time only, like nameOverride. |
@@ -50,6 +50,8 @@ Kubernetes: `>=1.34.0-0`
 | global.buildNodes.tolerations[0].key | string | `"ci-accelerator.io/node-role"` |  |
 | global.buildNodes.tolerations[0].operator | string | `"Equal"` |  |
 | global.buildNodes.tolerations[0].value | string | `"build"` |  |
+| global.router.enabled | bool | `false` |  |
+| global.router.service | string | `""` | The router's Service in this namespace. Rendered with tpl. |
 | global.tls.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | cert-manager issuer for the daemons' and the clients' certificates (tls.source=certManager). Empty name: the chart creates a CA dedicated to this release (see tls.certManager). Your own issuer must be dedicated to these daemons too (any certificate it signs gets in) and must put ca.crt into the Secrets it fills (CA or Vault issuers do, ACME does not). Client certificates in other namespaces need a ClusterIssuer. |
 | image.digest | string | `"sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"` | Image index digest. The runtime pulls by digest when it is set, so change or clear it together with tag (another tag with this default digest is refused). Default: the digest of the appVersion tag (multi-arch index). |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
@@ -63,7 +65,6 @@ Kubernetes: `>=1.34.0-0`
 | networkPolicy.egress.dns | list | `[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}},"podSelector":{"matchLabels":{"k8s-app":"kube-dns"}}}]` | Peers that serve DNS on port 53. |
 | networkPolicy.egress.extraRules | list | `[]` | More NetworkPolicyEgressRule entries (rendered with tpl). |
 | networkPolicy.enabled | bool | `false` | Render a NetworkPolicy for the daemon pods. |
-| networkPolicy.ingress.clientNamespaces | bool | `true` | The namespaces of tls.client.namespaces may connect to port 1234. false when the clients reach the daemons through a proxy (the ci-accelerator build router, admitted by extraFrom): they still hold their certificate, which the daemons check through the proxy. |
 | networkPolicy.ingress.extraFrom | list | `[]` | More NetworkPolicyPeer entries for port 1234 (e.g. an ipBlock for NodePort clients outside the cluster). |
 | networkPolicy.ingress.namespaces | list | `[]` | Namespaces whose pods may connect to port 1234, in addition to tls.client.namespaces. |
 | nodeSelector | object | `{}` | Merged over global.buildNodes.selector (and kubernetes.io/os: linux). |

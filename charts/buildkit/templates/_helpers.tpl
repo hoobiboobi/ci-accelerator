@@ -198,7 +198,7 @@ namespaces plus networkPolicy.ingress.namespaces. As a JSON list.
 */}}
 {{- define "buildkit.clientNamespaces" -}}
 {{- $tls := list }}
-{{- if ne (toString (dig "clientNamespaces" true .Values.networkPolicy.ingress)) "false" }}
+{{- if not (include "buildkit.routerService" .) }}
 {{- $tls = include "buildkit.tlsClientNamespaces" . | fromJsonArray }}
 {{- end }}
 {{- toJson (uniq (concat $tls .Values.networkPolicy.ingress.namespaces)) }}
@@ -279,10 +279,28 @@ qualified. As a JSON list.
 {{- range list (include "buildkit.fullname" .) (include "buildkit.headlessName" .) }}
 {{- $names = concat $names (list . (printf "%s.%s" . $ns) (printf "%s.%s.svc" . $ns) (printf "%s.%s.svc.%s" . $ns $.Values.tls.certManager.clusterDomain)) }}
 {{- end }}
+{{- with include "buildkit.routerService" . }}
+{{- $names = concat $names (list . (printf "%s.%s" . $ns) (printf "%s.%s.svc" . $ns) (printf "%s.%s.svc.%s" . $ns $.Values.tls.certManager.clusterDomain)) }}
+{{- end }}
 {{- range .Values.tls.certManager.extraDnsNames }}
 {{- with tpl . $ }}{{ $names = append $names . }}{{ end }}
 {{- end }}
 {{- toJson $names }}
+{{- end }}
+
+{{/*
+The ci-accelerator build router in front of the daemons
+(global.router.service, rendered with tpl, in the release's namespace),
+when global.router.enabled: CI jobs reach the daemons through it, their
+TLS passing through, so the daemons' certificate names it and the
+NetworkPolicy admits its pods instead of the clients' namespaces. Empty
+without it.
+*/}}
+{{- define "buildkit.routerService" -}}
+{{- $r := dig "router" (dict) (.Values.global | default dict) }}
+{{- if and (eq (toString (dig "enabled" false $r)) "true") (dig "service" "" $r) }}
+{{- tpl $r.service . }}
+{{- end }}
 {{- end }}
 
 {{/*

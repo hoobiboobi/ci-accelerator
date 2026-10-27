@@ -36,11 +36,12 @@ global:
     architecture: amd64
   router:
     # -- CI jobs connect to the build router (part of the control plane),
-    # which sends each job to the daemon where its project's cache is. Keep
-    # equal to control-plane.router.enabled. false: jobs use the daemons'
-    # Service (their own node's daemon); then also set
-    # buildkit.networkPolicy.ingress.clientNamespaces=true.
+    # which sends each job to the daemon where its project's cache is; the
+    # daemons then admit only the router and name it in their certificate.
+    # false: jobs connect to the daemons' Service (their own node's daemon).
     enabled: true
+    # The router's Service, for the daemons' certificate (do not change).
+    service: '{{ .Release.Name | trunc 40 | trimSuffix "-" }}-router'
   console:
     # -- The console's address as users reach it (https://...). When set,
     # every job prints the link to its page in its log, and sign-in through
@@ -73,41 +74,26 @@ buildkit:
       # The client certificate goes into the jobs namespace.
       namespaces:
         - "{{ .Values.global.jobs.namespace }}"
-    certManager:
-      # The router's Service: the jobs' TLS passes through it to the
-      # daemons, so their certificate carries its names too.
-      extraDnsNames:
-        - '{{ include "ci-accelerator.routerDnsName" (dict "root" . "i" 0) }}'
-        - '{{ include "ci-accelerator.routerDnsName" (dict "root" . "i" 1) }}'
-        - '{{ include "ci-accelerator.routerDnsName" (dict "root" . "i" 2) }}'
-        - '{{ include "ci-accelerator.routerDnsName" (dict "root" . "i" 3) }}'
   # Clients only through the router (and the controller); builds never
   # reach cloud metadata. List the cluster's pod and Service CIDRs in
   # networkPolicy.egress.clusterCIDRs to keep builds out of the cluster.
   networkPolicy:
     enabled: true
     ingress:
-      # The jobs reach the daemons through the router only.
-      clientNamespaces: false
       # The controller (control-plane.enabled) reads the daemons' build
-      # history and the routers pass the jobs through; the web never
-      # reaches them.
+      # history; the web never reaches them. The jobs come through the
+      # router (global.router), which the daemons admit by themselves.
       extraFrom:
         - podSelector:
             matchLabels:
               ci-accelerator.io/component: controller
-        - podSelector:
-            matchLabels:
-              ci-accelerator.io/component: router
   # The free space of each daemon's disk for the console's Nodes page: a
   # container running the ci-accelerator image at its own pinned tag (see
-  # charts/buildkit diskProbe.image — a mirror sets it there). Keep
-  # diskProbe.port equal to control-plane.daemons.diskProbePort.
+  # charts/buildkit diskProbe.image — a mirror sets it there). The daemons
+  # tell the control plane its port.
   diskProbe:
     # -- The probe next to each daemon (charts/buildkit diskProbe).
     enabled: true
-    # -- Equal to control-plane.daemons.diskProbePort.
-    port: 9180
 
 # The official gitlab-runner chart. Set enabled=false to keep your own
 # runner and use integrations/gitlab-runner/values.yaml with it instead.
@@ -210,11 +196,6 @@ control-plane:
       configMap: '{{ .Release.Name }}-runner-gitlab'
   daemons:
     discover: '{{ include "ci-accelerator.buildkitHeadless" . }}.{{ .Release.Namespace }}.svc:1234'
-    # -- Equal to buildkit.diskProbe.port: the controller reads each daemon's disk there.
-    diskProbePort: 9180
-    # -- Keep equal to "buildkit.storage.type is hostPath": with a cache that
-    # survives restarts, a node stays warm for its projects after a rollout.
-    cachePersists: false
   tls:
     # With buildkit.tls.source=existingSecret, set
     # control-plane.tls.existingSecret (the controller's client certificate
@@ -225,10 +206,8 @@ control-plane:
         name: '{{ include "ci-accelerator.issuerName" . }}'
   jobs:
     namespace: '{{ .Values.global.jobs.namespace }}'
-  # The build router on every build node. Keep router.enabled equal to
-  # global.router.enabled.
+  # The build router on every build node (on with global.router.enabled).
   router:
-    enabled: true
     # The daemons' PriorityClass: the router carries their builds.
     priorityClassName: '{{ .Release.Namespace }}-{{ include "ci-accelerator.buildkitName" . }}'
   networkPolicy:

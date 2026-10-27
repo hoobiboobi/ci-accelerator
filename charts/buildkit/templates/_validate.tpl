@@ -146,7 +146,7 @@ by digest: another tag with it would still run the appVersion image. */}}
 {{- end }}
 
 {{- /* A NetworkPolicy without ingress peers would cut every client off. */}}
-{{- if and $v.networkPolicy.enabled (not (include "buildkit.clientNamespaces" . | fromJsonArray)) (not $v.networkPolicy.ingress.extraFrom) }}
+{{- if and $v.networkPolicy.enabled (not (include "buildkit.clientNamespaces" . | fromJsonArray)) (not $v.networkPolicy.ingress.extraFrom) (not (include "buildkit.routerService" .)) }}
 {{- fail "networkPolicy.enabled: no client could reach the daemons. List the CI job namespaces in tls.client.namespaces or networkPolicy.ingress.namespaces, or add peers to networkPolicy.ingress.extraFrom." }}
 {{- end }}
 

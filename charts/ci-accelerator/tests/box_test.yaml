@@ -112,8 +112,6 @@ tests:
       name: my-buildkit
     set:
       global.router.enabled: false
-      control-plane.router.enabled: false
-      buildkit.networkPolicy.ingress.clientNamespaces: true
     asserts:
       - matchRegex:
           path: data["config.template.toml"]

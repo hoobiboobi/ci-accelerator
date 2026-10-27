@@ -57,7 +57,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - router
-            - -listen=:{{ int $v.port }}
+            - -listen=:1234
             - -health=:{{ int $v.healthPort }}
             - -daemons-service={{ $svc.name }}
             - -namespace={{ $svc.namespace }}
@@ -69,10 +69,9 @@ spec:
             - -controller=https://{{ include "control-plane.controllerName" . }}.{{ .Release.Namespace }}.svc:{{ int .Values.controller.api.port }}
             - -controller-ca=/api-tls/ca.crt
             - -token-file=/var/run/secrets/ci-accelerator/token
-            - -zones={{ dig "zones" true (.Values.router | default dict) }}
+            - -zones={{ $v.zones }}
             - -cross-zone={{ $v.crossZone }}
             - -overload={{ int $v.overloadBuilds }}
-            - -warm-for={{ mul (int $v.warmDays) 24 }}h
             - -drain={{ int $v.drainSeconds }}s
           env:
             - name: CI_ACCELERATOR_NODE_NAME
@@ -88,7 +87,7 @@ spec:
             {{- end }}
           ports:
             - name: tcp
-              containerPort: {{ int $v.port }}
+              containerPort: 1234
             - name: health
               containerPort: {{ int $v.healthPort }}
           readinessProbe:
@@ -164,7 +163,7 @@ spec:
     {{- include "control-plane.selectorLabels" $r | nindent 4 }}
   ports:
     - name: tcp
-      port: {{ int $v.port }}
+      port: 1234
       targetPort: tcp
       protocol: TCP
       # The daemons' mutual TLS passes through: meshes must not parse it.
