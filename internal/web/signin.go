@@ -18,7 +18,7 @@ import (
 // person read; admins see everything.
 
 // Gate lets requests through to h. With sign-in: static files, the health
-// check and the sign-in pages to anyone; the JSON API to admins; the rest
+// checks and the sign-in pages to anyone; the JSON API to admins; the rest
 // to people signed in (pages send others to sign in, streams and data
 // answer 401). Requests that change something must come from the
 // console's own pages.
@@ -33,7 +33,7 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/healthz" || strings.HasPrefix(p, "/static/") {
+		if p == "/healthz" || p == "/livez" || strings.HasPrefix(p, "/static/") {
 			h.ServeHTTP(w, r)
 			return
 		}
@@ -81,14 +81,22 @@ func viewer(r *http.Request) *auth.Viewer { return auth.From(r.Context()) }
 // may says whether the person on r may see a project's builds and jobs;
 // without sign-in, everyone may.
 func (s *Server) may(r *http.Request, instance string, project uint64) bool {
+	ok, _ := s.mayKnown(r, instance, project)
+	return ok
+}
+
+// mayKnown is may that also says whether GitLab answered: false when it
+// could not be asked (the person sees nothing of the project meanwhile).
+func (s *Server) mayKnown(r *http.Request, instance string, project uint64) (ok, known bool) {
 	if s.opt.Auth == nil {
-		return true
+		return true, true
 	}
 	ok, err := s.opt.Auth.CanRead(r.Context(), viewer(r), instance, project)
 	if err != nil {
 		s.log.Warn("could not ask GitLab what a person may see", "project", store.ProjectKey{Instance: instance, ID: project}.String(), "err", err)
+		return false, false
 	}
-	return ok
+	return ok, true
 }
 
 // readable keeps the projects the person on r may see, asking GitLab about

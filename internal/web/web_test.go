@@ -147,7 +147,9 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 	srv.now = func() time.Time { return testNow }
 	mux := http.NewServeMux()
 	srv.Register(mux)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") })
+	ok := func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }
+	mux.HandleFunc("GET /healthz", ok)
+	mux.HandleFunc("GET /livez", ok)
 	mux.HandleFunc("GET /api/v1/builds", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "[]") })
 	ts := start(Secure(srv.Gate(mux)))
 	t.Cleanup(ts.Close)

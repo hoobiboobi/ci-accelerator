@@ -367,6 +367,17 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	}
 	instance := r.PathValue("instance")
 	ctx := r.Context()
+	j, err := s.data.Job(ctx, instance, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	// Someone who may not see the job learns nothing of it, not even
+	// whether it built something.
+	if j != nil && !s.may(r, instance, j.ProjectID) {
+		s.notFound(w, r, "job")
+		return
+	}
 	ids, err := s.data.JobBuilds(ctx, instance, id)
 	if err != nil {
 		s.fail(w, err)
@@ -374,16 +385,12 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(ids) > 0 {
 		// A job with several builds opens its last; the page lists the others.
-		// The link in a job's log comes here: the page says so.
+		// The link in a job's log comes here: the page says so. (The build
+		// page checks its own project.)
 		http.Redirect(w, r, fmt.Sprintf("/builds/%d?via=log", ids[len(ids)-1]), http.StatusFound)
 		return
 	}
-	j, err := s.data.Job(ctx, instance, id)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if j == nil || !s.may(r, instance, j.ProjectID) {
+	if j == nil {
 		s.notFound(w, r, "job")
 		return
 	}

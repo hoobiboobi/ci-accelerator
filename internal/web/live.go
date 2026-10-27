@@ -109,23 +109,35 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 	beat := time.NewTicker(s.Heartbeat)
 	defer beat.Stop()
-	// With sign-in, a person hears only of pipelines they may see.
-	allowed := map[string]bool{}
+	// With sign-in, a person hears only of pipelines they may see. The
+	// answers are kept for a minute (GitLab's own answer may change), and
+	// a failed lookup is asked again with the next change.
+	type answer struct {
+		ok bool
+		at time.Time
+	}
+	allowed := map[string]answer{}
 	hear := func(k string) bool {
 		if s.opt.Auth == nil {
 			return true
 		}
-		ok, seen := allowed[k]
-		if !seen {
-			if pk, valid := store.ParseProjectKey(k); valid {
-				if project, err := s.data.PipelineProject(r.Context(), pk.Instance, pk.ID); err == nil {
-					ok = s.may(r, pk.Instance, project)
-				}
-			}
+		if a, seen := allowed[k]; seen && time.Since(a.at) < time.Minute {
+			return a.ok
+		}
+		pk, valid := store.ParseProjectKey(k)
+		if !valid {
+			return false
+		}
+		project, err := s.data.PipelineProject(r.Context(), pk.Instance, pk.ID)
+		if err != nil {
+			return false
+		}
+		ok, known := s.mayKnown(r, pk.Instance, project)
+		if known {
 			if len(allowed) > 2000 {
 				clear(allowed)
 			}
-			allowed[k] = ok
+			allowed[k] = answer{ok, time.Now()}
 		}
 		return ok
 	}
@@ -153,7 +165,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 					}
 					project, known := projectOf[k]
 					if !known {
-						project, _ = s.data.PipelineProject(r.Context(), pk.Instance, pk.ID)
+						var err error
+						if project, err = s.data.PipelineProject(r.Context(), pk.Instance, pk.ID); err != nil {
+							// Asked again with the pipeline's next change.
+							continue
+						}
 						if len(projectOf) > 2000 {
 							clear(projectOf)
 						}

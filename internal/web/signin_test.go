@@ -30,6 +30,14 @@ type signInGitLab struct {
 	mu      sync.Mutex
 	used    []string // Authorization headers of API reads
 	revoked []string
+	down    bool          // the project API answers 500
+	skew    time.Duration // the console's clock runs ahead by this
+}
+
+func (g *signInGitLab) now() time.Time {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return time.Now().Add(g.skew)
 }
 
 func newSignInGitLab(t *testing.T) *signInGitLab {
@@ -57,6 +65,10 @@ func newSignInGitLab(t *testing.T) *signInGitLab {
 			json.NewEncoder(w).Encode(map[string]any{"id": ids[user], "username": user, "name": strings.ToUpper(user[:1]) + user[1:]})
 		case strings.HasPrefix(r.URL.Path, "/api/v4/projects/42/"):
 			g.used = append(g.used, r.Header.Get("Authorization"))
+			if g.down {
+				w.WriteHeader(500)
+				return
+			}
 			if user != "alice" && user != "root" {
 				w.WriteHeader(404)
 				fmt.Fprint(w, `{"message":"404 Project Not Found"}`)
@@ -86,7 +98,7 @@ func signedIn(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *
 	ts, st, ids, _ := consoleBuild(t, func(st *store.Store) testOpts {
 		client := gitlab.New([]string{gl})
 		client.HTTP = via
-		a, err := auth.New(auth.Config{PublicURL: "https://127.0.0.1", Key: make([]byte, 32), HTTP: via,
+		a, err := auth.New(auth.Config{PublicURL: "https://127.0.0.1", Key: make([]byte, 32), HTTP: via, Now: g.now,
 			Instances: []auth.Instance{{URL: gl, ClientID: "cid", Secret: "sec", Admins: []string{"root"}}}}, st, client, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -145,7 +157,7 @@ func TestSignInRequired(t *testing.T) {
 	nobody := browser("")
 	for path, want := range map[string]int{"/": 302, "/pipelines/abcdef/1": 302, "/images": 302,
 		"/events": 401, "/search-index": 401, "/jobs/abcdef/1/log": 401, "/api/v1/builds": 401,
-		"/healthz": 200, "/static/console.css": 200} {
+		"/healthz": 200, "/livez": 200, "/static/console.css": 200} {
 		p := fetch(t, nobody, ts, "GET", path, nil)
 		if p.status != want {
 			t.Errorf("%s without sign-in: %d, want %d", path, p.status, want)
@@ -286,6 +298,19 @@ func TestSignedInSeesWhatGitLabAllows(t *testing.T) {
 		strings.Contains(bh.body, "example/") || strings.Contains(bh.body, "fix &lt;") {
 		t.Errorf("bob's home shows the project or no reason: %d", bh.status)
 	}
+	// A job that built something: alice is sent to its build, bob does
+	// not learn that it built anything.
+	bp, err := st.BuildPage(ctx, known[0])
+	if err != nil || bp.Job == nil || bp.Job.ProjectID != 42 {
+		t.Fatalf("fixture build %d: %+v, %v", known[0], bp, err)
+	}
+	built := fmt.Sprintf("/jobs/%s/%d", bp.Job.Instance, bp.Job.ID)
+	if got := fetch(t, alice, ts, "GET", built, nil); got.status != 302 {
+		t.Errorf("alice %s: %d, want 302", built, got.status)
+	}
+	if got := fetch(t, bob, ts, "GET", built, nil); got.status != 404 || got.header.Get("Location") != "" {
+		t.Errorf("bob %s: %d to %q, want 404", built, got.status, got.header.Get("Location"))
+	}
 	for _, p := range append(paths, "/jobs/"+inst+"/6003/log") {
 		got := fetch(t, bob, ts, "GET", p, nil)
 		if got.status != 404 || strings.Contains(got.body, "fix &lt;") || strings.Contains(got.body, "example/") {
@@ -352,6 +377,56 @@ func TestLiveUpdatesOnlyOfReadableProjects(t *testing.T) {
 	}
 	if hears(browser("bob"), key) {
 		t.Error("bob hears of a pipeline he may not see")
+	}
+}
+
+// GitLab away for a moment does not deafen a page for the rest of its life.
+func TestLiveUpdatesAfterGitLabWasAway(t *testing.T) {
+	ts, st, _, g, browser := signedIn(t)
+	_, key := seedJob(t, st)
+	alice := browser("alice")
+	g.mu.Lock()
+	g.down = true
+	g.mu.Unlock()
+	req, _ := http.NewRequest("GET", ts.URL+"/events", nil)
+	res, err := alice.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	lines := make(chan string, 16)
+	go func() {
+		sc := bufio.NewScanner(res.Body)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+		close(lines)
+	}()
+	<-lines // retry:
+	heard := func() bool {
+		time.Sleep(50 * time.Millisecond)
+		st.Announce(key)
+		timeout := time.After(time.Second)
+		for {
+			select {
+			case l := <-lines:
+				if l == "data: "+key {
+					return true
+				}
+			case <-timeout:
+				return false
+			}
+		}
+	}
+	if heard() {
+		t.Error("heard of a pipeline while GitLab could not say who may see it")
+	}
+	g.mu.Lock()
+	g.down = false
+	g.skew = time.Minute // past the console's memory of the failed question
+	g.mu.Unlock()
+	if !heard() {
+		t.Error("the page stays deaf after GitLab came back")
 	}
 }
 
