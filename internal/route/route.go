@@ -78,8 +78,8 @@ type Policy struct {
 type Reason string
 
 const (
-	LocalWarm    Reason = "local-warm"    // the job's node, which built the project before
-	ZoneWarm     Reason = "zone-warm"     // another node of the zone that built the project before
+	LocalWarm    Reason = "local-warm"    // the job's node, whose cache holds the project's layers
+	ZoneWarm     Reason = "zone-warm"     // the zone's node with the project's most recently used layers
 	ZoneHash     Reason = "zone-hash"     // nobody in the zone built it: the project's daemon by hash
 	CrossZone    Reason = "cross-zone"    // no daemon ready in the job's zone
 	UnknownLocal Reason = "unknown-local" // job not known: the daemon on its node

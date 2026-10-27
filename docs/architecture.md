@@ -39,8 +39,10 @@ a running job to get scheduled) and default requests of 500m CPU and 512Mi
    (`trafficDistribution: PreferSameNode`; another node's router when it
    is not ready). The router knows the job by its pod's address and picks
    the daemon ([ADR-0045](adr/0045-build-router.md)):
-   - the job's own node, if the project built there in the last week;
-   - else the node of its zone that built it most recently;
+   - the job's own node, if its cache holds layers of the project used in
+     the last week;
+   - else the node of its zone whose cache holds the project's most
+     recently used layers;
    - else the project's node by a rendezvous hash over the zone's ready
      daemons: every router agrees, so a new project's parallel jobs meet
      on one daemon and BuildKit runs their common steps once;
@@ -50,8 +52,10 @@ a running job to get scheduled) and default requests of 500m CPU and 512Mi
    `control-plane.router.zones: false` every daemon counts as one zone
    (zones close enough that crossing them costs nothing).
 
-   A connection from a pod that is no CI job goes to its own node's
-   daemon. The routers learn where projects built from the controller
+   Warmth is what the caches hold now, as the controller attributes their
+   records (see "The cache"), plus the routers' decisions of the last hour:
+   a cache emptied by a restart or by GC is cold again. A connection from
+   a pod that is no CI job goes to its own node's daemon. The routers learn where projects built from the controller
    (and keep routing on their last view while it is away); the build page
    says why its node was chosen.
 3. **Mutual TLS, end to end.** The router passes the bytes through. The

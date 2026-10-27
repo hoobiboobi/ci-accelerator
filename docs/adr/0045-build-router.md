@@ -23,15 +23,18 @@ runs an identical step once) when they meet on one daemon.
 - It knows a job by its pod's address (the job pods are watched), the
   daemons by their headless Service's EndpointSlices (address, node,
   zone, readiness: no access to Nodes).
-- The decision is a pure function: the job's node if the project built
-  there in the last week; else the zone's node that built it most
-  recently; else the project's node by rendezvous hash over the zone's
+- The decision is a pure function: the job's node if its cache holds the
+  project's layers used in the last week; else the zone's node with the
+  project's most recently used layers; else the project's node by rendezvous hash over the zone's
   ready daemons (every router agrees, so a new project's parallel jobs meet
   on one daemon); else another zone, or no daemon (`crossZone`). Warmth is
   kept by node, so a daemon's restart keeps its projects. A connection
   from a pod that is no CI job goes to its own node's daemon.
-- The controller serves the routers' view (projects' builds of the last
-  week by node, their decisions of the last hour, builds running per node)
+- The controller serves the routers' view: where each project's layers
+  are, from the caches' own listings attributed to the builds that made
+  them (0047; a cache emptied by a restart or GC is cold), the routers'
+  decisions of the last hour for daemons still running, builds running
+  per node;
   and stores their decisions; the build page says why its node was chosen.
   A router keeps routing on its last view while the controller is away.
 - SIGTERM stops taking connections and lets open ones (running builds)
