@@ -297,7 +297,8 @@ if [ -f "$STATE/values.yaml" ] && grep -q '^console:' "$STATE/values.yaml"; then
   # 0.3.0 renamed the console's objects and values: no in-place upgrade.
   die "this machine runs ci-accelerator 0.2.x, which $VERSION cannot upgrade in place (the console became the control plane, with new names). Remove the release, keeping k3s and the build cache:
   sudo KUBECONFIG=$KUBECONFIG $HELM uninstall $REL -n $NS --wait
-then in $STATE/values.yaml rename the top-level console: to control-plane: or delete the file to start over, and run this script again (with --gitlab-token-file to keep reading GitLab with a token). The old console's history stays on the PersistentVolumeClaim $REL-console-data until you delete it."
+  sudo k3s kubectl -n $NS delete secret $REL-buildkit-tls
+(the daemons' certificate outlives the release; the new one names the build router), then in $STATE/values.yaml rename the top-level console: to control-plane: or delete the file to start over, and run this script again (with --gitlab-token-file to keep reading GitLab with a token). The old console's history stays on the PersistentVolumeClaim $REL-console-data until you delete it."
 fi
 if [ -f "$STATE/values.yaml" ]; then
   say "Keeping the existing $STATE/values.yaml (delete it to start over)"
