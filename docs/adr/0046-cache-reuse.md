@@ -27,4 +27,5 @@ Registry cache export would let builds share layers through a registry.
 
 - One trust domain per daemon, as documented: a project can read what
   another's build left in a shared cache mount.
-- Cache mounts count as a shared pool in the per-project figures (0047).
+- How much of a node's cache belongs to which project cannot be read
+  from BuildKit's records; the console shows cache by kind only.

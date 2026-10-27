@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
-	"github.com/hoobiboobi/ci-accelerator/internal/cacheuse"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -47,11 +46,6 @@ type Backend interface {
 	ProjectCache(ctx context.Context, p store.ProjectKey) ([]store.CacheObject, []store.CacheStore, error)
 	Elsewhere(ctx context.Context, p store.ProjectKey, since time.Time, limit int) ([]store.Elsewhere, error)
 	SettleElsewhere(ctx context.Context, settled []store.Settled) error
-	// CacheUsage is each node's cache by owner; CacheActions the latest
-	// removals; RemoveCache removes what a project made alone on a node.
-	CacheUsage(ctx context.Context) (map[string]cacheuse.Usage, error)
-	CacheActions(ctx context.Context, limit int) ([]store.CacheAction, error)
-	RemoveCache(ctx context.Context, node string, p store.ProjectKey, who string) (store.CacheAction, error)
 	// Recent and Ping serve the JSON API and the health check.
 	Recent(ctx context.Context, limit int) ([]*store.Stored, error)
 	Ping(ctx context.Context) error

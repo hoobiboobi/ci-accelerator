@@ -61,6 +61,7 @@ type config struct {
 	apiListen, apiTLSDir      string
 	apiTokenFile, apiAudience string
 	apiAllow, apiAllowRouter  []string
+	cachePersists             bool
 }
 
 // version and commit are set at build time (-ldflags -X main.version=...);
@@ -153,6 +154,7 @@ func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
 		fs.StringVar(&c.apiAudience, "api-audience", control.Audience, "audience of the callers' ServiceAccount tokens")
 		fs.Var(&allow, "api-allow", "a ServiceAccount of the web, which may read the pages' data, namespace/name (repeatable)")
 		fs.Var(&allowRouter, "api-allow-router", "a ServiceAccount of the build routers, which may read where projects are warm and report decisions, namespace/name (repeatable)")
+		fs.BoolVar(&c.cachePersists, "cache-persists", false, "the daemons' cache survives their restart (hostPath): builds of daemons replaced since still make their node warm for the build router")
 		fs.StringVar(&c.apiTokenFile, "api-token-file", "", "file with a static token the callers send instead of ServiceAccount tokens (outside a cluster)")
 	} else {
 		fs.StringVar(&c.listen, "listen", ":8080", "address of the pages, the API and the health check")
@@ -283,7 +285,7 @@ func run(c config, log *slog.Logger) error {
 			return err
 		}
 		api := &control.Server{Local: local, GitLab: gl, Auth: signIn, Log: log, Authorize: authorize,
-			Routes: &control.Routes{Store: st, Live: col, Log: log},
+			Routes: &control.Routes{Store: st, Live: col, Log: log, CachePersists: c.cachePersists},
 			Config: control.ConfigFor(versionString(), c.release, gl, signIn)}
 		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second,
 			TLSConfig: &cryptotls.Config{MinVersion: cryptotls.VersionTLS12, GetCertificate: certs}}

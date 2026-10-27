@@ -114,6 +114,10 @@ daemons:
   # -- Port of the disk probe next to each daemon (the buildkit chart's
   # diskProbe), for the free space on the Nodes page. 0: not read.
   diskProbePort: 0
+  # -- The daemons' cache survives their restart (buildkit storage.type
+  # hostPath): a node stays warm for the projects that built there after
+  # a rollout. false (emptyDir): a restarted daemon starts cold.
+  cachePersists: false
 
 # The certificates: the controller's client certificate for the daemons
 # and its API's server certificate, both from the daemons' CA.

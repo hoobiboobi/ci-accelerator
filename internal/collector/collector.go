@@ -85,21 +85,6 @@ func (c *Collector) Run(ctx context.Context, src Source) error {
 		defer cancel()
 		go c.inspect(ictx, name, in)
 	}
-	if p, ok := src.(Pruner); ok {
-		c.live.mu.Lock()
-		if c.live.pruners == nil {
-			c.live.pruners = map[string]Pruner{}
-		}
-		c.live.pruners[name] = p
-		c.live.mu.Unlock()
-		defer func() {
-			c.live.mu.Lock()
-			if c.live.pruners[name] == p {
-				delete(c.live.pruners, name)
-			}
-			c.live.mu.Unlock()
-		}()
-	}
 	return src.Listen(ctx, func(t controlapi.BuildHistoryEventType, rec *controlapi.BuildHistoryRecord) error {
 		c.live.event(name, t, rec)
 		if t != controlapi.BuildHistoryEventType_COMPLETE {

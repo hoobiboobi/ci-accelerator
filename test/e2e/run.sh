@@ -1098,7 +1098,6 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   box_split
   box_settle
   box_router
-  box_cache_owners
   box_ui
   box_cache
   box_signin
@@ -1283,30 +1282,6 @@ box_router() {
   fi
   kc -n "$BOX_JOBS_NS" delete pod -l ci-accelerator.io/component=ci-job --field-selector=status.phase!=Running --ignore-not-found >/dev/null 2>&1
   kc -n "$BOX_JOBS_NS" delete pod route-unknown --ignore-not-found >/dev/null 2>&1
-}
-
-# box_cache_owners: the Nodes page says whose each node's cache is, and
-# removing a project's part makes its next build run its step again while
-# the base images stay.
-box_cache_owners() {
-  local inst node page
-  inst=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)
-  node=$(kc -n "$BOX_NS" get pod "$(routed_to p1a)" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
-  [ -n "$node" ] || { fail "no node for the routed project's daemon"; return; }
-  page=$LOGS/box-nodes.html
-  nodes_page() { kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/nodes" 2>/dev/null >"$page"; }
-  check "the Nodes page says whose the cache is, by project" \
-    eventually 60 eval 'nodes_page && grep -q "e2e/route-5001" "$page" && grep -q "Cache by project" "$page"'
-  check "it says how much of a node's cache is attributed" grep -Eq '[0-9]+% of [0-9.]+ [kMG]?B attributed' "$page"
-  kc -n "$JOBS_NS" exec client-build -- wget -qO- --post-data= \
-    "http://$BOX_REL-web.$BOX_NS.svc:8080/nodes/$node/cache/$inst/5001" >"$LOGS/box-cache-remove.html" 2>/dev/null
-  check "removing the project's cache on its node removes records" \
-    grep -Eq '<b>[0-9.]+ [kMG]?B</b> in [1-9][0-9]* record' "$LOGS/box-cache-remove.html"
-  # The step p1a built there (it slept 6 s), attributed long since.
-  check "the project's next build runs its step again" route_job p1f "$node" 5001 9550 9551 6
-  check "on the same daemon ($(routed_to p1f))" test "$(routed_to p1f)" = "$(routed_to p1a)"
-  check "and runs it (the cached result was removed)" built p1f
-  check "the base images stay" eventually 60 eval 'nodes_page && grep -q "Base images" "$page"'
 }
 
 # box_ui: the browser checks of test/ui against the box's console, which
@@ -1746,6 +1721,10 @@ s_upgrade() {
     --set "global.jobs.architecture=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')"
     --set-json "global.buildNodes.selector={\"ci-accelerator.io/node-role\":\"build\",\"kubernetes.io/hostname\":\"$BUILD_NODE\"}"
     --set buildkit.storage.type=hostPath --set "buildkit.storage.hostPath.path=$state")
+  # This tree's box wants to know the cache survives restarts; 0.2.x has
+  # no such key.
+  UPG_NEW_ARGS=("${UPG_ARGS[@]}" --set control-plane.daemons.cachePersists=true)
+  case "$UPGRADE_FROM" in 0.2.*) ;; *) UPG_ARGS=("${UPG_NEW_ARGS[@]}") ;; esac
   local old_values=(-f "$ROOT/test/e2e/box-values.yaml")
   for c in $UPGRADE_FROM_VALUES; do old_values+=(-f "$c"); done
   if ! hc install "$UPG_REL" "$old_chart" -n "$UPG_NS" "${old_values[@]}" "${UPG_ARGS[@]}" --wait --timeout 8m >"$LOGS/upgrade-install.log" 2>&1; then
@@ -1820,7 +1799,7 @@ upgrade_refused() {
   # This tree's defaults and the user's values in the new shape: the
   # release itself still runs the old console.
   if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" -f "$ROOT/test/e2e/box-values.yaml" \
-      -f "$ROOT/test/e2e/box-control-plane-values.yaml" "${UPG_ARGS[@]}" --wait --timeout 5m >"$LOGS/upgrade-reset.log" 2>&1; then
+      -f "$ROOT/test/e2e/box-control-plane-values.yaml" "${UPG_NEW_ARGS[@]}" --wait --timeout 5m >"$LOGS/upgrade-reset.log" 2>&1; then
     fail "helm upgrade from $UPGRADE_FROM with new values was accepted"
   else
     check "helm upgrade from $UPGRADE_FROM with values in the new shape is refused too" \
@@ -1838,7 +1817,7 @@ upgrade_refused() {
   check "the message names the daemons' certificate Secret to delete" grep -qF "delete secret $UPG_REL-buildkit-tls" "$LOGS/upgrade-reuse.log"
   kc -n "$UPG_NS" delete secret "$UPG_REL-buildkit-tls" --ignore-not-found >/dev/null
   if hc install "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" -f "$ROOT/test/e2e/box-values.yaml" \
-      -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${UPG_ARGS[@]}" \
+      -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${UPG_NEW_ARGS[@]}" \
       --wait --timeout 8m >"$LOGS/upgrade-reinstall.log" 2>&1; then
     pass "after helm uninstall this tree installs in the same namespace"
   else

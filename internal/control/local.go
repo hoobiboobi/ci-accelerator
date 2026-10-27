@@ -105,36 +105,3 @@ func (g *LocalGitLab) Changed(ctx context.Context, instance string, project uint
 
 // Status is the installation's standing with GitLab's rate limits.
 func (g *LocalGitLab) Status() (time.Time, error) { return g.Fetcher.Status() }
-
-// pruner is a Live that can remove records from a node's cache.
-type pruner interface {
-	Prune(ctx context.Context, node string, ids []string) (int, int64, error)
-}
-
-// RemoveCache removes from a node's cache what a project's builds alone
-// made there (not what other projects share, nor what a build holds), and
-// records who asked.
-func (l *Local) RemoveCache(ctx context.Context, node string, p store.ProjectKey, who string) (store.CacheAction, error) {
-	a := store.CacheAction{At: time.Now(), Who: who, Node: node, Project: p}
-	pr, ok := l.Live.(pruner)
-	if !ok {
-		return a, errors.New("control: no daemons to remove records from")
-	}
-	ids, _, err := l.ProjectRecords(ctx, node, p)
-	if err != nil {
-		return a, err
-	}
-	if len(ids) > 0 {
-		pctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		a.Records, a.Bytes, err = pr.Prune(pctx, node, ids)
-		cancel()
-		if err != nil {
-			a.Error = err.Error()
-		}
-	}
-	if serr := l.SaveCacheAction(ctx, a); serr != nil && err == nil {
-		err = serr
-	}
-	l.Announce("")
-	return a, err
-}

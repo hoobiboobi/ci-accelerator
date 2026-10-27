@@ -73,10 +73,6 @@ workflow copies them into the GitHub release.
   so a new project's parallel jobs share one daemon's steps), zone-aware.
   It passes the jobs' TLS through and holds no key; the build page says
   why its node was chosen.
-- Whose each node's cache is: the Nodes page shows each node's cache by
-  project, with the base images, contexts and cache mounts as shared
-  pools, and how much is attributed. An admin (anyone without sign-in)
-  can remove what a project's builds made alone on a node.
 - `scripts/buildkit-certs.sh --router <prefix>` adds the router's names to
   the daemons' certificate.
 

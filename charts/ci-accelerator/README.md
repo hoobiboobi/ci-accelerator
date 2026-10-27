@@ -42,6 +42,7 @@ Kubernetes: `>=1.34.0-0`
 | buildkit.tls.certManager.extraDnsNames[3] | string | `"{{ include \"ci-accelerator.routerDnsName\" (dict \"root\" . \"i\" 3) }}"` |  |
 | buildkit.tls.client.namespaces[0] | string | `"{{ .Values.global.jobs.namespace }}"` |  |
 | control-plane.caches.fromConfigMap | string | `"{{ .Release.Name }}-runner-caches"` |  |
+| control-plane.daemons.cachePersists | bool | `false` | Keep equal to "buildkit.storage.type is hostPath": with a cache that survives restarts, a node stays warm for its projects after a rollout. |
 | control-plane.daemons.discover | string | `"{{ include \"ci-accelerator.buildkitHeadless\" . }}.{{ .Release.Namespace }}.svc:1234"` |  |
 | control-plane.daemons.diskProbePort | int | `9180` | Equal to buildkit.diskProbe.port: the controller reads each daemon's disk there. |
 | control-plane.enabled | bool | `true` |  |

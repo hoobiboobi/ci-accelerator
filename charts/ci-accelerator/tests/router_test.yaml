@@ -128,3 +128,23 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: set buildkit.networkPolicy.ingress.clientNamespaces=true
+  - it: refuses a hostPath cache the router is not told about
+    template: validate.yaml
+    set:
+      buildkit.storage.type: hostPath
+      buildkit.storage.hostPath.path: /var/lib/ci-accelerator/buildkit
+    asserts:
+      - failedTemplate:
+          errorPattern: control-plane.daemons.cachePersists must be true with buildkit.storage.type=hostPath
+  - it: tells the controller the cache survives restarts with hostPath
+    template: charts/control-plane/templates/controller.yaml
+    set:
+      buildkit.storage.type: hostPath
+      buildkit.storage.hostPath.path: /var/lib/ci-accelerator/buildkit
+      control-plane.daemons.cachePersists: true
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-cache-persists=true" }
+  - it: tells the controller nothing of a cache that dies with its daemon
+    template: charts/control-plane/templates/controller.yaml
+    asserts:
+      - notContains: { path: "spec.template.spec.containers[0].args", content: "-cache-persists=true" }

@@ -320,8 +320,7 @@ on.
 | image builds, steps, cache verdicts, what changed, pipeline timeline | yes | yes | yes |
 | job results, how long jobs waited for a runner, "N other jobs" | no | yes | yes |
 | "files or node" settled by comparing the two commits, end of a job's log | no | yes | yes |
-| each node's cache by project, why the router chose a build's node | yes | yes | yes |
-| removing a project's cache from a node | everyone who reaches it | everyone who reaches it | admins |
+| why the build router chose a build's node | yes | yes | yes |
 | who sees what | everyone who reaches it | everyone who reaches it | each person: the projects GitLab lets them read |
 | the console reads GitLab with | nothing | one shared token | each person's own token |
 
