@@ -197,7 +197,11 @@ Namespaces whose pods may reach the daemons: the client certificate
 namespaces plus networkPolicy.ingress.namespaces. As a JSON list.
 */}}
 {{- define "buildkit.clientNamespaces" -}}
-{{- toJson (uniq (concat (include "buildkit.tlsClientNamespaces" . | fromJsonArray) .Values.networkPolicy.ingress.namespaces)) }}
+{{- $tls := list }}
+{{- if ne (toString (dig "clientNamespaces" true .Values.networkPolicy.ingress)) "false" }}
+{{- $tls = include "buildkit.tlsClientNamespaces" . | fromJsonArray }}
+{{- end }}
+{{- toJson (uniq (concat $tls .Values.networkPolicy.ingress.namespaces)) }}
 {{- end }}
 
 {{/*
@@ -275,7 +279,10 @@ qualified. As a JSON list.
 {{- range list (include "buildkit.fullname" .) (include "buildkit.headlessName" .) }}
 {{- $names = concat $names (list . (printf "%s.%s" . $ns) (printf "%s.%s.svc" . $ns) (printf "%s.%s.svc.%s" . $ns $.Values.tls.certManager.clusterDomain)) }}
 {{- end }}
-{{- toJson (concat $names .Values.tls.certManager.extraDnsNames) }}
+{{- range .Values.tls.certManager.extraDnsNames }}
+{{- with tpl . $ }}{{ $names = append $names . }}{{ end }}
+{{- end }}
+{{- toJson $names }}
 {{- end }}
 
 {{/*

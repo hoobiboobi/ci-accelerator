@@ -203,15 +203,68 @@ web:
   podLabels: {}
   podAnnotations: {}
 
+# The build router (DaemonSet on the build nodes and Service
+# <release>-router): CI jobs connect to it instead of to the daemons'
+# Service, and it sends each job to the daemon where its project built
+# before, else to the project's daemon by a hash that every router agrees
+# on, so the jobs of a pipeline share one daemon's cache and steps. It
+# passes the bytes through: the job and the daemon keep their mutual TLS
+# (the daemons' certificate must name the router's Service), the router
+# holds no key. It knows a job by its pod's address; a connection from
+# another pod goes to its own node's daemon.
+router:
+  # -- Run the router (the box does). The runners must then use
+  # tcp://<release>-router.<namespace>.svc:1234.
+  enabled: false
+  # -- The port the jobs connect to.
+  port: 1234
+  # -- The port of /livez and /readyz.
+  healthPort: 8080
+  # -- How the Service picks a router: PreferSameNode (the job's node, any
+  # other when it has none ready), Local (the job's node only) or Cluster.
+  routing: PreferSameNode
+  # -- When no daemon of the job's zone (topology.kubernetes.io/zone of the
+  # daemons' nodes) is ready: true sends the job to another zone's daemon,
+  # false refuses the connection.
+  crossZone: true
+  # -- Skip a daemon running this many builds when another one is free; 0:
+  # never (a busy warm daemon is usually still faster than a cold one).
+  overloadBuilds: 0
+  # -- Days a build keeps its project warm on its node.
+  warmDays: 7
+  # -- Seconds open connections (running builds) may finish when a router
+  # stops; the pod's grace period is this plus preStopSleepSeconds and 10.
+  drainSeconds: 300
+  # -- Seconds a stopping router keeps accepting while the Service drops it.
+  preStopSleepSeconds: 5
+  # -- PriorityClass of the router pods; the box gives them the daemons'.
+  priorityClassName: ""
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 256Mi
+  # -- Merged over global.buildNodes.selector.
+  nodeSelector: {}
+  # -- Appended to global.buildNodes.tolerations.
+  tolerations: []
+  podLabels: {}
+  podAnnotations: {}
+  # -- Namespaces whose pods may connect to the router; default: the jobs
+  # namespace. Rendered with tpl.
+  clientNamespaces: []
+
 # Who may connect. CI jobs and their builds (RUN steps share the daemons'
 # network) run untrusted code in the same cluster, and without sign-in the
 # console shows every project to whoever reaches it. Needs a CNI that
 # enforces NetworkPolicy. kubectl port-forward keeps working.
 networkPolicy:
-  # -- Render two NetworkPolicies: the web admits connections from every
+  # -- Render the NetworkPolicies: the web admits connections from every
   # namespace except this one, the jobs namespace and deniedNamespaces, and
   # from pods of this namespace except deniedComponents; the controller
-  # admits only the web. Only ingress is limited.
+  # admits only the web and the routers; the routers admit only their
+  # clients' namespaces. Only ingress is limited.
   enabled: false
   # -- More namespaces whose pods may not reach the web (the jobs namespace
   # is always one when jobs.namespace is set). Rendered with tpl.
@@ -227,6 +280,18 @@ networkPolicy:
   extraFrom: []
 
 global:
+  # Dedicated build nodes (label and taint them before install); the router
+  # runs there, next to the daemons and the CI jobs.
+  buildNodes:
+    # -- false: ignore selector/tolerations below and run on any Linux node.
+    enabled: true
+    selector:
+      ci-accelerator.io/node-role: build
+    tolerations:
+      - key: ci-accelerator.io/node-role
+        operator: Equal
+        value: build
+        effect: NoSchedule
   tls:
     issuerRef:
       name: ""

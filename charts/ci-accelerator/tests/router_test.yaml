@@ -1,0 +1,130 @@
+suite: the build router in the box
+templates:
+  - validate.yaml
+  - charts/gitlab-runner/templates/configmap.yaml
+  - charts/buildkit/templates/certificates.yaml
+  - charts/buildkit/templates/networkpolicy.yaml
+  - charts/control-plane/templates/router.yaml
+  - charts/control-plane/templates/controller.yaml
+  - charts/control-plane/templates/networkpolicy.yaml
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  # The jobs' TLS passes through the router: buildctl checks the name it
+  # dialled, so the daemons' certificate carries the router's names.
+  - it: puts the router's names into the daemons' certificate
+    template: charts/buildkit/templates/certificates.yaml
+    documentSelector: { path: metadata.name, value: box-buildkit-tls }
+    asserts:
+      - contains: { path: spec.dnsNames, content: box-router }
+      - contains: { path: spec.dnsNames, content: box-router.ci-accelerator.svc }
+      - contains: { path: spec.dnsNames, content: box-router.ci-accelerator.svc.cluster.local }
+      - contains: { path: spec.dnsNames, content: box-buildkit.ci-accelerator.svc }
+  - it: names no router in the certificate without one
+    template: charts/buildkit/templates/certificates.yaml
+    documentSelector: { path: metadata.name, value: box-buildkit-tls }
+    set:
+      global.router.enabled: false
+      control-plane.router.enabled: false
+      buildkit.networkPolicy.ingress.clientNamespaces: true
+    asserts:
+      - notContains: { path: spec.dnsNames, content: box-router }
+      - notContains: { path: spec.dnsNames, content: "" }
+      - lengthEqual: { path: spec.dnsNames, count: 8 }
+
+  # The jobs reach the daemons only through the routers.
+  - it: admits the routers and the controller to the daemons, not the jobs namespace
+    template: charts/buildkit/templates/networkpolicy.yaml
+    asserts:
+      - equal:
+          path: spec.ingress[0].from
+          value:
+            - podSelector: { matchLabels: { ci-accelerator.io/component: controller } }
+            - podSelector: { matchLabels: { ci-accelerator.io/component: router } }
+  - it: admits the jobs namespace to the daemons without the router
+    template: charts/buildkit/templates/networkpolicy.yaml
+    set:
+      global.router.enabled: false
+      control-plane.router.enabled: false
+      buildkit.networkPolicy.ingress.clientNamespaces: true
+    asserts:
+      - contains:
+          path: spec.ingress[0].from
+          content:
+            namespaceSelector:
+              matchExpressions:
+                - { key: kubernetes.io/metadata.name, operator: In, values: [ci-accelerator-jobs] }
+  - it: points the jobs at the daemons' Service without the router
+    template: charts/gitlab-runner/templates/configmap.yaml
+    set:
+      global.router.enabled: false
+      control-plane.router.enabled: false
+      buildkit.networkPolicy.ingress.clientNamespaces: true
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: '"BUILDKIT_REMOTE_ADDR=tcp://box-buildkit\.ci-accelerator\.svc:1234"'
+
+  - it: runs the router on the build nodes with the daemons' priority
+    template: charts/control-plane/templates/router.yaml
+    documentSelector: { path: kind, value: DaemonSet }
+    asserts:
+      - equal: { path: metadata.name, value: box-router }
+      - equal: { path: spec.template.spec.priorityClassName, value: ci-accelerator-box-buildkit }
+      - equal: { path: spec.template.spec.nodeSelector, value: { ci-accelerator.io/node-role: build, kubernetes.io/os: linux } }
+      - contains:
+          path: spec.template.spec.tolerations
+          content: { key: ci-accelerator.io/node-role, operator: Equal, value: build, effect: NoSchedule }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-daemons-service=box-buildkit-headless" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-namespace=ci-accelerator" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-jobs-namespace=ci-accelerator-jobs" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-controller=https://box-controller.ci-accelerator.svc:8443" }
+  - it: lets the routers call the controller
+    template: charts/control-plane/templates/controller.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -api-allow-router=ci-accelerator/box-router
+  - it: admits the jobs namespace to the routers
+    template: charts/control-plane/templates/networkpolicy.yaml
+    documentSelector: { path: metadata.name, value: box-router }
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator-jobs]
+
+  - it: refuses the router switches when they differ
+    template: validate.yaml
+    set:
+      control-plane.router.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: global.router.enabled \(true\) and control-plane.router.enabled \(false\) must be equal
+  - it: refuses the router without the control plane
+    template: validate.yaml
+    set:
+      control-plane.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: the build router is part of the control plane
+  - it: refuses a renamed control plane with the router
+    template: validate.yaml
+    set:
+      control-plane.fullnameOverride: cp
+    asserts:
+      - failedTemplate:
+          errorPattern: control-plane.fullnameOverride and nameOverride are not supported with the router
+  - it: refuses to keep the jobs away from the daemons without the router
+    template: validate.yaml
+    set:
+      global.router.enabled: false
+      control-plane.router.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: set buildkit.networkPolicy.ingress.clientNamespaces=true

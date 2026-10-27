@@ -82,7 +82,8 @@ tls:
     # -- Cluster DNS domain, for the fully qualified Service names.
     clusterDomain: cluster.local
     # -- More names and addresses for the daemon certificate (e.g. a node
-    # address for NodePort clients).
+    # address for NodePort clients, or a TCP proxy's Service such as the
+    # ci-accelerator build router). Names are rendered with tpl.
     extraDnsNames: []
     ipAddresses: []
   client:
@@ -161,6 +162,11 @@ networkPolicy:
   # -- Render a NetworkPolicy for the daemon pods.
   enabled: false
   ingress:
+    # -- The namespaces of tls.client.namespaces may connect to port 1234.
+    # false when the clients reach the daemons through a proxy (the
+    # ci-accelerator build router, admitted by extraFrom): they still hold
+    # their certificate, which the daemons check through the proxy.
+    clientNamespaces: true
     # -- Namespaces whose pods may connect to port 1234, in addition to
     # tls.client.namespaces.
     namespaces: []

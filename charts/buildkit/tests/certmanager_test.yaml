@@ -187,6 +187,27 @@ tests:
           path: spec.ipAddresses
           value: [10.0.0.5]
 
+  # A proxy in front of the daemons (the box's router) passes the clients'
+  # TLS through: its Service's names, rendered by a parent chart, join the
+  # certificate; an entry that renders empty is left out.
+  - it: renders extra names through tpl and drops empty ones
+    template: certificates.yaml
+    documentSelector:
+      path: metadata.name
+      value: bk-buildkit-tls
+    set:
+      tls.certManager.extraDnsNames: ["{{ .Release.Name }}-router.{{ .Release.Namespace }}.svc", "{{ if false }}x{{ end }}"]
+    asserts:
+      - contains:
+          path: spec.dnsNames
+          content: bk-router.builds.svc
+      - notContains:
+          path: spec.dnsNames
+          content: ""
+      - lengthEqual:
+          path: spec.dnsNames
+          count: 9
+
   - it: issues a client certificate into every listed namespace
     template: certificates.yaml
     set:

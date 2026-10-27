@@ -6,8 +6,8 @@ CHARTS := charts/buildkit
 # The control-plane chart needs its own required values.
 CONTROL_PLANE := charts/control-plane
 CONTROL_PLANE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set controller.api.tls.existingSecret=lint-api --set jobs.namespace=ci-jobs
-CONTROL_PLANE_SIGN_IN_SET := --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["root"]}]'
-CONTROL_PLANE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1
+CONTROL_PLANE_SIGN_IN_SET := --set router.enabled=true --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["root"]}]'
+CONTROL_PLANE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1 --set jobs.namespace=ci-jobs --set router.enabled=true --set networkPolicy.enabled=true
 # Extra values files every chart check also renders with.
 CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
 # Values the charts require and the files above leave to the installer.

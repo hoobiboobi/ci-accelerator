@@ -350,6 +350,7 @@
           "additionalProperties": false,
           "required": ["namespaces", "extraFrom"],
           "properties": {
+            "clientNamespaces": { "type": "boolean" },
             "namespaces": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/dnsLabel" } },
             "extraFrom": { "type": "array", "items": { "type": "object" } }
           }

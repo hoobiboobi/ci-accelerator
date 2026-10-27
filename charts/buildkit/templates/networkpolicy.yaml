@@ -24,8 +24,8 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Clients (CI jobs); mutual TLS still decides who gets in. The disk
-    # probe answers numbers only.
+    # Clients (CI jobs, directly or through a proxy); mutual TLS still
+    # decides who gets in. The disk probe answers numbers only.
     - ports:
         - port: grpc
           protocol: TCP

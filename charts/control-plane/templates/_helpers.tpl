@@ -24,6 +24,51 @@ to stay a valid name.
 {{- printf "%s-web" (include "control-plane.prefix" .) }}
 {{- end }}
 
+{{/* The build router: DaemonSet, ServiceAccount, Service. */}}
+{{- define "control-plane.routerName" -}}
+{{- printf "%s-router" (include "control-plane.prefix" .) }}
+{{- end }}
+
+{{- define "control-plane.router" -}}
+{{- if dig "router" "enabled" false .Values.AsMap }}true{{ end }}
+{{- end }}
+
+{{/*
+The daemons' headless Service from daemons.discover (host:port): its name,
+namespace (default: the release's) and port. As JSON.
+*/}}
+{{- define "control-plane.daemonsService" -}}
+{{- $d := include "control-plane.discover" . }}
+{{- $host := splitList ":" $d | first }}
+{{- $labels := splitList "." $host }}
+{{- $ns := .Release.Namespace }}
+{{- if gt (len $labels) 1 }}{{ $ns = index $labels 1 }}{{ end }}
+{{- toJson (dict "name" (first $labels) "namespace" $ns "port" (splitList ":" $d | last)) }}
+{{- end }}
+
+{{/* Namespaces whose pods may reach the router. As JSON. */}}
+{{- define "control-plane.routerClients" -}}
+{{- $out := list }}
+{{- range (dig "router" "clientNamespaces" (list) .Values.AsMap) }}{{ $out = append $out (tpl . $) }}{{ end }}
+{{- if not $out }}{{ with include "control-plane.jobsNamespace" . }}{{ $out = list . }}{{ end }}{{ end }}
+{{- toJson $out }}
+{{- end }}
+
+{{/* Placement on the build nodes (global.buildNodes) merged with router's. */}}
+{{- define "control-plane.routerNodeSelector" -}}
+{{- $bn := default (dict) .Values.global.buildNodes }}
+{{- $sel := dict "kubernetes.io/os" "linux" }}
+{{- if ne (toString $bn.enabled) "false" }}{{ $sel = merge (deepCopy (default (dict) $bn.selector)) $sel }}{{ end }}
+{{- toYaml (merge (deepCopy (default (dict) .Values.router.nodeSelector)) $sel) }}
+{{- end }}
+
+{{- define "control-plane.routerTolerations" -}}
+{{- $bn := default (dict) .Values.global.buildNodes }}
+{{- $t := list }}
+{{- if ne (toString $bn.enabled) "false" }}{{ $t = default (list) $bn.tolerations }}{{ end }}
+{{- with concat $t (default (list) .Values.router.tolerations) }}{{ toYaml . }}{{ end }}
+{{- end }}
+
 {{- define "control-plane.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
@@ -229,6 +274,14 @@ Checks that fail the render with a message naming the value to set.
 {{- end }}
 {{- if and .Values.tls.existingSecret (not .Values.controller.api.tls.existingSecret) }}
 {{- fail (printf "control-plane: with tls.existingSecret (no cert-manager) the controller's API needs controller.api.tls.existingSecret too: a Secret with tls.crt, tls.key and ca.crt for the name %s" (include "control-plane.controllerName" .)) }}
+{{- end }}
+{{- if include "control-plane.router" . }}
+{{- if not (include "control-plane.jobsNamespace" .) }}
+{{- fail "control-plane: the router knows each CI job by its pod: set jobs.namespace" }}
+{{- end }}
+{{- if eq (int .Values.router.port) (int .Values.router.healthPort) }}
+{{- fail "control-plane: router.port and router.healthPort must differ" }}
+{{- end }}
 {{- end }}
 {{- if eq (int .Values.controller.api.port) (int .Values.web.port) }}
 {{- fail "control-plane: controller.api.port and web.port must differ" }}

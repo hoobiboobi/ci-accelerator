@@ -64,6 +64,9 @@ spec:
             - -api-listen=:{{ int $v.api.port }}
             - -api-tls-dir=/api-tls
             - -api-allow={{ .Release.Namespace }}/{{ include "control-plane.webName" . }}
+            {{- if include "control-plane.router" . }}
+            - -api-allow-router={{ .Release.Namespace }}/{{ include "control-plane.routerName" . }}
+            {{- end }}
             - -discover={{ include "control-plane.discover" . }}
             {{- with .Values.daemons.serverName }}
             - -server-name={{ tpl . $ }}

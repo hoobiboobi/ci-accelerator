@@ -33,7 +33,13 @@ Kubernetes: `>=1.34.0-0`
 | buildkit.diskProbe.enabled | bool | `true` | The probe next to each daemon (charts/buildkit diskProbe). |
 | buildkit.diskProbe.port | int | `9180` | Equal to control-plane.daemons.diskProbePort. |
 | buildkit.networkPolicy.enabled | bool | `true` |  |
+| buildkit.networkPolicy.ingress.clientNamespaces | bool | `false` |  |
 | buildkit.networkPolicy.ingress.extraFrom[0].podSelector.matchLabels."ci-accelerator.io/component" | string | `"controller"` |  |
+| buildkit.networkPolicy.ingress.extraFrom[1].podSelector.matchLabels."ci-accelerator.io/component" | string | `"router"` |  |
+| buildkit.tls.certManager.extraDnsNames[0] | string | `"{{ include \"ci-accelerator.routerDnsName\" (dict \"root\" . \"i\" 0) }}"` |  |
+| buildkit.tls.certManager.extraDnsNames[1] | string | `"{{ include \"ci-accelerator.routerDnsName\" (dict \"root\" . \"i\" 1) }}"` |  |
+| buildkit.tls.certManager.extraDnsNames[2] | string | `"{{ include \"ci-accelerator.routerDnsName\" (dict \"root\" . \"i\" 2) }}"` |  |
+| buildkit.tls.certManager.extraDnsNames[3] | string | `"{{ include \"ci-accelerator.routerDnsName\" (dict \"root\" . \"i\" 3) }}"` |  |
 | buildkit.tls.client.namespaces[0] | string | `"{{ .Values.global.jobs.namespace }}"` |  |
 | control-plane.caches.fromConfigMap | string | `"{{ .Release.Name }}-runner-caches"` |  |
 | control-plane.daemons.discover | string | `"{{ include \"ci-accelerator.buildkitHeadless\" . }}.{{ .Release.Namespace }}.svc:1234"` |  |
@@ -42,6 +48,8 @@ Kubernetes: `>=1.34.0-0`
 | control-plane.gitlab.urlsFrom.configMap | string | `"{{ .Release.Name }}-runner-gitlab"` |  |
 | control-plane.jobs.namespace | string | `"{{ .Values.global.jobs.namespace }}"` |  |
 | control-plane.networkPolicy.enabled | bool | `true` | Keep the box's CI jobs and builds away from the console: the jobs namespace and the daemons (RUN steps share their network) may not connect; Ingress controllers in other namespaces and port-forward still do. Needs a CNI that enforces NetworkPolicy; see charts/control-plane. |
+| control-plane.router.enabled | bool | `true` |  |
+| control-plane.router.priorityClassName | string | `"{{ .Release.Namespace }}-{{ include \"ci-accelerator.buildkitName\" . }}"` |  |
 | control-plane.signIn.enabled | bool | `false` |  |
 | control-plane.tls.certManager.issuerRef.name | string | `"{{ include \"ci-accelerator.issuerName\" . }}"` |  |
 | control-plane.tls.existingSecret | string | `""` |  |
@@ -84,6 +92,7 @@ Kubernetes: `>=1.34.0-0`
 | global.console.url | string | `""` | The console's address as users reach it (https://...). When set, every job prints the link to its page in its log, and sign-in through GitLab (control-plane.signIn) uses it. Empty: no link. |
 | global.jobs.architecture | string | `"amd64"` | CPU architecture of the build nodes (kubernetes.io/arch). The runner picks its helper image by it. |
 | global.jobs.namespace | string | `"ci-accelerator-jobs"` | Namespace of the CI job pods. They run untrusted code, so they get their own namespace, apart from the runner and the daemons. Keep gitlab-runner.runners.jobNamespace equal to it. |
+| global.router.enabled | bool | `true` | CI jobs connect to the build router (part of the control plane), which sends each job to the daemon where its project's cache is. Keep equal to control-plane.router.enabled. false: jobs use the daemons' Service (their own node's daemon); then also set buildkit.networkPolicy.ingress.clientNamespaces=true. |
 | global.tls.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | cert-manager issuer for daemon and client certificates. Empty name: a CA dedicated to this release is created (see buildkit.tls). |
 | jobsNamespace.create | bool | `true` | false: the namespace exists already (or GitOps creates it); it needs the client certificate (issued here) and Pod Security "baseline". |
 | jobsNamespace.podSecurity | string | `"baseline"` | Pod Security level enforced for the job pods. |

@@ -13,9 +13,9 @@ runner end to end. See "What the e2e proves" below.
 
 | Concern | How |
 |---|---|
-| Where the daemons are | `BUILDKIT_REMOTE_ADDR=tcp://<buildkit>.<namespace>.svc:1234` in every job |
+| Where the daemons are | `BUILDKIT_REMOTE_ADDR` in every job: the box's build router, `tcp://<release>-router.<namespace>.svc:1234`, which sends each job to the daemon where its project's cache is; with `charts/buildkit` alone, the daemons' Service, `tcp://<buildkit>.<namespace>.svc:1234` |
 | Client certificate | The Secret cert-manager issues into the jobs namespace (buildkit chart: `tls.client.namespaces`), mounted read-only at `BUILDKIT_TLS_DIR=/certs` |
-| Warm cache | Job pods are placed on the build nodes (node selector + toleration). The buildkit Service prefers the daemon on the client's node |
+| Warm cache | Job pods are placed on the build nodes (node selector + toleration). The router (or, without it, the buildkit Service) prefers the client's node |
 | Small jobs | 50m CPU / 64Mi requested, 512Mi memory limit: the build runs in the daemon |
 | Isolation | Jobs run in their own namespace (`runners.jobNamespace`, Pod Security `baseline` is enough), without a Kubernetes API token |
 | Least privilege | The runner gets only the permissions the Kubernetes executor needs in the jobs namespace, not the chart's default `*` on core resources |

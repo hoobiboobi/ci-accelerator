@@ -41,6 +41,12 @@ Kubernetes: `>=1.34.0-0`
 | gitlab.token | object | `{"existingSecret":"","key":"token"}` | A token that can read the projects' jobs (read_api): a Secret's key. The controller reads with it the pipelines' jobs (how long each waited for a runner and ran, jobs of other runners) while the console's pages are in use, once per finished pipeline; GitLab's comparison of two commits, which settles "files or node"; and the end of a job's log on request. Without it, job times come from the job pods and "files or node" stays unclear. Not with sign-in: GitLab is then read with each person's own token. |
 | gitlab.urls | list | `[]` | URLs of the GitLab instances whose jobs the runners take, exactly as the runners have them (gitlabUrl, slash included): every build's trace id carries a hash of that string. |
 | gitlab.urlsFrom | object | `{"configMap":"","key":"urls"}` | Or read them from a ConfigMap key (comma-separated). Rendered with tpl. |
+| global.buildNodes.enabled | bool | `true` | false: ignore selector/tolerations below and run on any Linux node. |
+| global.buildNodes.selector."ci-accelerator.io/node-role" | string | `"build"` |  |
+| global.buildNodes.tolerations[0].effect | string | `"NoSchedule"` |  |
+| global.buildNodes.tolerations[0].key | string | `"ci-accelerator.io/node-role"` |  |
+| global.buildNodes.tolerations[0].operator | string | `"Equal"` |  |
+| global.buildNodes.tolerations[0].value | string | `"build"` |  |
 | global.console.url | string | `""` | Where browsers reach the console; the default of signIn.url. |
 | global.tls.issuerRef.group | string | `"cert-manager.io"` |  |
 | global.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
@@ -55,10 +61,28 @@ Kubernetes: `>=1.34.0-0`
 | nameOverride | string | `""` | Name of the app (app.kubernetes.io/name). Default: control-plane. |
 | networkPolicy.deniedComponents | list | `["buildkit"]` | Pods of this namespace whose ci-accelerator.io/component label is one of these may not reach the web: the daemons, whose network every build shares. |
 | networkPolicy.deniedNamespaces | list | `[]` | More namespaces whose pods may not reach the web (the jobs namespace is always one when jobs.namespace is set). Rendered with tpl. |
-| networkPolicy.enabled | bool | `false` | Render two NetworkPolicies: the web admits connections from every namespace except this one, the jobs namespace and deniedNamespaces, and from pods of this namespace except deniedComponents; the controller admits only the web. Only ingress is limited. |
+| networkPolicy.enabled | bool | `false` | Render the NetworkPolicies: the web admits connections from every namespace except this one, the jobs namespace and deniedNamespaces, and from pods of this namespace except deniedComponents; the controller admits only the web and the routers; the routers admit only their clients' namespaces. Only ingress is limited. |
 | networkPolicy.extraFrom | list | `[]` | More NetworkPolicyPeer entries that may reach the web, e.g. an ipBlock with the node addresses when the Ingress controller runs on the host network. |
 | retention.days | int | `30` | Days builds are kept in full (steps, reasons). Each image's daily figures (builds by outcome, build times) are kept a year regardless. At 150 pipelines a day with 15 image builds each, a project takes about 0.25 GB per 30 days. |
 | retention.outputDays | int | `7` | Days the steps' output is kept. |
+| router.clientNamespaces | list | `[]` | Namespaces whose pods may connect to the router; default: the jobs namespace. Rendered with tpl. |
+| router.crossZone | bool | `true` | When no daemon of the job's zone (topology.kubernetes.io/zone of the daemons' nodes) is ready: true sends the job to another zone's daemon, false refuses the connection. |
+| router.drainSeconds | int | `300` | Seconds open connections (running builds) may finish when a router stops; the pod's grace period is this plus preStopSleepSeconds and 10. |
+| router.enabled | bool | `false` | Run the router (the box does). The runners must then use tcp://<release>-router.<namespace>.svc:1234. |
+| router.healthPort | int | `8080` | The port of /livez and /readyz. |
+| router.nodeSelector | object | `{}` | Merged over global.buildNodes.selector. |
+| router.overloadBuilds | int | `0` | Skip a daemon running this many builds when another one is free; 0: never (a busy warm daemon is usually still faster than a cold one). |
+| router.podAnnotations | object | `{}` |  |
+| router.podLabels | object | `{}` |  |
+| router.port | int | `1234` | The port the jobs connect to. |
+| router.preStopSleepSeconds | int | `5` | Seconds a stopping router keeps accepting while the Service drops it. |
+| router.priorityClassName | string | `""` | PriorityClass of the router pods; the box gives them the daemons'. |
+| router.resources.limits.memory | string | `"256Mi"` |  |
+| router.resources.requests.cpu | string | `"20m"` |  |
+| router.resources.requests.memory | string | `"32Mi"` |  |
+| router.routing | string | `"PreferSameNode"` | How the Service picks a router: PreferSameNode (the job's node, any other when it has none ready), Local (the job's node only) or Cluster. |
+| router.tolerations | list | `[]` | Appended to global.buildNodes.tolerations. |
+| router.warmDays | int | `7` | Days a build keeps its project warm on its node. |
 | signIn | object | `{"enabled":false,"gitlab":[],"sessionKey":{"existingSecret":"","key":"key"},"url":""}` | Sign-in through GitLab. Each person signs in with a GitLab the runners serve and sees the projects whose jobs GitLab lets them read (Reporter or more, or public pipelines); GitLab is read with their own token. GitLab never calls the console: the browser carries the redirects. |
 | signIn.gitlab | list | `[]` | One OAuth application per GitLab (User or Group Settings > Applications, or Admin > Applications on your own GitLab): confidential, scopes openid and read_api, redirect URI <url>/auth/callback/<id> (the NOTES and the controller's log print it).   url: exactly as the runners have it; may be left empty when the        console serves one GitLab   existingSecret: a Secret with the keys client-id and client-secret   admins: GitLab usernames who see everything (builds of no known        project, the JSON API) |
 | signIn.sessionKey | object | `{"existingSecret":"","key":"key"}` | A Secret holding 32 random bytes in base64 (openssl rand -base64 32); it seals each session's GitLab token. Changing it signs everyone out. |

@@ -63,6 +63,7 @@ Kubernetes: `>=1.34.0-0`
 | networkPolicy.egress.dns | list | `[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}},"podSelector":{"matchLabels":{"k8s-app":"kube-dns"}}}]` | Peers that serve DNS on port 53. |
 | networkPolicy.egress.extraRules | list | `[]` | More NetworkPolicyEgressRule entries (rendered with tpl). |
 | networkPolicy.enabled | bool | `false` | Render a NetworkPolicy for the daemon pods. |
+| networkPolicy.ingress.clientNamespaces | bool | `true` | The namespaces of tls.client.namespaces may connect to port 1234. false when the clients reach the daemons through a proxy (the ci-accelerator build router, admitted by extraFrom): they still hold their certificate, which the daemons check through the proxy. |
 | networkPolicy.ingress.extraFrom | list | `[]` | More NetworkPolicyPeer entries for port 1234 (e.g. an ipBlock for NodePort clients outside the cluster). |
 | networkPolicy.ingress.namespaces | list | `[]` | Namespaces whose pods may connect to port 1234, in addition to tls.client.namespaces. |
 | nodeSelector | object | `{}` | Merged over global.buildNodes.selector (and kubernetes.io/os: linux). |
@@ -107,7 +108,7 @@ Kubernetes: `>=1.34.0-0`
 | tls.certManager.clusterDomain | string | `"cluster.local"` | Cluster DNS domain, for the fully qualified Service names. |
 | tls.certManager.clusterResourceNamespace | string | `"cert-manager"` | Namespace where cert-manager's ClusterIssuers read their Secrets (its --cluster-resource-namespace; by default its own namespace). With an empty global.tls.issuerRef the chart puts its CA there: a self-signed Issuer, the CA Certificate and its Secret. That Secret (the CA key) stays after `helm uninstall`. |
 | tls.certManager.duration | string | `"8760h"` | Lifetime of the daemon and client certificates. cert-manager renews them after two thirds; the daemons pick up a renewed certificate only when they restart (see reloader), within the remaining third. |
-| tls.certManager.extraDnsNames | list | `[]` | More names and addresses for the daemon certificate (e.g. a node address for NodePort clients). |
+| tls.certManager.extraDnsNames | list | `[]` | More names and addresses for the daemon certificate (e.g. a node address for NodePort clients, or a TCP proxy's Service such as the ci-accelerator build router). Names are rendered with tpl. |
 | tls.certManager.ipAddresses | list | `[]` |  |
 | tls.client.namespaces | list | `[]` | Namespaces that get a client certificate in Secret <fullname>-client (tls.crt, tls.key, ca.crt), e.g. the namespace of the CI job pods. They must exist. With source=certManager only. Entries are rendered with tpl, so a parent chart may write "{{ .Values.global.<key> }}". |
 | tls.existingSecret | string | `""` | With source=existingSecret: name of a Secret in the release namespace with the daemon's certificate (tls.crt, tls.key) and the CA that signs client certificates (ca.crt). The server certificate must cover the Service names clients use (<fullname>.<namespace>.svc). |

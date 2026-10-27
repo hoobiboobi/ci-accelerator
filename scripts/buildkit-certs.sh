@@ -7,11 +7,16 @@
 #     --no-server --client runner      # one more client from the same CA
 #   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
 #     --controller bk                  # the controller API's server certificate
+#   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
+#     --router bk                      # daemons reached through the build router
 #
 # --name is the chart's full name (<release>-buildkit, or the release name
 # when it already contains "buildkit"); the chart prints it when
 # tls.existingSecret is missing. The server certificate covers the Service
-# names clients use; add more with --san (DNS:name or IP:address).
+# names clients use; add more with --san (DNS:name or IP:address), and the
+# build router's Service names with --router <prefix> (the control plane's
+# fullnameOverride, or the release name): jobs reach the daemons through it
+# and check its name.
 #
 # Output (private keys mode 0600, directory 0700):
 #   <out>/ca/ca.crt, ca.key       the CA; keep ca.key offline, it signs clients
@@ -31,7 +36,7 @@
 
 set -euo pipefail
 
-usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 die() { echo "buildkit-certs: $*" >&2; exit 1; }
 
 NAME=""
@@ -44,6 +49,7 @@ CA_DAYS=3650
 DAYS=365
 EXTRA_SANS=""
 CONTROLLER=""
+ROUTER=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,6 +61,7 @@ while [ $# -gt 0 ]; do
     --client) CLIENT=${2:-}; shift 2 ;;
     --no-server) SERVER=0; shift ;;
     --controller) CONTROLLER=${2:-}; shift 2 ;;
+    --router) ROUTER=${2:-}; shift 2 ;;
     --ca-days) CA_DAYS=${2:-}; shift 2 ;;
     --days) DAYS=${2:-}; shift 2 ;;
     -h|--help) usage 0 ;;
@@ -76,6 +83,14 @@ if [ -n "$CONTROLLER" ]; then
   [ -n "$NAMESPACE" ] || die "--namespace is required for the controller API's certificate"
   printf '%s' "$NAMESPACE" | grep -Eq "$dns_label" || die "--namespace: not a DNS label: $NAMESPACE"
   SERVER=0
+fi
+if [ -n "$ROUTER" ]; then
+  printf '%s' "$ROUTER" | grep -Eq "$dns_label" || die "--router: not a DNS label: $ROUTER"
+  # The control plane's rule: <prefix> cut to 40 characters, then "-router".
+  router=${ROUTER:0:40}; router=${router%-}-router
+  for suffix in "" ".$NAMESPACE" ".$NAMESPACE.svc" ".$NAMESPACE.svc.$CLUSTER_DOMAIN"; do
+    EXTRA_SANS="$EXTRA_SANS DNS:$router$suffix"
+  done
 fi
 [ "$CLIENT" != ca ] && [ "$CLIENT" != server ] || die "--client: '$CLIENT' is reserved"
 case "$CA_DAYS$DAYS" in *[!0-9]*) die "--ca-days and --days take a number of days" ;; esac

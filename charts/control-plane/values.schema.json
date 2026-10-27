@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["image", "gitlab", "daemons", "tls", "jobs", "retention", "controller", "web"],
+  "required": ["image", "gitlab", "daemons", "tls", "jobs", "retention", "controller", "web", "router"],
   "properties": {
     "enabled": { "type": "boolean", "description": "The switch a parent chart uses to include this one." },
     "nameOverride": { "type": "string" },
@@ -247,6 +247,58 @@
         "affinity",
         "podLabels",
         "podAnnotations"
+      ]
+    },
+    "router": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "healthPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "routing": { "enum": ["PreferSameNode", "Local", "Cluster"] },
+        "crossZone": { "type": "boolean" },
+        "overloadBuilds": { "type": "integer", "minimum": 0 },
+        "warmDays": { "type": "integer", "minimum": 1, "maximum": 90 },
+        "drainSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 },
+        "preStopSleepSeconds": { "type": "integer", "minimum": 0, "maximum": 60 },
+        "priorityClassName": { "type": "string" },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "limits": { "type": "object", "additionalProperties": { "type": ["string", "number"] } },
+            "requests": { "type": "object", "additionalProperties": { "type": ["string", "number"] } },
+            "claims": { "type": "array" }
+          }
+        },
+        "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+        "tolerations": { "type": "array", "items": { "type": "object" } },
+        "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+        "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } },
+        "clientNamespaces": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "required": [
+        "enabled",
+        "port",
+        "healthPort",
+        "routing",
+        "crossZone",
+        "overloadBuilds",
+        "warmDays",
+        "drainSeconds",
+        "preStopSleepSeconds",
+        "priorityClassName",
+        "resources",
+        "nodeSelector",
+        "tolerations",
+        "podLabels",
+        "podAnnotations",
+        "clientNamespaces"
       ]
     },
     "networkPolicy": {
