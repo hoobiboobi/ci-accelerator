@@ -381,14 +381,19 @@ func plural(n int) string {
 	return "s"
 }
 
+// bytesText writes a size in binary units with their own names (1 GiB =
+// 1024 MiB): BuildKit's GC limits are binary too, and a "GB" that means
+// GiB would be 7 % off.
 func bytesText(n int64) string {
 	switch {
+	case n >= 1<<40:
+		return fmt.Sprintf("%.2f TiB", float64(n)/(1<<40))
 	case n >= 1<<30:
-		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
 	case n >= 1<<20:
-		return fmt.Sprintf("%.0f MB", float64(n)/(1<<20))
+		return fmt.Sprintf("%.0f MiB", float64(n)/(1<<20))
 	case n >= 1<<10:
-		return fmt.Sprintf("%.0f kB", float64(n)/(1<<10))
+		return fmt.Sprintf("%.0f KiB", float64(n)/(1<<10))
 	}
 	return fmt.Sprintf("%d B", n)
 }

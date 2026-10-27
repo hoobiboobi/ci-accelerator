@@ -213,7 +213,8 @@ func (s *Store) scanBuilds(ctx context.Context, rows *sql.Rows) ([]*Stored, erro
 func (s *Store) loadSteps(ctx context.Context, st *Stored) error {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.key, COALESCE(s.name, d.name, ''), s.identity, s.state, s.start_ms, s.dur_ms, s.lines,
-			(SELECT ref FROM builds x WHERE x.id = s.received_from), s.error
+			(SELECT ref FROM builds x WHERE x.id = s.received_from), s.error,
+			s.cpu_ms, s.throttled_ms, s.read_bytes, s.write_bytes
 		FROM steps s LEFT JOIN step_defs d ON d.identity = s.identity
 		WHERE s.build_id = ? ORDER BY s.idx`, st.ID)
 	if err != nil {
@@ -229,8 +230,10 @@ func (s *Store) loadSteps(ctx context.Context, st *Stored) error {
 			start, dur int64
 			lines      string
 			from       sql.NullString
+			cpu, thr   int64
 		)
-		if err := rows.Scan(&step.Key, &step.Name, &ident, &state, &start, &dur, &lines, &from, &step.Error); err != nil {
+		if err := rows.Scan(&step.Key, &step.Name, &ident, &state, &start, &dur, &lines, &from, &step.Error,
+			&cpu, &thr, &step.Usage.ReadBytes, &step.Usage.WriteBytes); err != nil {
 			return err
 		}
 		if ident.Valid {
@@ -244,6 +247,7 @@ func (s *Store) loadSteps(ctx context.Context, st *Stored) error {
 			step.Line = step.Lines[0].Start
 		}
 		step.ReceivedFrom = from.String
+		step.Usage.CPU, step.Usage.Throttled = time.Duration(cpu)*time.Millisecond, time.Duration(thr)*time.Millisecond
 		b.Steps = append(b.Steps, step)
 	}
 	return rows.Err()

@@ -230,3 +230,14 @@ func TestDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageFacts(t *testing.T) {
+	got := usageFacts(history.Usage{CPU: 9 * time.Second, Throttled: time.Second, ReadBytes: 2_000_000, WriteBytes: 0}, 3*time.Second)
+	if len(got) != 3 || got[0].K != "CPU time" || !strings.Contains(got[0].V, "3.0 cores busy on average") ||
+		got[1].K != "Held back by a CPU limit" || got[2].V != "read 2 MiB, wrote 0 B" {
+		t.Errorf("%+v", got)
+	}
+	if got := usageFacts(history.Usage{}, time.Second); len(got) != 0 {
+		t.Errorf("a step without usage: %+v", got)
+	}
+}

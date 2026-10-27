@@ -38,6 +38,9 @@ type Step struct {
 	Started   time.Time
 	Completed time.Time
 	Error     string
+	// Usage is what the step's processes used when this build executed
+	// it; zero for a step from the cache.
+	Usage Usage
 	// What the step printed, when this build executed it: secrets masked,
 	// clipped to MaxStepOutput. A cached or received step prints nothing
 	// in this build.
@@ -168,6 +171,13 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 	}
 	b.Attribution = att
 	b.Steps, b.ContextBytes = b.steps(progress)
+	for i := range b.Steps {
+		// The work of a step another build ran (or the cache held) is not
+		// this build's: its usage belongs to whoever executed it.
+		if b.Steps[i].State != Built {
+			b.Steps[i].Usage = Usage{}
+		}
+	}
 	b.Warnings = warnings(progress)
 	return b, nil
 }
@@ -263,6 +273,12 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 		if b.prov != nil {
 			s.StepID = b.prov.DigestMapping[d]
 			s.Identity = b.prov.Identity[s.StepID]
+			if u, ok := b.prov.Usage[s.StepID]; ok {
+				s.Usage.CPU += u.CPU
+				s.Usage.Throttled += u.Throttled
+				s.Usage.ReadBytes += u.ReadBytes
+				s.Usage.WriteBytes += u.WriteBytes
+			}
 			s.Line = b.prov.Lines[s.StepID]
 			s.Lines = b.prov.Ranges[s.StepID]
 		}
