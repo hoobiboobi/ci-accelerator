@@ -16,7 +16,7 @@ to the log's 0.1 s.
 
 Exit status 1 when anything disagrees. Python 3 standard library only.
 """
-import argparse, hashlib, json, re, ssl, sys, urllib.request
+import argparse, hashlib, json, re, ssl, sys, time, urllib.error, urllib.request
 from datetime import datetime
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\r")
@@ -27,10 +27,17 @@ CACHED = re.compile(r"^#(\d+) CACHED$")
 ERROR = re.compile(r"^#(\d+) ERROR")
 
 
-def get(url, headers, ctx=None, data=None):
+def get(url, headers, ctx=None, data=None, tries=4):
     req = urllib.request.Request(url, headers=headers, data=data, method="POST" if data is not None else "GET")
-    with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
-        return r.read()
+    for i in range(tries):
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
+                return r.read()
+        except (OSError, urllib.error.HTTPError) as e:
+            # GitLab's API times out or answers 5xx now and then.
+            if i == tries - 1 or (isinstance(e, urllib.error.HTTPError) and e.code < 500 and e.code != 429):
+                raise
+            time.sleep(5 * (i + 1))
 
 
 def when(x):
@@ -118,8 +125,16 @@ def main():
 
     problems, checked_steps, checked_builds = [], 0, 0
     for pid in o.pipeline:
-        jobs = json.loads(get(f"{api}/projects/{o.project}/pipelines/{pid}/jobs?per_page=100", gl))
+        jobs, page = [], 1
+        while True:
+            more = json.loads(get(f"{api}/projects/{o.project}/pipelines/{pid}/jobs?per_page=100&page={page}", gl))
+            jobs += more
+            if len(more) < 100:
+                break
+            page += 1
         for j in jobs:
+            if j["status"] in ("skipped", "created", "manual", "pending"):
+                continue
             trace = get(f"{api}/projects/{o.project}/jobs/{j['id']}/trace", gl).decode("utf-8", "replace")
             runs = log_steps(trace)
             if not runs:
@@ -134,12 +149,16 @@ def main():
                 checked_builds += 1
                 b = page["Build"]
                 console = [s for s in b["Steps"] if not s["Name"].startswith("FROM ")]
-                ckeys = [s["Key"] for s in console]
-                lkeys = [s[0] for s in steps]
+                # The log prints steps as they finish (cached ones all at
+                # once, in any order); the console in the Dockerfile's.
+                bykey = {s["Key"]: s for s in console}
+                ckeys = sorted(bykey)
+                lkeys = sorted(s[0] for s in steps)
                 if ckeys != lkeys:
                     problems.append(f"{where}: steps differ: log {lkeys} console {ckeys}")
                     continue
-                for (key, name, res, secs), s in zip(steps, console):
+                for key, name, res, secs in steps:
+                    s = bykey[key]
                     checked_steps += 1
                     state = s["State"]
                     want = {"cached": "cached", "done": ("built", "received"), "error": ("failed", "canceled", "built")}.get(res, ())

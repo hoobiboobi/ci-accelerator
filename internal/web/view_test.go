@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
+	"github.com/hoobiboobi/ci-accelerator/internal/route"
+	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
 func TestHighlight(t *testing.T) {
@@ -239,5 +241,47 @@ func TestUsageFacts(t *testing.T) {
 	}
 	if got := usageFacts(history.Usage{}, time.Second); len(got) != 0 {
 		t.Errorf("a step without usage: %+v", got)
+	}
+}
+
+// A build away from its image's cache says why the router put it there,
+// for every decision the router can make.
+func TestNodeHintForEveryRouteDecision(t *testing.T) {
+	if h := string(nodeHint(nil)); !strings.Contains(h, "build router") || strings.Contains(h, "planned") {
+		t.Errorf("without the router: %q", h)
+	}
+	for _, r := range []route.Reason{route.LocalWarm, route.ZoneWarm, route.ZoneHash, route.CrossZone, route.UnknownLocal, route.UnknownHash} {
+		d := &store.Decision{Reason: r, Node: "node-1"}
+		if h := nodeHint(d); h == "" || h == nodeHint(nil) {
+			t.Errorf("%s: %q", r, h)
+		}
+		if txt := routeText(*d); strings.Contains(txt, "("+string(r)+")") {
+			t.Errorf("%s shown as a code: %q", r, txt)
+		}
+	}
+}
+
+// The usual time is the median of finished, successful builds of the same
+// target and kind; the numbers are the ones a person can recount from the
+// builds list (the case seen live: rebuilt api builds of 10.9, 5.5 and
+// 6.5 s are usually 6.5 s).
+func TestUsualTimes(t *testing.T) {
+	at := time.Date(2026, 10, 27, 23, 0, 0, 0, time.UTC)
+	row := func(target string, built int, d time.Duration, err string) store.BuildRow {
+		return store.BuildRow{Target: target, Built: built, Started: at, Completed: at.Add(d), Error: err}
+	}
+	bs := []store.BuildRow{
+		row("api", 6, 10912*time.Millisecond, ""), row("api", 3, 5507*time.Millisecond, ""), row("api", 5, 6541*time.Millisecond, ""),
+		row("api", 0, 984*time.Millisecond, ""), row("api", 0, 336*time.Millisecond, ""),
+		row("api", 4, time.Minute, "failed"),   // failed: not usual
+		{Target: "api", Built: 2, Started: at}, // running
+		row("web", 0, 2*time.Second, ""),
+	}
+	u := usualTimes(bs)["api"]
+	if u.Rebuilt != 6541*time.Millisecond || u.RebuiltN != 3 || u.Cached != 336*time.Millisecond || u.CachedN != 2 || u.RebuiltP95 != 0 {
+		t.Errorf("api: %+v", u)
+	}
+	if w := usualTimes(bs)["web"]; w.Cached != 2*time.Second || w.CachedN != 1 || w.RebuiltN != 0 {
+		t.Errorf("web: %+v", w)
 	}
 }

@@ -15,7 +15,7 @@
 
 {{template "verdict" .Verdict}}
 <div class="nums">
-  {{if .Dur}}<span><b>{{.Dur}}</b>{{if .Delta}} <span class="{{if .Slower}}slow{{else}}fast{{end}}">{{.Delta}} vs usual</span>{{else if .Usual}} <span class="muted">usual {{.Usual}}</span>{{end}}</span>{{else}}<span><b>building</b></span>{{end}}
+  {{if .Dur}}<span><b>{{.Dur}}</b>{{if .Delta}} <span class="{{if .Slower}}slow{{else}}fast{{end}}" title="usual {{.Usual}}: {{.UsualOf}}">{{.Delta}} vs usual</span>{{else if .Usual}} <span class="muted" title="{{.UsualOf}}">usual {{.Usual}}</span>{{end}}</span>{{else}}<span><b>building</b></span>{{end}}
   <span><b>{{.Ran}}</b> of {{.Steps}} step{{if ne .Steps 1}}s{{end}} ran</span>
 </div>
 {{with .LogURL}}<details class="box fold"><summary>{{icon "chev" 14 "chev"}}<b>Job log</b><span class="muted">the end of it, read from GitLab when you open this</span></summary><div class="pad">{{template "logbox" .}}</div></details>{{end}}

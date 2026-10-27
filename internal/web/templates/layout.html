@@ -46,7 +46,7 @@
       <div class="who" title="{{if .Name}}{{.Name}} · {{end}}@{{.Username}} on {{.Host}}"><span class="av" aria-hidden="true">{{projInitial .Username}}</span><span class="lbl"><span>{{if .Name}}{{.Name}}{{else}}{{.Username}}{{end}}</span><small>@{{.Username}} · {{.Host}}{{if .Admin}} · admin{{end}}</small></span></div>
       <form class="signout" method="post" action="/auth/sign-out"><button class="sbtn" type="submit" aria-label="Sign out">{{icon "out" 15}}<span class="lbl">Sign out</span></button></form>
       {{else}}
-      <div class="side-note">Preview · sign-in is off: keep the console inside the cluster.</div>
+      <div class="side-note">Sign-in is off: everyone who reaches the console sees every project.</div>
       {{end}}
       {{with .Version}}<div class="side-note side-ver" title="ci-accelerator console {{.}}">console {{.}}</div>{{end}}
     </div>

@@ -249,7 +249,7 @@ func TestSignedInSeesWhatGitLabAllows(t *testing.T) {
 	home := fetch(t, alice, ts, "GET", "/", nil)
 	home.safe(t)
 	if home.status != 200 || !strings.Contains(home.body, "@alice") || !strings.Contains(home.body, `action="/auth/sign-out"`) ||
-		!strings.Contains(home.body, `class="rrow"`) || strings.Contains(home.body, "sign-in is off") {
+		!strings.Contains(home.body, `class="rrow"`) || strings.Contains(home.body, "Sign-in is off") {
 		t.Fatalf("alice's home: %d", home.status)
 	}
 	for _, p := range paths {

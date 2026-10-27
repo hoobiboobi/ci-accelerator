@@ -124,3 +124,26 @@ func TestWarmAndDecisions(t *testing.T) {
 		t.Errorf("decisions kept past retention: %+v", got)
 	}
 }
+
+func TestPercentileIsANearestRank(t *testing.T) {
+	s := func(xs ...int) []time.Duration {
+		var out []time.Duration
+		for _, x := range xs {
+			out = append(out, time.Duration(x)*time.Second)
+		}
+		return out
+	}
+	in := s(9, 1, 5, 3)
+	for _, c := range []struct {
+		ds   []time.Duration
+		p    int
+		want int
+	}{{nil, 50, 0}, {s(4), 50, 4}, {s(4), 95, 4}, {in, 50, 3}, {s(11, 6, 5), 50, 6}, {in, 95, 9}, {in, 25, 1}, {s(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20), 95, 19}} {
+		if got := Percentile(c.ds, c.p); got != time.Duration(c.want)*time.Second {
+			t.Errorf("p%d of %v = %v, want %ds", c.p, c.ds, got, c.want)
+		}
+	}
+	if in[0] != 9*time.Second {
+		t.Error("the caller's slice was sorted")
+	}
+}

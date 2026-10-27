@@ -136,21 +136,25 @@ func (s *Store) rollupDays(ctx context.Context, from, to int64) error {
 		n := c["cached"] + c["change"] + c["farm"] + c["unclear"] + c["failed"]
 		if _, err := ins.ExecContext(ctx, k.instance, k.project, k.target, k.day, n,
 			c["cached"], c["change"], c["farm"], c["unclear"], c["failed"], a.builtMs,
-			pct(a.cached, 50).Milliseconds(), pct(a.rebuilds, 50).Milliseconds(), pct(a.rebuilds, 95).Milliseconds()); err != nil {
+			Percentile(a.cached, 50).Milliseconds(), Percentile(a.rebuilds, 50).Milliseconds(), Percentile(a.rebuilds, 95).Milliseconds()); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// pct is the p-th percentile of ds (nearest rank); 0 for none.
-func pct(ds []time.Duration, p int) time.Duration {
+// Percentile is the p-th percentile of ds by nearest rank: always one of
+// the durations itself (a build a person can find), the lower middle one
+// for p=50 of an even count; 0 for none. Every median and p95 the console
+// shows comes from here, so two pages never disagree about one set.
+func Percentile(ds []time.Duration, p int) time.Duration {
 	if len(ds) == 0 {
 		return 0
 	}
-	sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
-	i := (len(ds)*p + 99) / 100
-	return ds[max(0, min(len(ds)-1, i-1))]
+	x := append([]time.Duration(nil), ds...)
+	sort.Slice(x, func(i, j int) bool { return x[i] < x[j] })
+	i := (len(x)*p + 99) / 100
+	return x[max(0, min(len(x)-1, i-1))]
 }
 
 // ImageDays returns an image's daily figures since t, oldest first.
