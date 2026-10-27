@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -63,25 +64,31 @@ func (s *Store) SaveDecisions(ctx context.Context, ds []Decision) error {
 // RouteKey is announced when the routers' view of warmth may have changed.
 const RouteKey = "route"
 
-// Warmth is the projects' activity by node: their builds in the last
-// window, and the routers' decisions in the last hour (a build the router
-// sent somewhere warms that node before it completes).
+// Warmth is where each project's cache is: the nodes holding layers its
+// builds made (whatever the daemon is called now, and gone once a restart
+// of an emptyDir cache or GC removed them), with when they were last used;
+// and the routers' decisions of the last hour (a job the router sent
+// somewhere warms that node before its layers are listed).
 type Warmth map[route.Project][]route.Activity
 
-// Warm reads the projects' activity since since.
-func (s *Store) Warm(ctx context.Context, since time.Time) (Warmth, error) {
-	recent := s.opts.Now().Add(-time.Hour)
-	if recent.Before(since) {
-		recent = since
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT b.instance, b.project_id, d.node, MAX(b.started_at) FROM builds b JOIN daemons d ON d.id = b.daemon_id
-		WHERE b.started_at >= ? AND b.instance IS NOT NULL AND b.project_id IS NOT NULL AND d.node != ''
-		GROUP BY b.instance, b.project_id, d.node
+// Warm reads where projects are warm. live names the daemons running now:
+// decisions for others (replaced since) do not count; nil: all count.
+func (s *Store) Warm(ctx context.Context, live []string) (Warmth, error) {
+	recent := s.opts.Now().Add(-time.Hour).UnixMilli()
+	q := `SELECT instance, project_id, node, MAX(COALESCE(last_used, created_at)) FROM cache_records
+		WHERE project_id IS NOT NULL AND instance IS NOT NULL
+		GROUP BY instance, project_id, node
 		UNION ALL
 		SELECT instance, project_id, node, MAX(at) FROM route_decisions
-		WHERE at >= ? AND instance IS NOT NULL AND project_id IS NOT NULL
-		GROUP BY instance, project_id, node`, since.UnixMilli(), recent.UnixMilli())
+		WHERE at >= ? AND instance IS NOT NULL AND project_id IS NOT NULL`
+	args := []any{recent}
+	if live != nil {
+		q += ` AND daemon IN (SELECT value FROM json_each(?))`
+		b, _ := json.Marshal(live)
+		args = append(args, string(b))
+	}
+	q += ` GROUP BY instance, project_id, node`
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

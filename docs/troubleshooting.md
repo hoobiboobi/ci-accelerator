@@ -106,8 +106,8 @@ buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" debug worke
 
 **Where did the router send it?** The build page's details say "Routed by
 the build router" and why: the job's own node that built the project
-before, the node that built it most recently, or the project's node by
-hash (nobody built it in the last week). No such line: the router did not
+before, the node holding its most recently used layers, or the project's
+node by hash (no cache held its layers). No such line: the router did not
 know the job (its pod was not a CI job of the jobs namespace, or a CNI
 changed its source address) and sent it to its own node's daemon.
 

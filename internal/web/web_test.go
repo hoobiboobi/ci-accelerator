@@ -993,7 +993,7 @@ func TestRoutedBuild(t *testing.T) {
 	}
 	page := get(t, ts, fmt.Sprintf("/builds/%d", row.ID))
 	page.safe(t)
-	if !strings.Contains(page.body, "node-2, which built the project most recently (the job ran on node-1)") ||
+	if !strings.Contains(page.body, "node-2, whose cache holds the project&#39;s most recently used layers (the job ran on node-1)") ||
 		strings.Contains(page.body, "node-3") {
 		t.Errorf("the build page does not say why the router chose its node")
 	}

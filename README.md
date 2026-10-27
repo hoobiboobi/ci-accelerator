@@ -58,10 +58,10 @@ Numbers from the production setup this project is derived from:
 - **BuildKit daemons:** a DaemonSet on the nodes labelled
   `ci-accelerator.io/node-role=build` (`charts/buildkit`).
 - **The build router:** on every build node (part of the control plane).
-  Jobs connect to it, and it sends each job to the daemon where its project
-  built in the last week; a new project goes to its daemon by a hash every
-  router agrees on, so the parallel jobs of a pipeline share one daemon's
-  steps. It passes the jobs' TLS through and holds no key.
+  Jobs connect to it, and it sends each job to the daemon whose cache
+  holds the project's layers; a new project goes to its daemon by a hash
+  every router agrees on, so the parallel jobs of a pipeline share one
+  daemon's steps. It passes the jobs' TLS through and holds no key.
 - **The official gitlab-runner chart,** configured so that job pods:
   - run on the build nodes, in their own namespace;
   - get `BUILDKIT_REMOTE_ADDR` and a client certificate (`BUILDKIT_TLS_DIR`);

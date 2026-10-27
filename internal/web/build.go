@@ -694,14 +694,14 @@ func routeText(d store.Decision) string {
 	node := d.Node
 	switch d.Reason {
 	case route.LocalWarm:
-		return fmt.Sprintf("the build router: the job's own node, %s, which built the project before", node)
+		return fmt.Sprintf("the build router: the job's own node, %s, whose cache holds the project's layers", node)
 	case route.ZoneWarm:
 		if d.JobNode != "" && d.JobNode != node {
-			return fmt.Sprintf("the build router: %s, which built the project most recently (the job ran on %s)", node, d.JobNode)
+			return fmt.Sprintf("the build router: %s, whose cache holds the project's most recently used layers (the job ran on %s)", node, d.JobNode)
 		}
-		return fmt.Sprintf("the build router: %s, which built the project most recently", node)
+		return fmt.Sprintf("the build router: %s, whose cache holds the project's most recently used layers", node)
 	case route.ZoneHash:
-		return fmt.Sprintf("the build router: %s, the project's node by hash: no node had built the project in the last week", node)
+		return fmt.Sprintf("the build router: %s, the project's node by hash: no cache held its layers", node)
 	case route.CrossZone:
 		return fmt.Sprintf("the build router: %s, in another zone: no daemon of the job's zone was ready", node)
 	}

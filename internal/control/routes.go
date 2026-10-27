@@ -46,10 +46,9 @@ type Routes struct {
 	Store *store.Store
 	Live  Live // may be nil
 	Log   *slog.Logger
-	// Window is how far back builds warm a node (default a week); Every is
-	// how long an answer is reused (default 2 s).
-	Window, Every time.Duration
-	Now           func() time.Time
+	// Every is how long an answer is reused (default 2 s).
+	Every time.Duration
+	Now   func() time.Time
 
 	mu   sync.Mutex
 	last Warm
@@ -76,11 +75,14 @@ func (rt *Routes) Snapshot(r *http.Request) (Warm, []byte, error) {
 	if rt.body != nil && now.Sub(rt.at) < every {
 		return rt.last, rt.body, nil
 	}
-	window := rt.Window
-	if window == 0 {
-		window = 7 * 24 * time.Hour
+	var live []string
+	if rt.Live != nil {
+		live = []string{}
+		for _, d := range rt.Live.Daemons() {
+			live = append(live, d.Name)
+		}
 	}
-	warmth, err := rt.Store.Warm(r.Context(), now.Add(-window))
+	warmth, err := rt.Store.Warm(r.Context(), live)
 	if err != nil {
 		return Warm{}, nil, err
 	}
