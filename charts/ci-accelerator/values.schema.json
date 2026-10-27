@@ -25,6 +25,14 @@
       "properties": {
         "buildNodes": { "type": "object", "description": "Shared placement of the daemons and the job pods (charts/buildkit validates it)." },
         "tls": { "type": "object", "description": "Shared cert-manager issuerRef (charts/buildkit validates it)." },
+        "router": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean", "description": "CI jobs connect to the build router; keep equal to control-plane.router.enabled." }
+          }
+        },
         "console": {
           "type": "object",
           "properties": {

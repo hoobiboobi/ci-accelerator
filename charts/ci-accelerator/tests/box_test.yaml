@@ -37,12 +37,12 @@ tests:
           count: 0
 
   # The contract with the CI component, filled in from this release.
-  - it: points the runner's jobs at this release's daemons and client certificate
+  - it: points the runner's jobs at this release's router and client certificate
     template: charts/gitlab-runner/templates/configmap.yaml
     asserts:
       - matchRegex:
           path: data["config.template.toml"]
-          pattern: '"BUILDKIT_REMOTE_ADDR=tcp://box-buildkit\.ci-accelerator\.svc:1234"'
+          pattern: '"BUILDKIT_REMOTE_ADDR=tcp://box-router\.ci-accelerator\.svc:1234"'
       - matchRegex:
           path: data["config.template.toml"]
           pattern: 'namespace = "ci-accelerator-jobs"'
@@ -110,6 +110,10 @@ tests:
     template: charts/gitlab-runner/templates/configmap.yaml
     release:
       name: my-buildkit
+    set:
+      global.router.enabled: false
+      control-plane.router.enabled: false
+      buildkit.networkPolicy.ingress.clientNamespaces: true
     asserts:
       - matchRegex:
           path: data["config.template.toml"]
@@ -202,12 +206,13 @@ tests:
           name: box-buildkit-client
           namespace: team-jobs
 
-  - it: admits only the jobs namespace to the daemons
+  # Through the router only (charts/ci-accelerator/tests/router_test.yaml
+  # covers the box without it).
+  - it: admits no namespace of clients to the daemons
     template: charts/buildkit/templates/networkpolicy.yaml
     asserts:
-      - equal:
-          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
-          value: [ci-accelerator-jobs]
+      - notExists:
+          path: spec.ingress[0].from[0].namespaceSelector
 
   - it: requires the GitLab URL
     template: validate.yaml

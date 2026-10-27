@@ -28,6 +28,9 @@ tests:
     template: runner-gitlab.yaml
     set:
       control-plane.enabled: false
+      global.router.enabled: false
+      control-plane.router.enabled: false
+      buildkit.networkPolicy.ingress.clientNamespaces: true
     asserts:
       - hasDocuments: { count: 0 }
 
@@ -109,7 +112,7 @@ tests:
     template: charts/control-plane/templates/networkpolicy.yaml
     documentIndex: 0
     asserts:
-      - hasDocuments: { count: 2 }
+      - hasDocuments: { count: 3 }
       - equal:
           path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
           value: [ci-accelerator, ci-accelerator-jobs]

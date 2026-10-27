@@ -181,6 +181,35 @@ tests:
           path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
           value: [builds-jobs]
 
+  # Clients through a proxy: their namespaces keep their certificates but
+  # not the way in.
+  - it: leaves the client certificate namespaces out with clientNamespaces=false
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.clientNamespaces: false
+      networkPolicy.ingress.extraFrom: [{ podSelector: { matchLabels: { ci-accelerator.io/component: router } } }]
+      tls.source: certManager
+      tls.client.namespaces: [ci-jobs]
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    asserts:
+      - equal:
+          path: spec.ingress[0].from
+          value: [{ podSelector: { matchLabels: { ci-accelerator.io/component: router } } }]
+  - it: refuses clientNamespaces=false with no other peer
+    template: daemonset.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.clientNamespaces: false
+      tls.source: certManager
+      tls.client.namespaces: [ci-jobs]
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    asserts:
+      - failedTemplate:
+          errorPattern: 'networkPolicy.enabled: no client could reach the daemons'
+
   # A parent chart allows its own backends by release-derived labels.
   - it: renders extra egress rules through tpl
     template: networkpolicy.yaml

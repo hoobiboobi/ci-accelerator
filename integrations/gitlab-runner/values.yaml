@@ -50,9 +50,12 @@ runners:
       # The contract with the CI component: where the daemons are and where
       # the client certificate is mounted. Job variables of the same name
       # override these.
-      # ADJUST: tcp://<buildkit fullname>.<buildkit namespace>.svc:1234
+      # ADJUST: the box's build router, tcp://<release>-router.<namespace>.svc:1234
+      # (it sends each job to the daemon where its project's cache is); with
+      # charts/buildkit alone, the daemons' Service,
+      # tcp://<buildkit fullname>.<buildkit namespace>.svc:1234.
       environment = [
-        "BUILDKIT_REMOTE_ADDR=tcp://ci-accelerator-buildkit.ci-accelerator.svc:1234",
+        "BUILDKIT_REMOTE_ADDR=tcp://ci-accelerator-router.ci-accelerator.svc:1234",
         "BUILDKIT_TLS_DIR=/certs",
         # ADJUST: with the console, its address, so each job prints its page:
         # "CI_ACCELERATOR_CONSOLE_URL=https://console.example.com",

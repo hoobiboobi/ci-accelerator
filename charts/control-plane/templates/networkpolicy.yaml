@@ -49,9 +49,10 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
 ---
-# Who may call the controller: the web's pods, nothing else (the kubelet's
-# probes come from the node, which a NetworkPolicy does not limit). Its
-# own connections (daemons, the API server, GitLab, S3) stay open.
+# Who may call the controller: the web's and the routers' pods, nothing
+# else (the kubelet's probes come from the node, which a NetworkPolicy does
+# not limit). Its own connections (daemons, the API server, GitLab, S3)
+# stay open.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -73,4 +74,38 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "control-plane.selectorLabels" (dict "root" . "role" "web") | nindent 14 }}
+        {{- if include "control-plane.router" . }}
+        - podSelector:
+            matchLabels:
+              {{- include "control-plane.selectorLabels" (dict "root" . "role" "router") | nindent 14 }}
+        {{- end }}
+{{- if include "control-plane.router" . }}
+---
+# Who may connect to the routers: the CI jobs' namespaces. Their daemons
+# check each job's certificate through the router.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "control-plane.routerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "router") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "control-plane.selectorLabels" (dict "root" . "role" "router") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: tcp
+          protocol: TCP
+      from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  {{- include "control-plane.routerClients" . | fromJsonArray | toYaml | nindent 18 }}
+{{- end }}
 {{- end }}

@@ -19,6 +19,38 @@ are refused below).
 {{- end }}
 
 {{/*
+The build router's Service (the control-plane subchart's rule; its name
+overrides are refused), and the address CI jobs use: the router's, or the
+daemons' Service without it.
+*/}}
+{{- define "ci-accelerator.routerName" -}}
+{{- printf "%s-router" (.Release.Name | trunc 40 | trimSuffix "-") }}
+{{- end }}
+
+{{- define "ci-accelerator.daemonsAddress" -}}
+{{- if dig "router" "enabled" false (.Values.global | default dict) -}}
+tcp://{{ include "ci-accelerator.routerName" . }}.{{ .Release.Namespace }}.svc:1234
+{{- else -}}
+tcp://{{ include "ci-accelerator.buildkitName" . }}.{{ .Release.Namespace }}.svc:1234
+{{- end }}
+{{- end }}
+
+{{/*
+The router's names in the daemons' certificate (the jobs' TLS passes
+through the router, and buildctl checks the name it dialled), rendered by
+the buildkit subchart with tpl; empty without the router.
+*/}}
+{{- define "ci-accelerator.routerDnsName" -}}
+{{- $root := .root }}
+{{- if dig "router" "enabled" false ($root.Values.global | default dict) }}
+{{- $n := include "ci-accelerator.routerName" $root }}
+{{- $ns := $root.Release.Namespace }}
+{{- $domain := dig "tls" "certManager" "clusterDomain" "cluster.local" $root.Values.AsMap }}
+{{- index (list $n (printf "%s.%s" $n $ns) (printf "%s.%s.svc" $n $ns) (printf "%s.%s.svc.%s" $n $ns $domain)) (int .i) }}
+{{- end }}
+{{- end }}
+
+{{/*
 The issuer of the daemons' certificates, as the buildkit subchart picks it:
 global.tls.issuerRef, or the CA it creates (<namespace>-<full name>-ca).
 */}}
@@ -131,6 +163,21 @@ running with no [[runners]] and takes no jobs). */}}
 {{- include "ci-accelerator.preflightJobsNamespace" . }}
 {{- if and (dig "control-plane" "enabled" false .Values.AsMap) (eq (toString .Values.buildkit.tls.source) "existingSecret") (not (dig "control-plane" "tls" "existingSecret" "" .Values.AsMap)) }}
 {{- fail "control-plane.enabled with buildkit.tls.source=existingSecret: give the controller its own client certificate signed by the daemons' CA, control-plane.tls.existingSecret (a Secret with ca.crt, tls.crt and tls.key in the release namespace), and its API a server certificate, control-plane.controller.api.tls.existingSecret." }}
+{{- end }}
+{{- $cp := index .Values "control-plane" | default dict }}
+{{- $router := dig "router" "enabled" false .Values.global }}
+{{- if ne (toString $router) (toString (dig "router" "enabled" false $cp)) }}
+{{- fail (printf "global.router.enabled (%v) and control-plane.router.enabled (%v) must be equal: the runners' address follows the first, the router's DaemonSet the second." $router (dig "router" "enabled" false $cp)) }}
+{{- end }}
+{{- if and $router (not $cp.enabled) }}
+{{- fail "the build router is part of the control plane: with control-plane.enabled=false set global.router.enabled=false and control-plane.router.enabled=false too." }}
+{{- end }}
+{{- if and $router (or $cp.fullnameOverride $cp.nameOverride) }}
+{{- fail "control-plane.fullnameOverride and nameOverride are not supported with the router: the runner configuration derives the router's address from the release name." }}
+{{- end }}
+{{- $clientNs := dig "networkPolicy" "ingress" "clientNamespaces" true .Values.buildkit }}
+{{- if and .Values.buildkit.networkPolicy.enabled (not $router) (eq (toString $clientNs) "false") }}
+{{- fail "without the router the CI jobs connect to the daemons themselves: set buildkit.networkPolicy.ingress.clientNamespaces=true." }}
 {{- end }}
 {{- if or .Values.buildkit.fullnameOverride .Values.buildkit.nameOverride }}
 {{- fail "buildkit.fullnameOverride and buildkit.nameOverride are not supported in this chart: the runner configuration derives the daemons' address from the release name." }}

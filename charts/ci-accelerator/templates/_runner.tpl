@@ -30,7 +30,7 @@ certificate, trace context, job data and placement rules. A dict:
 {{ . | indent 2 }}
 {{- end }}
   environment = [
-    "BUILDKIT_REMOTE_ADDR=tcp://{{ include "ci-accelerator.buildkitName" $root }}.{{ $root.Release.Namespace }}.svc:1234",
+    "BUILDKIT_REMOTE_ADDR={{ include "ci-accelerator.daemonsAddress" $root }}",
     "BUILDKIT_TLS_DIR=/certs",
     {{- with dig "console" "url" "" $root.Values.global }}
     "CI_ACCELERATOR_CONSOLE_URL={{ . }}",

@@ -1,0 +1,249 @@
+{{- if include "control-plane.router" . }}
+{{- $r := dict "root" . "role" "router" }}
+{{- $v := .Values.router }}
+{{- $svc := include "control-plane.daemonsService" . | fromJson }}
+{{- $jobs := include "control-plane.jobsNamespace" . }}
+# The build router: one pod on every build node. CI jobs connect to it, and
+# it passes each job's connection through to the daemon where the job's
+# project is warm. TLS stays between the job and the daemon.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "control-plane.routerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" $r | nindent 4 }}
+spec:
+  revisionHistoryLimit: 3
+  # One node at a time: the Service sends a node's jobs to another node's
+  # router while its own drains.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "control-plane.selectorLabels" $r | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "control-plane.podLabels" $r | nindent 8 }}
+      {{- with $v.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "control-plane.routerName" . }}
+      # Watches the daemons' EndpointSlices and the job pods.
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.priorityClassName }}
+      priorityClassName: {{ tpl . $ }}
+      {{- end }}
+      # Running builds finish through the router that carries them.
+      terminationGracePeriodSeconds: {{ add (int $v.drainSeconds) (int $v.preStopSleepSeconds) 10 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: router
+          image: {{ include "control-plane.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - router
+            - -listen=:{{ int $v.port }}
+            - -health=:{{ int $v.healthPort }}
+            - -daemons-service={{ $svc.name }}
+            - -namespace={{ $svc.namespace }}
+            - -daemon-port={{ $svc.port }}
+            - -jobs-namespace={{ $jobs }}
+            {{- range .Values.gitlab.urls }}
+            - -gitlab-url={{ . }}
+            {{- end }}
+            - -controller=https://{{ include "control-plane.controllerName" . }}.{{ .Release.Namespace }}.svc:{{ int .Values.controller.api.port }}
+            - -controller-ca=/api-tls/ca.crt
+            - -token-file=/var/run/secrets/ci-accelerator/token
+            - -cross-zone={{ $v.crossZone }}
+            - -overload={{ int $v.overloadBuilds }}
+            - -warm-for={{ mul (int $v.warmDays) 24 }}h
+            - -drain={{ int $v.drainSeconds }}s
+          env:
+            - name: CI_ACCELERATOR_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- with include "control-plane.urlsConfigMap" . }}
+            - name: GITLAB_URLS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.gitlab.urlsFrom.key }}
+            {{- end }}
+          ports:
+            - name: tcp
+              containerPort: {{ int $v.port }}
+            - name: health
+              containerPort: {{ int $v.healthPort }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: health
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          {{- if $v.preStopSleepSeconds }}
+          lifecycle:
+            # Keep accepting while the Service stops sending jobs here.
+            preStop:
+              sleep:
+                seconds: {{ int $v.preStopSleepSeconds }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with $v.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: api-ca
+              mountPath: /api-tls
+              readOnly: true
+            - name: token
+              mountPath: /var/run/secrets/ci-accelerator
+              readOnly: true
+      volumes:
+        - name: api-ca
+          secret:
+            secretName: {{ include "control-plane.apiSecretName" . }}
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: token
+          projected:
+            defaultMode: 0444
+            sources:
+              - serviceAccountToken:
+                  audience: ci-accelerator-controller
+                  expirationSeconds: 3600
+                  path: token
+      nodeSelector:
+        {{- include "control-plane.routerNodeSelector" . | nindent 8 }}
+      {{- with include "control-plane.routerTolerations" . }}
+      tolerations:
+        {{- . | nindent 8 }}
+      {{- end }}
+---
+# Where CI jobs connect: their own node's router.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "control-plane.routerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" $r | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "control-plane.selectorLabels" $r | nindent 4 }}
+  ports:
+    - name: tcp
+      port: {{ int $v.port }}
+      targetPort: tcp
+      protocol: TCP
+      # The daemons' mutual TLS passes through: meshes must not parse it.
+      appProtocol: tls
+  {{- if eq $v.routing "Local" }}
+  internalTrafficPolicy: Local
+  {{- else }}
+  internalTrafficPolicy: Cluster
+  {{- if eq $v.routing "PreferSameNode" }}
+  trafficDistribution: PreferSameNode
+  {{- end }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "control-plane.routerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" $r | nindent 4 }}
+automountServiceAccountToken: false
+---
+# The daemons, from their headless Service's EndpointSlices (address,
+# node, zone, readiness).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "control-plane.routerName" . }}-daemons
+  namespace: {{ $svc.namespace }}
+  labels:
+    {{- include "control-plane.labels" $r | nindent 4 }}
+rules:
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "control-plane.routerName" . }}-daemons
+  namespace: {{ $svc.namespace }}
+  labels:
+    {{- include "control-plane.labels" $r | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "control-plane.routerName" . }}-daemons
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.routerName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.jobs.rbac.create }}
+---
+# The CI job pods: which job (and project) a connection's address is.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "control-plane.routerName" . }}-jobs
+  namespace: {{ $jobs }}
+  labels:
+    {{- include "control-plane.labels" $r | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "control-plane.routerName" . }}-jobs
+  namespace: {{ $jobs }}
+  labels:
+    {{- include "control-plane.labels" $r | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "control-plane.routerName" . }}-jobs
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.routerName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}
