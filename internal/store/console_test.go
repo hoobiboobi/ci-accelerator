@@ -260,9 +260,9 @@ func TestUsualIsRecent(t *testing.T) {
 		}
 		last = &x
 	}
-	// Builds 2..11 before the last: 3..12 s, median 8 s.
-	if u, err := s.Usual(ctx, last, 42); err != nil || u != 8*time.Second {
-		t.Errorf("usual %v %v, want 8s", u, err)
+	// Builds 2..11 before the last: 3..12 s, median (nearest rank) 7 s.
+	if u, err := s.Usual(ctx, last, 42); err != nil || u != 7*time.Second {
+		t.Errorf("usual %v %v, want 7s", u, err)
 	}
 }
 

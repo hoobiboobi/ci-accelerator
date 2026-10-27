@@ -398,12 +398,5 @@ func bytesText(n int64) string {
 	return fmt.Sprintf("%d B", n)
 }
 
-// median of a list of durations; 0 for none.
-func median(ds []time.Duration) time.Duration {
-	if len(ds) == 0 {
-		return 0
-	}
-	c := append([]time.Duration(nil), ds...)
-	sort.Slice(c, func(i, j int) bool { return c[i] < c[j] })
-	return c[len(c)/2]
-}
+// median of a list of durations (nearest rank, as everywhere); 0 for none.
+func median(ds []time.Duration) time.Duration { return store.Percentile(ds, 50) }

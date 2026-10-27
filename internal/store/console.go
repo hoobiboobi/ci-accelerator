@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -182,19 +181,18 @@ func (s *Store) Usual(ctx context.Context, b *history.Build, project uint64) (ti
 		return 0, err
 	}
 	defer rows.Close()
-	var ds []int64
+	var ds []time.Duration
 	for rows.Next() {
 		var d int64
 		if err := rows.Scan(&d); err != nil {
 			return 0, err
 		}
-		ds = append(ds, d)
+		ds = append(ds, time.Duration(d)*time.Millisecond)
 	}
-	if err := rows.Err(); err != nil || len(ds) == 0 {
+	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
-	return time.Duration(ds[len(ds)/2]) * time.Millisecond, nil
+	return Percentile(ds, 50), nil
 }
 
 // DaemonCount is what the store knows about one daemon's builds.

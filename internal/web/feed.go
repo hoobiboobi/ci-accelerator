@@ -36,6 +36,7 @@ type cachedStats struct {
 // compared with its own kind.
 type usualTime struct {
 	Cached, Rebuilt, RebuiltP95 time.Duration
+	CachedN, RebuiltN           int // builds behind each median
 }
 
 // of returns the usual time for builds like b, and the time above which
@@ -88,12 +89,12 @@ func usualTimes(bs []store.BuildRow) map[string]usualTime {
 	out := map[string]usualTime{}
 	for t, ds := range cached {
 		u := out[t]
-		u.Cached = median(ds)
+		u.Cached, u.CachedN = median(ds), len(ds)
 		out[t] = u
 	}
 	for t, ds := range rebuilt {
 		u := out[t]
-		u.Rebuilt = median(ds)
+		u.Rebuilt, u.RebuiltN = median(ds), len(ds)
 		if len(ds) >= 10 {
 			u.RebuiltP95 = percentile(ds, 95)
 		}
@@ -542,15 +543,7 @@ func imageKey(t string) string {
 	return t
 }
 
-func percentile(ds []time.Duration, p int) time.Duration {
-	x := append([]time.Duration(nil), ds...)
-	sort.Slice(x, func(i, j int) bool { return x[i] < x[j] })
-	if len(x) == 0 {
-		return 0
-	}
-	i := (len(x)*p + 99) / 100
-	return x[min(max(i-1, 0), len(x)-1)]
-}
+func percentile(ds []time.Duration, p int) time.Duration { return store.Percentile(ds, p) }
 
 // ---- the overview ----
 

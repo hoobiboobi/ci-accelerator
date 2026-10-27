@@ -96,6 +96,9 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 		by = name(p.Reason.By)
 	}
 	d.Verdict = withVia(verdictFor(b, p.Reason, by, d.Built, p.Saved, rec), p.Reason, p.Via)
+	if p.Reason.Kind == history.OtherNode && p.Route != nil {
+		d.Verdict.Hint = nodeHint(p.Route)
+	}
 	d.Cat = catOf(p.Reason.Kind, b.Error, d.Built)
 	d.Verdict.Icon = d.Cat.Icon
 	return d, nil
@@ -116,6 +119,7 @@ type BuildView struct {
 	Dur, Delta string
 	Slower     bool
 	Usual      string
+	UsualOf    string // what the usual time is the median of
 	Ran, Steps int
 	Ref, SHA   string
 	Commit     string
@@ -260,13 +264,20 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err)
 			return
 		}
-		usual, _ = st.usual[b.Target].of(d.Built > 0)
+		u := st.usual[b.Target]
+		usual, _ = u.of(d.Built > 0)
+		kind, n := "builds from the cache", u.CachedN
+		if d.Built > 0 {
+			kind, n = "builds that ran steps", u.RebuiltN
+		}
+		v.UsualOf = fmt.Sprintf("The median of %d %s of %s in the last 7 days.", n, kind, orDefault(b.Target))
 	}
 	if usual == 0 {
 		if usual, err = s.data.Usual(ctx, b, project); err != nil {
 			s.fail(w, err)
 			return
 		}
+		v.UsualOf = fmt.Sprintf("The median of up to 10 earlier builds of %s.", orDefault(b.Target))
 	}
 	if usual > 0 && !running {
 		v.Usual = duration(usual)
@@ -707,6 +718,10 @@ func routeText(d store.Decision) string {
 		return fmt.Sprintf("the build router: %s, the project's node by hash: no cache held its layers", node)
 	case route.CrossZone:
 		return fmt.Sprintf("the build router: %s, in another zone: no daemon of the job's zone was ready", node)
+	case route.UnknownLocal:
+		return fmt.Sprintf("the build router: %s, the job's own node: the job's pod was not found in time", node)
+	case route.UnknownHash:
+		return fmt.Sprintf("the build router: %s, by hash: the job's pod was not found in time and its node has no daemon", node)
 	}
 	return fmt.Sprintf("the build router: %s (%s)", node, d.Reason)
 }

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
+	"github.com/hoobiboobi/ci-accelerator/internal/route"
+	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
 // Verdict is the answer a build page leads with: why the build took what
@@ -166,13 +168,13 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 				Title: "Rebuilt because this job ran on another build node.",
 				Detail: template.HTML(fmt.Sprintf("%s%s reads no files and did not change: its cache is on node <b>%s</b>, where this target was built last time, and this job ran on <b>%s</b>.",
 					code(r.Step.Name), at, e(shortDaemon(r.Old)), e(shortDaemon(r.New)))),
-				Hint: "<b>What helps:</b> keeping a project's jobs on the node that holds its cache (sticky routing, planned). Until then: fewer, larger build nodes, or pin the project to one node with runner tags."}
+				Hint: nodeHint(nil)}
 		}
 		return Verdict{Tone: "node", Kicker: "Not your change",
 			Title: "Rebuilt because this job ran on another build node.",
 			Detail: template.HTML(fmt.Sprintf("%s%s was cached on node <b>%s</b>, where this target was built last time; this job ran on <b>%s</b>. <b>%s</b> in this pipeline got the same step from cache on its node, so the files did not change.",
 				code(r.Step.Name), at, e(shortDaemon(r.Old)), e(shortDaemon(r.New)), e(by))),
-			Hint: "<b>What helps:</b> keeping a project's jobs on the node that holds its cache (sticky routing, planned). Until then: fewer, larger build nodes, or pin the project to one node with runner tags."}
+			Hint: nodeHint(nil)}
 	case history.CacheElsewhere:
 		detail := fmt.Sprintf("Either %s changed, or this node's cache no longer had the step. No other job in this pipeline settles which.",
 			orContext(r.Paths))
@@ -239,6 +241,25 @@ func withVia(v Verdict, r history.Reason, via string) Verdict {
 		}
 	}
 	return v
+}
+
+// nodeHint says why a build ran away from its image's cache, from how the
+// build router placed the job (nil: the router did not place it).
+func nodeHint(d *store.Decision) template.HTML {
+	if d == nil {
+		return "<b>What helps:</b> the build router (on by default in the box) sends each project's jobs to the node that holds the project's cache. Without it: fewer, larger build nodes, or pin the project to one node with runner tags."
+	}
+	switch d.Reason {
+	case route.LocalWarm, route.ZoneWarm:
+		return "<b>Why here:</b> the build router follows the project, not each image: it sent the job to the node where the project built most recently, and this image's previous build ran on another node."
+	case route.ZoneHash:
+		return "<b>Why here:</b> when the job started, no node's cache was known to hold the project's layers (its builds were older than the router's window, or their daemons were replaced), so the build router chose the project's node by hash."
+	case route.CrossZone:
+		return "<b>Why here:</b> no daemon in the job's zone was ready, so the build router sent the job to another zone."
+	case route.UnknownLocal, route.UnknownHash:
+		return "<b>Why here:</b> the build router could not tell which project the job belongs to (its pod was not found in time), so it used a daemon without looking at the cache."
+	}
+	return ""
 }
 
 func orContext(ps []string) string {
