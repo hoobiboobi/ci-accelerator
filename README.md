@@ -22,8 +22,11 @@ did. ci-accelerator keeps the build engine running between jobs instead:
 
 - **The cache stays warm.** BuildKit daemons run on dedicated build nodes
   and keep their cache on local disk across jobs, pipelines and projects.
-- **Jobs are thin clients.** A job sends its build context to the daemon
-  on its own node and waits. The daemon builds and pushes the image.
+- **Jobs are thin clients.** A job sends its build context to a daemon and
+  waits. The daemon builds and pushes the image.
+- **Each project builds where its cache is.** A router sends every job to
+  the build node where its project built before, so a project's cache
+  warms up once, not once per node.
 - **Identical work runs once.** BuildKit deduplicates identical steps
   across concurrent builds. Ten parallel jobs of one pipeline that share a
   `yarn install` step run it once.
@@ -42,18 +45,23 @@ Numbers from the production setup this project is derived from:
 
 ```
  GitLab ──────► gitlab-runner ─────────► CI job pod (jobs namespace, on a build node)
-                                              │  buildctl, mutual TLS
+                                              │  buildctl, mutual TLS (passed through)
                                               ▼
-                     buildkit daemon on the same node ── local cache
+                     build router on the job's node ── picks the node where the project is warm
+                                              ▼
+                     buildkit daemon ── local cache
                                               │
                                               ├── build history ──► console (optional)
                                               └── OTLP ───────────► your backend: metrics, traces (optional)
 ```
 
 - **BuildKit daemons:** a DaemonSet on the nodes labelled
-  `ci-accelerator.io/node-role=build` (`charts/buildkit`). A Service keeps
-  each job on its own node's daemon and falls back to another node when that
-  daemon is not ready.
+  `ci-accelerator.io/node-role=build` (`charts/buildkit`).
+- **The build router:** on every build node (part of the control plane).
+  Jobs connect to it, and it sends each job to the daemon where its project
+  built in the last week; a new project goes to its daemon by a hash every
+  router agrees on, so the parallel jobs of a pipeline share one daemon's
+  steps. It passes the jobs' TLS through and holds no key.
 - **The official gitlab-runner chart,** configured so that job pods:
   - run on the build nodes, in their own namespace;
   - get `BUILDKIT_REMOTE_ADDR` and a client certificate (`BUILDKIT_TLS_DIR`);
@@ -61,8 +69,9 @@ Numbers from the production setup this project is derived from:
 - **Mutual TLS** between jobs and daemons, issued by cert-manager with a CA
   dedicated to this installation. Without it, any build could drive its own
   daemon.
-- **A NetworkPolicy:** daemons accept connections only from the jobs
-  namespace, and builds cannot reach cloud instance metadata.
+- **NetworkPolicies:** daemons accept connections only from the routers
+  and the controller, the routers only from the jobs namespace, and builds
+  cannot reach cloud instance metadata.
 - **Metrics and traces over OTLP (optional):** the daemons push them to
   your own backend (`buildkit.otel.*`). The box stores none of it; build
   times and cache answers are in the console.
@@ -311,6 +320,8 @@ on.
 | image builds, steps, cache verdicts, what changed, pipeline timeline | yes | yes | yes |
 | job results, how long jobs waited for a runner, "N other jobs" | no | yes | yes |
 | "files or node" settled by comparing the two commits, end of a job's log | no | yes | yes |
+| each node's cache by project, why the router chose a build's node | yes | yes | yes |
+| removing a project's cache from a node | everyone who reaches it | everyone who reaches it | admins |
 | who sees what | everyone who reaches it | everyone who reaches it | each person: the projects GitLab lets them read |
 | the console reads GitLab with | nothing | one shared token | each person's own token |
 
@@ -504,10 +515,11 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   meet `restricted`.
 
 **Cache and routing.**
-- **The cache is per daemon.** A project's first build on each build node
-  is cold. When a job's own daemon is not ready, the job goes to another
-  node's daemon: it succeeds, but with a cold cache. Routing a project to a
-  fixed daemon is planned.
+- **The cache is per daemon.** The router keeps a project on the node that
+  built it last; when that daemon is not ready, the job goes to another
+  node: it succeeds, with a cold cache there. The router knows a job by its
+  pod's address: with a CNI that hides it (SNAT inside the cluster) every
+  job goes to its own node's daemon, as without the router.
 - **emptyDir mode:** the cache lives only as long as the pod, so every
   rollout empties it. Use `hostPath` on a dedicated disk in production.
 - **What uninstall leaves behind:**

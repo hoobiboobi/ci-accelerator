@@ -13,7 +13,10 @@ workflow copies them into the GitHub release.
   the control plane, and every object and value of it has a new name, so
   Helm refuses the upgrade and says how to move:
   1. `helm uninstall <release> -n <namespace> --wait`, then wait until its
-     pods are gone (the jobs namespace goes with the release).
+     pods are gone (the jobs namespace goes with the release), and delete
+     the daemons' certificate Secret `<release>-buildkit-tls`: it outlives
+     the release, and the new one names the build router (without
+     cert-manager, make it again with `scripts/buildkit-certs.sh --router`).
   2. Move your values from `console:` to `control-plane:`. The
      controller's pod settings and volume go under
      `control-plane.controller` (`resources`, `nodeSelector`,
@@ -42,6 +45,17 @@ workflow copies them into the GitHub release.
   `<release>-web` (the console) and `<release>-controller` (its API),
   volume `<release>-controller-data`, labels `controller` and `web`
   (`app.kubernetes.io/component` and `ci-accelerator.io/component`).
+- CI jobs reach the daemons through the build router
+  (`tcp://<release>-router.<namespace>.svc:1234`; the runners of the box
+  are configured for it, an own runner with
+  `integrations/gitlab-runner/values.yaml` must change
+  `BUILDKIT_REMOTE_ADDR`). The daemons' certificate names the router: with
+  `buildkit.tls.source=existingSecret`, make it again with
+  `scripts/buildkit-certs.sh --router <release>`. The daemons admit only
+  the routers and the controller. To keep jobs talking to the daemons
+  directly, set `global.router.enabled=false`,
+  `control-plane.router.enabled=false` and
+  `buildkit.networkPolicy.ingress.clientNamespaces=true`.
 - The controller checks the web's ServiceAccount tokens with a
   TokenReview: the chart adds a ClusterRole that allows only that, and its
   binding. Whoever installs the chart needs the right to create them.
@@ -51,6 +65,20 @@ workflow copies them into the GitHub release.
   `tls.crt`, `tls.key` and `ca.crt`. `scripts/buildkit-certs.sh
   --controller <release>` makes one from the daemons' CA. With cert-manager
   it is issued like the controller's client certificate.
+
+### Added
+
+- The build router: each CI job's build goes to the node where its project
+  built before (else the project's node by a hash every router agrees on,
+  so a new project's parallel jobs share one daemon's steps), zone-aware.
+  It passes the jobs' TLS through and holds no key; the build page says
+  why its node was chosen.
+- Whose each node's cache is: the Nodes page shows each node's cache by
+  project, with the base images, contexts and cache mounts as shared
+  pools, and how much is attributed. An admin (anyone without sign-in)
+  can remove what a project's builds made alone on a node.
+- `scripts/buildkit-certs.sh --router <prefix>` adds the router's names to
+  the daemons' certificate.
 
 ### Changed
 
