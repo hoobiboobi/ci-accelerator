@@ -175,6 +175,10 @@ running with no [[runners]] and takes no jobs). */}}
 {{- if and $router (or $cp.fullnameOverride $cp.nameOverride) }}
 {{- fail "control-plane.fullnameOverride and nameOverride are not supported with the router: the runner configuration derives the router's address from the release name." }}
 {{- end }}
+{{- $persists := eq (toString (dig "storage" "type" "emptyDir" .Values.buildkit)) "hostPath" }}
+{{- if and $cp.enabled $router (ne (toString (dig "daemons" "cachePersists" false $cp)) (toString $persists)) }}
+{{- fail (printf "control-plane.daemons.cachePersists must be %v with buildkit.storage.type=%s: the router keeps a node warm for a project after a daemon restart only when the cache survived it." $persists (dig "storage" "type" "emptyDir" .Values.buildkit)) }}
+{{- end }}
 {{- $clientNs := dig "networkPolicy" "ingress" "clientNamespaces" true .Values.buildkit }}
 {{- if and .Values.buildkit.networkPolicy.enabled (not $router) (eq (toString $clientNs) "false") }}
 {{- fail "without the router the CI jobs connect to the daemons themselves: set buildkit.networkPolicy.ingress.clientNamespaces=true." }}

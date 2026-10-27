@@ -52,10 +52,11 @@ a running job to get scheduled) and default requests of 500m CPU and 512Mi
    `control-plane.router.zones: false` every daemon counts as one zone
    (zones close enough that crossing them costs nothing).
 
-   Warmth is what the caches hold now, as the controller attributes their
-   records (see "The cache"), plus the routers' decisions of the last hour:
-   a cache emptied by a restart or by GC is cold again. A connection from
-   a pod that is no CI job goes to its own node's daemon. The routers learn where projects built from the controller
+   Warmth is the project's builds on the node in the last week (builds of
+   a daemon replaced since count only when the cache survives restarts,
+   `control-plane.daemons.cachePersists`, i.e. hostPath) and the routers'
+   decisions of the last hour. A connection from a pod that is no CI job
+   goes to its own node's daemon. The routers learn where projects built from the controller
    (and keep routing on their last view while it is away); the build page
    says why its node was chosen.
 3. **Mutual TLS, end to end.** The router passes the bytes through. The
@@ -102,10 +103,9 @@ Each daemon names itself in two ways:
 - **Shared between projects.** Identical steps of different projects reuse
   each other's layers, and cache mounts are shared
   ([ADR-0046](adr/0046-cache-reuse.md)).
-- **Whose it is.** The controller attributes each layer to the build that
-  made it (the step it executed when the layer appeared) and the Nodes page
-  shows each node's cache by project; an admin can remove what a project
-  made alone on a node ([ADR-0047](adr/0047-cache-by-project.md)).
+- **Whose it is: not known.** BuildKit's disk usage lists records without
+  a build or project, so the console shows each node's cache by kind
+  (base images, build layers, cache mounts, contexts), not by project.
 - **Persistence:**
   - **`hostPath`** (production, on a dedicated disk): the cache survives
     restarts, rollouts and uninstall.

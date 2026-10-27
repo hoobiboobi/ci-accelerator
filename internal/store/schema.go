@@ -225,42 +225,6 @@ CREATE INDEX route_decisions_job ON route_decisions (instance, job_id);
 CREATE INDEX route_decisions_at ON route_decisions (at);
 CREATE INDEX builds_started ON builds (started_at);
 
--- Each node's cache records as its daemon last listed them, and whose
--- they are: the project whose build made a layer alone (instance,
--- project_id, target), else owners lists every project that made it at
--- the same moment (shared) or nothing (a pool or not attributed).
--- matched_at: when attribution was last tried.
-CREATE TABLE cache_records (
-	node        TEXT NOT NULL,
-	id          TEXT NOT NULL,
-	kind        TEXT NOT NULL,
-	description TEXT NOT NULL,
-	size        INTEGER NOT NULL,
-	created_at  INTEGER NOT NULL,
-	last_used   INTEGER,
-	in_use      INTEGER NOT NULL DEFAULT 0,
-	parents     TEXT NOT NULL DEFAULT '[]',
-	instance    INTEGER,
-	project_id  INTEGER,
-	target      TEXT NOT NULL DEFAULT '',
-	owners      TEXT NOT NULL DEFAULT '[]',
-	matched_at  INTEGER,
-	PRIMARY KEY (node, id)
-) WITHOUT ROWID;
-CREATE INDEX cache_records_project ON cache_records (instance, project_id) WHERE project_id IS NOT NULL;
-
--- What people removed from the cache, for the record.
-CREATE TABLE cache_actions (
-	id          INTEGER PRIMARY KEY,
-	at          INTEGER NOT NULL,
-	who         TEXT NOT NULL,
-	node        TEXT NOT NULL,
-	instance    INTEGER,
-	project_id  INTEGER,
-	records     INTEGER NOT NULL,
-	bytes       INTEGER NOT NULL,
-	error       TEXT NOT NULL DEFAULT ''
-);
 `,
 }
 

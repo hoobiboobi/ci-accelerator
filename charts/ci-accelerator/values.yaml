@@ -212,6 +212,9 @@ control-plane:
     discover: '{{ include "ci-accelerator.buildkitHeadless" . }}.{{ .Release.Namespace }}.svc:1234'
     # -- Equal to buildkit.diskProbe.port: the controller reads each daemon's disk there.
     diskProbePort: 9180
+    # -- Keep equal to "buildkit.storage.type is hostPath": with a cache that
+    # survives restarts, a node stays warm for its projects after a rollout.
+    cachePersists: false
   tls:
     # With buildkit.tls.source=existingSecret, set
     # control-plane.tls.existingSecret (the controller's client certificate

@@ -80,6 +80,9 @@ spec:
             {{- with .Values.daemons.diskProbePort }}
             - -disk-probe-port={{ int . }}
             {{- end }}
+            {{- if dig "cachePersists" false (.Values.daemons | default dict) }}
+            - -cache-persists=true
+            {{- end }}
             - -keep-days={{ int .Values.retention.days }}
             - -keep-output-days={{ int .Values.retention.outputDays }}
             - -release={{ .Release.Name }}

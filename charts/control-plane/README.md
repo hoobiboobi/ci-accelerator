@@ -33,6 +33,7 @@ Kubernetes: `>=1.34.0-0`
 | controller.resources.requests.cpu | string | `"50m"` |  |
 | controller.resources.requests.memory | string | `"128Mi"` |  |
 | controller.tolerations | list | `[]` |  |
+| daemons.cachePersists | bool | `false` | The daemons' cache survives their restart (buildkit storage.type hostPath): a node stays warm for the projects that built there after a rollout. false (emptyDir): a restarted daemon starts cold. |
 | daemons.discover | string | `""` | host:port of the BuildKit chart's headless Service; every address it resolves to is a daemon. Rendered with tpl. |
 | daemons.diskProbePort | int | `0` | Port of the disk probe next to each daemon (the buildkit chart's diskProbe), for the free space on the Nodes page. 0: not read. |
 | daemons.serverName | string | `""` | Name in the daemons' certificate. Default: the host of discover. |

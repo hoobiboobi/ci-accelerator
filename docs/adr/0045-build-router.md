@@ -30,11 +30,10 @@ runs an identical step once) when they meet on one daemon.
   on one daemon); else another zone, or no daemon (`crossZone`). Warmth is
   kept by node, so a daemon's restart keeps its projects. A connection
   from a pod that is no CI job goes to its own node's daemon.
-- The controller serves the routers' view: where each project's layers
-  are, from the caches' own listings attributed to the builds that made
-  them (0047; a cache emptied by a restart or GC is cold), the routers'
-  decisions of the last hour for daemons still running, builds running
-  per node;
+- The controller serves the routers' view: each project's builds by
+  node in the last week (a daemon replaced since counts only when its
+  cache survived, hostPath), the routers' decisions of the last hour for
+  daemons still running, builds running per node;
   and stores their decisions; the build page says why its node was chosen.
   A router keeps routing on its last view while the controller is away.
 - SIGTERM stops taking connections and lets open ones (running builds)

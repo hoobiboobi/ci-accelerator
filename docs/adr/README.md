@@ -50,4 +50,3 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0044](0044-control-plane.md) | The control plane: a controller and a web, new names, no in-place upgrade from 0.2.x |
 | [0045](0045-build-router.md) | The build router: each job to the daemon where its project is warm |
 | [0046](0046-cache-reuse.md) | Cache shared across projects; no per-project namespaces |
-| [0047](0047-cache-by-project.md) | Whose the cache is, and removing a project's part |
