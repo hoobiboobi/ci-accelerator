@@ -47,6 +47,9 @@ type Router struct {
 	// Node is where this router runs: a connection from an unknown pod is
 	// taken to be from this node.
 	Node string
+	// IgnoreZones treats every daemon as one zone (zones close enough
+	// that crossing them costs nothing).
+	IgnoreZones bool
 	// Port is the daemons' port.
 	Port string
 	// Report receives every decision; nil: none.
@@ -168,7 +171,7 @@ func (r *Router) Decide(ip string) (route.Decision, store.Decision, error) {
 	}
 	daemons := r.View.Daemons()
 	for _, d := range daemons {
-		if d.Node == req.Node && d.Zone != "" {
+		if d.Node == req.Node && d.Zone != "" && !r.IgnoreZones {
 			req.Zone = d.Zone
 		}
 	}

@@ -257,6 +257,7 @@
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "healthPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "routing": { "enum": ["PreferSameNode", "Local", "Cluster"] },
+        "zones": { "type": "boolean" },
         "crossZone": { "type": "boolean" },
         "overloadBuilds": { "type": "integer", "minimum": 0 },
         "warmDays": { "type": "integer", "minimum": 1, "maximum": 90 },

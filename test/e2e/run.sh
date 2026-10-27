@@ -1155,7 +1155,7 @@ spec:
           export TRACEPARENT=$tp &&
           echo "ROUTED_TO \$(buildctl --addr tcp://$BOX_REL-router.$BOX_NS.svc:1234 --tlsdir /certs debug workers -v | sed -n 's/.*worker.hostname:[[:space:]]*//p' | head -n 1)" &&
           mkdir -p /tmp/ctx &&
-          printf 'FROM alpine:3.22\nRUN echo route-$project-$ROUTE_ID && sleep $sleep && echo ROUTE_STEP_BUILT\n' > /tmp/ctx/Dockerfile &&
+          printf 'FROM alpine:3.22\nRUN echo route-$project-$ROUTE_ID && sleep $sleep && echo ROUTE_STEP_BUILT \$(cat /proc/sys/kernel/random/uuid)\n' > /tmp/ctx/Dockerfile &&
           buildctl --addr tcp://$BOX_REL-router.$BOX_NS.svc:1234 --tlsdir /certs
           build --frontend dockerfile.v0 --local context=/tmp/ctx --local dockerfile=/tmp/ctx --progress plain
       volumeMounts:
@@ -1176,7 +1176,10 @@ route_wait() {
 # routed_to <name>: the daemon pod the job reached; built <name>: whether
 # it ran its step (else it came from the cache).
 routed_to() { sed -n 's/^ROUTED_TO //p' "$LOGS/route-$1.log" | head -n 1; }
-built() { grep -Eq '^#[0-9]+ [0-9.]+ ROUTE_STEP_BUILT$' "$LOGS/route-$1.log"; }
+built() { grep -Eq '^#[0-9]+ [0-9.]+ ROUTE_STEP_BUILT [0-9a-f-]+$' "$LOGS/route-$1.log"; }
+# run_id <name>: the id the job's step printed when it ran (BuildKit sends
+# a shared step's output to every build that waits for it).
+run_id() { sed -n 's/^#[0-9]* [0-9.]* ROUTE_STEP_BUILT \([0-9a-f-]*\)$/\1/p' "$LOGS/route-$1.log" | head -n 1; }
 
 # box_daemon_on <node>: the box's daemon pod on <node>.
 box_daemon_on() {
@@ -1225,10 +1228,11 @@ box_router() {
   want=$(box_daemon_on "$(hash_node 5001)")
   check "a new project's jobs on two nodes meet on its daemon by hash ($(routed_to p1a), $(routed_to p1b); hash: $want)" \
     test -n "$want" -a "$(routed_to p1a)" = "$want" -a "$(routed_to p1b)" = "$want"
-  check "they share the step: it ran once" eval '[ "$(built p1a && echo 1)$(built p1b && echo 1)" = 1 ]'
+  check "they share the step: it ran once ($(run_id p1a), $(run_id p1b))" \
+    eval '[ -n "$(run_id p1a)" ] && [ "$(run_id p1a)" = "$(run_id p1b)" ]'
   # Later jobs of the project go where it built, from any node, from cache.
   d1=$want
-  route_job p1c "$c" 5001 9510 9511 || { fail "a routed job (see $LOGS/route-p1c.log)"; return; }
+  route_job p1c "$c" 5001 9510 9511 6 || { fail "a routed job (see $LOGS/route-p1c.log)"; return; }
   check "a later job of the project goes to the node it built on ($(routed_to p1c))" test "$(routed_to p1c)" = "$d1"
   check "and finds its step in the cache" eval '! built p1c'
   check "the build page says why the router chose its node" eventually 30 route_page 9511 "Routed by"
@@ -1253,6 +1257,8 @@ box_router() {
   check "without the controller a job still goes to its project's node ($(routed_to p1d))" test "$(routed_to p1d)" = "$d1"
   kc -n "$BOX_NS" scale deploy "$BOX_REL-controller" --replicas 1 >/dev/null
   kc -n "$BOX_NS" rollout status deploy "$BOX_REL-controller" --timeout=180s >/dev/null 2>&1 || fail "the controller did not come back"
+  kc -n "$BOX_NS" logs -l "app.kubernetes.io/instance=$BOX_REL,app.kubernetes.io/component=router" --prefix --tail=-1 \
+    >"$LOGS/box-router.log" 2>&1
   # A router rollout while a build runs through it: the build finishes.
   route_pod drain "$a" 5002 9530 9531 25 || { fail "start a long routed job"; return; }
   check "a long build starts through the router" eventually 60 eval 'kc -n "$BOX_JOBS_NS" logs route-drain 2>/dev/null | grep -q "^#[0-9]* [0-9.]* route-5002"'
@@ -1264,6 +1270,17 @@ box_router() {
   check "jobs are routed again after the rollout" route_job p1e "$a" 5001 9540 9541
   check "to their project's node ($(routed_to p1e))" test "$(routed_to p1e)" = "$d1"
   [ "$(kc -n "$BOX_NS" get ds "$BOX_REL-router" -o jsonpath='{.metadata.generation}')" -gt "$gen" ] || info "the router's generation did not change"
+  # With zones (one per node on kind), a job's build stays in its zone even
+  # where its project is warm elsewhere.
+  if hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" --reuse-values --set control-plane.router.zones=true \
+      --wait --timeout 6m >"$LOGS/box-router-zones.log" 2>&1 &&
+    kc -n "$BOX_NS" rollout status ds "$BOX_REL-router" --timeout=300s >/dev/null 2>&1; then
+    route_job p1z "$b" 5001 9560 9561 || fail "a routed job with zones (see $LOGS/route-p1z.log)"
+    check "with zones a job stays in its zone ($(routed_to p1z), its node's: $(box_daemon_on "$b"))" \
+      test "$(routed_to p1z)" = "$(box_daemon_on "$b")" -a "$(routed_to p1z)" != "$d1"
+  else
+    fail "turn the router's zones on (see $LOGS/box-router-zones.log)"
+  fi
   kc -n "$BOX_JOBS_NS" delete pod -l ci-accelerator.io/component=ci-job --field-selector=status.phase!=Running --ignore-not-found >/dev/null 2>&1
   kc -n "$BOX_JOBS_NS" delete pod route-unknown --ignore-not-found >/dev/null 2>&1
 }
@@ -1285,7 +1302,8 @@ box_cache_owners() {
     "http://$BOX_REL-web.$BOX_NS.svc:8080/nodes/$node/cache/$inst/5001" >"$LOGS/box-cache-remove.html" 2>/dev/null
   check "removing the project's cache on its node removes records" \
     grep -Eq '<b>[0-9.]+ [kMG]?B</b> in [1-9][0-9]* record' "$LOGS/box-cache-remove.html"
-  check "the project's next build runs its step again" route_job p1f "$node" 5001 9550 9551
+  # The step p1a built there (it slept 6 s), attributed long since.
+  check "the project's next build runs its step again" route_job p1f "$node" 5001 9550 9551 6
   check "on the same daemon ($(routed_to p1f))" test "$(routed_to p1f)" = "$(routed_to p1a)"
   check "and runs it (the cached result was removed)" built p1f
   check "the base images stay" eventually 60 eval 'nodes_page && grep -q "Base images" "$page"'

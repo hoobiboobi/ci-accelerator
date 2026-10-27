@@ -66,7 +66,7 @@ Kubernetes: `>=1.34.0-0`
 | retention.days | int | `30` | Days builds are kept in full (steps, reasons). Each image's daily figures (builds by outcome, build times) are kept a year regardless. At 150 pipelines a day with 15 image builds each, a project takes about 0.25 GB per 30 days. |
 | retention.outputDays | int | `7` | Days the steps' output is kept. |
 | router.clientNamespaces | list | `[]` | Namespaces whose pods may connect to the router; default: the jobs namespace. Rendered with tpl. |
-| router.crossZone | bool | `true` | When no daemon of the job's zone (topology.kubernetes.io/zone of the daemons' nodes) is ready: true sends the job to another zone's daemon, false refuses the connection. |
+| router.crossZone | bool | `true` | When no daemon of the job's zone is ready: true sends the job to another zone's daemon, false refuses the connection. |
 | router.drainSeconds | int | `300` | Seconds open connections (running builds) may finish when a router stops; the pod's grace period is this plus preStopSleepSeconds and 10. |
 | router.enabled | bool | `false` | Run the router (the box does). The runners must then use tcp://<release>-router.<namespace>.svc:1234. |
 | router.healthPort | int | `8080` | The port of /livez and /readyz. |
@@ -83,6 +83,7 @@ Kubernetes: `>=1.34.0-0`
 | router.routing | string | `"PreferSameNode"` | How the Service picks a router: PreferSameNode (the job's node, any other when it has none ready), Local (the job's node only) or Cluster. |
 | router.tolerations | list | `[]` | Appended to global.buildNodes.tolerations. |
 | router.warmDays | int | `7` | Days a build keeps its project warm on its node. |
+| router.zones | bool | `true` | Keep a job's builds in its zone (topology.kubernetes.io/zone of the daemons' nodes): a project then warms up once per zone. false: every daemon is one zone (zones close enough that crossing them costs nothing, or one zone label per node). |
 | signIn | object | `{"enabled":false,"gitlab":[],"sessionKey":{"existingSecret":"","key":"key"},"url":""}` | Sign-in through GitLab. Each person signs in with a GitLab the runners serve and sees the projects whose jobs GitLab lets them read (Reporter or more, or public pipelines); GitLab is read with their own token. GitLab never calls the console: the browser carries the redirects. |
 | signIn.gitlab | list | `[]` | One OAuth application per GitLab (User or Group Settings > Applications, or Admin > Applications on your own GitLab): confidential, scopes openid and read_api, redirect URI <url>/auth/callback/<id> (the NOTES and the controller's log print it).   url: exactly as the runners have it; may be left empty when the        console serves one GitLab   existingSecret: a Secret with the keys client-id and client-secret   admins: GitLab usernames who see everything (builds of no known        project, the JSON API) |
 | signIn.sessionKey | object | `{"existingSecret":"","key":"key"}` | A Secret holding 32 random bytes in base64 (openssl rand -base64 32); it seals each session's GitLab token. Changing it signs everyone out. |

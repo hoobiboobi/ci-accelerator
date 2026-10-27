@@ -16,3 +16,8 @@ control-plane:
   web:
     tolerations:
       - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+  # kind gives every node its own zone (for the Services' zone checks):
+  # the router treats them as one, as close zones would be; box_router
+  # turns zones on for one check.
+  router:
+    zones: false

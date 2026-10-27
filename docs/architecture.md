@@ -46,6 +46,10 @@ a running job to get scheduled) and default requests of 500m CPU and 512Mi
      on one daemon and BuildKit runs their common steps once;
    - else another zone's daemon (or none, with `crossZone: false`).
 
+   Zones are the daemons' nodes' `topology.kubernetes.io/zone`; with
+   `control-plane.router.zones: false` every daemon counts as one zone
+   (zones close enough that crossing them costs nothing).
+
    A connection from a pod that is no CI job goes to its own node's
    daemon. The routers learn where projects built from the controller
    (and keep routing on their last view while it is away); the build page

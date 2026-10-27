@@ -69,6 +69,7 @@ spec:
             - -controller=https://{{ include "control-plane.controllerName" . }}.{{ .Release.Namespace }}.svc:{{ int .Values.controller.api.port }}
             - -controller-ca=/api-tls/ca.crt
             - -token-file=/var/run/secrets/ci-accelerator/token
+            - -zones={{ dig "zones" true (.Values.router | default dict) }}
             - -cross-zone={{ $v.crossZone }}
             - -overload={{ int $v.overloadBuilds }}
             - -warm-for={{ mul (int $v.warmDays) 24 }}h
