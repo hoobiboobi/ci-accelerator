@@ -49,37 +49,37 @@ tests:
 
   - it: says the console without sign-in stays inside the cluster
     set:
-      console.enabled: true
+      control-plane.enabled: true
     asserts:
       - matchRegexRaw:
-          pattern: 'Sign-in is off \(console\.signIn\): it shows everything to whoever reaches\nit, so keep it inside the cluster:\n  kubectl -n ci-accelerator port-forward svc/box-console 8080'
+          pattern: 'Sign-in is off \(control-plane\.signIn\): the console shows everything to\nwhoever reaches it, so keep it inside the cluster:\n  kubectl -n ci-accelerator port-forward svc/box-web 8080'
       - matchRegexRaw:
-          pattern: 'The console explains each build\.'
+          pattern: 'The console explains each build: the controller \(box-controller\)\ncollects the daemons. history, the web \(box-web\) serves the pages\.'
       - notMatchRegexRaw:
           pattern: 'preview'
       - matchRegexRaw:
-          pattern: 'Without GitLab access it shows image builds, their steps and cache\nverdicts, but no job results or runner waits\. More \(README, "The console"\):\n  - a GitLab token with read_api \(console\.gitlab\.token\.existingSecret\):'
+          pattern: 'Without GitLab access it shows image builds, their steps and cache\nverdicts, but no job results or runner waits\. More \(README, "The console"\):\n  - a GitLab token with read_api \(control-plane\.gitlab\.token\.existingSecret\):'
       # Without global.console.url the redirect URI shows where the address goes.
       - matchRegexRaw:
           pattern: '      <global\.console\.url>/auth/callback/051b90\n'
 
   - it: does not ask for a token the console already has
     set:
-      console.enabled: true
-      console.gitlab.token.existingSecret: console-gitlab-token
+      control-plane.enabled: true
+      control-plane.gitlab.token.existingSecret: console-gitlab-token
     asserts:
       - matchRegexRaw:
           pattern: 'Sign-in is off'
       - notMatchRegexRaw:
-          pattern: 'console\.gitlab\.token\.existingSecret'
+          pattern: 'control-plane\.gitlab\.token\.existingSecret'
       - matchRegexRaw:
           pattern: 'With its GitLab token it also shows job results and runner waits'
 
   - it: prints the redirect URI of the runner's GitLab for sign-in
     set:
-      console.enabled: true
+      control-plane.enabled: true
       global.console.url: https://ci.example.com/
-      console.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
+      control-plane.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
     asserts:
       - matchRegexRaw:
           pattern: 'People sign in through GitLab at https://ci\.example\.com/ and see the projects whose jobs'
@@ -88,24 +88,22 @@ tests:
       - notMatchRegexRaw:
           pattern: 'Sign-in is off'
       - notMatchRegexRaw:
-          pattern: 'console\.gitlab\.token\.existingSecret'
+          pattern: 'control-plane\.gitlab\.token\.existingSecret'
 
   - it: gives the port-forward for a console on this machine
     set:
-      console.enabled: true
+      control-plane.enabled: true
       global.console.url: http://localhost:18081
-      console.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
+      control-plane.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
     asserts:
       - matchRegexRaw:
-          pattern: 'http://localhost:18081 is this machine: reach the console with\n  kubectl -n ci-accelerator port-forward svc/box-console 18081:8080'
+          pattern: 'http://localhost:18081 is this machine: reach the console with\n  kubectl -n ci-accelerator port-forward svc/box-web 18081:8080'
       - notMatchRegexRaw:
           pattern: 'Ingress or gateway with TLS for http://'
 
-  # helm upgrade --reuse-values from 0.1.0 keeps a values tree without a
-  # console block: the notes must still render.
-  - it: renders for values reused from 0.1.0, which have no console
+  - it: says nothing of the console when the control plane is off
     set:
-      console: null
+      control-plane.enabled: false
     asserts:
       - notFailedTemplate: {}
       - notMatchRegexRaw:

@@ -1,9 +1,0 @@
-gitlab:
-  urls: [https://gitlab.example.com/]
-daemons:
-  discover: buildkit-headless.ci-accelerator.svc:1234
-tls:
-  existingSecret: console-client
-api:
-  tls:
-    existingSecret: console-api

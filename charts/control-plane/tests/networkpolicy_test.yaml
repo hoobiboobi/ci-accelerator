@@ -1,0 +1,77 @@
+suite: NetworkPolicy
+templates:
+  - networkpolicy.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  - it: is off by default
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: keeps the jobs namespace, this namespace and the daemons out
+    set:
+      networkPolicy.enabled: true
+      jobs.namespace: ci-jobs
+    documentIndex: 0
+    asserts:
+      - hasDocuments: { count: 2 }
+      - equal: { path: metadata.name, value: c-web }
+      - equal: { path: spec.policyTypes, value: [Ingress] }
+      - equal: { path: spec.podSelector.matchLabels, value: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: web } }
+      - equal:
+          path: spec.ingress[0].ports
+          value: [{ port: http, protocol: TCP }]
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions
+          value: [{ key: kubernetes.io/metadata.name, operator: NotIn, values: [ci-accelerator, ci-jobs] }]
+      - equal:
+          path: spec.ingress[0].from[1].podSelector.matchExpressions
+          value: [{ key: ci-accelerator.io/component, operator: NotIn, values: [buildkit] }]
+      - isNull: { path: spec.egress }
+
+  - it: renders denied namespaces through tpl and adds peers
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.deniedNamespaces: ['{{ .Release.Namespace }}-builds', other]
+      networkPolicy.extraFrom: [{ ipBlock: { cidr: 10.0.0.0/24 } }]
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator, ci-accelerator-builds, other]
+      - equal: { path: 'spec.ingress[0].from[2]', value: { ipBlock: { cidr: 10.0.0.0/24 } } }
+
+  - it: admits every pod of this namespace without denied components
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.deniedComponents: []
+    documentIndex: 0
+    asserts:
+      - equal: { path: 'spec.ingress[0].from[1].podSelector', value: {} }
+
+  # The controller answers the web's pods only: no namespace, no job, no
+  # build reaches its API.
+  - it: lets only the web call the controller
+    set:
+      networkPolicy.enabled: true
+      jobs.namespace: ci-jobs
+    documentIndex: 1
+    asserts:
+      - equal: { path: metadata.name, value: c-controller }
+      - equal: { path: spec.podSelector.matchLabels, value: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: controller } }
+      - equal: { path: spec.policyTypes, value: [Ingress] }
+      - equal:
+          path: spec.ingress
+          value:
+            - ports: [{ port: api, protocol: TCP }]
+              from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: web } } }]
+      - isNull: { path: spec.egress }
+
+  - it: renders with values reused from a release without networkPolicy
+    set:
+      networkPolicy: null
+    asserts:
+      - hasDocuments: { count: 0 }

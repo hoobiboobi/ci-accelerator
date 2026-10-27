@@ -9,37 +9,63 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-- The console becomes two Deployments. `<release>-console` keeps its name,
-  its volume and its data, and becomes the controller; the pages move to
-  the new `<release>-console-web` (two pods). The Service
-  `<release>-console` now points at the web, so port-forwards, Ingresses
-  and `global.console.url` keep working. The upgrade restarts the console
-  once, never the daemons. Values from 0.2.x keep their meaning (the
-  console's keys are the controller's); `console.web.*` and `console.api.*`
-  are new.
+- **0.2.x does not upgrade in place: install again.** The console became
+  the control plane, and every object and value of it has a new name, so
+  Helm refuses the upgrade and says how to move:
+  1. `helm uninstall <release> -n <namespace> --wait`, then wait until its
+     pods are gone (the jobs namespace goes with the release).
+  2. Move your values from `console:` to `control-plane:`. The
+     controller's pod settings and volume go under
+     `control-plane.controller` (`resources`, `nodeSelector`,
+     `tolerations`, `affinity`, `podLabels`, `podAnnotations`,
+     `persistence`), the web's under `control-plane.web` (its port was
+     `service.port`; the web no longer follows the controller's
+     placement). A runner cache's `consoleSecretName` is now
+     `controllerSecretName`.
+  3. Install this release. The daemons' cache on a hostPath stays (an
+     emptyDir cache starts empty, as on every rollout); the new console
+     starts with an empty history, and the old one stays on the volume
+     `<release>-console-data` until you delete it.
+  4. Point port-forwards, Ingresses and the address behind
+     `global.console.url` at the Service `<release>-web` (it was
+     `<release>-console`).
+
+  On the one-machine install, `quickstart.sh` stops with the same steps.
+  GitOps: delete the Application or HelmRelease and create it again with
+  the new values. Step by step: troubleshooting, "Upgrading from 0.2.x to
+  0.3.0".
+- New names: chart `control-plane` (was `console`,
+  `oci://ghcr.io/hoobiboobi/charts/control-plane`), image
+  `ghcr.io/hoobiboobi/ci-accelerator` (was `ci-accelerator-console`; it
+  also runs the daemons' disk probe, so the daemons restart once),
+  Deployments `<release>-controller` and `<release>-web`, Services
+  `<release>-web` (the console) and `<release>-controller` (its API),
+  volume `<release>-controller-data`, labels `controller` and `web`
+  (`app.kubernetes.io/component` and `ci-accelerator.io/component`).
 - The controller checks the web's ServiceAccount tokens with a
   TokenReview: the chart adds a ClusterRole that allows only that, and its
   binding. Whoever installs the chart needs the right to create them.
-- Without cert-manager (`console.tls.existingSecret`), the controller's API
-  needs a server certificate too: `console.api.tls.existingSecret`, a
-  Secret with `tls.crt`, `tls.key` and `ca.crt`. `scripts/buildkit-certs.sh
-  --console-api <release>-console` makes one from the daemons' CA. With
-  cert-manager it is issued like the console's client certificate.
-- Sessions of people signed in survive the upgrade (they are in the
-  controller's store); nobody has to sign in again.
+- Without cert-manager (`control-plane.tls.existingSecret`), the
+  controller's API needs a server certificate too:
+  `control-plane.controller.api.tls.existingSecret`, a Secret with
+  `tls.crt`, `tls.key` and `ca.crt`. `scripts/buildkit-certs.sh
+  --controller <release>` makes one from the daemons' CA. With cert-manager
+  it is issued like the controller's client certificate.
 
 ### Changed
 
-- The console runs as a controller (one pod: the store, reading the
-  daemons and the job pods, the sessions, every GitLab token) and a web
-  (the pages, any number of pods, nothing kept), from one image. The web
-  reads the controller's API over HTTPS with a server-auth-only
-  certificate from the daemons' CA and proves who it is with a projected
-  ServiceAccount token; the controller's NetworkPolicy admits the web's
-  pods only. A page whose controller does not answer says so (502) instead
-  of showing an empty console; the web rolls without a pause.
-- The console binary has roles: `console controller`, `console web`, and
-  the default `console` with both in one process (for development).
+- The console is served by the control plane: a controller (one pod: the
+  store, reading the daemons and the job pods, the sessions, every GitLab
+  token) and a web (the pages, any number of pods, nothing kept), from one
+  image. The web reads the controller's API over HTTPS with a
+  server-auth-only certificate from the daemons' CA and proves who it is
+  with a projected ServiceAccount token; the controller's NetworkPolicy
+  admits the web's pods only. A page whose controller does not answer says
+  so (502) instead of showing an empty console; the web rolls without a
+  pause.
+- One binary, `ci-accelerator`, with roles: `controller`, `web`,
+  `disk-probe`, and `all` (the default: controller and web in one process,
+  for development).
 
 ## 0.2.5 - 2026-10-26
 

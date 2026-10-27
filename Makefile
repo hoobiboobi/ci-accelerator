@@ -3,11 +3,11 @@
 
 HELM   ?= helm
 CHARTS := charts/buildkit
-# The console chart needs its own required values.
-CONSOLE := charts/console
-CONSOLE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set api.tls.existingSecret=lint-api --set jobs.namespace=ci-jobs
-CONSOLE_SIGN_IN_SET := --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["root"]}]'
-CONSOLE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1
+# The control-plane chart needs its own required values.
+CONTROL_PLANE := charts/control-plane
+CONTROL_PLANE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set controller.api.tls.existingSecret=lint-api --set jobs.namespace=ci-jobs
+CONTROL_PLANE_SIGN_IN_SET := --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["root"]}]'
+CONTROL_PLANE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1
 # Extra values files every chart check also renders with.
 CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
 # Values the charts require and the files above leave to the installer.
@@ -60,7 +60,7 @@ KUBECTL_VERSION := v1.37.1
 KUBECTL_SHA256_linux_amd64 := 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
 KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7
 # Vulnerability scanners: govulncheck (golang.org/x/vuln, installed with Go,
-# verified by the Go checksum database) for the console's code, trivy for
+# verified by the Go checksum database) for the Go code, trivy for
 # its image. Checksums from trivy's <version>_checksums.txt release asset.
 GOVULNCHECK_VERSION := 1.8.0
 # Chart READMEs from values comments (helm-docs, installed with Go) and the
@@ -76,7 +76,7 @@ TRIVY_SHA256_linux_arm64  := a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a1
 TRIVY_SHA256_darwin_arm64 := 4a77108cccf8e55c8d6823e1e759939a622277e66cd0daa3c1fc621ed69e4568
 TRIVY_OS = $(subst linux,Linux,$(subst darwin,macOS,$(OS)))
 TRIVY_ARCH = $(subst amd64,64bit,$(subst arm64,ARM64,$(ARCH)))
-# Go for the console (internal/, cmd/). Locally any Go >= 1.21 fetches this
+# Go for the control plane (internal/, cmd/). Locally any Go >= 1.21 fetches this
 # toolchain itself (GOTOOLCHAIN, verified against the Go checksum database);
 # CI downloads the archive below. Checksums from https://go.dev/dl/?mode=json.
 GO_VERSION := 1.27.3
@@ -194,7 +194,7 @@ chart-docs-check: $(HELM_DOCS) ## Fail when a chart README is out of date (make 
 .PHONY: artifacthub-metadata
 artifacthub-metadata: $(ORAS) ## Push artifacthub/<chart>.yml to every chart's OCI repository (CHARTS_REPO=ghcr.io/<owner>/charts)
 	@[ -n "$(CHARTS_REPO)" ] || { echo "set CHARTS_REPO=ghcr.io/<owner>/charts" >&2; exit 2; }
-	@for c in buildkit console ci-accelerator; do \
+	@for c in buildkit control-plane ci-accelerator; do \
 		rm -rf $(TOOLS)/artifacthub && mkdir -p $(TOOLS)/artifacthub && cp artifacthub/$$c.yml $(TOOLS)/artifacthub/artifacthub-repo.yml && \
 		(cd $(TOOLS)/artifacthub && $(ORAS) push "$(CHARTS_REPO)/$$c:artifacthub.io" \
 			--config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
@@ -210,14 +210,14 @@ $(TRIVY):
 	@mkdir -p $(dir $@) && tar -xzf $(TOOLS)/dl/trivy-$(TRIVY_VERSION).tgz -C $(dir $@) trivy
 
 .PHONY: vulncheck
-vulncheck: $(GOVULNCHECK) ## Known vulnerabilities reachable from the console's code, both release targets (.govulncheck-allow for grace periods)
+vulncheck: $(GOVULNCHECK) ## Known vulnerabilities reachable from the Go code, both release targets (.govulncheck-allow for grace periods)
 	@GOVULNCHECK=$(GOVULNCHECK) GOTOOLCHAIN=go$(GO_VERSION) scripts/vulncheck.sh
 
 # IMAGE=<ref> scans a registry image, IMAGE_TAR=<docker archive> a local one
-# (scripts/build-console-image.sh writes it with SCAN_TAR). Fails on HIGH or
+# (scripts/build-image.sh writes it with SCAN_TAR). Fails on HIGH or
 # CRITICAL findings that have a fix; .trivyignore.yaml holds grace periods.
 .PHONY: image-scan
-image-scan: $(TRIVY) ## trivy over the console image (IMAGE=<ref> or IMAGE_TAR=<file>): HIGH/CRITICAL with a fix fail
+image-scan: $(TRIVY) ## trivy over the ci-accelerator image (IMAGE=<ref> or IMAGE_TAR=<file>): HIGH/CRITICAL with a fix fail
 	@[ -n "$(IMAGE)$(IMAGE_TAR)" ] || { echo "set IMAGE=<ref> or IMAGE_TAR=<docker archive>" >&2; exit 2; }
 	$(TRIVY) image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
 		--ignorefile .trivyignore.yaml $(if $(IMAGE_TAR),--input $(IMAGE_TAR),$(IMAGE))
@@ -264,7 +264,7 @@ UMBRELLA := charts/ci-accelerator
 deps: $(RUNNER_CHART) ## Vendor the umbrella chart's dependencies into charts/ci-accelerator/charts/
 	@mkdir -p $(UMBRELLA)/charts && rm -f $(UMBRELLA)/charts/*.tgz
 	@$(HELM) package charts/buildkit -d $(UMBRELLA)/charts >/dev/null
-	@$(HELM) package $(CONSOLE) -d $(UMBRELLA)/charts >/dev/null
+	@$(HELM) package $(CONTROL_PLANE) -d $(UMBRELLA)/charts >/dev/null
 	@cp $(RUNNER_CHART) $(UMBRELLA)/charts/
 
 .PHONY: lint
@@ -279,31 +279,32 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 				|| { $(HELM) lint --strict $$c -f $$v $(RENDER_SET); exit 1; }; \
 		done; \
 	done
-	@echo "==> lint $(CONSOLE)"
-	@cmp -s LICENSE $(CONSOLE)/LICENSE || { echo "$(CONSOLE)/LICENSE differs from LICENSE"; exit 1; }
-	@$(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET) >/dev/null || { $(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET); exit 1; }
-	@$(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET) $(CONSOLE_SIGN_IN_SET) >/dev/null || { $(HELM) lint --strict $(CONSOLE) $(CONSOLE_SET) $(CONSOLE_SIGN_IN_SET); exit 1; }
+	@echo "==> lint $(CONTROL_PLANE)"
+	@cmp -s LICENSE $(CONTROL_PLANE)/LICENSE || { echo "$(CONTROL_PLANE)/LICENSE differs from LICENSE"; exit 1; }
+	@$(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET) >/dev/null || { $(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET); exit 1; }
+	@$(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET) $(CONTROL_PLANE_SIGN_IN_SET) >/dev/null || { $(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET) $(CONTROL_PLANE_SIGN_IN_SET); exit 1; }
 	@echo "==> lint $(UMBRELLA)"
 	@cmp -s LICENSE $(UMBRELLA)/LICENSE || { echo "$(UMBRELLA)/LICENSE differs from LICENSE"; exit 1; }
 	@$(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml >/dev/null \
 		|| { $(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml; exit 1; }
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-console-image.sh scripts/quickstart.sh test/quickstart/run.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
-	@for c in $(CHARTS) $(CONSOLE) $(UMBRELLA); do \
+	@for c in $(CHARTS) $(CONTROL_PLANE) $(UMBRELLA); do \
 		echo "==> unittest $$c"; \
 		$(HELM) unittest --strict $$c || exit 1; \
 	done
 
-# The console image for kind and the e2e (not published from here).
-CONSOLE_IMAGE ?= ci-accelerator-console:dev
-.PHONY: console-image
-console-image: ## Build the console image for this machine's architecture and load it into kind
-	@docker buildx build -f cmd/console/Dockerfile -t $(CONSOLE_IMAGE) --build-arg VERSION=dev --build-arg COMMIT=$$(git rev-parse --short=12 HEAD) --load . >/dev/null
-	@kind load docker-image $(CONSOLE_IMAGE) --name $(KIND_CLUSTER) >/dev/null 2>&1
-	@echo "$(CONSOLE_IMAGE) loaded into kind cluster $(KIND_CLUSTER)"
+# The ci-accelerator image (controller, web, disk probe) for kind and the
+# e2e (not published from here).
+LOCAL_IMAGE ?= ci-accelerator:dev
+.PHONY: image
+image: ## Build the ci-accelerator image for this machine's architecture and load it into kind
+	@docker buildx build -f cmd/ci-accelerator/Dockerfile -t $(LOCAL_IMAGE) --build-arg VERSION=dev --build-arg COMMIT=$$(git rev-parse --short=12 HEAD) --load . >/dev/null
+	@kind load docker-image $(LOCAL_IMAGE) --name $(KIND_CLUSTER) >/dev/null 2>&1
+	@echo "$(LOCAL_IMAGE) loaded into kind cluster $(KIND_CLUSTER)"
 
 .PHONY: ui-tools
 ui-tools: $(NODE) ## Pinned Node for the browser checks into .tools/node-v<version>
@@ -319,7 +320,7 @@ component-test: ## The GitLab CI component's job script against a fake buildctl,
 .PHONY: ui-test
 ui-test: $(NODE) ## Browser checks of the console's pages on its fixtures (needs Chrome; CHROME=<path> to pick one)
 	@UI_TEST=1 NODE=$(NODE) $(GO_RUN) test -count=1 -v -run '^TestUI(SignedIn)?$$' -timeout 15m ./internal/web/
-	@echo "==> the same pages through the controller's API (split console)"
+	@echo "==> the same pages through the controller's API (controller and web apart)"
 	@UI_TEST=1 WEB_TEST_SPLIT=1 NODE=$(NODE) $(GO_RUN) test -count=1 -v -run '^TestUI(SignedIn)?$$' -timeout 15m ./internal/web/
 
 .PHONY: ui-shots
@@ -357,14 +358,14 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		done; \
 	done
 	@for k in $(KUBE_VERSIONS); do \
-		echo "==> kubeconform $(CONSOLE) k8s $$k"; \
-		$(HELM) template test $(CONSOLE) --kube-version $$k -n ci-accelerator $(CONSOLE_SET) \
+		echo "==> kubeconform $(CONTROL_PLANE) k8s $$k"; \
+		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n ci-accelerator $(CONTROL_PLANE_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
-		echo "==> kubeconform $(CONSOLE) k8s $$k sign-in"; \
-		$(HELM) template test $(CONSOLE) --kube-version $$k -n ci-accelerator $(CONSOLE_SET) $(CONSOLE_SIGN_IN_SET) \
+		echo "==> kubeconform $(CONTROL_PLANE) k8s $$k sign-in"; \
+		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n ci-accelerator $(CONTROL_PLANE_SET) $(CONTROL_PLANE_SIGN_IN_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
-		echo "==> kubeconform $(CONSOLE) k8s $$k cert-manager"; \
-		$(HELM) template test $(CONSOLE) --kube-version $$k -n ci-accelerator $(CONSOLE_CERT_MANAGER_SET) \
+		echo "==> kubeconform $(CONTROL_PLANE) k8s $$k cert-manager"; \
+		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n ci-accelerator $(CONTROL_PLANE_CERT_MANAGER_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 	done
 	@for k in $(KUBE_VERSIONS); do \
@@ -380,9 +381,9 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
 			-f $(UMBRELLA)/tests/values/required.yaml -f $(UMBRELLA)/tests/values/tiers.yaml \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
-		echo "==> kubeconform $(UMBRELLA) k8s $$k console"; \
+		echo "==> kubeconform $(UMBRELLA) k8s $$k control plane"; \
 		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
-			-f $(UMBRELLA)/tests/values/required.yaml -f $(UMBRELLA)/tests/values/console.yaml \
+			-f $(UMBRELLA)/tests/values/required.yaml -f $(UMBRELLA)/tests/values/control-plane.yaml \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 	done
 	@test/runner-config-parity.sh $(HELM) $(RUNNER_CHART)

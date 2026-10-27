@@ -1,0 +1,61 @@
+suite: no in-place upgrade of a 0.2.x console
+templates:
+  - controller.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+kubernetesProvider:
+  scheme:
+    "apps/v1/Deployment":
+      gvr:
+        group: apps
+        version: v1
+        resource: deployments
+      namespaced: true
+tests:
+  # 0.3.0 renamed every object: upgrading would start a second controller
+  # next to the old console, on another volume.
+  - it: refuses a release that still has the console of 0.2.x
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: c-console
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: c, ci-accelerator.io/component: console }
+    asserts:
+      - failedTemplate:
+          errorPattern: "release c has the console of ci-accelerator 0.2.x \\(Deployment c-console\\), which 0.3.0 cannot upgrade in place.*helm uninstall c -n ci-accelerator.*c-console-data"
+  - it: refuses it before any other check (old values miss what the new chart needs)
+    set:
+      gitlab.urls: []
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: c-console
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: c, ci-accelerator.io/component: console }
+    asserts:
+      - failedTemplate: { errorPattern: "cannot upgrade in place" }
+  - it: ignores another release's console and its own controller
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: other-console
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: other, ci-accelerator.io/component: console }
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: c-controller
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: c, ci-accelerator.io/component: controller }
+    asserts:
+      - notFailedTemplate: {}

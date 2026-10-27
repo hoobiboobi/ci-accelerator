@@ -4,7 +4,7 @@
 
 A self-hosted fast CI runner for GitLab: persistent BuildKit daemons with a shared cache on dedicated build nodes, and a gitlab-runner that sends CI jobs to them.
 
-The box: one release that installs persistent BuildKit daemons on your build nodes, a gitlab-runner whose jobs use them, and the console that explains every build. Set the GitLab URL and the runner token's Secret; everything else has working defaults. cert-manager is a prerequisite (the daemons and jobs authenticate each other with certificates it issues).
+The box: one release that installs persistent BuildKit daemons on your build nodes, a gitlab-runner whose jobs use them, and the control plane whose console explains every build. Set the GitLab URL and the runner token's Secret; everything else has working defaults. cert-manager is a prerequisite (the daemons and jobs authenticate each other with certificates it issues).
 
 ```sh
 helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <version> \
@@ -14,7 +14,7 @@ helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --ver
   --wait --timeout 10m
 ```
 
-For production, say where the cache lives (`buildkit.storage`: a hostPath on a dedicated disk) and pin the console image by digest. The [documentation](https://ci-accelerator.io/docs/) has the quickstart, the requirements, the console's levels and the limitations; [GitOps](https://ci-accelerator.io/docs/gitops/) installs the same release with Flux or Argo CD. The subcharts' values are under `buildkit`, `console` and `gitlab-runner`; the table below lists the box's own keys.
+For production, say where the cache lives (`buildkit.storage`: a hostPath on a dedicated disk) and pin the control plane's image by digest. The [documentation](https://ci-accelerator.io/docs/) has the quickstart, the requirements, the console's levels and the limitations; [GitOps](https://ci-accelerator.io/docs/gitops/) installs the same release with Flux or Argo CD. The subcharts' values are under `buildkit`, `control-plane` and `gitlab-runner`; the table below lists the box's own keys.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ Kubernetes: `>=1.34.0-0`
 | Repository | Name | Version |
 |------------|------|---------|
 | file://../buildkit | buildkit | 0.2.5 |
-| file://../console | console | 0.2.5 |
+| file://../control-plane | control-plane | 0.2.5 |
 | https://charts.gitlab.io | gitlab-runner | 0.93.0 |
 
 ## Values
@@ -31,20 +31,20 @@ Kubernetes: `>=1.34.0-0`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | buildkit.diskProbe.enabled | bool | `true` | The probe next to each daemon (charts/buildkit diskProbe). |
-| buildkit.diskProbe.port | int | `9180` | Equal to console.daemons.diskProbePort. |
+| buildkit.diskProbe.port | int | `9180` | Equal to control-plane.daemons.diskProbePort. |
 | buildkit.networkPolicy.enabled | bool | `true` |  |
-| buildkit.networkPolicy.ingress.extraFrom[0].podSelector.matchLabels."ci-accelerator.io/component" | string | `"console"` |  |
+| buildkit.networkPolicy.ingress.extraFrom[0].podSelector.matchLabels."ci-accelerator.io/component" | string | `"controller"` |  |
 | buildkit.tls.client.namespaces[0] | string | `"{{ .Values.global.jobs.namespace }}"` |  |
-| console.caches.fromConfigMap | string | `"{{ .Release.Name }}-console-caches"` |  |
-| console.daemons.discover | string | `"{{ include \"ci-accelerator.buildkitHeadless\" . }}.{{ .Release.Namespace }}.svc:1234"` |  |
-| console.daemons.diskProbePort | int | `9180` | Equal to buildkit.diskProbe.port: the console reads each daemon's disk there. |
-| console.enabled | bool | `true` |  |
-| console.gitlab.urlsFrom.configMap | string | `"{{ .Release.Name }}-console-gitlab"` |  |
-| console.jobs.namespace | string | `"{{ .Values.global.jobs.namespace }}"` |  |
-| console.networkPolicy.enabled | bool | `true` | Keep the box's CI jobs and builds away from the console: the jobs namespace and the daemons (RUN steps share their network) may not connect; Ingress controllers in other namespaces and port-forward still do. Needs a CNI that enforces NetworkPolicy; see charts/console. |
-| console.signIn.enabled | bool | `false` |  |
-| console.tls.certManager.issuerRef.name | string | `"{{ include \"ci-accelerator.issuerName\" . }}"` |  |
-| console.tls.existingSecret | string | `""` |  |
+| control-plane.caches.fromConfigMap | string | `"{{ .Release.Name }}-runner-caches"` |  |
+| control-plane.daemons.discover | string | `"{{ include \"ci-accelerator.buildkitHeadless\" . }}.{{ .Release.Namespace }}.svc:1234"` |  |
+| control-plane.daemons.diskProbePort | int | `9180` | Equal to buildkit.diskProbe.port: the controller reads each daemon's disk there. |
+| control-plane.enabled | bool | `true` |  |
+| control-plane.gitlab.urlsFrom.configMap | string | `"{{ .Release.Name }}-runner-gitlab"` |  |
+| control-plane.jobs.namespace | string | `"{{ .Values.global.jobs.namespace }}"` |  |
+| control-plane.networkPolicy.enabled | bool | `true` | Keep the box's CI jobs and builds away from the console: the jobs namespace and the daemons (RUN steps share their network) may not connect; Ingress controllers in other namespaces and port-forward still do. Needs a CNI that enforces NetworkPolicy; see charts/control-plane. |
+| control-plane.signIn.enabled | bool | `false` |  |
+| control-plane.tls.certManager.issuerRef.name | string | `"{{ include \"ci-accelerator.issuerName\" . }}"` |  |
+| control-plane.tls.existingSecret | string | `""` |  |
 | gitlab-runner.enabled | bool | `true` |  |
 | gitlab-runner.gitlabUrl | string | `""` | Required: your GitLab, e.g. https://gitlab.example.com/ |
 | gitlab-runner.image.tag | string | `"alpine-v19.4.1"` |  |
@@ -81,7 +81,7 @@ Kubernetes: `>=1.34.0-0`
 | gitlab-runner.runners.jobNamespace | string | `"ci-accelerator-jobs"` | Keep equal to global.jobs.namespace. |
 | gitlab-runner.runners.secret | string | `""` | Required: a Secret in this release's namespace with the runner authentication token (runner-token: glrt-...) and an empty runner-registration-token key. |
 | global.buildNodes | object | `{"enabled":true,"selector":{"ci-accelerator.io/node-role":"build"},"tolerations":[{"effect":"NoSchedule","key":"ci-accelerator.io/node-role","operator":"Equal","value":"build"}]}` | Dedicated build nodes: the daemons and the CI job pods run there, so a job reaches the daemon (and the cache) on its own node. Label and taint them before install. |
-| global.console.url | string | `""` | The console's address as users reach it (https://...). When set, every job prints the link to its page in its log, and sign-in through GitLab (console.signIn) uses it. Empty: no link. |
+| global.console.url | string | `""` | The console's address as users reach it (https://...). When set, every job prints the link to its page in its log, and sign-in through GitLab (control-plane.signIn) uses it. Empty: no link. |
 | global.jobs.architecture | string | `"amd64"` | CPU architecture of the build nodes (kubernetes.io/arch). The runner picks its helper image by it. |
 | global.jobs.namespace | string | `"ci-accelerator-jobs"` | Namespace of the CI job pods. They run untrusted code, so they get their own namespace, apart from the runner and the daemons. Keep gitlab-runner.runners.jobNamespace equal to it. |
 | global.tls.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | cert-manager issuer for daemon and client certificates. Empty name: a CA dedicated to this release is created (see buildkit.tls). |

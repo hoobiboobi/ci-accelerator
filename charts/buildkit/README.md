@@ -11,7 +11,7 @@ helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version <versio
   -n ci-accelerator --set 'tls.client.namespaces={ci-jobs}'
 ```
 
-The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs this chart with a gitlab-runner and the console. How to use the daemons from a job, where the cache should live and what to watch: the [documentation](https://ci-accelerator.io/docs/), [architecture](https://ci-accelerator.io/docs/architecture/) and [troubleshooting](https://ci-accelerator.io/docs/troubleshooting/).
+The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs this chart with a gitlab-runner and the control plane (the console). How to use the daemons from a job, where the cache should live and what to watch: the [documentation](https://ci-accelerator.io/docs/), [architecture](https://ci-accelerator.io/docs/architecture/) and [troubleshooting](https://ci-accelerator.io/docs/troubleshooting/).
 
 ## Requirements
 
@@ -31,16 +31,16 @@ Kubernetes: `>=1.34.0-0`
 | config.gc.minFreeSpace | string | `"30%"` | Reclaim when free space on the state-dir filesystem drops below this. It is compared with free blocks including the filesystem's root reserve (ext4: 5%), while kubelet evicts on available blocks at 10-15%. With the cache on the node's root disk (emptyDir, or hostPath not on its own disk) keep it at 30% or more; on a dedicated disk use an absolute size (production: 400GB on a 3 TB NVMe). |
 | config.gc.reservedSpace | string | `"10GB"` | The capped policies never reclaim below this much cache. Age-based policies (cache mounts, local context) still expire by age. |
 | config.gcPolicy | list | `[]` | Replace the chart's GC policies entirely. Each item: filters, all, keepDuration, reservedSpace, maxUsedSpace, minFreeSpace. Filters use buildkit's prune syntax, e.g. "type==exec.cachemount". |
-| config.history | object | `{"maxAge":"48h","maxEntries":1000}` | Build history, which the console reads (it copies each record when it completes, and reads the history again after a restart). Keys: maxAge (duration) and maxEntries (int). Set both, or neither: a key that is not set becomes 0, not the buildkit default (48h / 50); maxEntries 0 stops recording new history, and maxAge alone drops the 50-entry floor. 1000 records cover about an hour of a busy farm; buildkit's own 50 last minutes there. |
+| config.history | object | `{"maxAge":"48h","maxEntries":1000}` | Build history, which the controller reads (it copies each record when it completes, and reads the history again after a restart). Keys: maxAge (duration) and maxEntries (int). Set both, or neither: a key that is not set becomes 0, not the buildkit default (48h / 50); maxEntries 0 stops recording new history, and maxAge alone drops the 50-entry floor. 1000 records cover about an hour of a busy farm; buildkit's own 50 last minutes there. |
 | config.maxParallelism | int | `0` | Max concurrently running build operations per daemon: RUN, COPY/ADD and source operations (image pulls, git, local context). 0 = unlimited, which is buildkit's default (not the CPU count). Production ran 28 on a 48-CPU daemon. |
 | config.maxRegistryConcurrency | int | `0` | Max concurrent connections per registry; 0 keeps the buildkit default (4). Pushes that get stuck hold their slot and can hang every build on the daemon (moby/buildkit#7275); the probes do not detect that. |
 | config.workerOCI | object | `{}` | Extra keys for the [worker.oci] table, e.g. {snapshotter: native}. Values: strings, numbers, booleans or lists. The keys the chart sets (enabled, gc, max-parallelism, gcpolicy) are rejected. |
-| diskProbe.enabled | bool | `false` | Run the probe. Off here (no console to read it); the box turns it on. |
+| diskProbe.enabled | bool | `false` | Run the probe. Off here (no controller to read it); the box turns it on. |
 | diskProbe.image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability). |
 | diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
-| diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator-console"` | The console's image: mirror it together with the console's. |
-| diskProbe.image.tag | string | `""` | Default: v0.2.3, the console that last changed the probe program — pinned, so a chart release alone does not restart every daemon. |
-| diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the console's daemons.diskProbePort. |
+| diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator"` | The ci-accelerator image: mirror it together with the control plane's. |
+| diskProbe.image.tag | string | `""` | Default: v0.3.0, the release that last changed the probe program or its image; pinned, so a chart release alone does not restart every daemon. |
+| diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the control plane's daemons.diskProbePort. |
 | diskProbe.resources | object | `{"limits":{"memory":"32Mi"},"requests":{"cpu":"5m","memory":"16Mi"}}` | The probe's resources (it reads one number a minute). |
 | extraEnv | list | `[]` | Extra environment variables for the daemon container. |
 | fullnameOverride | string | `""` | Override the full resource name (<release>-<chart> by default). Install-time only, like nameOverride. |

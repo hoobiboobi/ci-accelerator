@@ -1,0 +1,45 @@
+suite: validation
+templates:
+  - controller.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  - it: needs the GitLab URLs
+    set:
+      gitlab.urls: []
+    asserts:
+      - failedTemplate: { errorPattern: "set gitlab.urls" }
+  - it: needs the daemons
+    set:
+      daemons.discover: ""
+    asserts:
+      - failedTemplate: { errorPattern: "set daemons.discover" }
+  - it: needs host:port for the daemons
+    set:
+      daemons.discover: buildkit-headless
+    asserts:
+      - failedTemplate: { errorPattern: "must be host:port" }
+  - it: needs a client certificate source
+    set:
+      tls.existingSecret: ""
+    asserts:
+      - failedTemplate: { errorPattern: "needs tls.existingSecret, or an issuer" }
+  - it: accepts the global issuer as the certificate source
+    set:
+      tls.existingSecret: ""
+      global.tls.issuerRef.name: ca
+    asserts:
+      - notFailedTemplate: {}
+  - it: refuses output kept longer than builds
+    set:
+      retention: { days: 3, outputDays: 7 }
+    asserts:
+      - failedTemplate: { errorPattern: "output kept no longer than builds" }
+  - it: refuses a URL list in one string (the schema)
+    set:
+      gitlab.urls: ["https://a.example.com/,https://b.example.com/"]
+    asserts:
+      - failedTemplate: {}

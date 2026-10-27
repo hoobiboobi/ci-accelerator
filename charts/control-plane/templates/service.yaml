@@ -1,0 +1,35 @@
+# The console: its pages and JSON API, served by the web's pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "control-plane.webName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "web") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "control-plane.selectorLabels" (dict "root" . "role" "web") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ int .Values.web.port }}
+      targetPort: http
+---
+# The controller's API, for the web (HTTPS; callers prove themselves with
+# a ServiceAccount token).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "control-plane.controllerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "control-plane.selectorLabels" (dict "root" . "role" "controller") | nindent 4 }}
+  ports:
+    - name: api
+      port: {{ int .Values.controller.api.port }}
+      targetPort: api
+      appProtocol: https

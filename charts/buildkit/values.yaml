@@ -257,7 +257,7 @@ config:
   # buildkit's prune syntax, e.g. "type==exec.cachemount".
   gcPolicy: []
 
-  # -- Build history, which the console reads (it copies each record when
+  # -- Build history, which the controller reads (it copies each record when
   # it completes, and reads the history again after a restart). Keys: maxAge
   # (duration) and maxEntries (int). Set both, or neither: a key that is not
   # set becomes 0, not the buildkit default (48h / 50); maxEntries 0 stops
@@ -418,20 +418,20 @@ priorityClass:
 # A small container next to the daemon that reports the free space of the
 # cache's filesystem (statfs), which BuildKit's API does not: the console
 # shows it on the Nodes page against the GC limits and warns before the
-# disk fills. It runs the console's image; enable it together with the
-# console (the box does). Answers plain HTTP on its port with numbers only
-# (the console reaches it like the daemon; builds share the pod's network
-# and can read the numbers too).
+# disk fills. It runs the ci-accelerator image (the control plane's);
+# enable it together with the control plane (the box does). Answers plain
+# HTTP on its port with numbers only (the controller reaches it like the
+# daemon; builds share the pod's network and can read the numbers too).
 diskProbe:
-  # -- Run the probe. Off here (no console to read it); the box turns it on.
+  # -- Run the probe. Off here (no controller to read it); the box turns it on.
   enabled: false
-  # -- Its port (GET /disk, /healthz); the console's daemons.diskProbePort.
+  # -- Its port (GET /disk, /healthz); the control plane's daemons.diskProbePort.
   port: 9180
   image:
-    # -- The console's image: mirror it together with the console's.
-    repository: ghcr.io/hoobiboobi/ci-accelerator-console
-    # -- Default: v0.2.3, the console that last changed the probe program —
-    # pinned, so a chart release alone does not restart every daemon.
+    # -- The ci-accelerator image: mirror it together with the control plane's.
+    repository: ghcr.io/hoobiboobi/ci-accelerator
+    # -- Default: v0.3.0, the release that last changed the probe program or
+    # its image; pinned, so a chart release alone does not restart every daemon.
     tag: ""
     # -- When set, the image is pulled by digest (tag is kept for readability).
     digest: ""

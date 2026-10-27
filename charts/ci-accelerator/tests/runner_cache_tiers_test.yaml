@@ -1,7 +1,7 @@
 suite: runner S3 cache and runner tiers
 templates:
   - runner-tiers.yaml
-  - console-caches.yaml
+  - runner-caches.yaml
   - validate.yaml
   - charts/gitlab-runner/templates/configmap.yaml
   - charts/gitlab-runner/templates/deployment.yaml
@@ -278,13 +278,13 @@ tests:
     asserts:
       - failedTemplate: {errorPattern: "runnerTiers.deploy.cache.secretName"}
 
-  # ---- the console's view of the caches ----
-  - it: tells the console each cache folder once, and lets it read only their keys
+  # ---- the controller's view of the caches ----
+  - it: tells the controller each cache folder once, and lets it read only their keys
     set:
-      console.enabled: true
+      control-plane.enabled: true
       gitlab-runner.runners.cache:
         secretName: runner-cache
-        consoleSecretName: runner-cache-read
+        controllerSecretName: runner-cache-read
         s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
       runnerTiers:
         deploy:
@@ -292,7 +292,7 @@ tests:
           resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
           cache:
             secretName: runner-cache
-            consoleSecretName: runner-cache-read
+            controllerSecretName: runner-cache-read
             s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
         other:
           token: {existingSecret: runner-other}
@@ -301,7 +301,7 @@ tests:
             secretName: other-keys
             path: elsewhere
             s3: {server: "minio.storage.svc:9000", bucket: other, region: us-east-1, insecure: true, pathStyle: true}
-    template: console-caches.yaml
+    template: runner-caches.yaml
     asserts:
       - equal:
           path: data["caches.json"]
@@ -309,36 +309,27 @@ tests:
         documentIndex: 0
       - equal: {path: 'rules[0].resourceNames', value: [runner-cache-read, other-keys]}
         documentIndex: 1
-      - equal: {path: 'subjects[0].name', value: box-console}
+      - equal: {path: 'subjects[0].name', value: box-controller}
         documentIndex: 2
-  # The binding names the console's ServiceAccount as the console chart
-  # names it.
-  - it: binds the console's ServiceAccount under a renamed console
+  # The binding names the controller's ServiceAccount as the control-plane
+  # chart names it.
+  - it: binds the controller's ServiceAccount under a renamed control plane
     set:
-      console.enabled: true
-      console.fullnameOverride: ci-console
+      control-plane.enabled: true
+      control-plane.fullnameOverride: ci
       gitlab-runner.runners.cache:
         secretName: runner-cache
         s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
-    template: console-caches.yaml
+    template: runner-caches.yaml
     asserts:
-      - equal: {path: 'subjects[0].name', value: ci-console}
+      - equal: {path: 'subjects[0].name', value: ci-controller}
         documentIndex: 2
-  - it: binds it under a console nameOverride
-    set:
-      console.enabled: true
-      console.nameOverride: ui
-      gitlab-runner.runners.cache:
-        secretName: runner-cache
-        s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
-    template: console-caches.yaml
-    asserts:
-      - equal: {path: 'subjects[0].name', value: box-ui}
-        documentIndex: 2
+      - equal: {path: metadata.name, value: box-runner-caches}
+        documentIndex: 0
   - it: writes an empty list without caches
     set:
-      console.enabled: true
-    template: console-caches.yaml
+      control-plane.enabled: true
+    template: runner-caches.yaml
     asserts:
       - hasDocuments: {count: 1}
       - equal: {path: 'data["caches.json"]', value: "[]"}

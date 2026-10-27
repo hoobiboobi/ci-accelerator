@@ -96,6 +96,7 @@ Render-time checks for the box: required values and the names the
 subcharts must agree on.
 */}}
 {{- define "ci-accelerator.validate" -}}
+{{- include "ci-accelerator.refuseOld" . }}
 {{- $runner := index .Values "gitlab-runner" }}
 {{- $jobs := .Values.global.jobs.namespace }}
 {{- if eq $jobs .Release.Namespace }}
@@ -128,8 +129,8 @@ running with no [[runners]] and takes no jobs). */}}
 {{- include "ci-accelerator.checkTiers" . }}
 {{- include "ci-accelerator.checkDiskProbe" . }}
 {{- include "ci-accelerator.preflightJobsNamespace" . }}
-{{- if and (dig "console" "enabled" false .Values.AsMap) (eq (toString .Values.buildkit.tls.source) "existingSecret") (not (dig "console" "tls" "existingSecret" "" .Values.AsMap)) }}
-{{- fail "console.enabled with buildkit.tls.source=existingSecret: give the console its own client certificate signed by the daemons' CA, console.tls.existingSecret (a Secret with ca.crt, tls.crt and tls.key in the release namespace)." }}
+{{- if and (dig "control-plane" "enabled" false .Values.AsMap) (eq (toString .Values.buildkit.tls.source) "existingSecret") (not (dig "control-plane" "tls" "existingSecret" "" .Values.AsMap)) }}
+{{- fail "control-plane.enabled with buildkit.tls.source=existingSecret: give the controller its own client certificate signed by the daemons' CA, control-plane.tls.existingSecret (a Secret with ca.crt, tls.crt and tls.key in the release namespace), and its API a server certificate, control-plane.controller.api.tls.existingSecret." }}
 {{- end }}
 {{- if or .Values.buildkit.fullnameOverride .Values.buildkit.nameOverride }}
 {{- fail "buildkit.fullnameOverride and buildkit.nameOverride are not supported in this chart: the runner configuration derives the daemons' address from the release name." }}
@@ -191,21 +192,45 @@ lookup is empty offline, so the check is skipped there.
 {{- end }}
 
 {{/*
-The console reads each daemon's disk probe on its port: the two port
+The controller reads each daemon's disk probe on its port: the two port
 values must agree. The probe's image is its own pin (charts/buildkit
-diskProbeImage): it need not equal the console's, whose tag moves with
-every release while the probe program does not.
+diskProbeImage): it need not equal the control plane's, whose tag moves
+with every release while the probe program does not.
 */}}
 {{- define "ci-accelerator.checkDiskProbe" -}}
 {{- $probe := .Values.buildkit.diskProbe | default dict }}
-{{- $console := .Values.console | default dict }}
-{{- $port := int (dig "daemons" "diskProbePort" 0 $console) }}
-{{- if $console.enabled }}
+{{- $cp := index .Values "control-plane" | default dict }}
+{{- $port := int (dig "daemons" "diskProbePort" 0 $cp) }}
+{{- if $cp.enabled }}
 {{- if and $probe.enabled (ne $port (int (default 9180 $probe.port))) }}
-{{- fail (printf "console.daemons.diskProbePort (%d) must equal buildkit.diskProbe.port (%d)." $port (int (default 9180 $probe.port))) }}
+{{- fail (printf "control-plane.daemons.diskProbePort (%d) must equal buildkit.diskProbe.port (%d)." $port (int (default 9180 $probe.port))) }}
 {{- end }}
 {{- if and (not $probe.enabled) (gt $port 0) }}
-{{- fail "console.daemons.diskProbePort is set but buildkit.diskProbe.enabled is false: enable the probe, or set the port to 0." }}
+{{- fail "control-plane.daemons.diskProbePort is set but buildkit.diskProbe.enabled is false: enable the probe, or set the port to 0." }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+ci-accelerator 0.3.0 split the console (0.2.x) into the control plane's
+controller and web, with new names for every object and value. It does
+not take over a 0.2.x release: refuse values under console: (kept by
+--reuse-values, or an old values file) and a release that still runs the
+old console, with the way forward. lookup is empty under helm template and
+GitOps renders.
+*/}}
+{{- define "ci-accelerator.refuseOld" -}}
+{{- $how := printf "ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place: the console became the control plane (a controller and a web) and its objects have new names. Remove the release (helm uninstall %s -n %s), wait until its pods are gone, and install 0.3.0; the daemons' cache on hostPath stays, and the old console's history stays on the PersistentVolumeClaim of its Deployment (<name>-data) until you delete it." .Release.Name .Release.Namespace }}
+{{- if hasKey .Values "console" }}
+{{- fail (printf "values under console: are the 0.2.x console's: since 0.3.0 they are under control-plane: (the controller's pod settings and persistence under control-plane.controller, the web's under control-plane.web; see the upgrade notes). %s" $how) }}
+{{- end }}
+{{- /* The 0.2.x console's Deployment: <release>-console, or <release> when
+the release name holds "console". Read by name: no list of Deployments. */}}
+{{- range (uniq (list (printf "%s-console" .Release.Name | trunc 63 | trimSuffix "-") .Release.Name)) }}
+{{- $d := lookup "apps/v1" "Deployment" $.Release.Namespace . }}
+{{- $l := dig "metadata" "labels" (dict) $d }}
+{{- if and (eq (get $l "app.kubernetes.io/instance") $.Release.Name) (eq (get $l "ci-accelerator.io/component") "console") }}
+{{- fail (printf "release %s has the console of ci-accelerator 0.2.x (Deployment %s). %s" $.Release.Name . $how) }}
 {{- end }}
 {{- end }}
 {{- end }}

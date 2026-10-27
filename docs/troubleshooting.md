@@ -33,7 +33,9 @@ names the fix; the common ones:
 | `global.buildNodes.selector has kubernetes.io/arch=...` | Set `global.jobs.architecture` to the same architecture |
 | `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
 | `priorityclasses.scheduling.k8s.io is forbidden` | The installer may not create cluster-scoped objects: `buildkit.priorityClass.create=false`, or name an existing class in `buildkit.priorityClassName` |
-| `console.daemons.diskProbePort (...) must equal buildkit.diskProbe.port` | Set the same port in both, or switch the probe off and set the port to 0 |
+| `control-plane.daemons.diskProbePort (...) must equal buildkit.diskProbe.port` | Set the same port in both, or switch the probe off and set the port to 0 |
+| `ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place`, or `release ... has the console of ci-accelerator 0.2.x` | 0.3.0 renamed every object and value of the console: uninstall, wait for the pods, install again ([below](#upgrading-from-02x-to-030)) |
+| `values under console: are the 0.2.x console's` | Move them under `control-plane:` (pod settings and volume under `control-plane.controller`, the web's under `control-plane.web`) |
 
 Checks that read the live cluster (Pod Security, build nodes, Secrets)
 need read access to Namespaces, Nodes and Secrets. Installers without it
@@ -76,7 +78,7 @@ kubectl -n ci-accelerator get secret gitlab-runner-token \
 | Runner pod in `ContainerCreating`, event `FailedMount ... non-existent secret key: runner-registration-token` | The empty key is missing | `kubectl -n ci-accelerator patch secret gitlab-runner-token --type merge -p '{"data":{"runner-registration-token":""}}'` |
 | Log `Verifying runner... is not valid` | Wrong or placeholder token, or the runner was deleted in GitLab | Fix the Secret, then `kubectl -n ci-accelerator rollout restart deploy/ci-accelerator-gitlab-runner` (the token is read at start) |
 | The runner is online, jobs stay pending or run elsewhere | Tags: a runner with tags that does not run untagged jobs only takes jobs with matching `tags:`. On gitlab.com untagged jobs go to the shared runners, which have no `BUILDKIT_*` variables | Add `tags:` to the job, or allow untagged jobs on the runner |
-| Runner pod `Pending` (`Unschedulable`), `helm install --wait` times out on the runner Deployment; the same for the console's pods | Every node is a tainted build node: the runner manager and the console do not tolerate the build-node taint | Keep one node without the taint, or add tolerations: `gitlab-runner.tolerations`, `console.tolerations` (the web follows them unless `console.web.tolerations` is set) |
+| Runner pod `Pending` (`Unschedulable`), `helm install --wait` times out on the runner Deployment; the same for the control plane's pods | Every node is a tainted build node: the runner manager, the controller and the web do not tolerate the build-node taint | Keep one node without the taint, or add tolerations: `gitlab-runner.tolerations`, `control-plane.controller.tolerations` and `control-plane.web.tolerations` |
 | Job pod `Pending` | It cannot go to a build node: missing toleration or node selector in a hand-made runner configuration | Use the configuration from the umbrella or `integrations/gitlab-runner` |
 | Job fails pulling `gitlab-runner-helper:x86_64-...` with `no match for platform` | arm64 build nodes, but the runner assumed amd64 | `global.jobs.architecture=arm64` (or `kubernetes.io/arch` in the fragment's node selector) |
 | Jobs rejected by Pod Security | The jobs namespace enforces `restricted` | Use `baseline` |
@@ -213,40 +215,43 @@ limit on build nodes.
 ## The console
 
 - **Pages answer "The console's controller is not reachable" (502).** The
-  web pods serve the pages; the controller (`deploy/<release>-console`)
-  holds the data. During a controller restart this lasts a few seconds.
-  If it stays: `kubectl logs deploy/<release>-console` for the controller,
-  `kubectl logs deploy/<release>-console-web` for the web's side
-  ("controller API refused a call" means its token or NetworkPolicy).
+  web's pods (`deploy/<release>-web`) serve the pages; the controller
+  (`deploy/<release>-controller`) holds the data. During a controller
+  restart this lasts a few seconds. If it stays: `kubectl logs
+  deploy/<release>-controller` for the controller, `kubectl logs
+  deploy/<release>-web` for the web's side ("controller API refused a
+  call" means its token or NetworkPolicy).
 - **The web's pods are not ready, "The console is starting".** A web pod
   waits for the controller's first answer (its setup) before it serves.
-  Check that `<release>-console-api` has an endpoint, that the Secret
-  `<release>-console-api` exists (cert-manager issues it; without
-  cert-manager `console.api.tls.existingSecret`), and that the controller
-  may create TokenReviews (the ClusterRole `<namespace>-<release>-console-tokenreview`).
+  Check that the Service `<release>-controller` has an endpoint, that the
+  Secret `<release>-controller-tls` exists (cert-manager issues it;
+  without cert-manager `control-plane.controller.api.tls.existingSecret`),
+  and that the controller may create TokenReviews (the ClusterRole
+  `<namespace>-<release>-controller-tokenreview`).
 - **The controller refuses the web (401/403 in its log).** The web's token
-  is projected for the audience `ci-accelerator-console` and its
-  ServiceAccount must be `<release>-console-web` in the release's
-  namespace; the controller checks both with Kubernetes (TokenReview).
+  is projected for the audience `ci-accelerator-controller` and its
+  ServiceAccount must be `<release>-web` in the release's namespace; the
+  controller checks both with Kubernetes (TokenReview).
   The answers are kept for 5 minutes, refusals for 10 seconds.
 - **No pipelines on the pages.** The console lists builds of CI jobs it can
   attribute: the job pods must carry the runner's annotations (the box's
   runner configuration or `integrations/gitlab-runner/values.yaml`), and
-  `console.jobs.namespace` must be the jobs namespace. Builds started
+  `control-plane.jobs.namespace` must be the jobs namespace. Builds started
   outside CI are stored but not listed.
-- **The console does not answer through an Ingress (or a tunnel) after
-  0.2.2.** The box's NetworkPolicy for the console admits pods of other
+- **The console does not answer through an Ingress (or a tunnel).** The
+  box's NetworkPolicy for the web admits pods of other
   namespaces, not traffic from node addresses: an Ingress controller on the
   host network (`hostNetwork: true`) comes from a node. Add the node
-  addresses to `console.networkPolicy.extraFrom` (`ipBlock`), or set
-  `console.networkPolicy.enabled=false` if the CNI enforces no policies
+  addresses to `control-plane.networkPolicy.extraFrom` (`ipBlock`), or set
+  `control-plane.networkPolicy.enabled=false` if the CNI enforces no policies
   anyway. `kubectl port-forward` is not affected.
-- **A build node shows as unreachable.** The console reads each daemon's
-  history over mutual TLS: check its client certificate (`<release>-console-client`)
-  and that the daemons' NetworkPolicy admits the console pod. Daemons that
-  are gone after a rollout disappear from the page by themselves (before
-  0.2.3 they could stay until the console restarted).
-- **"Disk: the probe did not answer".** The console asks the disk probe
+- **A build node shows as unreachable.** The controller reads each
+  daemon's history over mutual TLS: check its client certificate
+  (`<release>-controller-client`) and that the daemons' NetworkPolicy
+  admits the controller's pod (label `ci-accelerator.io/component:
+  controller`). Daemons that are gone after a rollout disappear from the
+  page by themselves.
+- **"Disk: the probe did not answer".** The controller asks the disk probe
   next to each daemon on port 9180: check the daemon pod's `disk-probe`
   container and that the daemons' NetworkPolicy has the `disk` port (it
   has, when `buildkit.diskProbe.enabled`). Right after an upgrade, the old
@@ -261,9 +266,9 @@ limit on build nodes.
   shows a warning dot. "Under 5 % of inodes free": the disk fills up by
   file count before bytes.
 - **No runner or checkout time, no jobs of other runners.** Those come from
-  GitLab's API. Sign in through GitLab (`console.signIn`), or without
-  sign-in give the console a token that can read the projects' jobs
-  (`console.gitlab.token.existingSecret`). The console calls GitLab only
+  GitLab's API. Sign in through GitLab (`control-plane.signIn`), or
+  without sign-in give the console a token that can read the projects'
+  jobs (`control-plane.gitlab.token.existingSecret`). The console calls GitLab only
   while its pages are in use:
   - the pipelines list and a pipeline's page read the pipelines' jobs
     (finished pipelines once);
@@ -365,6 +370,47 @@ by itself.
 2. Set `buildkit.storage.type=hostPath` and `buildkit.storage.hostPath.path`.
 3. Upgrade. Every daemon restarts with an empty cache, one node at a time.
 
+### Upgrading from 0.2.x to 0.3.0
+
+0.3.0 split the console into the control plane: chart `control-plane`
+(was `console`), image `ghcr.io/hoobiboobi/ci-accelerator` (was
+`ci-accelerator-console`), a controller and a web with new names for every
+object (`<release>-controller`, `<release>-web`) and value. Helm refuses
+to upgrade a 0.2.x release in place, so install it again:
+
+1. Remove the release and wait for its pods:
+   ```sh
+   helm uninstall ci-accelerator -n ci-accelerator --wait
+   kubectl -n ci-accelerator wait --for=delete pod -l app.kubernetes.io/instance=ci-accelerator --timeout=10m
+   ```
+   The jobs namespace goes with the release (running jobs fail); the
+   daemons' cache on a hostPath stays.
+2. In your values, move everything under `console:` to `control-plane:`.
+   The controller's pod settings and volume go under
+   `control-plane.controller` (`resources`, `nodeSelector`, `tolerations`,
+   `affinity`, `podLabels`, `podAnnotations`, `persistence`, and `api`
+   from the top level), the web's under `control-plane.web` (`port`, from
+   `service.port`; the web no longer follows the controller's placement).
+   A runner cache's `consoleSecretName` is now `controllerSecretName`.
+3. Install 0.3.0 with those values. Without cert-manager, issue the
+   controller's API certificate with `scripts/buildkit-certs.sh
+   --controller <release>` and name the Secret in
+   `control-plane.controller.api.tls.existingSecret`.
+4. The new console starts with an empty history. The old one stays on
+   `<release>-console-data`; delete it when you no longer need it, with
+   the old certificate Secrets:
+   ```sh
+   kubectl -n ci-accelerator delete pvc ci-accelerator-console-data
+   kubectl -n ci-accelerator delete secret ci-accelerator-console-client ci-accelerator-console-api --ignore-not-found
+   ```
+   Port-forwards, an Ingress or a `global.console.url` tunnel point at the
+   Service `<release>-web` now (it was `<release>-console`).
+
+On the one-machine install, `quickstart.sh` stops with these steps: run
+the `helm uninstall` it prints, rename `console:` to `control-plane:` in
+`/var/lib/ci-accelerator/values.yaml` (or delete the file to start over)
+and run the script again.
+
 ### After upgrading from 0.1.0
 
 0.1.0 installed VictoriaMetrics and VictoriaTraces for metrics and traces.
@@ -388,10 +434,11 @@ every job pod in it. It leaves:
 
 - **with hostPath, the cache on each build node:** remove it as in step 2
   above;
-- **the console's volume,** if the console was enabled (it is kept on
-  purpose, with the console's history):
+- **the controller's volume,** if the control plane was enabled (it is
+  kept on purpose, with the console's history; a 0.2.x install also left
+  `ci-accelerator-console-data`):
   ```sh
-  kubectl -n ci-accelerator delete pvc ci-accelerator-console-data
+  kubectl -n ci-accelerator delete pvc ci-accelerator-controller-data
   ```
 - **the certificate Secrets** (cert-manager keeps them when their
   Certificates are deleted):
@@ -399,10 +446,10 @@ every job pod in it. It leaves:
     ```sh
     kubectl -n cert-manager delete secret -l app.kubernetes.io/instance=ci-accelerator
     ```
-  - the daemons' certificate and the console's client certificate in the
+  - the daemons' certificate and the controller's certificates in the
     box namespace:
     ```sh
-    kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls ci-accelerator-console-client
+    kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls ci-accelerator-controller-client ci-accelerator-controller-tls
     ```
 - **the token Secrets and the box namespace you created.**
 

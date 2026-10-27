@@ -1,7 +1,7 @@
 suite: disk probe in the box
 templates:
   - validate.yaml
-  - charts/console/templates/deployment.yaml
+  - charts/control-plane/templates/controller.yaml
   - charts/buildkit/templates/daemonset.yaml
   - charts/buildkit/templates/configmap.yaml
   - charts/buildkit/templates/priorityclass.yaml
@@ -14,7 +14,7 @@ capabilities:
   apiVersions:
     - cert-manager.io/v1
 tests:
-  - it: runs the probe next to each daemon, from the console's image, and the console reads it
+  - it: runs the probe next to each daemon, from the ci-accelerator image, and the controller reads it
     asserts:
       - equal:
           path: spec.template.spec.containers[1].name
@@ -22,12 +22,12 @@ tests:
         template: charts/buildkit/templates/daemonset.yaml
       - matchRegex:
           path: spec.template.spec.containers[1].image
-          pattern: '^ghcr\.io/hoobiboobi/ci-accelerator-console:v'
+          pattern: '^ghcr\.io/hoobiboobi/ci-accelerator:v'
         template: charts/buildkit/templates/daemonset.yaml
       - contains:
           path: spec.template.spec.containers[0].args
           content: -disk-probe-port=9180
-        template: charts/console/templates/deployment.yaml
+        template: charts/control-plane/templates/controller.yaml
 
   - it: gives the daemons their PriorityClass
     asserts:
@@ -40,10 +40,10 @@ tests:
           value: ci-accelerator-box-buildkit
         template: charts/buildkit/templates/daemonset.yaml
 
-  - it: accepts a probe image that differs from the console's (the probe has its own pin)
+  - it: accepts a probe image that differs from the control plane's (the probe has its own pin)
     template: validate.yaml
     set:
-      console.image.repository: mirror.example/console
+      control-plane.image.repository: mirror.example/ci-accelerator
     asserts:
       - hasDocuments:
           count: 0
@@ -54,7 +54,7 @@ tests:
       buildkit.diskProbe.port: 9300
     asserts:
       - failedTemplate:
-          errorPattern: "console.daemons.diskProbePort \\(9180\\) must equal buildkit.diskProbe.port \\(9300\\)"
+          errorPattern: "control-plane.daemons.diskProbePort \\(9180\\) must equal buildkit.diskProbe.port \\(9300\\)"
 
   - it: refuses a port for a probe that is off
     template: validate.yaml

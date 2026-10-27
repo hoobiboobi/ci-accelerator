@@ -1,0 +1,32 @@
+suite: client certificate
+templates:
+  - certificate.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  - it: issues nothing with an existing Secret
+    asserts:
+      - hasDocuments: { count: 0 }
+  - it: issues a client certificate from the global issuer
+    set:
+      tls.existingSecret: ""
+      global.tls.issuerRef.name: ci-accelerator-buildkit-ca
+    asserts:
+      - equal: { path: spec.secretName, value: c-controller-client }
+      - equal: { path: spec.usages, value: [client auth, digital signature] }
+      - equal:
+          path: spec.issuerRef
+          value: { name: ci-accelerator-buildkit-ca, kind: ClusterIssuer, group: cert-manager.io }
+  - it: prefers its own issuer, rendered with tpl
+    set:
+      tls.existingSecret: ""
+      global.tls.issuerRef.name: global-ca
+      tls.certManager.issuerRef.name: '{{ .Release.Namespace }}-own-ca'
+    asserts:
+      - equal: { path: spec.issuerRef.name, value: ci-accelerator-own-ca }

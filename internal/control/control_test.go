@@ -160,7 +160,7 @@ func TestTokenReview(t *testing.T) {
 		switch tr.Spec.Token {
 		case "web-token":
 			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, Audiences: []string{Audience},
-				User: authnv1.UserInfo{Username: "system:serviceaccount:box:box-console-web"}}
+				User: authnv1.UserInfo{Username: "system:serviceaccount:box:box-web"}}
 		case "other-token":
 			tr.Status = authnv1.TokenReviewStatus{Authenticated: true,
 				User: authnv1.UserInfo{Username: "system:serviceaccount:box:default"}}
@@ -169,7 +169,7 @@ func TestTokenReview(t *testing.T) {
 		}
 		return true, tr, nil
 	})
-	r := &TokenReviewer{Kube: kube, Audience: Audience, Allow: map[string]bool{"box/box-console-web": true}}
+	r := &TokenReviewer{Kube: kube, Audience: Audience, Allow: map[string]bool{"box/box-web": true}}
 	check := func(token string) error {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		if token != "" {

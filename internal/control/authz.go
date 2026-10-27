@@ -30,7 +30,7 @@ var (
 )
 
 // Audience is the audience the callers' tokens are projected for.
-const Audience = "ci-accelerator-console"
+const Audience = "ci-accelerator-controller"
 
 func bearer(r *http.Request) string {
 	t, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")

@@ -1,0 +1,18 @@
+# e2e-only: the box's control plane, from the image `make image` loads into
+# kind (tag e2e: a run never replaces the :dev image of a local install),
+# on the control-plane node like the storage (every kind worker is a
+# tainted build node).
+control-plane:
+  enabled: true
+  image:
+    repository: ci-accelerator
+    tag: e2e
+    pullPolicy: Never
+  controller:
+    persistence:
+      size: 1Gi
+    tolerations:
+      - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+  web:
+    tolerations:
+      - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}

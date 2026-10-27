@@ -51,46 +51,48 @@ Runners:
 The runners never delete old caches: give each bucket a lifecycle rule
 (docs/runner-cache.md shows one), or it only grows.
 {{- end }}
-{{- /* Read with defaults: a values tree reused from 0.1.0 has no console. */}}
-{{- $console := default (dict) .Values.console }}
-{{- if $console.enabled }}
-{{- $svc := ternary .Release.Name (printf "%s-console" .Release.Name) (contains "console" .Release.Name) | trunc 63 | trimSuffix "-" }}
+{{- $cp := index .Values "control-plane" | default dict }}
+{{- if $cp.enabled }}
+{{- $prefix := default .Release.Name $cp.fullnameOverride | trunc 40 | trimSuffix "-" }}
+{{- $svc := printf "%s-web" $prefix }}
+{{- $port := int (dig "web" "port" 8080 $cp) }}
 
-The console explains each build.
-{{- if dig "signIn" "enabled" false $console }}
-{{- $u := trimSuffix "/" (default (dig "console" "url" "" (default (dict) .Values.global)) (dig "signIn" "url" "" $console)) }}
+The console explains each build: the controller ({{ $prefix }}-controller)
+collects the daemons' history, the web ({{ $svc }}) serves the pages.
+{{- if dig "signIn" "enabled" false $cp }}
+{{- $u := trimSuffix "/" (default (dig "console" "url" "" (default (dict) .Values.global)) (dig "signIn" "url" "" $cp)) }}
 People sign in through GitLab at {{ $u }}/ and see the projects whose jobs
 GitLab lets them read. Each OAuth application must list the redirect URI:
-{{- range dig "signIn" "gitlab" (list) $console }}
+{{- range dig "signIn" "gitlab" (list) $cp }}
 {{- $gl := default $runner.gitlabUrl .url }}
   {{ $gl }}: {{ $u }}/auth/callback/{{ $gl | sha256sum | trunc 6 }}
 {{- end }}
 {{- if hasPrefix "http://" $u }}
 {{ $u }} is this machine: reach the console with
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} {{ default "80" (regexFind "[0-9]+$" (urlParse $u).host) }}:8080
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} {{ default "80" (regexFind "[0-9]+$" (urlParse $u).host) }}:{{ $port }}
 {{- else }}
-The console serves plain HTTP on its ClusterIP Service {{ $svc }}: put it
+The web serves plain HTTP on its ClusterIP Service {{ $svc }}: put it
 behind your Ingress or gateway with TLS for {{ $u }}.
 {{- end }}
 {{- else }}
-Sign-in is off (console.signIn): it shows everything to whoever reaches
-it, so keep it inside the cluster:
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} 8080
-    then http://localhost:8080/
+Sign-in is off (control-plane.signIn): the console shows everything to
+whoever reaches it, so keep it inside the cluster:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $svc }} {{ $port }}
+    then http://localhost:{{ $port }}/
 {{- $cu := trimSuffix "/" (dig "console" "url" "" (default (dict) .Values.global)) }}
-{{- if not (dig "gitlab" "token" "existingSecret" "" $console) }}
+{{- if not (dig "gitlab" "token" "existingSecret" "" $cp) }}
 Without GitLab access it shows image builds, their steps and cache
 verdicts, but no job results or runner waits. More (README, "The console"):
-  - a GitLab token with read_api (console.gitlab.token.existingSecret):
+  - a GitLab token with read_api (control-plane.gitlab.token.existingSecret):
     job results, runner waits, "files or node" by comparing commits;
-  - sign-in through GitLab (console.signIn): each person sees the projects
-    GitLab lets them read; the OAuth application's redirect URI is
+  - sign-in through GitLab (control-plane.signIn): each person sees the
+    projects GitLab lets them read; the OAuth application's redirect URI is
       {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
 {{- else }}
 With its GitLab token it also shows job results and runner waits and
 settles "files or node" by comparing commits. Sign-in through GitLab
-(console.signIn; README, "The console") would show each person only the
-projects GitLab lets them read; its redirect URI would be
+(control-plane.signIn; README, "The console") would show each person only
+the projects GitLab lets them read; its redirect URI would be
   {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
 {{- end }}
 {{- end }}

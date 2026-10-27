@@ -5,7 +5,7 @@
 
 {{ template "chart.description" . }}
 
-The box: one release that installs persistent BuildKit daemons on your build nodes, a gitlab-runner whose jobs use them, and the console that explains every build. Set the GitLab URL and the runner token's Secret; everything else has working defaults. cert-manager is a prerequisite (the daemons and jobs authenticate each other with certificates it issues).
+The box: one release that installs persistent BuildKit daemons on your build nodes, a gitlab-runner whose jobs use them, and the control plane whose console explains every build. Set the GitLab URL and the runner token's Secret; everything else has working defaults. cert-manager is a prerequisite (the daemons and jobs authenticate each other with certificates it issues).
 
 ```sh
 helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <version> \
@@ -15,7 +15,7 @@ helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --ver
   --wait --timeout 10m
 ```
 
-For production, say where the cache lives (`buildkit.storage`: a hostPath on a dedicated disk) and pin the console image by digest. The [documentation](https://ci-accelerator.io/docs/) has the quickstart, the requirements, the console's levels and the limitations; [GitOps](https://ci-accelerator.io/docs/gitops/) installs the same release with Flux or Argo CD. The subcharts' values are under `buildkit`, `console` and `gitlab-runner`; the table below lists the box's own keys.
+For production, say where the cache lives (`buildkit.storage`: a hostPath on a dedicated disk) and pin the control plane's image by digest. The [documentation](https://ci-accelerator.io/docs/) has the quickstart, the requirements, the console's levels and the limitations; [GitOps](https://ci-accelerator.io/docs/gitops/) installs the same release with Flux or Argo CD. The subcharts' values are under `buildkit`, `control-plane` and `gitlab-runner`; the table below lists the box's own keys.
 
 {{ template "chart.requirementsSection" . }}
 
