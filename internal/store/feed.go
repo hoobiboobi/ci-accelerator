@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 )
@@ -112,7 +113,7 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 	if q.Author != "" {
 		// CI_COMMIT_AUTHOR is "Name <email>".
 		where, args = append(where, "(p.commit_author = ? OR substr(p.commit_author, 1, ?) = ?)"),
-			append(args, q.Author, len(q.Author)+2, q.Author+" <")
+			append(args, q.Author, utf8.RuneCountInString(q.Author)+2, q.Author+" <")
 	}
 	if q.Pipeline != 0 {
 		where, args = append(where, "b.pipeline_id = ?"), append(args, nullUint(q.Pipeline))

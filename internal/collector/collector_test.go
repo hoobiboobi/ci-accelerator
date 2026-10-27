@@ -346,3 +346,35 @@ func TestWindowKeepsRecentBuilds(t *testing.T) {
 		t.Errorf("window holds %d builds, the first among them: %v", len(w.builds), ok)
 	}
 }
+
+// A reconnecting stream replays old records after newer ones: an old one
+// is stored all the same, and does not stay in memory.
+func TestOldRecordAfterANewerOneIsStored(t *testing.T) {
+	f := recorded(t)
+	c, s := newCollector(t)
+	first, last := f.recs[0], proto.Clone(f.recs[len(f.recs)-1]).(*controlapi.BuildHistoryRecord)
+	last.CreatedAt = timestamppb.New(first.CreatedAt.AsTime().Add(Window + time.Minute))
+	last.CompletedAt = timestamppb.New(last.CreatedAt.AsTime().Add(time.Minute))
+	if err := c.Record(ctx, f, last); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Record(ctx, f, first); err != nil {
+		t.Fatal(err)
+	}
+	builds, err := s.Recent(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, b := range builds {
+		if b.Build.Ref == first.Ref {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the old record was dropped; stored: %d builds", len(builds))
+	}
+	if _, ok := c.daemons[f.name].builds[first.Ref]; ok {
+		t.Error("the old record stays in memory")
+	}
+}

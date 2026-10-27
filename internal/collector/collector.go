@@ -129,13 +129,22 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 	if b.Started.After(w.newest) {
 		w.newest = b.Started
 	}
+	// Builds older than the window leave memory; the one that just
+	// arrived is stored all the same (a reconnecting stream replays old
+	// records after newer ones) and leaves after.
+	old := b.Started.Before(w.newest.Add(-Window))
 	for ref, x := range w.builds {
-		if x.Started.Before(w.newest.Add(-Window)) {
+		if x != b && x.Started.Before(w.newest.Add(-Window)) {
 			delete(w.builds, ref)
 			delete(w.gens, ref)
 			delete(before, ref)
 		}
 	}
+	defer func() {
+		if old {
+			delete(w.builds, b.Ref)
+		}
+	}()
 	list := make([]*history.Build, 0, len(w.builds))
 	for _, x := range w.builds {
 		list = append(list, x)
@@ -157,6 +166,11 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 			}
 		}
 		if err := c.save(ctx, x, w.gens[x.Ref]); err != nil {
+			if x == b {
+				// Not stored: the record is read again when it comes again.
+				delete(w.gens, b.Ref)
+				delete(w.builds, b.Ref)
+			}
 			return err
 		}
 		if a := x.Attribution; a.State == history.Attributed {
