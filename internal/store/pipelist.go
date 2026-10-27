@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // PipeQuery selects a page of a project's pipelines, newest first.
@@ -75,7 +76,7 @@ func (s *Store) PipelineList(ctx context.Context, q PipeQuery) ([]PipeRow, error
 	}
 	if q.Author != "" {
 		where, args = append(where, "(commit_author = ? OR substr(commit_author, 1, ?) = ?)"),
-			append(args, q.Author, len(q.Author)+2, q.Author+" <")
+			append(args, q.Author, utf8.RuneCountInString(q.Author)+2, q.Author+" <")
 	}
 	if strings.TrimSpace(q.Search) != "" {
 		w, a := searchWhere(q.Search)

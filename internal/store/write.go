@@ -257,22 +257,14 @@ func (s *Store) timeSaved(ctx context.Context, tx *sql.Tx, b *history.Build, ins
 }
 
 func (s *Store) daemon(ctx context.Context, tx *sql.Tx, name string) (int64, error) {
-	s.mu.Lock()
-	id, ok := s.daemonID[name]
-	s.mu.Unlock()
-	if ok {
-		return id, nil
-	}
+	// Inside the build's transaction, uncached: an id cached before a
+	// rolled-back commit would name a row that does not exist.
+	var id int64
 	if _, err := tx.ExecContext(ctx, "INSERT INTO daemons (name) VALUES (?) ON CONFLICT (name) DO NOTHING", name); err != nil {
 		return 0, err
 	}
-	if err := tx.QueryRowContext(ctx, "SELECT id FROM daemons WHERE name = ?", name).Scan(&id); err != nil {
-		return 0, err
-	}
-	s.mu.Lock()
-	s.daemonID[name] = id
-	s.mu.Unlock()
-	return id, nil
+	err := tx.QueryRowContext(ctx, "SELECT id FROM daemons WHERE name = ?", name).Scan(&id)
+	return id, err
 }
 
 // SetReason replaces a stored build's reason (Settle may decide it after

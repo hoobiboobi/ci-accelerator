@@ -41,9 +41,8 @@ type Store struct {
 	opts Options
 	key  []byte
 
-	mu       sync.Mutex
-	outputs  map[int]*outputFile // by day, yyyymmdd
-	daemonID map[string]int64
+	mu      sync.Mutex
+	outputs map[int]*outputFile // by day, yyyymmdd
 
 	changes Changes
 }
@@ -72,7 +71,7 @@ func Open(ctx context.Context, dir string, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{dir: dir, db: db, opts: opts, outputs: map[int]*outputFile{}, daemonID: map[string]int64{}}
+	s := &Store{dir: dir, db: db, opts: opts, outputs: map[int]*outputFile{}}
 	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -91,7 +90,9 @@ func Open(ctx context.Context, dir string, opts Options) (*Store, error) {
 // transactions that take the lock when they begin.
 func openSQLite(path string) (*sql.DB, error) {
 	q := url.Values{}
-	for _, p := range []string{"busy_timeout(10000)", "foreign_keys(1)", "journal_mode(WAL)", "synchronous(NORMAL)"} {
+	// auto_vacuum first: it takes effect only before the file is set up,
+	// which switching to WAL already does.
+	for _, p := range []string{"auto_vacuum(INCREMENTAL)", "busy_timeout(10000)", "foreign_keys(1)", "journal_mode(WAL)", "synchronous(NORMAL)"} {
 		q.Add("_pragma", p)
 	}
 	q.Set("_txlock", "immediate")
@@ -110,12 +111,6 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	if version > len(migrations) {
 		return fmt.Errorf("%w (schema %d, known %d)", ErrNewerSchema, version, len(migrations))
-	}
-	if version == 0 {
-		// Only takes effect before the first table exists.
-		if _, err := s.db.ExecContext(ctx, "PRAGMA auto_vacuum = INCREMENTAL"); err != nil {
-			return err
-		}
 	}
 	for i := version; i < len(migrations); i++ {
 		tx, err := s.db.BeginTx(ctx, nil)

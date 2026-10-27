@@ -227,6 +227,7 @@ CREATE TABLE route_decisions (
 CREATE INDEX route_decisions_job ON route_decisions (instance, job_id);
 CREATE INDEX route_decisions_at ON route_decisions (at);
 CREATE INDEX builds_started ON builds (started_at);
+DROP INDEX builds_completed;
 
 `,
 }
