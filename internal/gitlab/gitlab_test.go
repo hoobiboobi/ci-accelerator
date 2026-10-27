@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -535,5 +536,27 @@ func TestJobLogPartsKeepEmptyLines(t *testing.T) {
 	more := read(LogQuery{Lines: 1 << 20, After: int64(cut), Since: true})
 	if first.Text+more.Text != whole.Text {
 		t.Errorf("a part and the lines after it: %d + %d bytes, whole %d", len(first.Text), len(more.Text), len(whole.Text))
+	}
+}
+
+// gitlab.com answers a range past the log's end with 416 and, when the
+// request accepts gzip, no Content-Range (seen 2026-10-28): nothing new,
+// not "too much is new".
+func TestJobLogNothingNewWithoutContentRange(t *testing.T) {
+	const logText = "2026-10-28T00:00:00Z 01O one\n2026-10-28T00:00:01Z 01O two\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") == "bytes="+strconv.Itoa(len(logText))+"-" {
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			fmt.Fprint(w, `<?xml version='1.0' encoding='UTF-8'?><Error><Code>InvalidRange</Code></Error>`)
+			return
+		}
+		http.ServeContent(w, r, "trace", time.Time{}, strings.NewReader(logText))
+	}))
+	defer srv.Close()
+	c := New([]string{srv.URL})
+	p, err := c.JobLogPart(context.Background(), Token("tok"), history.InstancePrefix(srv.URL), 42, 77,
+		LogQuery{Lines: 500, After: int64(len(logText)), Since: true})
+	if err != nil || p.Gap || p.Text != "" || p.End != int64(len(logText)) || p.Size != int64(len(logText)) {
+		t.Errorf("nothing new: %+v, %v", p, err)
 	}
 }

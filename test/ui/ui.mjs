@@ -511,6 +511,9 @@ async function jobPage(s, pages) {
     check(`${p} the whole log once read back to its start`, /The whole log, \d+ lines/.test(await s.eval(`document.querySelector("[data-log-note]").textContent`)));
     const nums = all.split("\n").map(l => (l.match(/^test (\d{4})/) || [])[1]).filter(Boolean).map(Number);
     check(`${p} the parts join without a gap or a repeat`, nums.length === 1200 && nums.every((n, i) => n === i + 1), `${nums.length} numbered lines`);
+  } else if (n0 < 500) {
+    // A short log (a live job): all of it at once, said so.
+    check(`${p} a log shorter than one part is shown whole`, /The whole log, \d+ lines/.test(await s.eval(`document.querySelector("[data-log-note]").textContent`)), `${n0} lines`);
   } else {
     check(`${p} a log longer than one part offers earlier lines`, false, `${n0} lines, no button`);
   }
