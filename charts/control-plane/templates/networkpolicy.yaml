@@ -1,0 +1,76 @@
+{{- $np := default (dict) .Values.networkPolicy }}
+{{- if dig "enabled" false $np }}
+{{- $denied := list .Release.Namespace }}
+{{- with include "control-plane.jobsNamespace" . }}{{ $denied = append $denied . }}{{ end }}
+{{- range (dig "deniedNamespaces" (list) $np) }}{{ $denied = append $denied (tpl . $) }}{{ end }}
+# Who may open the console's pages. CI jobs and their builds run untrusted
+# code in the same cluster, and without sign-in the console shows every
+# project to whoever reaches it: the jobs namespace and the daemons (RUN
+# steps share their network) are kept out; Ingress controllers and other
+# namespaces, and kubectl port-forward (it enters the pod from the node),
+# still reach it. Only ingress is limited.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "control-plane.webName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "web") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "control-plane.selectorLabels" (dict "root" . "role" "web") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: http
+          protocol: TCP
+      from:
+        # Every namespace but this one and the denied ones.
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: NotIn
+                values:
+                  {{- toYaml (uniq $denied) | nindent 18 }}
+        # This namespace, but not the denied components.
+        - podSelector:
+            {{- with (dig "deniedComponents" (list "buildkit") $np) }}
+            matchExpressions:
+              - key: ci-accelerator.io/component
+                operator: NotIn
+                values:
+                  {{- toYaml . | nindent 18 }}
+            {{- else }}
+            {}
+            {{- end }}
+        {{- with (dig "extraFrom" (list) $np) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+---
+# Who may call the controller: the web's pods, nothing else (the kubelet's
+# probes come from the node, which a NetworkPolicy does not limit). Its
+# own connections (daemons, the API server, GitLab, S3) stay open.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "control-plane.controllerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "control-plane.selectorLabels" (dict "root" . "role" "controller") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: api
+          protocol: TCP
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "control-plane.selectorLabels" (dict "root" . "role" "web") | nindent 14 }}
+{{- end }}

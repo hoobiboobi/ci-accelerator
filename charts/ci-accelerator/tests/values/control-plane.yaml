@@ -1,0 +1,3 @@
+# The box with the control plane on (make validate).
+control-plane:
+  enabled: true

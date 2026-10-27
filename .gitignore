@@ -77,5 +77,6 @@ kind-certs/
 !test/e2e/fixtures/**
 
 # --- build outputs ---
+/ci-accelerator
 /console
 /.ui-shots/

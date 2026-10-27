@@ -51,14 +51,14 @@ spec:
         hostPath: { path: /var/mnt/nvme/buildkit }
       config:
         gc: { maxUsedSpace: "2TB", reservedSpace: "100GB", minFreeSpace: "400GB" }
-    console:
+    control-plane:
       image: { digest: "sha256:..." }        # from the release notes
       gitlab:
-        token: { existingSecret: console-gitlab-token }
+        token: { existingSecret: gitlab-api-token }
 ```
 
 The Secrets (`gitlab-runner-token` with the keys `runner-token` and an empty
-`runner-registration-token`; `console-gitlab-token` with `token`) live in
+`runner-registration-token`; `gitlab-api-token` with `token`) live in
 the box namespace; the jobs namespace is created by the release.
 
 ## Argo CD
@@ -84,12 +84,19 @@ skipped during rendering and run at install.
   node at a time; `emptyDir` caches are lost then (README, "Where the
   cache lives").
 - Cluster-scoped objects: the daemons' PriorityClass
-  (`<namespace>-<release>-buildkit`, from 0.2.3) and, with a CA the chart
+  (`<namespace>-<release>-buildkit`), the controller's ClusterRole and
+  ClusterRoleBinding for TokenReviews
+  (`<namespace>-<release>-controller-tokenreview`) and, with a CA the chart
   bootstraps, a ClusterIssuer. The tool's service account needs to create
   them (for Argo CD, an AppProject whose `clusterResourceWhitelist` allows
-  `scheduling.k8s.io/PriorityClass`), or set
+  `scheduling.k8s.io/PriorityClass` and the two RBAC kinds), or set
   `buildkit.priorityClass.create=false` and name an existing class in
   `buildkit.priorityClassName`. The names stay the same across syncs.
-- The disk probe runs the console's image: a mirrored registry needs
-  `buildkit.diskProbe.image` set to the same repository, tag and digest as
-  `console.image`; the chart refuses values where they differ.
+- The disk probe runs the ci-accelerator image at its own pinned tag
+  (it changes only when the probe does): a mirrored registry needs
+  `buildkit.diskProbe.image` set as well as `control-plane.image`.
+- 0.3.0 does not upgrade a 0.2.x release in place (the console became the
+  control plane, with new names): delete the release (the Argo CD
+  `Application` or Flux `HelmRelease`), wait for its pods, and create it
+  again with the values moved from `console:` to `control-plane:`
+  ([troubleshooting](troubleshooting.md#upgrading-from-02x-to-030)).

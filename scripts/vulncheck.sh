@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Known vulnerabilities reachable from the console's code, for both release
+# Known vulnerabilities reachable from the Go code, for both release
 # targets (linux/amd64, linux/arm64), with govulncheck in source mode. A
 # vulnerability counts when a call path reaches an affected symbol; module-
 # level matches are reported for information only.

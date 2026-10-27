@@ -1,0 +1,40 @@
+apiVersion: v2
+name: control-plane
+description: >-
+  The ci-accelerator control plane: a controller that collects the build
+  history of BuildKit daemons and the CI jobs around it, and a web that
+  serves the console, which explains every build: what came from cache,
+  what came from another job, and why a step was rebuilt.
+type: application
+version: 0.2.5
+# The image is released with the charts and tagged v<appVersion>.
+appVersion: "0.2.5"
+kubeVersion: ">=1.34.0-0"
+home: https://ci-accelerator.io
+sources:
+  - https://github.com/hoobiboobi/ci-accelerator
+keywords:
+  - buildkit
+  - ci
+  - build-cache
+  - control-plane
+icon: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/main/docs/icon.svg
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/images: |
+    - name: ci-accelerator
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.2.5
+      platforms:
+        - linux/amd64
+        - linux/arm64
+  artifacthub.io/links: |
+    - name: Website and documentation
+      url: https://ci-accelerator.io/docs/#the-console
+    - name: Values of this chart
+      url: https://ci-accelerator.io/docs/charts/control-plane/
+    - name: support
+      url: https://github.com/hoobiboobi/ci-accelerator/issues
+maintainers:
+  - name: hoobiboobi
+    url: https://github.com/hoobiboobi

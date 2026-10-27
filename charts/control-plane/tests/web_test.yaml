@@ -1,0 +1,183 @@
+suite: the web (pages) and the controller's API
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  - it: runs the pages as their own Deployment, reading the controller
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - isKind: { of: Deployment }
+      - equal: { path: metadata.name, value: c-web }
+      - equal: { path: spec.replicas, value: 2 }
+      - isNull: { path: spec.strategy }
+      - equal: { path: spec.selector.matchLabels, value: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: web } }
+      - equal: { path: 'spec.template.metadata.labels["ci-accelerator.io/component"]', value: web }
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - web
+            - -listen=:8080
+            - -controller=https://c-controller.ci-accelerator.svc:8443
+            - -controller-ca=/api-tls/ca.crt
+            - -token-file=/var/run/secrets/ci-accelerator/token
+
+  # The web holds no key and no Kubernetes access: the CA alone, and a token
+  # only the controller accepts.
+  - it: gives the web the API's CA and a projected token, nothing else
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - equal: { path: spec.template.spec.automountServiceAccountToken, value: false }
+      - equal: { path: spec.template.spec.serviceAccountName, value: c-web }
+      - equal:
+          path: spec.template.spec.volumes[0]
+          value: { name: api-ca, secret: { secretName: controller-tls, defaultMode: 0444, items: [{ key: ca.crt, path: ca.crt }] } }
+      - equal:
+          path: spec.template.spec.volumes[1].projected.sources
+          value: [{ serviceAccountToken: { audience: ci-accelerator-controller, expirationSeconds: 3600, path: token } }]
+      - lengthEqual: { path: spec.template.spec.volumes, count: 2 }
+      - notExists: { path: "spec.template.spec.containers[0].env" }
+
+  - it: runs the web as non-root with a read-only root file system
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - equal: { path: spec.template.spec.securityContext.runAsNonRoot, value: true }
+      - equal: { path: "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem", value: true }
+      - equal: { path: "spec.template.spec.containers[0].securityContext.capabilities.drop", value: [ALL] }
+      - equal: { path: "spec.template.spec.containers[0].readinessProbe.httpGet", value: { path: /healthz, port: http } }
+      - equal: { path: "spec.template.spec.containers[0].livenessProbe.httpGet", value: { path: /livez, port: http } }
+
+  - it: does not place the web by the controller's settings
+    template: web.yaml
+    documentIndex: 0
+    set:
+      controller.nodeSelector: { disk: ssd }
+    asserts:
+      - notExists: { path: spec.template.spec.nodeSelector }
+  - it: places the web by its own settings when given
+    template: web.yaml
+    documentIndex: 0
+    set:
+      web: { replicas: 3, nodeSelector: { pool: web }, resources: { requests: { cpu: 5m } }, podLabels: { team: x } }
+    asserts:
+      - equal: { path: spec.replicas, value: 3 }
+      - equal: { path: spec.template.spec.nodeSelector, value: { pool: web } }
+      - equal: { path: "spec.template.spec.containers[0].resources.requests.cpu", value: 5m }
+      - equal: { path: spec.template.metadata.labels.team, value: x }
+
+  - it: has the web's default resources
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].resources", value: { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 256Mi } } }
+
+  - it: has a ServiceAccount of its own
+    template: web.yaml
+    documentIndex: 1
+    asserts:
+      - isKind: { of: ServiceAccount }
+      - equal: { path: metadata.name, value: c-web }
+      - equal: { path: automountServiceAccountToken, value: false }
+
+  # The Service users open (port-forward, Ingress) is the web's; the API
+  # has the controller's.
+  - it: points the web's Service at the web and the controller's at the controller
+    template: service.yaml
+    asserts:
+      - equal: { path: metadata.name, value: c-web }
+        documentIndex: 0
+      - equal: { path: spec.selector, value: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: web } }
+        documentIndex: 0
+      - equal: { path: spec.ports, value: [{ name: http, port: 8080, targetPort: http }] }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: c-controller }
+        documentIndex: 1
+      - equal: { path: spec.selector, value: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: controller } }
+        documentIndex: 1
+      - equal: { path: spec.ports, value: [{ name: api, port: 8443, targetPort: api, appProtocol: https }] }
+        documentIndex: 1
+
+  - it: lets the controller check tokens, and nothing else cluster-wide
+    template: tokenreview.yaml
+    asserts:
+      - equal: { path: metadata.name, value: ci-accelerator-c-controller-tokenreview }
+      - equal: { path: rules, value: [{ apiGroups: [authentication.k8s.io], resources: [tokenreviews], verbs: [create] }] }
+        documentIndex: 0
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: c-controller, namespace: ci-accelerator }] }
+        documentIndex: 1
+
+  - it: issues the API's certificate for server auth only, for the API Service's names
+    template: certificate.yaml
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    set:
+      tls.existingSecret: ""
+      controller.api.tls.existingSecret: ""
+      global.tls.issuerRef.name: box-ca
+    documentIndex: 1
+    asserts:
+      - equal: { path: metadata.name, value: c-controller-tls }
+      - equal: { path: spec.secretName, value: c-controller-tls }
+      - equal: { path: spec.usages, value: [server auth, digital signature] }
+      - equal:
+          path: spec.dnsNames
+          value: [c-controller, c-controller.ci-accelerator, c-controller.ci-accelerator.svc, c-controller.ci-accelerator.svc.cluster.local]
+      - equal: { path: spec.issuerRef, value: { name: box-ca, kind: ClusterIssuer, group: cert-manager.io } }
+  - it: mounts the issued API Secret when none is given
+    template: controller.yaml
+    capabilities:
+      apiVersions: [cert-manager.io/v1]
+    set:
+      tls.existingSecret: ""
+      controller.api.tls.existingSecret: ""
+      global.tls.issuerRef.name: box-ca
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: api-tls, secret: { secretName: c-controller-tls, defaultMode: 0440, items: [{ key: tls.crt, path: tls.crt }, { key: tls.key, path: tls.key }] } }
+
+  - it: needs the API's Secret when there is no cert-manager
+    template: controller.yaml
+    set:
+      controller.api.tls.existingSecret: ""
+    asserts:
+      - failedTemplate: { errorPattern: "the controller's API needs controller.api.tls.existingSecret too" }
+  - it: refuses the same port for the pages and the API
+    template: controller.yaml
+    set:
+      controller.api.port: 8080
+    asserts:
+      - failedTemplate: { errorPattern: "controller.api.port and web.port must differ" }
+  - it: refuses an unknown web key
+    template: web.yaml
+    set:
+      web.replica: 2
+    asserts:
+      - failedTemplate: {}
+
+  # The web reads the controller's setup at start: turning sign-in on (or
+  # adding a token) must roll it.
+  - it: rolls the web when sign-in is turned on
+    template: web.yaml
+    documentIndex: 0
+    set:
+      signIn: { enabled: true, url: https://ci.example.com, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
+    asserts:
+      # Not the value without sign-in (2d5723f5587376cb, below).
+      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/controller-setup"]', value: 6fed5b8810430f8d }
+  - it: has a setup checksum without sign-in
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/controller-setup"]', value: 2d5723f5587376cb }
+  - it: rolls the web when a GitLab token is added
+    template: web.yaml
+    documentIndex: 0
+    set:
+      gitlab.token: { existingSecret: tok }
+    asserts:
+      - notEqual: { path: 'spec.template.metadata.annotations["ci-accelerator.io/controller-setup"]', value: 2d5723f5587376cb }

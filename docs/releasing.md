@@ -8,7 +8,7 @@ How a version gets from `main` to users. The rules behind it (patch vs minor, up
 
 - **Patch or minor?** A patch is fixes only. A minor brings something new that is ready and on by default.
 - **Is `main` releasable?** Unfinished work must be switched off by default. If `main` already holds changes that should not ship in a patch, release the patch from a branch instead (see [A patch from a release branch](#a-patch-from-a-release-branch)).
-- **Pinned components.** Look at the releases and security advisories of everything that is pinned: BuildKit, cert-manager, the gitlab-runner chart and image, Go and the console's base images (`cmd/console/Dockerfile`), Node, the kind node image, the e2e images (`test/e2e/run.sh`), the tools in the Makefile, and the actions in the workflows. Bump what has a fix and is at least two weeks old - except a security patch (see below).
+- **Pinned components.** Look at the releases and security advisories of everything that is pinned: BuildKit, cert-manager, the gitlab-runner chart and image, Go and the image's base images (`cmd/ci-accelerator/Dockerfile`), Node, the kind node image, the e2e images (`test/e2e/run.sh`), the tools in the Makefile, and the actions in the workflows. Bump what has a fix and is at least two weeks old - except a security patch (see below).
 - **Security patches skip the two-weeks wait** ([ADR-0041](adr/0041-security-patch-exception.md)): a patch release of the same minor line that fixes a vulnerability which affects the project (govulncheck, trivy, Dependabot or the advisory says so) may be pinned at once, provided the full CI passes; the changelog names the exception. A new minor waits the two weeks even when it carries security fixes.
 
 ## 2. The release pull request
@@ -17,12 +17,12 @@ On a branch `release/v<v>`:
 
 1. Set the version in eight places:
    - `version:` in `charts/buildkit/Chart.yaml`;
-   - `version:` and `appVersion:` in `charts/console/Chart.yaml` (the appVersion is the console image's tag, `v<appVersion>`);
+   - `version:` and `appVersion:` in `charts/control-plane/Chart.yaml` (the appVersion is the ci-accelerator image's tag, `v<appVersion>`);
    - `version:` and `appVersion:` in `charts/ci-accelerator/Chart.yaml` (the box's version is its own, not BuildKit's);
-   - the `buildkit` and `console` dependencies' `version:` in `charts/ci-accelerator/Chart.yaml`;
+   - the `buildkit` and `control-plane` dependencies' `version:` in `charts/ci-accelerator/Chart.yaml`;
    - `VERSION=` in `scripts/quickstart.sh` (the one-node installer installs it; the release attaches the script);
    - the README's quickstart download links and `helm install ... --version`;
-   - the console image tag in `artifacthub.io/images` of `charts/console/Chart.yaml` and `charts/ci-accelerator/Chart.yaml`, and the release's `artifacthub.io/changes` in the umbrella's `Chart.yaml` (Artifact Hub shows them on the version page);
+   - the ci-accelerator image tag in `artifacthub.io/images` of `charts/control-plane/Chart.yaml` and `charts/ci-accelerator/Chart.yaml`, and the release's `artifacthub.io/changes` in the umbrella's `Chart.yaml` (Artifact Hub shows them on the version page);
    - `make chart-docs` regenerates the charts' READMEs (the packaged README is what Artifact Hub shows; `make lint` fails when they are stale).
 
    Also update the status line and the `--version` of the quickstart in `README.md`.
@@ -48,8 +48,8 @@ git push origin v<v>
 
 Tags `v*` cannot be moved or deleted once pushed. The workflow:
 - runs the checks again;
-- packages the three charts (ci-accelerator, buildkit, console) reproducibly and pushes them to `oci://ghcr.io/hoobiboobi/charts`;
-- builds the console image for amd64 and arm64 (`scripts/build-console-image.sh`, the same build the checks run on every pull request) and pushes it as `ghcr.io/hoobiboobi/ci-accelerator-console:v<v>`;
+- packages the three charts (ci-accelerator, buildkit, control-plane) reproducibly and pushes them to `oci://ghcr.io/hoobiboobi/charts`;
+- builds the ci-accelerator image (the control plane and the disk probe) for amd64 and arm64 (`scripts/build-image.sh`, the same build the checks run on every pull request) and pushes it as `ghcr.io/hoobiboobi/ci-accelerator:v<v>`;
 - signs all four with cosign;
 - creates the GitHub release with the changelog entry, the archives, `SHA256SUMS` and the digests.
 
@@ -63,21 +63,21 @@ signatures found"):
 export HELM_REGISTRY_CONFIG=$(mktemp -d)/registry.json
 helm pull oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <v>
 helm pull oci://ghcr.io/hoobiboobi/charts/buildkit --version <v>
-helm pull oci://ghcr.io/hoobiboobi/charts/console --version <v>
-sha256sum ci-accelerator-<v>.tgz buildkit-<v>.tgz console-<v>.tgz   # compare with SHA256SUMS of the release
-for ref in charts/buildkit:<v> charts/console:<v> charts/ci-accelerator:<v> ci-accelerator-console:v<v>; do
+helm pull oci://ghcr.io/hoobiboobi/charts/control-plane --version <v>
+sha256sum ci-accelerator-<v>.tgz buildkit-<v>.tgz control-plane-<v>.tgz   # compare with SHA256SUMS of the release
+for ref in charts/buildkit:<v> charts/control-plane:<v> charts/ci-accelerator:<v> ci-accelerator:v<v>; do
   cosign verify ghcr.io/hoobiboobi/$ref \
     --certificate-identity https://github.com/hoobiboobi/ci-accelerator/.github/workflows/release.yml@refs/tags/v<v> \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 done
-docker pull ghcr.io/hoobiboobi/ci-accelerator-console:v<v>
+docker pull ghcr.io/hoobiboobi/ci-accelerator:v<v>
 ```
 
 About half an hour later [Artifact Hub](https://artifacthub.io/packages/helm/ci-accelerator/ci-accelerator) lists the version with the Signed badge and the verified publisher mark. It checks the signature once, when it first indexes the version (every half hour), and never again for the same digest; the workflow therefore signs right after the push. A version indexed inside that window stays unsigned there for good (0.2.1 did; `cosign verify` is what counts).
 
 Then check the release the way a user installs it on one machine: run the Quickstart workflow by hand with the release's version (`gh workflow run quickstart.yml -f release=<v>`). It downloads `quickstart.sh` from the release, checks it against `SHA256SUMS` and installs from the registry on a clean runner.
 
-A package pushed for the first time is private: make it public under the repository's Packages (`charts/console` and `ci-accelerator-console` came with 0.2.0). Then install the umbrella from the registry on a kind cluster with `console.enabled=true` and run a build, as the README quickstart does.
+A package pushed for the first time is private: make it public under the repository's Packages (`charts/control-plane` and `ci-accelerator` came with 0.3.0; register `charts/control-plane` on Artifact Hub and put its repository id into `artifacthub/control-plane.yml`). Then install the umbrella from the registry on a kind cluster and run a build, as the README quickstart does.
 
 ## 6. After the release
 
@@ -85,7 +85,7 @@ Open a pull request that moves the upgrade test to the new release. In `test/e2e
 - `UPGRADE_FROM=<v>`;
 - `UPGRADE_FROM_SHA256` and `UPGRADE_FROM_BUILDKIT_SHA256` to the ci-accelerator and buildkit lines of the release's `SHA256SUMS`;
 - `UPGRADE_ROLLOUT_EXPECTED` back to `0`, unless `main` already holds a change that restarts the daemons on purpose;
-- `test/e2e/box-values-old.yaml` to what the new release needs on kind (tolerations for what runs on the control-plane node, small volumes).
+- `test/e2e/box-values-old.yaml` to what the new release needs on kind (tolerations for what runs on the control-plane node, small volumes). From 0.2.x the scenario checks the refusal and the reinstall; from 0.3.0 on it upgrades in place. `UPGRADE_FROM_DIR` and `UPGRADE_FROM_VALUES` rehearse the in-place path against a packaged tree before a release.
 
 From then on every change is tested against the version users have.
 

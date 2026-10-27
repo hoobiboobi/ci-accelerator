@@ -12,7 +12,8 @@
     "preflight"
   ],
   "properties": {
-    "console": { "type": "object", "description": "The console subchart (charts/console validates it): enabled, image, persistence, signIn, ..." },
+    "control-plane": { "type": "object", "description": "The control-plane subchart (charts/control-plane validates it): enabled, image, controller, web, signIn, ..." },
+    "console": { "description": "The 0.2.x console's values: refused with a message naming control-plane." },
     "global": {
       "type": "object",
       "additionalProperties": false,
@@ -139,7 +140,7 @@
           "description": "S3 cache: off without s3.server. The Secret holds accesskey and secretkey.",
           "properties": {
             "secretName": { "type": "string" },
-            "consoleSecretName": { "type": "string", "description": "Keys the console reads the bucket with (default: secretName)." },
+            "controllerSecretName": { "type": "string", "description": "Keys the controller reads the bucket with (default: secretName)." },
             "path": { "type": "string" },
             "maxArchiveBytes": { "type": "integer", "minimum": 1 },
             "s3": {

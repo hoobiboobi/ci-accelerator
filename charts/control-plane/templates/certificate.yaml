@@ -1,0 +1,70 @@
+{{- if not .Values.tls.existingSecret }}
+{{- if not (.Capabilities.APIVersions.Has "cert-manager.io/v1") }}
+{{- fail "control-plane: the controller's client certificate is issued with cert-manager, whose API (cert-manager.io/v1) this cluster does not have. Install cert-manager, or set tls.existingSecret to a Secret with ca.crt, tls.crt and tls.key signed by the daemons' CA. For an offline render pass --api-versions cert-manager.io/v1." }}
+{{- end }}
+# The controller's client certificate for the daemons, from their CA.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "control-plane.controllerName" . }}-client
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+spec:
+  secretName: {{ include "control-plane.clientSecretName" . }}
+  commonName: {{ include "control-plane.controllerName" . | trunc 64 | quote }}
+  usages:
+    - client auth
+    - digital signature
+  duration: {{ .Values.tls.certManager.duration }}
+  renewBeforePercentage: {{ int .Values.tls.certManager.renewBeforePercentage }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    {{- include "control-plane.issuerRef" . | nindent 4 }}
+  secretTemplate:
+    labels:
+      {{- include "control-plane.selectorLabels" (dict "root" . "role" "controller") | nindent 6 }}
+      {{- include "control-plane.componentLabels" (dict "root" . "role" "controller") | nindent 6 }}
+{{- end }}
+{{- if not .Values.controller.api.tls.existingSecret }}
+{{- if not (.Capabilities.APIVersions.Has "cert-manager.io/v1") }}
+{{- fail "control-plane: the controller's API certificate is issued with cert-manager, whose API (cert-manager.io/v1) this cluster does not have. Install cert-manager, or set controller.api.tls.existingSecret to a Secret with tls.crt, tls.key and ca.crt. For an offline render pass --api-versions cert-manager.io/v1." }}
+{{- end }}
+---
+# The controller API's server certificate, from the daemons' CA. Server
+# auth only: daemons accept clients whose certificates are for client
+# auth, so this one can never drive them.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "control-plane.controllerName" . }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+spec:
+  secretName: {{ include "control-plane.apiSecretName" . }}
+  dnsNames:
+    {{- $n := include "control-plane.controllerName" . }}
+    - {{ $n }}
+    - {{ $n }}.{{ .Release.Namespace }}
+    - {{ $n }}.{{ .Release.Namespace }}.svc
+    - {{ $n }}.{{ .Release.Namespace }}.svc.{{ .Values.controller.api.clusterDomain }}
+  usages:
+    - server auth
+    - digital signature
+  duration: {{ .Values.tls.certManager.duration }}
+  renewBeforePercentage: {{ int .Values.tls.certManager.renewBeforePercentage }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    {{- include "control-plane.issuerRef" . | nindent 4 }}
+  secretTemplate:
+    labels:
+      {{- include "control-plane.selectorLabels" (dict "root" . "role" "controller") | nindent 6 }}
+      {{- include "control-plane.componentLabels" (dict "root" . "role" "controller") | nindent 6 }}
+{{- end }}

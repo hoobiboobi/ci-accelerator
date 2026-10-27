@@ -14,9 +14,9 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "job"
-  - it: refuses a misspelled resources key of the console
+  - it: refuses a misspelled resources key of the controller
     set:
-      console.resources: { limit: { cpu: 1 } }
+      control-plane.controller.resources: { limit: { cpu: 1 } }
     asserts:
       - failedTemplate:
           errorPattern: "limit"

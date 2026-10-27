@@ -1,9 +1,9 @@
 // Package control connects the console's pages to what they read.
 //
-// The console runs as roles of one binary: the controller owns the store,
-// the collector, the job-pod watch, the sessions and every GitLab token;
-// the web serves the pages and holds nothing. In one process (the default
-// `console` command, and the tests) the pages read the controller's parts
+// The control plane runs as roles of one binary: the controller owns the
+// store, the collector, the job-pod watch, the sessions and every GitLab
+// token; the web serves the pages and holds nothing. In one process (the
+// role `all`, and the tests) the pages read the controller's parts
 // directly through Local, LocalGitLab and the sign-in itself. Split, the
 // web reads them through a Client, which calls the controller's Server
 // over HTTPS; the controller does every write the pages cause.

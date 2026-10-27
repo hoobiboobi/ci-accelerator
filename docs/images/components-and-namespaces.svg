@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" role="img" aria-labelledby="t d">
   <title id="t">Components and namespaces</title>
-  <desc id="d">The box namespace holds the gitlab-runner manager, the buildkit Services, the daemon DaemonSet, the optional console and the daemons' NetworkPolicy. The runner creates CI job pods in the jobs namespace; they reach the daemons' Service over mutual TLS. cert-manager's namespace holds the release's CA, which signs the daemons' server certificate and the jobs' client certificate.</desc>
+  <desc id="d">The box namespace holds the gitlab-runner manager, the buildkit Services, the daemon DaemonSet, the optional control plane (controller and web, which serve the console) and the daemons' NetworkPolicy. The runner creates CI job pods in the jobs namespace; they reach the daemons' Service over mutual TLS. cert-manager's namespace holds the release's CA, which signs the daemons' server certificate and the jobs' client certificate.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#9a948b"/>
@@ -39,7 +39,7 @@
 
   <rect class="card" x="40" y="204" width="508" height="52" rx="8"/>
   <text x="56" y="226" class="mono">Service &lt;release&gt;-buildkit-headless</text>
-  <text x="56" y="245" class="sub">every daemon by name, for the console</text>
+  <text x="56" y="245" class="sub">every daemon by name, for the controller</text>
 
   <rect class="card-main" x="40" y="268" width="508" height="122" rx="8"/>
   <text x="56" y="290" class="mono">DaemonSet &lt;release&gt;-buildkit</text>
@@ -49,12 +49,12 @@
   <text x="56" y="367" class="sub">OTLP metrics and traces to your backend (optional)</text>
 
   <rect class="card" x="40" y="402" width="508" height="52" rx="8"/>
-  <text x="56" y="424" class="mono">Deployment &lt;release&gt;-console<tspan class="sub" font-family="system-ui, sans-serif"> (optional)</tspan></text>
-  <text x="56" y="443" class="sub">reads every build from the daemons</text>
+  <text x="56" y="424" class="mono">Deployments &lt;release&gt;-controller, -web<tspan class="sub" font-family="system-ui, sans-serif"> (optional)</tspan></text>
+  <text x="56" y="443" class="sub">the control plane: reads every build, serves the console</text>
 
   <rect class="card" x="40" y="466" width="508" height="52" rx="8"/>
   <text x="56" y="488" class="name">NetworkPolicy for the daemons</text>
-  <text x="56" y="507" class="sub">ingress from the jobs namespace and the console</text>
+  <text x="56" y="507" class="sub">ingress from the jobs namespace and the controller</text>
 
   <!-- The jobs namespace -->
   <text x="644" y="38"><tspan class="ns">namespace ci-accelerator-jobs</tspan><tspan class="ns-note"> · baseline</tspan></text>

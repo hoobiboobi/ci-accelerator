@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Checks that a release tag matches the charts before anything is published:
 # the three charts carry the tag's version, the umbrella depends on exactly
-# those buildkit and console versions, the console's appVersion (its image
-# tag, v<appVersion>) is the same, the README and docs/gitops.md install
+# those buildkit and control-plane versions, the control plane's appVersion
+# (the ci-accelerator image tag, v<appVersion>) is the same, the README and docs/gitops.md install
 # it, the README's one-node upgrade uses the quickstart's Helm, and
 # CHANGELOG.md has an entry with upgrade notes for it.
 # Prints the version on success.
@@ -23,32 +23,32 @@ version=${tag#v}
 chart_version() { awk '/^version:/ {print $2; exit}' "$1"; }
 
 fail=0
-for chart in buildkit console ci-accelerator; do
+for chart in buildkit control-plane ci-accelerator; do
   v=$(chart_version "$ROOT/charts/$chart/Chart.yaml")
   if [ "$v" != "$version" ]; then
     echo "charts/$chart/Chart.yaml has version $v, the tag says $version" >&2; fail=1
   fi
 done
-for sub in buildkit console; do
+for sub in buildkit control-plane; do
   dep=$(awk "/^  - name: $sub\$/ {found = 1; next} found && /^    version:/ {print \$2; exit}" "$ROOT/charts/ci-accelerator/Chart.yaml")
   if [ "$dep" != "$version" ]; then
     echo "charts/ci-accelerator depends on $sub $dep, the tag says $version" >&2; fail=1
   fi
 done
-# The console chart's default image is the one this release builds.
-app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/console/Chart.yaml")
+# The control-plane chart's default image is the one this release builds.
+app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/control-plane/Chart.yaml")
 if [ "$app" != "$version" ]; then
-  echo "charts/console/Chart.yaml has appVersion $app (its image tag), the tag says $version" >&2; fail=1
+  echo "charts/control-plane/Chart.yaml has appVersion $app (its image tag), the tag says $version" >&2; fail=1
 fi
-# The box's appVersion is its own version (the console's), not BuildKit's.
+# The box's appVersion is its own version (its image's), not BuildKit's.
 box=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/ci-accelerator/Chart.yaml")
 if [ "$box" != "$version" ]; then
   echo "charts/ci-accelerator/Chart.yaml has appVersion $box, the tag says $version" >&2; fail=1
 fi
-# The Artifact Hub image annotations name this release's console image.
-for chart in console ci-accelerator; do
-  grep -q "image: ghcr.io/hoobiboobi/ci-accelerator-console:v$version\$" "$ROOT/charts/$chart/Chart.yaml" \
-    || { echo "charts/$chart/Chart.yaml: artifacthub.io/images does not name ci-accelerator-console:v$version" >&2; fail=1; }
+# The Artifact Hub image annotations name this release's image.
+for chart in control-plane ci-accelerator; do
+  grep -q "image: ghcr.io/hoobiboobi/ci-accelerator:v$version\$" "$ROOT/charts/$chart/Chart.yaml" \
+    || { echo "charts/$chart/Chart.yaml: artifacthub.io/images does not name ci-accelerator:v$version" >&2; fail=1; }
 done
 # The one-node installer installs this release.
 qs=$(awk -F= '/^VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")

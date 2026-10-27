@@ -1,0 +1,64 @@
+suite: the runners' cache folders
+templates:
+  - caches.yaml
+  - controller.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  - it: lists no folder and reads no Secret by default
+    asserts:
+      - hasDocuments: {count: 0}
+        template: caches.yaml
+      - notContains: {path: 'spec.template.spec.containers[0].args', content: "-caches=/caches/caches.json"}
+        template: controller.yaml
+      - notContains: {path: spec.template.spec.volumes, content: {name: caches, configMap: {name: c-controller-caches}}}
+        template: controller.yaml
+  - it: writes the folders, with the GitLab's id, and may read only their Secrets
+    set:
+      caches.stores:
+        - {server: s3.example.com, bucket: ci-cache, region: eu-1, path: /box/x/, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc, pathStyle: true}
+        - {server: "s3.example.com:9000", bucket: b, region: us-east-1, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc, insecure: true}
+    template: caches.yaml
+    asserts:
+      - equal:
+          path: data["caches.json"]
+          value: '[{"bucket":"ci-cache","instance":"051b90","path":"box/x","pathStyle":true,"region":"eu-1","secret":"rc","server":"s3.example.com"},{"bucket":"b","insecure":true,"instance":"051b90","path":"","region":"us-east-1","secret":"rc","server":"s3.example.com:9000"}]'
+        documentIndex: 0
+      - equal: {path: rules, value: [{apiGroups: [""], resources: [secrets], resourceNames: [rc], verbs: [get]}]}
+        documentIndex: 1
+  - it: passes the folders to the controller, with its namespace and a token
+    set:
+      caches.fromConfigMap: '{{ .Release.Name }}-runner-caches'
+    template: controller.yaml
+    asserts:
+      - contains: {path: 'spec.template.spec.containers[0].args', content: "-caches=/caches/caches.json"}
+      - contains: {path: 'spec.template.spec.containers[0].args', content: "-cache-every=10m"}
+      - contains: {path: spec.template.spec.volumes, content: {name: caches, configMap: {name: c-runner-caches}}}
+      - contains:
+          path: 'spec.template.spec.containers[0].env'
+          content: {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+      - equal: {path: spec.template.spec.automountServiceAccountToken, value: true}
+  # 0s would list the bucket without pause.
+  - it: refuses to list the folders more often than every 10 seconds
+    set:
+      caches.fromConfigMap: x
+      caches.every: 5s
+    template: controller.yaml
+    asserts:
+      - failedTemplate: {}
+  - it: takes 10 seconds or more
+    set:
+      caches.fromConfigMap: x
+      caches.every: 15s
+    template: controller.yaml
+    asserts:
+      - contains: {path: 'spec.template.spec.containers[0].args', content: "-cache-every=15s"}
+  - it: needs every field of a folder
+    set:
+      caches.stores: [{server: s3.example.com, bucket: ci-cache, region: eu-1, existingSecret: rc}]
+    template: controller.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "caches.stores\\[0\\].gitlabUrl is needed"}

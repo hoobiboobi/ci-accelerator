@@ -18,6 +18,12 @@ kubernetesProvider:
         version: v1
         resource: namespaces
       namespaced: false
+    "apps/v1/Deployment":
+      gvr:
+        group: apps
+        version: v1
+        resource: deployments
+      namespaced: true
 tests:
   - it: accepts a Secret with a token and the empty registration key
     kubernetesProvider:

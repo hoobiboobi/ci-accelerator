@@ -4,12 +4,12 @@
 # the e2e, runs two CI jobs that build an image through the real runner
 # (the second must find the first one's cache), asks the console about the
 # build, and uninstalls. Run as root, from the repository root, after
-# `make deps` and with the console image saved to a tar:
+# `make deps` and with the ci-accelerator image saved to a tar:
 #
-#   sudo test/quickstart/run.sh /tmp/console.tar
+#   sudo test/quickstart/run.sh /tmp/ci-accelerator.tar
 #
 # or a published release as a user gets it: quickstart.sh from the GitHub
-# release, checked against its SHA256SUMS, the charts and the console image
+# release, checked against its SHA256SUMS, the charts and the image
 # from the registry:
 #
 #   sudo test/quickstart/run.sh --release 0.2.0-rc.1
@@ -18,7 +18,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 IMAGE_TAR="" RELEASE=""
-case "${1:?usage: $0 <console image tar> | --release <version>}" in
+case "${1:?usage: $0 <ci-accelerator image tar> | --release <version>}" in
   --release) RELEASE=${2:?usage: $0 --release <version>} ;;
   *) IMAGE_TAR=$1 ;;
 esac
@@ -51,7 +51,7 @@ if [ -n "$RELEASE" ]; then
     || { fail "quickstart.sh of v$RELEASE matches the release's SHA256SUMS"; exit 1; }
   pass "quickstart.sh of v$RELEASE matches the release's SHA256SUMS"
 else
-  overrides=(CI_ACCELERATOR_CHART="$ROOT/charts/ci-accelerator" CI_ACCELERATOR_CONSOLE_IMAGE_TAR="$IMAGE_TAR")
+  overrides=(CI_ACCELERATOR_CHART="$ROOT/charts/ci-accelerator" CI_ACCELERATOR_IMAGE_TAR="$IMAGE_TAR")
 fi
 echo "== install with ${RELEASE:+v$RELEASE }quickstart.sh (GitLab $gitlab)"
 t0=$(date +%s)
@@ -96,7 +96,7 @@ check "a CI job builds an image" test "$(job 1)" = success
 check "the second build finds the first one's cache" eval '[ "$(job 2)" = success ] && grep -A1 "RUN sleep 2" "$LOGS/job-2.trace" | grep -q "^#[0-9]* CACHED$"'
 
 echo "== the console saw the builds"
-kc -n "$NS" port-forward svc/ci-accelerator-console 18080:8080 >"$LOGS/port-forward.log" 2>&1 &
+kc -n "$NS" port-forward svc/ci-accelerator-web 18080:8080 >"$LOGS/port-forward.log" 2>&1 &
 pf=$!
 console_builds() {
   curl -fs "http://localhost:18080/api/v1/builds?limit=10" >"$LOGS/console-builds.json" 2>/dev/null \

@@ -1,0 +1,239 @@
+{{- include "control-plane.validate" . }}
+{{- $jobs := include "control-plane.jobsNamespace" . }}
+{{- $urlsFrom := include "control-plane.urlsConfigMap" . }}
+{{- $token := .Values.gitlab.token.existingSecret }}
+{{- $signIn := include "control-plane.signIn" . }}
+{{- $caches := include "control-plane.cachesConfigMap" . }}
+{{- $c := dict "root" . "role" "controller" }}
+{{- $v := .Values.controller }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "control-plane.controllerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" $c | nindent 4 }}
+spec:
+  # The controller. One writer: SQLite on a ReadWriteOnce volume. Recreate,
+  # so the old pod is gone before the new one opens the store.
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "control-plane.selectorLabels" $c | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "control-plane.podLabels" $c | nindent 8 }}
+      {{- if or $v.podAnnotations $signIn }}
+      annotations:
+        {{- with $v.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $signIn }}
+        # The controller reads its sign-in file at start.
+        ci-accelerator.io/sign-in-checksum: {{ include "control-plane.signInConfig" . | sha256sum | trunc 16 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "control-plane.controllerName" . }}
+      # The token checks the web's tokens (TokenReview), watches the job
+      # pods and reads the caches' keys.
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: {{ include "control-plane.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - controller
+            - -data=/data
+            - -tls-dir=/certs
+            - -api-listen=:{{ int $v.api.port }}
+            - -api-tls-dir=/api-tls
+            - -api-allow={{ .Release.Namespace }}/{{ include "control-plane.webName" . }}
+            - -discover={{ include "control-plane.discover" . }}
+            {{- with .Values.daemons.serverName }}
+            - -server-name={{ tpl . $ }}
+            {{- end }}
+            {{- range .Values.gitlab.urls }}
+            - -gitlab-url={{ . }}
+            {{- end }}
+            {{- with $jobs }}
+            - -jobs-namespace={{ . }}
+            {{- end }}
+            {{- with .Values.daemons.diskProbePort }}
+            - -disk-probe-port={{ int . }}
+            {{- end }}
+            - -keep-days={{ int .Values.retention.days }}
+            - -keep-output-days={{ int .Values.retention.outputDays }}
+            - -release={{ .Release.Name }}
+            {{- if $token }}
+            - -gitlab-token-file=/gitlab/token
+            {{- end }}
+            {{- if $signIn }}
+            - -sign-in=/sign-in/config/sign-in.json
+            {{- end }}
+            {{- if $caches }}
+            - -caches=/caches/{{ .Values.caches.key }}
+            - -cache-every={{ default "10m" .Values.caches.every }}
+            {{- end }}
+          {{- if or $urlsFrom $caches }}
+          env:
+            {{- with $urlsFrom }}
+            - name: GITLAB_URLS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.gitlab.urlsFrom.key }}
+            {{- end }}
+            {{- if $caches }}
+            # Where the Secrets with the caches' keys are.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: api
+              containerPort: {{ int $v.api.port }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+              scheme: HTTPS
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+              scheme: HTTPS
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with $v.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+            - name: api-tls
+              mountPath: /api-tls
+              readOnly: true
+            # SQLite's temporary files.
+            - name: tmp
+              mountPath: /tmp
+            {{- if $token }}
+            - name: gitlab-token
+              mountPath: /gitlab
+              readOnly: true
+            {{- end }}
+            {{- if $caches }}
+            - name: caches
+              mountPath: /caches
+              readOnly: true
+            {{- end }}
+            {{- if $signIn }}
+            - name: sign-in
+              mountPath: /sign-in/config
+              readOnly: true
+            - name: sign-in-key
+              mountPath: /sign-in/key
+              readOnly: true
+            {{- range $i, $g := .Values.signIn.gitlab }}
+            - name: sign-in-gitlab-{{ $i }}
+              mountPath: /sign-in/gitlab-{{ $i }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "control-plane.pvcName" . }}
+        - name: certs
+          secret:
+            secretName: {{ include "control-plane.clientSecretName" . }}
+            defaultMode: 0440
+        - name: api-tls
+          secret:
+            secretName: {{ include "control-plane.apiSecretName" . }}
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        - name: tmp
+          emptyDir: {}
+        {{- if $token }}
+        - name: gitlab-token
+          secret:
+            secretName: {{ $token }}
+            defaultMode: 0440
+            items:
+              - key: {{ default "token" .Values.gitlab.token.key }}
+                path: token
+        {{- end }}
+        {{- if $caches }}
+        - name: caches
+          configMap:
+            name: {{ $caches }}
+        {{- end }}
+        {{- if $signIn }}
+        - name: sign-in
+          configMap:
+            name: {{ include "control-plane.controllerName" . }}-sign-in
+        - name: sign-in-key
+          secret:
+            secretName: {{ .Values.signIn.sessionKey.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ default "key" .Values.signIn.sessionKey.key }}
+                path: key
+        {{- range $i, $g := .Values.signIn.gitlab }}
+        - name: sign-in-gitlab-{{ $i }}
+          secret:
+            secretName: {{ $g.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: client-id
+                path: client-id
+              - key: client-secret
+                path: client-secret
+        {{- end }}
+        {{- end }}
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,45 @@
+{{- $stores := .Values.caches.stores }}
+{{- if $stores }}
+{{- $secrets := list }}
+{{- range $stores }}{{ $secrets = append $secrets .existingSecret }}{{ end }}
+# The runners' cache folders the controller lists (no keys here).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "control-plane.controllerName" . }}-caches
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+data:
+  caches.json: {{ include "control-plane.cachesJson" . | quote }}
+---
+# Read access to the Secrets with the folders' keys, and to nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "control-plane.controllerName" . }}-caches
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: {{ toJson (uniq $secrets) }}
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "control-plane.controllerName" . }}-caches
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "control-plane.controllerName" . }}-caches
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.controllerName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -62,9 +62,9 @@ BUILD_DIR=$STATE/buildkit
 KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 export KUBECONFIG
 # For testing this script before a release: a chart directory instead of
-# the registry, and a console image to load into k3s.
+# the registry, and a ci-accelerator image to load into k3s.
 CHART=${CI_ACCELERATOR_CHART:-}
-CONSOLE_IMAGE_TAR=${CI_ACCELERATOR_CONSOLE_IMAGE_TAR:-}
+IMAGE_TAR=${CI_ACCELERATOR_IMAGE_TAR:-}
 
 gitlab_url="" runner_token_file="" gitlab_token_file="" allow_docker=0 yes=0 uninstall=0
 while [ $# -gt 0 ]; do
@@ -274,7 +274,7 @@ kubectl -n "$NS" create secret generic gitlab-runner-token \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 if [ -n "$gitlab_token" ]; then
   printf '%s' "$gitlab_token" >"$WORK/gitlab-token"
-  kubectl -n "$NS" create secret generic console-gitlab-token --from-file=token="$WORK/gitlab-token" \
+  kubectl -n "$NS" create secret generic gitlab-api-token --from-file=token="$WORK/gitlab-token" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 fi
 mkdir -p "$BUILD_DIR" "$STATE"
@@ -293,17 +293,23 @@ fi
 # cache path or anything else the user added live. Flags that change values
 # are applied with --set and printed, to be copied into the file.
 value_set=()
+if [ -f "$STATE/values.yaml" ] && grep -q '^console:' "$STATE/values.yaml"; then
+  # 0.3.0 renamed the console's objects and values: no in-place upgrade.
+  die "this machine runs ci-accelerator 0.2.x, which $VERSION cannot upgrade in place (the console became the control plane, with new names). Remove the release, keeping k3s and the build cache:
+  sudo KUBECONFIG=$KUBECONFIG $HELM uninstall $REL -n $NS --wait
+then in $STATE/values.yaml rename the top-level console: to control-plane: or delete the file to start over, and run this script again (with --gitlab-token-file to keep reading GitLab with a token). The old console's history stays on the PersistentVolumeClaim $REL-console-data until you delete it."
+fi
 if [ -f "$STATE/values.yaml" ]; then
   say "Keeping the existing $STATE/values.yaml (delete it to start over)"
   grep -q "gitlabUrl: $gitlab_url\$" "$STATE/values.yaml" || warn "$STATE/values.yaml names another GitLab than --gitlab-url: the file wins"
-  if [ -n "$gitlab_token" ] && ! grep -q "existingSecret: console-gitlab-token" "$STATE/values.yaml"; then
-    value_set+=(--set console.gitlab.token.existingSecret=console-gitlab-token)
-    warn "the GitLab token is applied with --set; add console.gitlab.token.existingSecret: console-gitlab-token to $STATE/values.yaml to keep it"
+  if [ -n "$gitlab_token" ] && ! grep -q "existingSecret: gitlab-api-token" "$STATE/values.yaml"; then
+    value_set+=(--set control-plane.gitlab.token.existingSecret=gitlab-api-token)
+    warn "the GitLab token is applied with --set; add control-plane.gitlab.token.existingSecret: gitlab-api-token to $STATE/values.yaml to keep it"
   fi
 else
 # The daemon on this one node: half the CPUs and a quarter of the memory
 # requested, three quarters of the memory at most; the rest is for k3s, the
-# runner, the console and the CI jobs.
+# runner, the control plane and the CI jobs.
 cpus=$(nproc)
 mem_mi=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
 req_cpu=$(( cpus / 2 > 1 ? cpus / 2 : 1 ))
@@ -331,22 +337,22 @@ buildkit:
   resources:
     requests: {cpu: "$req_cpu", memory: ${req_mem}Mi}
     limits: {memory: ${lim_mem}Mi}
-console:
+control-plane:
   enabled: true
 EOF
 if [ -n "$gitlab_token" ]; then
   cat >>"$STATE/values.yaml" <<EOF
   gitlab:
     token:
-      existingSecret: console-gitlab-token
+      existingSecret: gitlab-api-token
 EOF
 fi
 fi
 image_set=()
-if [ -n "$CONSOLE_IMAGE_TAR" ]; then
-  /usr/local/bin/k3s ctr images import "$CONSOLE_IMAGE_TAR" >/dev/null
-  ref=$(tar -xOf "$CONSOLE_IMAGE_TAR" manifest.json | sed -n 's/.*"RepoTags":\["\([^"]*\)".*/\1/p')
-  image_set=(--set "console.image.repository=${ref%:*}" --set "console.image.tag=${ref##*:}" --set console.image.pullPolicy=Never
+if [ -n "$IMAGE_TAR" ]; then
+  /usr/local/bin/k3s ctr images import "$IMAGE_TAR" >/dev/null
+  ref=$(tar -xOf "$IMAGE_TAR" manifest.json | sed -n 's/.*"RepoTags":\["\([^"]*\)".*/\1/p')
+  image_set=(--set "control-plane.image.repository=${ref%:*}" --set "control-plane.image.tag=${ref##*:}" --set control-plane.image.pullPolicy=Never
     --set "buildkit.diskProbe.image.repository=${ref%:*}" --set "buildkit.diskProbe.image.tag=${ref##*:}" --set buildkit.diskProbe.image.pullPolicy=Never)
 fi
 helm upgrade --install "$REL" "$CHART" -n "$NS" -f "$STATE/values.yaml" ${image_set[@]+"${image_set[@]}"} ${value_set[@]+"${value_set[@]}"} \
@@ -362,7 +368,7 @@ Done. ci-accelerator $VERSION runs on this machine.
 $(helm get notes "$REL" -n "$NS")
 
 The console (no sign-in: reachable only through a tunnel). On this machine:
-  sudo k3s kubectl -n $NS port-forward svc/$REL-console 8080:8080
+  sudo k3s kubectl -n $NS port-forward svc/$REL-web 8080:8080
 and from your computer:
   ssh -N -L 8080:localhost:8080 $(logname 2>/dev/null || echo you)@$host
 then open http://localhost:8080

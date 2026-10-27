@@ -46,11 +46,11 @@ jobs:
           echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
           PATH="$PWD/.tools/bin:$PATH" make deps
 
-      - name: The console image of this tree
+      - name: The ci-accelerator image of this tree
         if: ${{ !inputs.release }}
         run: |
-          docker build -f cmd/console/Dockerfile -t ci-accelerator-console:quickstart .
-          docker save -o "$RUNNER_TEMP/console.tar" ci-accelerator-console:quickstart
+          docker build -f cmd/ci-accelerator/Dockerfile -t ci-accelerator:quickstart .
+          docker save -o "$RUNNER_TEMP/image.tar" ci-accelerator:quickstart
 
       # The installer expects a machine without Docker (its iptables rules
       # can break the pods' network).
@@ -65,7 +65,7 @@ jobs:
           if [ -n "$RELEASE" ]; then
             sudo --preserve-env=QUICKSTART_LOGS test/quickstart/run.sh --release "$RELEASE"
           else
-            sudo --preserve-env=QUICKSTART_LOGS test/quickstart/run.sh "$RUNNER_TEMP/console.tar"
+            sudo --preserve-env=QUICKSTART_LOGS test/quickstart/run.sh "$RUNNER_TEMP/image.tar"
           fi
 
       - name: Upload logs

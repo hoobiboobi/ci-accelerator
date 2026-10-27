@@ -149,7 +149,7 @@ tests:
           path: data["buildkitd.toml"]
           pattern: '\[history\]\n  maxAge = "168h"\n  maxEntries = 0\n'
 
-  # The console reads the history: more than buildkit's 50 records.
+  # The controller reads the history: more than buildkit's 50 records.
   - it: keeps 1000 history records for 48 h by default
     asserts:
       - matchRegex:

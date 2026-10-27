@@ -1,0 +1,171 @@
+suite: the control plane in the box
+templates:
+  - runner-gitlab.yaml
+  - validate.yaml
+  - charts/control-plane/templates/controller.yaml
+  - charts/control-plane/templates/certificate.yaml
+  - charts/control-plane/templates/rbac.yaml
+  - charts/control-plane/templates/networkpolicy.yaml
+  - charts/control-plane/templates/service.yaml
+  - charts/buildkit/templates/networkpolicy.yaml
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  # On by default; control-plane.enabled=false keeps it off. A
+  # disabled subchart's templates are not rendered at all (helm-unittest
+  # cannot select them), so this chart's own ConfigMap shows it.
+  - it: is on by default
+    template: runner-gitlab.yaml
+    asserts:
+      - hasDocuments: { count: 1 }
+  - it: stays off with control-plane.enabled=false
+    template: runner-gitlab.yaml
+    set:
+      control-plane.enabled: false
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  # One GitLab URL, set once for the runner: the controller reads the same
+  # string, which the trace ids carry a hash of.
+  - it: gives the controller the runner's GitLab URL
+    template: runner-gitlab.yaml
+    set:
+      control-plane.enabled: true
+    asserts:
+      - equal: { path: metadata.name, value: box-runner-gitlab }
+      - equal: { path: data.urls, value: "https://gitlab.example.com/" }
+  - it: points the controller at this release's daemons, ConfigMap and jobs namespace
+    template: charts/control-plane/templates/controller.yaml
+    set:
+      control-plane.enabled: true
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: -discover=box-buildkit-headless.ci-accelerator.svc:1234 }
+      - contains: { path: "spec.template.spec.containers[0].args", content: -jobs-namespace=ci-accelerator-jobs }
+      - equal:
+          path: "spec.template.spec.containers[0].env[0].valueFrom.configMapKeyRef"
+          value: { name: box-runner-gitlab, key: urls }
+  - it: lets the controller read pods in the jobs namespace
+    template: charts/control-plane/templates/rbac.yaml
+    set:
+      control-plane.enabled: true
+    documentIndex: 0
+    asserts:
+      - equal: { path: metadata.namespace, value: ci-accelerator-jobs }
+
+  - it: issues the controller's certificate from the daemons' own CA
+    template: charts/control-plane/templates/certificate.yaml
+    set:
+      control-plane.enabled: true
+    asserts:
+      - equal:
+          path: spec.issuerRef
+          value: { name: ci-accelerator-box-buildkit-ca, kind: ClusterIssuer, group: cert-manager.io }
+  - it: uses the global issuer when the box has one
+    template: charts/control-plane/templates/certificate.yaml
+    set:
+      control-plane.enabled: true
+      global.tls.issuerRef.name: company-ca
+    asserts:
+      - equal: { path: spec.issuerRef.name, value: company-ca }
+
+  - it: asks for the controller's own certificates when the daemons' come from a Secret
+    template: validate.yaml
+    set:
+      control-plane.enabled: true
+      buildkit.tls.source: existingSecret
+      buildkit.tls.existingSecret: daemons-tls
+    asserts:
+      - failedTemplate: { errorPattern: "control-plane.tls.existingSecret.*control-plane.controller.api.tls.existingSecret" }
+
+  # Sign-in: the controller takes the box's address and the runner's GitLab
+  # (an entry without a url), so neither is written twice.
+  - it: passes sign-in to the controller with the box's address
+    template: charts/control-plane/templates/controller.yaml
+    set:
+      control-plane.enabled: true
+      global.console.url: https://ci.example.com
+      control-plane.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o, admins: [alice] }] }
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-sign-in=/sign-in/config/sign-in.json" }
+      - notContains: { path: 'spec.template.spec.containers[0].args', content: "-gitlab-token-file=/gitlab/token" }
+  - it: needs the box's address for sign-in
+    template: charts/control-plane/templates/controller.yaml
+    set:
+      control-plane.enabled: true
+      control-plane.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
+    asserts:
+      - failedTemplate: { errorPattern: "sign-in needs signIn.url \\(or global.console.url\\)" }
+
+  # CI jobs and their builds may not reach the console (it shows every
+  # project without sign-in): the box turns the policy on, with its jobs
+  # namespace and its daemons kept out.
+  - it: keeps the box's jobs and builds away from the console
+    template: charts/control-plane/templates/networkpolicy.yaml
+    documentIndex: 0
+    asserts:
+      - hasDocuments: { count: 2 }
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator, ci-accelerator-jobs]
+      - equal:
+          path: spec.ingress[0].from[1].podSelector.matchExpressions[0].values
+          value: [buildkit]
+  - it: follows a renamed jobs namespace
+    template: charts/control-plane/templates/networkpolicy.yaml
+    documentIndex: 0
+    set:
+      global.jobs.namespace: ci-builds
+      gitlab-runner.runners.jobNamespace: ci-builds
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator, ci-builds]
+
+  # The box's daemons admit the controller (it reads their history), never
+  # the pages; the controller admits the web only.
+  - it: lets the controller, not the web, reach the daemons
+    template: charts/buildkit/templates/networkpolicy.yaml
+    asserts:
+      - contains:
+          path: spec.ingress[0].from
+          content: { podSelector: { matchLabels: { ci-accelerator.io/component: controller } } }
+  - it: issues the controller API's certificate from the box's CA
+    template: charts/control-plane/templates/certificate.yaml
+    documentIndex: 1
+    asserts:
+      - equal: { path: metadata.name, value: box-controller-tls }
+      - equal: { path: spec.issuerRef.name, value: ci-accelerator-box-buildkit-ca }
+      - equal: { path: spec.usages, value: [server auth, digital signature] }
+
+  # The web never reaches the daemons: their policy admits the controller's
+  # label only.
+  - it: does not let the web reach the daemons
+    template: charts/buildkit/templates/networkpolicy.yaml
+    asserts:
+      - notContains:
+          path: spec.ingress[0].from
+          content: { podSelector: { matchLabels: { ci-accelerator.io/component: web } } }
+
+  - it: names the box's control-plane objects after the release and the role
+    template: charts/control-plane/templates/service.yaml
+    asserts:
+      - equal: { path: metadata.name, value: box-web }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: box-controller }
+        documentIndex: 1
+
+  # 0.3.0 does not take over a 0.2.x release (new names for every console
+  # object and value): a clear refusal with the way forward.
+  - it: refuses values under console (0.2.x, e.g. kept by --reuse-values)
+    template: validate.yaml
+    set:
+      console: { enabled: true }
+    asserts:
+      - failedTemplate:
+          errorPattern: "values under console: are the 0.2.x console's: since 0.3.0 they are under control-plane:.*helm uninstall box -n ci-accelerator"

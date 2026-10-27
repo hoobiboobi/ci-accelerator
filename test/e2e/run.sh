@@ -80,10 +80,15 @@ RUNNER_CHART_VERSION=0.93.0
 RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 # The last published release, which the upgrade scenario installs from the
 # registry and upgrades to this tree. Bump both with every release.
-UPGRADE_FROM=0.2.5
+# UPGRADE_FROM_DIR=<dir> takes ci-accelerator-<v>.tgz and buildkit-<v>.tgz
+# from a directory instead (a packaged tree, to rehearse the next upgrade;
+# no checksums), with UPGRADE_FROM_VALUES for what it needs on kind.
+UPGRADE_FROM=${UPGRADE_FROM:-0.2.5}
 UPGRADE_FROM_SHA256=44bc28794b084dd259e4f16431f8597b0eca9326151716e570bcd26c49394e82
 UPGRADE_FROM_BUILDKIT_SHA256=d6a8f227450d0224992a868cefc4fc3d24b48172c07d8c08915bcc00c32f40e5
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
+UPGRADE_FROM_DIR=${UPGRADE_FROM_DIR:-}
+UPGRADE_FROM_VALUES=${UPGRADE_FROM_VALUES:-$ROOT/test/e2e/box-values-old.yaml}
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
 # then restarts every daemon; say so in the upgrade notes). 0 since 0.2.4:
 # the disk probe's image tag is pinned, so a release alone changes nothing
@@ -1014,7 +1019,7 @@ box_disk() {
   check "every daemon pod's disk probe is ready" \
     [ "$(kc -n "$BOX_NS" get pods -l "$sel" -o jsonpath='{range .items[*].status.containerStatuses[?(@.name=="disk-probe")]}{.ready}{"\n"}{end}' | grep -c '^true$')" = "$n" ]
   box_nodes_disk() {
-    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/nodes" 2>/dev/null >"$LOGS/box-nodes.html"
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/nodes" 2>/dev/null >"$LOGS/box-nodes.html"
     [ "$(grep -o 'class="ndisk"' "$LOGS/box-nodes.html" | wc -l | tr -d ' ')" = "$n" ] && grep -q 'Available to pods' "$LOGS/box-nodes.html"
   }
   # The console reads each daemon once a minute.
@@ -1027,10 +1032,10 @@ s_box() {
   ensure_ns "$BOX_NS" privileged
   ensure_fake_gitlab "$BOX_NS" || return
   make -C "$ROOT" deps >"$LOGS/box-deps.log" 2>&1 || { fail "make deps (see $LOGS/box-deps.log)"; return; }
-  make -C "$ROOT" console-image CONSOLE_IMAGE=ci-accelerator-console:e2e >"$LOGS/box-console-image.log" 2>&1 \
-    || { fail "build the console image (see $LOGS/box-console-image.log)"; return; }
+  make -C "$ROOT" image LOCAL_IMAGE=ci-accelerator:e2e >"$LOGS/box-image.log" 2>&1 \
+    || { fail "build the ci-accelerator image (see $LOGS/box-image.log)"; return; }
   arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
-  local extra=(-f "$ROOT/test/e2e/box-console-values.yaml")
+  local extra=(-f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml")
   for f in ${E2E_BOX_EXTRA_VALUES:-}; do extra+=(-f "$f"); done
   hc upgrade --install "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" -f "$ROOT/test/e2e/box-values.yaml" ${extra[@]+"${extra[@]}"} \
     --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -1071,7 +1076,7 @@ s_box() {
   # attributed to the job, and compared (a first build), which needs the
   # project from the pod.
   box_console() {
-    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/api/v1/builds?limit=50" \
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/api/v1/builds?limit=50" \
       2>/dev/null >"$LOGS/box-console.json"
     python3 -c 'import json,sys
 b = [x for x in json.load(open(sys.argv[1]))["builds"] if x.get("job") == int(sys.argv[2])]
@@ -1083,7 +1088,7 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   # its time. The instance is the trace id's GitLab part.
   box_console_page() {
     kc -n "$JOBS_NS" exec client-build -- wget -qO- \
-      "http://$BOX_REL-console.$BOX_NS.svc:8080/jobs/${box_tid:2:6}/$(job_id box)" 2>/dev/null >"$LOGS/box-console-page.html"
+      "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/${box_tid:2:6}/$(job_id box)" 2>/dev/null >"$LOGS/box-console-page.html"
     grep -q 'First build of target <code>' "$LOGS/box-console-page.html" &&
       grep -q 'class="dl step st-built' "$LOGS/box-console-page.html"
   }
@@ -1099,8 +1104,8 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   kc -n "$BOX_NS" delete secret e2e-console-oauth e2e-console-session --ignore-not-found >/dev/null 2>&1
   check "uninstall removes the jobs namespace" \
     eventually 60 eval '! kc get namespace "$BOX_JOBS_NS" >/dev/null 2>&1'
-  check "uninstall keeps the console's store" quiet kc -n "$BOX_NS" get pvc "$BOX_REL-console-data"
-  kc -n "$BOX_NS" delete pvc "$BOX_REL-console-data" --ignore-not-found >/dev/null 2>&1
+  check "uninstall keeps the controller's store" quiet kc -n "$BOX_NS" get pvc "$BOX_REL-controller-data"
+  kc -n "$BOX_NS" delete pvc "$BOX_REL-controller-data" --ignore-not-found >/dev/null 2>&1
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
 }
 
@@ -1117,7 +1122,7 @@ box_ui() {
     if [ "${E2E_UI:-}" = 1 ]; then fail "browser checks: no Node >= 22 (make ui-tools)"; else info "browser checks skipped: no Node >= 22 (make ui-tools)"; fi
     return
   fi
-  kubectl --context "$CTX" -n "$BOX_NS" port-forward "svc/$BOX_REL-console" "$port:8080" >"$LOGS/box-ui-port-forward.log" 2>&1 &
+  kubectl --context "$CTX" -n "$BOX_NS" port-forward "svc/$BOX_REL-web" "$port:8080" >"$LOGS/box-ui-port-forward.log" 2>&1 &
   pf=$!
   eventually 15 quiet curl -fsS "http://127.0.0.1:$port/healthz" || { fail "browser checks: no port-forward to the console"; kill "$pf" 2>/dev/null; return; }
   if "$node" "$ROOT/test/ui/ui.mjs" --base "http://127.0.0.1:$port" >"$LOGS/box-ui.log" 2>&1; then ok=1; fi
@@ -1180,7 +1185,7 @@ EOF_S3
   hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" --reuse-values \
     --set-json "gitlab-runner.runners.cache=$cache" \
     --set-json 'runnerTiers={"deploy":{"nodes":"build","concurrent":2,"token":{"existingSecret":"e2e-runner-tier"},"resources":{"requests":{"cpu":"50m","memory":"64Mi"},"limits":{"memory":"512Mi"}},"cache":'"$cache"',"manager":{"tolerations":[{"key":"node-role.kubernetes.io/control-plane","operator":"Exists","effect":"NoSchedule"}]}}}' \
-    --set console.caches.every=15s --wait --timeout 6m >"$LOGS/box-cache-upgrade.log" 2>&1 \
+    --set control-plane.caches.every=15s --wait --timeout 6m >"$LOGS/box-cache-upgrade.log" 2>&1 \
     || { fail "turn on the runner cache and a tier (see $LOGS/box-cache-upgrade.log)"; return; }
   check "the tier's runner pod is ready" eventually 60 eval '[ "$(kc -n "$BOX_NS" get deploy "$BOX_REL-runner-deploy" -o jsonpath={.status.readyReplicas})" = 1 ]'
   # A job with cache: keyword, as GitLab sends it.
@@ -1210,8 +1215,8 @@ PY
   out=$(kc -n "$NS" exec s3 -- sh -c 'curl -s --aws-sigv4 aws:amz:us-east-1:s3 -u "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" "http://127.0.0.1:8333/runner-cache?list-type=2"' 2>/dev/null)
   check "the bucket holds one archive for the project, shared by both runners" \
     test "$(printf '%s' "$out" | grep -o "<Key>$BOX_REL/$inst/project/1/e2e-cache</Key>" | wc -l | tr -d ' ')" = 1
-  check "the console is told the folder and lists it" \
-    eventually 120 eval 'kc -n "$BOX_NS" logs deploy/"$BOX_REL-console" 2>/dev/null | grep "\"cache listed\"" | grep -q "\"store\":\"$s3/runner-cache/$BOX_REL/$inst\",\"objects\":1"'
+  check "the controller is told the folder and lists it" \
+    eventually 120 eval 'kc -n "$BOX_NS" logs deploy/"$BOX_REL-controller" 2>/dev/null | grep "\"cache listed\"" | grep -q "\"store\":\"$s3/runner-cache/$BOX_REL/$inst\",\"objects\":1"'
   JOB_SPEC=$(job_spec 778)
 }
 
@@ -1227,15 +1232,15 @@ box_signin() {
   kc -n "$BOX_NS" create secret generic e2e-console-session --from-literal=key="$(head -c 32 /dev/urandom | base64)" \
     --dry-run=client -o yaml | kc apply -f - >/dev/null
   hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" --reuse-values --set "global.console.url=$url" \
-    --set console.signIn.enabled=true --set console.signIn.sessionKey.existingSecret=e2e-console-session \
-    --set-json 'console.signIn.gitlab=[{"existingSecret":"e2e-console-oauth","admins":["root"]}]' \
+    --set control-plane.signIn.enabled=true --set control-plane.signIn.sessionKey.existingSecret=e2e-console-session \
+    --set-json 'control-plane.signIn.gitlab=[{"existingSecret":"e2e-console-oauth","admins":["root"]}]' \
     --wait --timeout 5m >"$LOGS/box-signin-upgrade.log" 2>&1 \
-    || { kc -n "$BOX_NS" logs deploy/"$BOX_REL-console" --all-containers >"$LOGS/box-signin-console.log" 2>&1
-         kc -n "$BOX_NS" describe pods -l ci-accelerator.io/component=console >"$LOGS/box-signin-console-pods.txt" 2>&1
-         fail "turn on the console's sign-in (see $LOGS/box-signin-upgrade.log, box-signin-console.log)"; return; }
+    || { kc -n "$BOX_NS" logs deploy/"$BOX_REL-controller" --all-containers >"$LOGS/box-signin-controller.log" 2>&1
+         kc -n "$BOX_NS" describe pods -l "app.kubernetes.io/instance=$BOX_REL,app.kubernetes.io/name=control-plane" >"$LOGS/box-signin-control-plane-pods.txt" 2>&1
+         fail "turn on the console's sign-in (see $LOGS/box-signin-upgrade.log, box-signin-controller.log)"; return; }
   check "the install notes give the OAuth application's redirect URI" \
     grep -q "fake-gitlab.$NS.svc/: $url/auth/callback/$inst" "$LOGS/box-signin-upgrade.log"
-  kubectl --context "$CTX" -n "$BOX_NS" port-forward "svc/$BOX_REL-console" "$port:8080" >"$LOGS/box-signin-port-forward.log" 2>&1 &
+  kubectl --context "$CTX" -n "$BOX_NS" port-forward "svc/$BOX_REL-web" "$port:8080" >"$LOGS/box-signin-port-forward.log" 2>&1 &
   pf=$!
   eventually 30 quiet curl -fsS "$url/healthz" || { fail "sign-in: no port-forward to the console"; kill "$pf" 2>/dev/null; return; }
   check "with sign-in, a page sends to sign in" \
@@ -1330,7 +1335,7 @@ YAML
 # settle_reason <job>: the console's reason kind for the job's build, and
 # whether it names the job that settled it ("kind by").
 settle_reason() {
-  kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/api/v1/builds?limit=200" 2>/dev/null \
+  kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/api/v1/builds?limit=200" 2>/dev/null \
     | python3 -c 'import json,sys
 b = [x for x in json.load(sys.stdin)["builds"] if x.get("job") == int(sys.argv[1])]
 r = (b[0].get("reason") or {}) if b else {}
@@ -1345,7 +1350,7 @@ print(r.get("kind", "none"), "by" if r.get("by") else "-")' "$1"
 # above read it from $JOBS_NS) but not its own CI jobs or its daemons (RUN
 # steps share their network): without sign-in it shows every project.
 box_console_policy() {
-  local url="http://$BOX_REL-console.$BOX_NS.svc:8080/healthz"
+  local url="http://$BOX_REL-web.$BOX_NS.svc:8080/healthz"
   kc -n "$BOX_JOBS_NS" delete pod np-probe --ignore-not-found --wait=true >/dev/null 2>&1
   kc -n "$BOX_JOBS_NS" run np-probe --image="$IMAGE" --restart=Never \
     --overrides="{\"spec\":{\"nodeName\":\"$BUILD_NODE\",\"terminationGracePeriodSeconds\":0,
@@ -1356,7 +1361,7 @@ box_console_policy() {
   # A positive control from the same pod: it resolves the console's name,
   # so a timeout below is the policy, not a broken pod network.
   check "a pod in the box's jobs namespace has a network (control)" \
-    quiet kc -n "$BOX_JOBS_NS" exec np-probe -- nslookup "$BOX_REL-console.$BOX_NS.svc.cluster.local"
+    quiet kc -n "$BOX_JOBS_NS" exec np-probe -- nslookup "$BOX_REL-web.$BOX_NS.svc.cluster.local"
   check "a pod in the box's jobs namespace cannot reach the console" refused_console "$BOX_JOBS_NS" np-probe "" "$url"
   kc -n "$BOX_JOBS_NS" delete pod np-probe --wait=false >/dev/null 2>&1
   local daemon
@@ -1367,16 +1372,16 @@ box_console_policy() {
     quiet kc -n "$JOBS_NS" exec client-build -- wget -q -T 5 -O- "$url"
 }
 
-# box_split: the console runs as a controller (the store and the sessions,
-# one pod) and a web (the pages, two pods) that reads the controller's API
+# box_split: the control plane runs as a controller (the store and the
+# sessions, one pod) and a web (the pages, two pods) that reads its API
 # over HTTPS and proves who it is with a ServiceAccount token the
 # controller checks with Kubernetes.
 box_split() {
   check "the web runs as two pods apart from the controller" \
-    eval '[ "$(kc -n "$BOX_NS" get deploy "$BOX_REL-console-web" -o jsonpath="{.status.readyReplicas}" 2>/dev/null)" = 2 ]'
+    eval '[ "$(kc -n "$BOX_NS" get deploy "$BOX_REL-web" -o jsonpath="{.status.readyReplicas}" 2>/dev/null)" = 2 ]'
   # Who may call: through a port-forward, which a NetworkPolicy does not see.
   local port=$((${E2E_UI_PORT:-18431} + 7)) pf
-  kubectl --context "$CTX" -n "$BOX_NS" port-forward "deploy/$BOX_REL-console" "$port:8443" >"$LOGS/box-api-port-forward.log" 2>&1 &
+  kubectl --context "$CTX" -n "$BOX_NS" port-forward "deploy/$BOX_REL-controller" "$port:8443" >"$LOGS/box-api-port-forward.log" 2>&1 &
   pf=$!
   eventually 15 quiet curl -ksS -o /dev/null "https://127.0.0.1:$port/healthz" \
     || { fail "no port-forward to the controller's API"; kill "$pf" 2>/dev/null; return; }
@@ -1391,21 +1396,21 @@ box_split() {
     test "$(curl -ks -o /dev/null -w '%{http_code}' "https://127.0.0.1:$port/healthz")" = 200
   check "the controller's API refuses a call without a token" test "$(api_status "")" = 401
   local web other wrong
-  web=$(kc -n "$BOX_NS" create token "$BOX_REL-console-web" --audience ci-accelerator-console --duration 10m 2>/dev/null)
-  other=$(kc -n "$BOX_NS" create token default --audience ci-accelerator-console --duration 10m 2>/dev/null)
-  wrong=$(kc -n "$BOX_NS" create token "$BOX_REL-console-web" --duration 10m 2>/dev/null)
+  web=$(kc -n "$BOX_NS" create token "$BOX_REL-web" --audience ci-accelerator-controller --duration 10m 2>/dev/null)
+  other=$(kc -n "$BOX_NS" create token default --audience ci-accelerator-controller --duration 10m 2>/dev/null)
+  wrong=$(kc -n "$BOX_NS" create token "$BOX_REL-web" --duration 10m 2>/dev/null)
   check "the controller's API answers the web's ServiceAccount" test "$(api_status "$web")" = 200
   check "the controller's API refuses another ServiceAccount of its namespace" test "$(api_status "$other")" = 403
   check "the controller's API refuses the web's token made for another audience" test "$(api_status "$wrong")" = 401
   kill "$pf" 2>/dev/null
   # Its certificate can never act as a client of the daemons.
-  kc -n "$BOX_NS" get secret "$BOX_REL-console-api" -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d >"$LOGS/box-api.crt" 2>/dev/null
+  kc -n "$BOX_NS" get secret "$BOX_REL-controller-tls" -o jsonpath='{.data.tls\.crt}' 2>/dev/null | base64 -d >"$LOGS/box-api.crt" 2>/dev/null
   check "the API's certificate is for server auth only" \
     eval 'openssl x509 -in "$LOGS/box-api.crt" -noout -text 2>/dev/null | grep -A1 "Extended Key Usage" | grep -q "Server Authentication" && ! openssl x509 -in "$LOGS/box-api.crt" -noout -text | grep -A1 "Extended Key Usage" | grep -q "Client Authentication"'
   # Who may connect (NetworkPolicy): the web's pods only. An HTTP request
   # to the HTTPS port gets Go's 400 when it arrives, nothing when refused.
-  local api="http://$BOX_REL-console-api.$BOX_NS.svc:8443/healthz" wpod
-  wpod=$(kc -n "$BOX_NS" get pods -l "app.kubernetes.io/name=console-web,app.kubernetes.io/instance=$BOX_REL" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  local api="http://$BOX_REL-controller.$BOX_NS.svc:8443/healthz" wpod
+  wpod=$(kc -n "$BOX_NS" get pods -l "app.kubernetes.io/name=control-plane,app.kubernetes.io/component=web,app.kubernetes.io/instance=$BOX_REL" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
   kc -n "$BOX_NS" debug "pod/$wpod" --image="$IMAGE" --container=e2e-api-probe --profile=general -- \
     sh -c "wget -q -T 5 -O- $api 2>&1; sleep 1" >/dev/null 2>&1
   web_reach() { case "$(kc -n "$BOX_NS" logs "$wpod" -c e2e-api-probe 2>/dev/null)" in *" 400 "*) return 0 ;; esac; return 1; }
@@ -1427,14 +1432,14 @@ box_split() {
   # The web keeps nothing: a rolling restart of it loses nothing; the
   # controller keeps its store across a restart, and the web follows it.
   local before after
-  before=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
+  before=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
     | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["builds"]))' 2>/dev/null)
-  kc -n "$BOX_NS" rollout restart deploy/"$BOX_REL-console-web" >/dev/null 2>&1
-  check "a rolling restart of the web completes" quiet kc -n "$BOX_NS" rollout status deploy/"$BOX_REL-console-web" --timeout=120s
-  kc -n "$BOX_NS" rollout restart deploy/"$BOX_REL-console" >/dev/null 2>&1
-  check "a restart of the controller completes" quiet kc -n "$BOX_NS" rollout status deploy/"$BOX_REL-console" --timeout=180s
+  kc -n "$BOX_NS" rollout restart deploy/"$BOX_REL-web" >/dev/null 2>&1
+  check "a rolling restart of the web completes" quiet kc -n "$BOX_NS" rollout status deploy/"$BOX_REL-web" --timeout=120s
+  kc -n "$BOX_NS" rollout restart deploy/"$BOX_REL-controller" >/dev/null 2>&1
+  check "a restart of the controller completes" quiet kc -n "$BOX_NS" rollout status deploy/"$BOX_REL-controller" --timeout=180s
   box_builds_kept() {
-    after=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
+    after=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
       | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["builds"]))' 2>/dev/null)
     [ -n "$before" ] && [ -n "$after" ] && [ "$after" -ge "$before" ] && [ "$before" -gt 0 ]
   }
@@ -1472,157 +1477,78 @@ box_settle() {
   check "a rebuild on another node is put down to the files when a job of the pipeline rebuilt the step on its own node" \
     eventually 60 eval '[ "$(settle_reason 9301)" = "files-changed by" ]'
   check "the job's page says it was not the job's change" \
-    eventually 30 eval 'kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-console.$BOX_NS.svc:8080/jobs/$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)/9201" 2>/dev/null | grep -q "Not your change"'
+    eventually 30 eval 'kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)/9201" 2>/dev/null | grep -q "Not your change"'
 }
 
-# The last release, as users have it, upgraded in place to this tree: the
-# chart from the registry, then helm upgrade with the values users keep
-# (--reuse-values and --reset-then-reuse-values), then helm rollback. The
-# daemon has its cache on hostPath on one node, as in production, and CI
-# jobs go through the runner before, between and after.
+# The last release, as users have it, and this tree. The daemon has its
+# cache on hostPath on one node, as in production, and CI jobs go through
+# the runner before and after. From 0.2.x (the console before it became
+# the control plane, with new names for every object and value) an upgrade
+# is refused with the way forward, which the scenario then follows:
+# uninstall, install, the cache is still there. From 0.3.0 on: upgraded in
+# place with the values users keep (--reuse-values and
+# --reset-then-reuse-values), then helm rollback.
 s_upgrade() {
-  step "upgrade: $UPGRADE_FROM from the registry upgrades in place to this tree and rolls back"
-  local old_chart old_bk args gen0 gen1 gen2 uids0 uids1 state=$STATE_DIR/upgrade
+  local old_chart old_bk state=$STATE_DIR/upgrade c
+  case "$UPGRADE_FROM" in
+    0.2.*) step "upgrade: $UPGRADE_FROM from the registry is refused with the way forward, which works" ;;
+    *) step "upgrade: $UPGRADE_FROM upgrades in place to this tree and rolls back" ;;
+  esac
   ensure_ns "$UPG_NS" privileged
   ensure_fake_gitlab "$UPG_NS" || return
   make -C "$ROOT" deps >"$LOGS/upgrade-deps.log" 2>&1 || { fail "make deps (see $LOGS/upgrade-deps.log)"; return; }
-  # Anonymously, as a user pulls it, and checked against the release.
-  rm -rf "$LOGS/upgrade-from"; mkdir -p "$LOGS/upgrade-from"
-  local c
-  for c in ci-accelerator buildkit; do
-    if ! HELM_REGISTRY_CONFIG="$LOGS/upgrade-from/registry.json" hc pull "$UPGRADE_FROM_REPO/$c" \
-        --version "$UPGRADE_FROM" -d "$LOGS/upgrade-from" >>"$LOGS/upgrade-pull.log" 2>&1; then
-      fail "pull $c $UPGRADE_FROM from $UPGRADE_FROM_REPO (see $LOGS/upgrade-pull.log)"; return
-    fi
-  done
-  old_chart=$LOGS/upgrade-from/ci-accelerator-$UPGRADE_FROM.tgz
-  old_bk=$LOGS/upgrade-from/buildkit-$UPGRADE_FROM.tgz
-  check "the $UPGRADE_FROM packages match their release checksums" \
-    test "$(sha256 "$old_chart" | awk '{print $1}')" = "$UPGRADE_FROM_SHA256" \
-      -a "$(sha256 "$old_bk" | awk '{print $1}')" = "$UPGRADE_FROM_BUILDKIT_SHA256"
+  make -C "$ROOT" image LOCAL_IMAGE=ci-accelerator:e2e >"$LOGS/upgrade-image.log" 2>&1 \
+    || { fail "build the ci-accelerator image (see $LOGS/upgrade-image.log)"; return; }
+  if [ -n "$UPGRADE_FROM_DIR" ]; then
+    old_chart=$UPGRADE_FROM_DIR/ci-accelerator-$UPGRADE_FROM.tgz
+    old_bk=$UPGRADE_FROM_DIR/buildkit-$UPGRADE_FROM.tgz
+    [ -f "$old_chart" ] && [ -f "$old_bk" ] || { fail "no $old_chart or $old_bk"; return; }
+    info "the old release from $UPGRADE_FROM_DIR (not the registry, no checksums)"
+  else
+    # Anonymously, as a user pulls it, and checked against the release.
+    rm -rf "$LOGS/upgrade-from"; mkdir -p "$LOGS/upgrade-from"
+    for c in ci-accelerator buildkit; do
+      if ! HELM_REGISTRY_CONFIG="$LOGS/upgrade-from/registry.json" hc pull "$UPGRADE_FROM_REPO/$c" \
+          --version "$UPGRADE_FROM" -d "$LOGS/upgrade-from" >>"$LOGS/upgrade-pull.log" 2>&1; then
+        fail "pull $c $UPGRADE_FROM from $UPGRADE_FROM_REPO (see $LOGS/upgrade-pull.log)"; return
+      fi
+    done
+    old_chart=$LOGS/upgrade-from/ci-accelerator-$UPGRADE_FROM.tgz
+    old_bk=$LOGS/upgrade-from/buildkit-$UPGRADE_FROM.tgz
+    check "the $UPGRADE_FROM packages match their release checksums" \
+      test "$(sha256 "$old_chart" | awk '{print $1}')" = "$UPGRADE_FROM_SHA256" \
+        -a "$(sha256 "$old_bk" | awk '{print $1}')" = "$UPGRADE_FROM_BUILDKIT_SHA256"
+  fi
   docker exec "$BUILD_NODE" mkdir -p "$state" || { fail "mkdir $state on $BUILD_NODE"; return; }
   # One daemon, on the node whose cache the jobs must find again.
-  args=(-f "$ROOT/test/e2e/box-values.yaml" -f "$ROOT/test/e2e/box-values-old.yaml"
-    --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token
+  UPG_ARGS=(--set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token
     --set "global.jobs.namespace=$UPG_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$UPG_JOBS_NS"
     --set "global.jobs.architecture=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')"
     --set-json "global.buildNodes.selector={\"ci-accelerator.io/node-role\":\"build\",\"kubernetes.io/hostname\":\"$BUILD_NODE\"}"
     --set buildkit.storage.type=hostPath --set "buildkit.storage.hostPath.path=$state")
-  if ! hc install "$UPG_REL" "$old_chart" -n "$UPG_NS" "${args[@]}" --wait --timeout 8m >"$LOGS/upgrade-install.log" 2>&1; then
+  local old_values=(-f "$ROOT/test/e2e/box-values.yaml")
+  for c in $UPGRADE_FROM_VALUES; do old_values+=(-f "$c"); done
+  if ! hc install "$UPG_REL" "$old_chart" -n "$UPG_NS" "${old_values[@]}" "${UPG_ARGS[@]}" --wait --timeout 8m >"$LOGS/upgrade-install.log" 2>&1; then
     fail "install $UPGRADE_FROM (see $LOGS/upgrade-install.log)"; return
   fi
-  pass "$UPGRADE_FROM installs from the registry"
+  pass "$UPGRADE_FROM installs${UPGRADE_FROM_DIR:+ from $UPGRADE_FROM_DIR}"
   JOB_SPEC=$(job_spec 901)
   run_job upgrade-before "$UPG_JOBS_NS"
   check "a CI job on $UPGRADE_FROM succeeds" test "$(cat "$LOGS/job-upgrade-before.state")" = success
-  # The console's store must outlive the upgrade and the rollback: the
-  # build of the job before, as the old console stored it.
-  upg_has_job() {
-    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$UPG_REL-console.$UPG_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
-      | python3 -c 'import json,sys; b=json.load(sys.stdin)["builds"]; sys.exit(0 if any(x.get("job") == int(sys.argv[1]) for x in b) else 1)' "$1"
-  }
-  local upg_console=""
-  if [ -n "$(kc -n "$UPG_NS" get deploy "$UPG_REL-console" -o name --ignore-not-found 2>/dev/null)" ]; then
-    upg_console=1
-    check "the $UPGRADE_FROM console stores the job's build" eventually 90 upg_has_job "$(job_id upgrade-before)"
-  fi
-  gen0=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
-  uids0=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
+  UPG_GEN0=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
+  UPG_UIDS0=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
 
-  # The values users keep: Helm reuses the old values tree, without the
-  # keys this tree added (they must be read with defaults). The console
-  # image of this tree is not published yet (its tag is the release under
-  # test): the image `make console-image` loads into kind stands in. The
-  # disk probe keeps its pinned, published image: overriding it would
-  # itself roll the daemons.
-  make -C "$ROOT" console-image CONSOLE_IMAGE=ci-accelerator-console:e2e >"$LOGS/upgrade-console-image.log" 2>&1 \
-    || { fail "build the console image (see $LOGS/upgrade-console-image.log)"; return; }
-  if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reuse-values \
-      --set console.image.repository=ci-accelerator-console --set console.image.tag=e2e --set console.image.pullPolicy=Never \
-      --wait --timeout 8m >"$LOGS/upgrade-reuse.log" 2>&1; then
-    pass "helm upgrade --reuse-values from $UPGRADE_FROM"
-  else
-    fail "helm upgrade --reuse-values from $UPGRADE_FROM (see $LOGS/upgrade-reuse.log)"; return
-  fi
-  # --reuse-values keeps the old values tree: a console the old release
-  # had stays, one it did not know (0.1.x) stays off.
-  if [ -n "$(kc -n "$UPG_NS" get deploy "$UPG_REL-console" -o name --ignore-not-found 2>/dev/null)" ] \
-      && [ "$(hc get values "$UPG_REL" -n "$UPG_NS" --revision 1 -o json 2>/dev/null | grep -c '"console"')" -ge 0 ]; then
-    check "--reuse-values keeps the console the old release had" \
-      eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-console --timeout=60s >/dev/null'
-  else
-    check "--reuse-values keeps the console off (the old values have no such key)" \
-      eval '! kc -n "$UPG_NS" get deploy "$UPG_REL-console" >/dev/null 2>&1' 
-  fi
-  if [ -n "$upg_console" ]; then
-    # The console of this tree: the old Deployment runs the controller on
-    # the old volume, the pages move to the web.
-    check "the console's web runs after the upgrade" \
-      eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-console-web --timeout=120s >/dev/null'
-    check "the controller took over the old store without a restart" \
-      eval '[ "$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/name=console,app.kubernetes.io/instance=$UPG_REL" -o jsonpath="{.items[*].status.containerStatuses[0].restartCount}")" = 0 ] && ! kc -n "$UPG_NS" logs deploy/"$UPG_REL"-console 2>/dev/null | grep -qi "database is locked"'
-    check "the build the old console stored is shown by the new one" eventually 90 upg_has_job "$(job_id upgrade-before)"
-  fi
-  gen1=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
-  uids1=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
-  if [ "$UPGRADE_ROLLOUT_EXPECTED" = 1 ]; then
-    info "daemon rollout expected (UPGRADE_ROLLOUT_EXPECTED=1): generation $gen0 -> $gen1"
-  else
-    check "the upgrade does not restart the daemons (generation $gen0 -> $gen1; a rollout on purpose needs UPGRADE_ROLLOUT_EXPECTED=1 and an upgrade note)" \
-      test "$gen0" = "$gen1" -a "$uids0" = "$uids1"
-  fi
-  # 0.1.0 ran VictoriaMetrics and VictoriaTraces; this tree does not: the
-  # upgrade removes them and keeps their volumes (the upgrade notes say so).
-  hc get manifest "$UPG_REL" -n "$UPG_NS" --revision 1 >"$LOGS/upgrade-manifest-old.yaml" 2>/dev/null
-  if grep -q 'name: victoria-metrics-single' "$LOGS/upgrade-manifest-old.yaml"; then
-    check "the upgrade removes the old release's metrics and traces storage" \
-      eval '! kc -n "$UPG_NS" get statefulset,deployment -o name 2>/dev/null | grep -q "victoria\|vt-single"'
-    check "and keeps its volumes" eval 'kc -n "$UPG_NS" get pvc -o name | grep -q "victoria\|vt-single"'
-  fi
-  hc get manifest "$UPG_REL" -n "$UPG_NS" >"$LOGS/upgrade-manifest-new.yaml" 2>/dev/null
-  info "manifest diff $UPGRADE_FROM -> this tree: $(diff "$LOGS/upgrade-manifest-old.yaml" "$LOGS/upgrade-manifest-new.yaml" | grep -c '^[<>]') lines ($LOGS/upgrade-manifest-*.yaml)"
-  run_job upgrade-after "$UPG_JOBS_NS"
-  check "a CI job after the upgrade succeeds" test "$(cat "$LOGS/job-upgrade-after.state")" = success
-  check "the job after the upgrade finds the cache from before it" \
-    eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-upgrade-after.trace" | grep -q "^#[0-9]* CACHED$"'
-
-  # The recommended way: this tree's defaults plus the user's values. The
-  # defaults turn the console on: from the image this tree builds, on the
-  # control-plane node (every kind worker is a tainted build node).
-  if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values \
-      -f "$ROOT/test/e2e/box-console-values.yaml" --wait --timeout 8m >"$LOGS/upgrade-reset.log" 2>&1; then
-    pass "helm upgrade --reset-then-reuse-values"
-  else
-    fail "helm upgrade --reset-then-reuse-values (see $LOGS/upgrade-reset.log)"
-  fi
-  gen2=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
-  if [ "$UPGRADE_ROLLOUT_EXPECTED" = 1 ]; then
-    info "--reset-then-reuse-values: generation $gen1 -> $gen2 (this tree's defaults differ on purpose)"
-  else
-    check "--reset-then-reuse-values after --reuse-values changes nothing (generation $gen1 -> $gen2)" test "$gen1" = "$gen2"
-  fi
-  check "with this tree's defaults the console runs" \
-    eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-console --timeout=60s >/dev/null'
-  check "with this tree's defaults the daemons send no metrics to the removed storage" \
-    eval '! kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o yaml | grep -q "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"' 
-
-  if hc rollback "$UPG_REL" 1 -n "$UPG_NS" --wait --timeout 8m >"$LOGS/upgrade-rollback.log" 2>&1; then
-    pass "helm rollback to $UPGRADE_FROM"
-  else
-    fail "helm rollback to $UPGRADE_FROM (see $LOGS/upgrade-rollback.log)"
-  fi
-  run_job upgrade-rolled-back "$UPG_JOBS_NS"
-  check "a CI job after the rollback succeeds" test "$(cat "$LOGS/job-upgrade-rolled-back.state")" = success
-  if [ -n "$upg_console" ]; then
-    check "after the rollback the old console runs again, on the same store" \
-      eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-console --timeout=120s >/dev/null && ! kc -n "$UPG_NS" get deploy "$UPG_REL-console-web" >/dev/null 2>&1'
-    check "and shows the build from before the upgrade" eventually 90 upg_has_job "$(job_id upgrade-before)"
-  fi
+  case "$UPGRADE_FROM" in
+    0.2.*) upgrade_refused ;;
+    *) upgrade_in_place ;;
+  esac
 
   hc uninstall "$UPG_REL" -n "$UPG_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the upgraded release"
+  kc -n "$UPG_NS" delete pvc "$UPG_REL-console-data" "$UPG_REL-controller-data" --ignore-not-found >/dev/null 2>&1
 
   # The daemons chart on its own: --reuse-values there keeps the old
   # chart's defaults too, so a key it lacks is missing outright.
+  local gen0 gen1
   if ! hc install "$UPG_BK_REL" "$old_bk" -n "$UPG_NS" \
       --set "tls.client.namespaces={$UPG_NS}" --wait --timeout 5m >"$LOGS/upgrade-bk-install.log" 2>&1; then
     fail "install the buildkit chart $UPGRADE_FROM (see $LOGS/upgrade-bk-install.log)"
@@ -1646,6 +1572,127 @@ s_upgrade() {
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
   kc -n "$UPG_NS" wait --for=delete pod -l "app.kubernetes.io/instance=$UPG_REL" --timeout=300s >/dev/null 2>&1 || true
   docker exec "$BUILD_NODE" rm -rf "$state" >/dev/null 2>&1 || true
+}
+
+# upg_builds_has_job <service> <job id>: the console's API behind that
+# Service lists the job's build.
+upg_builds_has_job() {
+  kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$1.$UPG_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
+    | python3 -c 'import json,sys; b=json.load(sys.stdin)["builds"]; sys.exit(0 if any(x.get("job") == int(sys.argv[1]) for x in b) else 1)' "$2"
+}
+
+# upgrade_refused: a 0.2.x release with its console. Helm must refuse the
+# upgrade with the values users keep and with this tree's defaults, change
+# nothing, and the way the message gives must work.
+upgrade_refused() {
+  check "the $UPGRADE_FROM console stores the job's build" eventually 90 upg_builds_has_job "$UPG_REL-console" "$(job_id upgrade-before)"
+  local uid0
+  # shellcheck disable=SC2034 # read by the eval'd check below
+  uid0=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=console" -o jsonpath='{.items[*].metadata.uid}')
+  # --reuse-values keeps the old values tree, console: and all.
+  if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reuse-values \
+      --wait --timeout 5m >"$LOGS/upgrade-reuse.log" 2>&1; then
+    fail "helm upgrade --reuse-values from $UPGRADE_FROM was accepted"
+  else
+    check "helm upgrade --reuse-values from $UPGRADE_FROM is refused with the way forward" \
+      eval 'grep -q "cannot upgrade.* in place" "$LOGS/upgrade-reuse.log" && grep -qF "helm uninstall $UPG_REL -n $UPG_NS" "$LOGS/upgrade-reuse.log"'
+  fi
+  # This tree's defaults and the user's values in the new shape: the
+  # release itself still runs the old console.
+  if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" -f "$ROOT/test/e2e/box-values.yaml" \
+      -f "$ROOT/test/e2e/box-control-plane-values.yaml" "${UPG_ARGS[@]}" --wait --timeout 5m >"$LOGS/upgrade-reset.log" 2>&1; then
+    fail "helm upgrade from $UPGRADE_FROM with new values was accepted"
+  else
+    check "helm upgrade from $UPGRADE_FROM with values in the new shape is refused too" \
+      eval 'grep -q "has the console of ci-accelerator 0.2.x (Deployment $UPG_REL-console)" "$LOGS/upgrade-reset.log"'
+  fi
+  check "the refused upgrades change nothing (revision 1, same daemons and console)" \
+    eval '[ "$(hc history "$UPG_REL" -n "$UPG_NS" -o json | python3 -c "import json,sys; h=json.load(sys.stdin); print(len(h), h[-1][\"status\"])")" = "1 deployed" ] &&
+      [ "$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath="{.metadata.generation}")" = "$UPG_GEN0" ] &&
+      [ "$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=console" -o jsonpath="{.items[*].metadata.uid}")" = "$uid0" ]'
+
+  # The way forward, as the message says it.
+  hc uninstall "$UPG_REL" -n "$UPG_NS" --wait --timeout 5m >/dev/null 2>&1 || { fail "uninstall $UPGRADE_FROM"; return; }
+  kc -n "$UPG_NS" wait --for=delete pod -l "app.kubernetes.io/instance=$UPG_REL" --timeout=300s >/dev/null 2>&1 || true
+  eventually 120 eval '! kc get namespace "$UPG_JOBS_NS" >/dev/null 2>&1' || true
+  if hc install "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" -f "$ROOT/test/e2e/box-values.yaml" \
+      -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${UPG_ARGS[@]}" \
+      --wait --timeout 8m >"$LOGS/upgrade-reinstall.log" 2>&1; then
+    pass "after helm uninstall this tree installs in the same namespace"
+  else
+    fail "install this tree after uninstalling $UPGRADE_FROM (see $LOGS/upgrade-reinstall.log)"; return
+  fi
+  check "the controller and the web run" \
+    eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-controller --timeout=60s >/dev/null && kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-web --timeout=60s >/dev/null'
+  check "the old console's store is kept next to the new one until deleted" \
+    quiet kc -n "$UPG_NS" get pvc "$UPG_REL-console-data" "$UPG_REL-controller-data"
+  run_job upgrade-after "$UPG_JOBS_NS"
+  check "a CI job after the reinstall succeeds" test "$(cat "$LOGS/job-upgrade-after.state")" = success
+  check "the job after the reinstall finds the cache from before it (hostPath)" \
+    eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-upgrade-after.trace" | grep -q "^#[0-9]* CACHED$"'
+  check "the new console stores the job's build" eventually 90 upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-after)"
+}
+
+# upgrade_in_place: a release with the control plane (0.3.0 on), upgraded
+# with the values users keep, then rolled back. The image of this tree is
+# not published yet (its tag is the release under test): the one `make
+# image` loads into kind stands in. The disk probe keeps the old release's
+# image: changing it would itself roll the daemons.
+upgrade_in_place() {
+  local gen1 gen2 uids1 cp_img=(--set control-plane.image.repository=ci-accelerator --set control-plane.image.tag=e2e --set control-plane.image.pullPolicy=Never)
+  check "the $UPGRADE_FROM console stores the job's build" eventually 90 upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-before)"
+  if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reuse-values "${cp_img[@]}" \
+      --wait --timeout 8m >"$LOGS/upgrade-reuse.log" 2>&1; then
+    pass "helm upgrade --reuse-values from $UPGRADE_FROM"
+  else
+    fail "helm upgrade --reuse-values from $UPGRADE_FROM (see $LOGS/upgrade-reuse.log)"; return
+  fi
+  check "the web runs after the upgrade" \
+    eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-web --timeout=120s >/dev/null'
+  check "the controller took over its store without a restart" \
+    eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-controller --timeout=120s >/dev/null && [ "$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/component=controller,app.kubernetes.io/instance=$UPG_REL" -o jsonpath="{.items[*].status.containerStatuses[0].restartCount}")" = 0 ] && ! kc -n "$UPG_NS" logs deploy/"$UPG_REL"-controller 2>/dev/null | grep -qi "database is locked"'
+  check "the build stored before the upgrade is still shown" eventually 90 upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-before)"
+  gen1=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
+  uids1=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
+  if [ "$UPGRADE_ROLLOUT_EXPECTED" = 1 ]; then
+    info "daemon rollout expected (UPGRADE_ROLLOUT_EXPECTED=1): generation $UPG_GEN0 -> $gen1"
+  else
+    check "the upgrade does not restart the daemons (generation $UPG_GEN0 -> $gen1; a rollout on purpose needs UPGRADE_ROLLOUT_EXPECTED=1 and an upgrade note)" \
+      test "$UPG_GEN0" = "$gen1" -a "$UPG_UIDS0" = "$uids1"
+  fi
+  hc get manifest "$UPG_REL" -n "$UPG_NS" --revision 1 >"$LOGS/upgrade-manifest-old.yaml" 2>/dev/null
+  hc get manifest "$UPG_REL" -n "$UPG_NS" >"$LOGS/upgrade-manifest-new.yaml" 2>/dev/null
+  info "manifest diff $UPGRADE_FROM -> this tree: $(diff "$LOGS/upgrade-manifest-old.yaml" "$LOGS/upgrade-manifest-new.yaml" | grep -c '^[<>]') lines ($LOGS/upgrade-manifest-*.yaml)"
+  run_job upgrade-after "$UPG_JOBS_NS"
+  check "a CI job after the upgrade succeeds" test "$(cat "$LOGS/job-upgrade-after.state")" = success
+  check "the job after the upgrade finds the cache from before it" \
+    eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-upgrade-after.trace" | grep -q "^#[0-9]* CACHED$"'
+
+  # The recommended way: this tree's defaults plus the user's values.
+  if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values "${cp_img[@]}" \
+      --wait --timeout 8m >"$LOGS/upgrade-reset.log" 2>&1; then
+    pass "helm upgrade --reset-then-reuse-values"
+  else
+    fail "helm upgrade --reset-then-reuse-values (see $LOGS/upgrade-reset.log)"
+  fi
+  gen2=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
+  if [ "$UPGRADE_ROLLOUT_EXPECTED" = 1 ]; then
+    info "--reset-then-reuse-values: generation $gen1 -> $gen2 (this tree's defaults differ on purpose)"
+  else
+    check "--reset-then-reuse-values after --reuse-values changes nothing (generation $gen1 -> $gen2)" test "$gen1" = "$gen2"
+  fi
+  check "with this tree's defaults the controller runs" \
+    eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-controller --timeout=60s >/dev/null'
+
+  if hc rollback "$UPG_REL" 1 -n "$UPG_NS" --wait --timeout 8m >"$LOGS/upgrade-rollback.log" 2>&1; then
+    pass "helm rollback to $UPGRADE_FROM"
+  else
+    fail "helm rollback to $UPGRADE_FROM (see $LOGS/upgrade-rollback.log)"
+  fi
+  run_job upgrade-rolled-back "$UPG_JOBS_NS"
+  check "a CI job after the rollback succeeds" test "$(cat "$LOGS/job-upgrade-rolled-back.state")" = success
+  check "after the rollback the old controller runs again, on the same store, and shows the build from before" \
+    eval 'kc -n "$UPG_NS" rollout status deploy/"$UPG_REL"-controller --timeout=120s >/dev/null && upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-before)"'
 }
 
 s_cache() {

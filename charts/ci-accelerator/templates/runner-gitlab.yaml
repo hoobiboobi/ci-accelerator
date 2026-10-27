@@ -1,0 +1,13 @@
+{{- if dig "control-plane" "enabled" false .Values.AsMap }}
+# The runner's GitLab URL for the controller: the trace ids it reads carry
+# a hash of exactly this string.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-runner-gitlab
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.labels" . | nindent 4 }}
+data:
+  urls: {{ index .Values "gitlab-runner" "gitlabUrl" | quote }}
+{{- end }}

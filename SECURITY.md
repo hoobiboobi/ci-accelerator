@@ -18,9 +18,9 @@ upgrades in place from the previous one (see
 
 ## What is in scope
 
-- The Helm charts (`charts/*`), the console (`cmd/`, `internal/`), the
+- The Helm charts (`charts/*`), the control plane (`cmd/`, `internal/`), the
   runner integration and `scripts/quickstart.sh`.
-- Published artifacts: the charts and the console image on `ghcr.io`,
+- Published artifacts: the charts and the ci-accelerator image on `ghcr.io`,
   signed with cosign (the release notes show how to verify them).
 
 Out of scope: BuildKit, cert-manager, the GitLab runner and Kubernetes
@@ -34,7 +34,7 @@ sign-in shows everything to whoever reaches it.
 - Every dependency, image, tool and GitHub Action is pinned by version and
   checksum or digest; pins are at least two weeks old when adopted, except
   a security patch of the same minor line, which is adopted at once.
-- Every pull request runs `govulncheck` on the console's code for both
+- Every pull request runs `govulncheck` on the Go code for both
   release targets and `trivy` on the built image; a weekly run repeats
   both against `main` and the latest published image.
 - GitHub's dependency graph, Dependabot alerts and security updates,

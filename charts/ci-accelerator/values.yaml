@@ -37,7 +37,7 @@ global:
   console:
     # -- The console's address as users reach it (https://...). When set,
     # every job prints the link to its page in its log, and sign-in through
-    # GitLab (console.signIn) uses it. Empty: no link.
+    # GitLab (control-plane.signIn) uses it. Empty: no link.
     url: ""
 
 # Install-time checks against the live cluster. Skipped by `helm template`
@@ -72,19 +72,20 @@ buildkit:
   networkPolicy:
     enabled: true
     ingress:
-      # The console (console.enabled) reads the daemons' build history.
+      # The controller (control-plane.enabled) reads the daemons' build
+      # history; the web never reaches them.
       extraFrom:
         - podSelector:
             matchLabels:
-              ci-accelerator.io/component: console
+              ci-accelerator.io/component: controller
   # The free space of each daemon's disk for the console's Nodes page: a
-  # container running the console's image at its own pinned tag (see
+  # container running the ci-accelerator image at its own pinned tag (see
   # charts/buildkit diskProbe.image — a mirror sets it there). Keep
-  # diskProbe.port equal to console.daemons.diskProbePort.
+  # diskProbe.port equal to control-plane.daemons.diskProbePort.
   diskProbe:
     # -- The probe next to each daemon (charts/buildkit diskProbe).
     enabled: true
-    # -- Equal to console.daemons.diskProbePort.
+    # -- Equal to control-plane.daemons.diskProbePort.
     port: 9180
 
 # The official gitlab-runner chart. Set enabled=false to keep your own
@@ -108,7 +109,7 @@ gitlab-runner:
     # keeps them). Off while s3.server is empty. For example:
     #   cache:
     #     secretName: runner-cache   # keys accesskey and secretkey
-    #     consoleSecretName: runner-cache-read   # optional: read-only keys for the console
+    #     controllerSecretName: runner-cache-read   # optional: read-only keys for the controller
     #     s3:
     #       server: s3.example.com
     #       bucket: ci-cache
@@ -172,24 +173,28 @@ gitlab-runner:
 # default 3600).
 runnerTiers: {}
 
-# The console: reads every daemon's build history and the CI job pods, and
-# explains each build. On by default (false keeps it off): it needs a
-# volume (the default StorageClass, or console.persistence.*). Its Service
-# is ClusterIP only; without sign-in (console.signIn) it shows everything
-# to whoever reaches it. See charts/console for every value.
-console:
+# The control plane (charts/control-plane): the controller reads every
+# daemon's build history and the CI job pods, and the web serves the
+# console, which explains each build. On by default (false keeps it off):
+# the controller needs a volume (the default StorageClass, or
+# control-plane.controller.persistence.*). The web's Service
+# <release>-web is ClusterIP only; without sign-in (control-plane.signIn)
+# the console shows everything to whoever reaches it. See
+# charts/control-plane for every value.
+control-plane:
   enabled: true
   # The runner's GitLab URL, from a ConfigMap this chart writes.
   gitlab:
     urlsFrom:
-      configMap: '{{ .Release.Name }}-console-gitlab'
+      configMap: '{{ .Release.Name }}-runner-gitlab'
   daemons:
     discover: '{{ include "ci-accelerator.buildkitHeadless" . }}.{{ .Release.Namespace }}.svc:1234'
-    # -- Equal to buildkit.diskProbe.port: the console reads each daemon's disk there.
+    # -- Equal to buildkit.diskProbe.port: the controller reads each daemon's disk there.
     diskProbePort: 9180
   tls:
-    # With buildkit.tls.source=existingSecret, set console.tls.existingSecret
-    # (a client certificate from the daemons' CA).
+    # With buildkit.tls.source=existingSecret, set
+    # control-plane.tls.existingSecret (the controller's client certificate
+    # from the daemons' CA) and control-plane.controller.api.tls.existingSecret.
     existingSecret: ""
     certManager:
       issuerRef:
@@ -200,12 +205,13 @@ console:
     # -- Keep the box's CI jobs and builds away from the console: the jobs
     # namespace and the daemons (RUN steps share their network) may not
     # connect; Ingress controllers in other namespaces and port-forward
-    # still do. Needs a CNI that enforces NetworkPolicy; see charts/console.
+    # still do. Needs a CNI that enforces NetworkPolicy; see
+    # charts/control-plane.
     enabled: true
   # The runners' cache folders (the main runner's and the tiers'), written
   # by this chart with read access to their keys' Secrets.
   caches:
-    fromConfigMap: '{{ .Release.Name }}-console-caches'
+    fromConfigMap: '{{ .Release.Name }}-runner-caches'
   # Sign-in through GitLab at global.console.url; each person sees the
   # projects whose jobs GitLab lets them read. A GitLab entry without a url
   # is the runner's. For example:

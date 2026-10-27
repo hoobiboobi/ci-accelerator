@@ -21,14 +21,14 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[1].image
-          value: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3
+          value: ghcr.io/hoobiboobi/ci-accelerator:v0.3.0
   - it: an explicitly empty tag from old values still gets the pin
     set:
       diskProbe.image.tag: ""
     asserts:
       - equal:
           path: spec.template.spec.containers[1].image
-          value: ghcr.io/hoobiboobi/ci-accelerator-console:v0.2.3
+          value: ghcr.io/hoobiboobi/ci-accelerator:v0.3.0
   - it: an own tag and digest win over the pin
     set:
       diskProbe.image.tag: v9.8.7
@@ -36,4 +36,4 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[1].image
-          value: ghcr.io/hoobiboobi/ci-accelerator-console:v9.8.7@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          value: ghcr.io/hoobiboobi/ci-accelerator:v9.8.7@sha256:0000000000000000000000000000000000000000000000000000000000000000

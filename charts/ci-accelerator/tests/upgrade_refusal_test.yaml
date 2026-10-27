@@ -1,0 +1,56 @@
+suite: no in-place upgrade of a 0.2.x release
+templates:
+  - validate.yaml
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+kubernetesProvider:
+  scheme:
+    "apps/v1/Deployment":
+      gvr:
+        group: apps
+        version: v1
+        resource: deployments
+      namespaced: true
+tests:
+  - it: refuses a release that still runs the 0.2.x console
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: box-console
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: box, ci-accelerator.io/component: console }
+    asserts:
+      - failedTemplate:
+          errorPattern: "release box has the console of ci-accelerator 0.2.x \\(Deployment box-console\\)\\. ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place.*helm uninstall box -n ci-accelerator"
+  - it: refuses it with the control plane switched off too
+    set:
+      control-plane.enabled: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: box-console
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: box, ci-accelerator.io/component: console }
+    asserts:
+      - failedTemplate: { errorPattern: "cannot upgrade a 0.2.x release in place" }
+  - it: installs next to another release's console
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: other-console
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: other, ci-accelerator.io/component: console }
+    asserts:
+      - notFailedTemplate: {}

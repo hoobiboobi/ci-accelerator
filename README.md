@@ -70,7 +70,7 @@ Numbers from the production setup this project is derived from:
   bucket, and more runners (tiers) with their own tags, job size,
   placement and cache, each its own pod
   ([docs/runner-cache.md](docs/runner-cache.md)).
-- **The console (on by default; `console.enabled=false` leaves it out):** why
+- **The console (on by default; `control-plane.enabled=false` leaves it out):** why
   an image build was slow or not cached, and whether your change or the
   build farm caused it. Five sections:
   - Overview: rebuild reasons, ranked by the build time they cost;
@@ -94,7 +94,7 @@ Numbers from the production setup this project is derived from:
   what changed since the previous build of the image, then its steps.
   Every job's log can link to its page (`global.console.url`). Jobs that
   build no image stay in GitLab. With sign-in through GitLab
-  (`console.signIn`), each person sees the projects whose jobs GitLab lets
+  (`control-plane.signIn`), each person sees the projects whose jobs GitLab lets
   them read; without it, keep it inside the cluster (`kubectl
   port-forward`).
 
@@ -159,9 +159,10 @@ is not meant for production: one node, no high availability.
     --namespace cert-manager --create-namespace --set crds.enabled=true
   ```
 
-- **A default StorageClass,** for the console's volume (or set
-  `console.persistence.storageClass` or `console.persistence.existingClaim`,
-  or leave the console out with `console.enabled=false`).
+- **A default StorageClass,** for the controller's volume (or set
+  `control-plane.controller.persistence.storageClass` or
+  `control-plane.controller.persistence.existingClaim`, or leave the
+  console out with `control-plane.enabled=false`).
 - **A CNI that enforces NetworkPolicy** (Calico, Cilium, kindnet, ...).
   Without one, the daemons accept connections from any namespace and builds
   can reach cloud instance metadata; mutual TLS still applies.
@@ -169,9 +170,9 @@ is not meant for production: one node, no high availability.
   their own, so under node pressure the kubelet evicts CI jobs before them.
   Without that permission set `buildkit.priorityClass.create=false`, or name
   an existing class in `buildkit.priorityClassName`.
-- **Permission to create a ClusterRole and its binding** for the console:
-  its controller checks the tokens of its web pods with a TokenReview, its
-  only cluster-wide right.
+- **Permission to create a ClusterRole and its binding** for the control
+  plane: the controller checks the tokens of the web's pods with a
+  TokenReview, its only cluster-wide right.
 - **Daemon resources:** the defaults (500m CPU, 512Mi requested) only keep
   the daemons out of BestEffort; size `buildkit.resources` to your build
   nodes (the chart's values list sizes).
@@ -215,9 +216,9 @@ values. The daemons alone: `oci://ghcr.io/hoobiboobi/charts/buildkit`.
 - **Defaults:** amd64 build nodes, jobs in namespace `ci-accelerator-jobs`
   (created by the release), the build cache in an `emptyDir` (see below).
 - **arm64 build nodes:** add `--set global.jobs.architecture=arm64`.
-- **Production:** pin the console image by digest with
-  `--set console.image.digest=sha256:...` (the release notes list it); the
-  daemons' image is pinned by digest already.
+- **Production:** pin the control plane's image by digest with
+  `--set control-plane.image.digest=sha256:...` (the release notes list
+  it); the daemons' image is pinned by digest already.
 - **GitOps:** [docs/gitops.md](docs/gitops.md) shows the same install as
   a Flux `HelmRelease` and an Argo CD `Application`.
 
@@ -297,9 +298,10 @@ job's credentials.
 
 ### The console
 
-The console is on by default. It runs as a controller (one pod: the store,
-the sessions, every GitLab token) and a web (two pods serving the pages),
-which reads the controller's API; see
+The console is on by default. The control plane serves it: a controller
+(Deployment `<release>-controller`, one pod: the store, the sessions,
+every GitLab token) and a web (Deployment and Service `<release>-web`, two
+pods serving the pages), which reads the controller's API; see
 [the architecture](docs/architecture.md#the-console). It works in three
 levels; each adds to the previous one, and the install notes say which is
 on.
@@ -326,17 +328,17 @@ one-machine install prints its SSH tunnel).
 Put it into a Secret and name it in the values:
 
 ```sh
-kubectl -n ci-accelerator create secret generic console-gitlab-token --from-literal=token=glpat-...
+kubectl -n ci-accelerator create secret generic gitlab-api-token --from-literal=token=glpat-...
 ```
 
 ```yaml
 global:
   console:
     url: https://ci-console.example.com   # optional: every job's log links to its page
-console:
+control-plane:
   gitlab:
     token:
-      existingSecret: console-gitlab-token
+      existingSecret: gitlab-api-token
 ```
 
 On the one-machine install, run the script again with
@@ -374,11 +376,11 @@ reaches over https.
      --from-literal=key=$(openssl rand -base64 32)
    ```
 
-4. Set the values and upgrade (drop `console.gitlab.token` if it was set:
-   a shared token and sign-in exclude each other):
+4. Set the values and upgrade (drop `control-plane.gitlab.token` if it
+   was set: a shared token and sign-in exclude each other):
 
    ```yaml
-   console:
+   control-plane:
      signIn:
        enabled: true
        sessionKey: { existingSecret: console-session }
@@ -398,7 +400,7 @@ reaches over https.
      -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait
    ```
 
-Every key is in [charts/console/values.yaml](charts/console/values.yaml).
+Every key is in [charts/control-plane/values.yaml](charts/control-plane/values.yaml).
 
 ### Sending metrics and traces to your backend
 
@@ -430,8 +432,9 @@ no trace backend.
 
 ## Upgrading
 
-Every release upgrades in place from the previous one. Read its **Upgrade
-notes** in [CHANGELOG.md](CHANGELOG.md) first, then:
+Every release upgrades in place from the previous one, except 0.3.0 from
+0.2.x (below). Read its **Upgrade notes** in [CHANGELOG.md](CHANGELOG.md)
+first, then:
 
 ```sh
 helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <new version> \
@@ -442,6 +445,19 @@ helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --ver
 defaults for everything else. The end-to-end tests upgrade the previous
 release this way before every change is merged
 ([ADR-0027](docs/adr/0027-upgrades-and-branches.md)).
+
+**From 0.2.x to 0.3.0: install again.** 0.3.0 split the console into the
+control plane (chart `control-plane`, image `ci-accelerator`, a controller
+and a web) and gave every object and value of it a new name, so Helm
+refuses to upgrade a 0.2.x release in place and says how to move: remove
+the release (`helm uninstall ci-accelerator -n ci-accelerator --wait`),
+wait until its pods are gone, move the values under `console:` to
+`control-plane:` (the controller's pod settings and volume under
+`control-plane.controller`, the web's under `control-plane.web`), and
+install 0.3.0. The daemons' cache on a hostPath stays, and so does the old
+console's volume (`<release>-console-data`) until you delete it; the new
+console starts with an empty history. The one-machine install stops with
+the same steps.
 
 **From 0.1.0:** the box no longer installs VictoriaMetrics and
 VictoriaTraces. Helm removes them on upgrade, but their volumes stay until
@@ -525,9 +541,9 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   only: use `kubectl port-forward`, or an Ingress with its own
   authentication. "Inside the cluster" is not a trust boundary here: the
   box's own CI jobs and builds run untrusted code in it. The box therefore
-  ships a NetworkPolicy (`console.networkPolicy`, on by default since
-  0.2.2) that keeps the jobs namespace and the daemons (whose network
-  every RUN step shares) away from the console; other namespaces, an
+  ships a NetworkPolicy (`control-plane.networkPolicy`, on by default)
+  that keeps the jobs namespace and the daemons (whose network every RUN
+  step shares) away from the console; other namespaces, an
   Ingress controller among them, still reach it. It needs a CNI that
   enforces NetworkPolicy.
 - **A configured token is shared.** Without sign-in, anyone who reaches
@@ -540,9 +556,10 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   masked.
 - **Job pods carry the commit author's name and email** as annotations,
   and the console stores them.
-- **One replica.** SQLite on a ReadWriteOnce volume (never NFS), with the
-  `Recreate` strategy: every upgrade stops the console briefly. There is no
-  built-in backup.
+- **One controller.** SQLite on a ReadWriteOnce volume (never NFS), with
+  the `Recreate` strategy: while the controller restarts (an upgrade that
+  changes it), the pages say it is not reachable. There is no built-in
+  backup.
 - **Without sign-in and without a token** the console shows no runner wait
   times and cannot compare commits, so "files or node" stays "unclear".
 
@@ -600,8 +617,8 @@ make e2e                      # end-to-end on kind
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
 | `ci/gitlab` | GitLab CI component: a job that builds and pushes on the build farm |
-| `charts/console` | The console, usable and published on its own (`oci://ghcr.io/hoobiboobi/charts/console`) |
-| `cmd/console`, `internal/` | Go: the console (build history to builds and reasons, store, collector, pages) |
+| `charts/control-plane` | The control plane (controller and web, the console), usable and published on its own (`oci://ghcr.io/hoobiboobi/charts/control-plane`) |
+| `cmd/ci-accelerator`, `internal/` | Go: the control plane's binary and image (build history to builds and reasons, store, collector, pages, disk probe) |
 | `scripts/quickstart.sh` | One clean Linux machine: k3s, cert-manager and the box (attached to every release) |
 | `scripts/buildkit-certs.sh` | CA and certificates for `charts/buildkit` without cert-manager (`tls.source=existingSecret`) |
 | `docs/architecture.md` | How the parts fit together: build path, cache, certificates, telemetry, rollouts |

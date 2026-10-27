@@ -1,0 +1,51 @@
+The controller reads the daemons behind {{ include "control-plane.discover" . }}
+{{- with include "control-plane.jobsNamespace" . }} and the CI job pods in {{ . }}{{ end }}.
+{{- $web := include "control-plane.webName" . }}
+{{- $ctrl := include "control-plane.controllerName" . }}
+
+{{- if include "control-plane.signIn" . }}
+{{- $u := include "control-plane.signInURL" . }}
+
+People sign in to the console through GitLab at {{ $u }}/ and see the
+projects whose jobs GitLab lets them read; the JSON API
+({{ $u }}/api/v1/builds) answers the admins. Each GitLab's OAuth
+application must list this redirect URI:
+{{- range .Values.signIn.gitlab }}
+{{- if .url }}
+  {{ .url }}: {{ $u }}/auth/callback/{{ sha256sum .url | trunc 6 }}
+{{- else }}
+  the runners' GitLab: {{ $u }}/auth/callback/<id> (the controller's log
+  prints it: kubectl -n {{ $.Release.Namespace }} logs deploy/{{ $ctrl }} | grep redirect_uri)
+{{- end }}
+{{- end }}
+{{- if hasPrefix "http://" $u }}
+{{ $u }} is this machine: reach the console with
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $web }} {{ default "80" (regexFind "[0-9]+$" (urlParse $u).host) }}:{{ int .Values.web.port }}
+{{- else }}
+The web serves plain HTTP on its ClusterIP Service {{ $web }}: put it
+behind your Ingress or gateway with TLS for {{ $u }}.
+{{- end }}
+{{- else }}
+
+Sign-in is off: the console's pages and API show everything to whoever
+reaches them, so keep them inside the cluster (sign-in through GitLab:
+signIn.enabled). To look at it:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $web }} {{ int .Values.web.port }}
+
+then open http://localhost:{{ int .Values.web.port }}/ (Overview, Pipelines, Builds,
+Images, Nodes) or http://localhost:{{ int .Values.web.port }}/api/v1/builds?limit=10.
+{{- end }}
+{{- if and (not .Values.gitlab.token.existingSecret) (not (include "control-plane.signIn" .)) }}
+
+With a GitLab token that can read the projects' jobs
+(gitlab.token.existingSecret), the console also shows how long jobs waited
+for a runner, settles "files or node" by comparing commits, and shows the
+end of a job's log on request.
+{{- end }}
+
+The controller (deploy/{{ $ctrl }}: the store, the sessions, GitLab)
+serves its API on the Service {{ $ctrl }} (HTTPS) to the web, {{ int .Values.web.replicas }} pods
+(deploy/{{ $web }}: the console's pages). The store is on the
+PersistentVolumeClaim {{ include "control-plane.pvcName" . }}
+{{- if not .Values.controller.persistence.existingClaim }}, which is kept when the release is removed{{ end }}.
