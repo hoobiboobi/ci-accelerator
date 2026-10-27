@@ -204,6 +204,9 @@ type DaemonCount struct {
 	Farm    int
 	Unclear int // rebuilt here, files or node
 	Last    time.Time
+	// Routed counts the build routers' decisions for this daemon by their
+	// reason (route.Reason): one per connection a router sent here.
+	Routed map[string]int
 }
 
 // DaemonCounts returns, per daemon name, its builds started since t.
@@ -228,7 +231,31 @@ func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]D
 		c.Last = msTime(last)
 		out[name] = c
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	routed, err := s.db.QueryContext(ctx, `SELECT daemon, reason, count(*) FROM route_decisions WHERE at >= ? GROUP BY daemon, reason`, since.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer routed.Close()
+	for routed.Next() {
+		var (
+			name, reason string
+			n            int
+		)
+		if err := routed.Scan(&name, &reason, &n); err != nil {
+			return nil, err
+		}
+		c := out[name]
+		if c.Routed == nil {
+			c.Routed = map[string]int{}
+		}
+		c.Routed[reason] = n
+		out[name] = c
+	}
+	return out, routed.Err()
 }
 
 // JobEnded records when a job's pod went away, which is when the job
