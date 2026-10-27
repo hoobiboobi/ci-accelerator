@@ -115,6 +115,15 @@ func TestWarmAndDecisions(t *testing.T) {
 		t.Fatalf("job routes %+v, %v", got, err)
 	}
 
+	// The Nodes page counts them per daemon and reason, within its window.
+	counts, err := s.DaemonCounts(ctx, c.t.Add(-time.Hour))
+	if err != nil || counts["bk-x"].Routed[string(route.ZoneHash)] != 1 || len(counts["bk-x"].Routed) != 1 {
+		t.Errorf("routed in the last hour: %+v, %v", counts["bk-x"], err)
+	}
+	if counts, _ := s.DaemonCounts(ctx, time.Time{}); counts["bk-x"].Routed[string(route.ZoneHash)] != 2 {
+		t.Errorf("routed ever: %+v", counts["bk-x"])
+	}
+
 	// Decisions go with the builds' retention.
 	c.t = c.t.Add(s.opts.Keep + time.Hour)
 	if _, err := s.Prune(ctx); err != nil {

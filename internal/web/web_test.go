@@ -791,12 +791,24 @@ func TestNodes(t *testing.T) {
 				MountList:  []collector.Mount{{Description: "cached mount /root/.cache/pip from exec x", Size: 10 << 20, LastUsed: testNow}}}},
 		Active: []collector.Active{{Daemon: "box-buildkit-abcde", Target: "api" + evil, Started: started}}},
 		{Name: "box-buildkit-fghij", Connected: false, Inspection: collector.Inspection{Usage: collector.Usage{ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20}}}}}
-	ts, _, _, _ := consoleWith(t, testOpts{Live: daemons, Release: "box"})
+	ts, st, _, _ := consoleWith(t, testOpts{Live: daemons, Release: "box"})
+	var ds []store.Decision
+	for i, r := range []route.Reason{route.LocalWarm, route.ZoneWarm, route.ZoneHash} {
+		ds = append(ds, store.Decision{Project: route.Project{Instance: "abcdef", ID: 42}, JobID: uint64(900 + i), Node: "node-1",
+			Daemon: "box-buildkit-abcde", Reason: r, Cands: 2, JobNode: "node-1", At: testNow.Add(-time.Hour)})
+	}
+	old := ds[0]
+	old.JobID, old.At = 899, testNow.Add(-25*time.Hour) // outside the day
+	if err := st.SaveDecisions(ctx, append(ds, old)); err != nil {
+		t.Fatal(err)
+	}
 	nodes := get(t, ts, "/nodes")
 	nodes.safe(t)
 	for _, want := range []string{"1 ready of 2", "on node-1", "300 MiB", "/root/.cache/pip cache mount", "Duplicate cache",
 		"python:3.13-slim", "Keep cache up to", "40.0 GiB per node", "14 days after last use", "Running now", "Unreachable", "release <code>box</code>",
-		"replaced since"} {
+		"replaced since", "<span>Sent here by the build router, 24 hours</span><span>3 — 2 to the project&#39;s cache, 1 by hash: no cache held the project</span>",
+		"<span>Sent here by the build router, 24 hours</span><span>0</span>",
+		"The build router, 24 hours: 3 build connections, 2 to a node whose cache held the project&#39;s layers (66%)."} {
 		if !strings.Contains(nodes.body, want) {
 			t.Errorf("nodes page lacks %q", want)
 		}
@@ -947,6 +959,12 @@ func TestRoutedBuild(t *testing.T) {
 	if !strings.Contains(page.body, "node-2, whose cache holds the project&#39;s most recently used layers (the job ran on node-1)") ||
 		strings.Contains(page.body, "node-3") {
 		t.Errorf("the build page does not say why the router chose its node")
+	}
+	// The Nodes page counts them, the page as a whole and per daemon.
+	nodes := get(t, ts, "/nodes")
+	nodes.safe(t)
+	if !strings.Contains(nodes.body, "The build router, 24 hours: 2 build connections, 2 to a node whose cache held the project&#39;s layers (100%).") {
+		t.Errorf("the Nodes page does not sum up the router's decisions")
 	}
 }
 

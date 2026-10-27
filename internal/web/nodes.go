@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
+	"github.com/hoobiboobi/ci-accelerator/internal/route"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
@@ -32,6 +33,9 @@ type NodesView struct {
 	// Builds served by daemons that are gone (replaced by a rollout):
 	// they count in the projects' totals, not on any card.
 	GoneBuilds, GoneDaemons int
+	// Router sums up the build routers' decisions of the last 24 hours;
+	// empty when they made none (no router).
+	Router string
 }
 
 // NodeCard is one daemon.
@@ -41,6 +45,7 @@ type NodeCard struct {
 	Builds, Farm, Unclear                  int
 	Running                                int
 	RunningNote                            string
+	Routed                                 string // the routers' decisions for it, 24 hours
 	Total, Images, Layers, Mounts          int64
 	Segs                                   []NSeg
 	MountRows                              []KV
@@ -173,17 +178,30 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	for _, d := range daemons {
 		shown[d.Name] = true
 	}
+	all := map[string]int{}
 	for name, c := range counts {
 		if !shown[name] && c.Builds > 0 {
 			v.GoneBuilds += c.Builds
 			v.GoneDaemons++
 		}
+		for k, n := range c.Routed {
+			all[k] += n
+		}
+	}
+	if n, warm, _ := routed(all); n > 0 {
+		v.Router = fmt.Sprintf("The build router, 24 hours: %d build connection%s, %d to a node whose cache held the project's layers (%d%%).",
+			n, plural(n), warm, warm*100/n)
 	}
 	for _, d := range daemons {
 		c := counts[d.Name]
 		card := NodeCard{Name: d.Name, Short: shortDaemon(d.Name), Node: d.Inspection.Node, Version: d.Inspection.Version,
 			Ready: d.Connected, Builds: c.Builds, Farm: c.Farm, Unclear: c.Unclear, Running: len(d.Active), Err: d.InspectErr,
 			Inspected: !d.InspectedAt.IsZero()}
+		if n, _, text := routed(c.Routed); n > 0 {
+			card.Routed = text
+		} else if len(all) > 0 {
+			card.Routed = "0"
+		}
 		if d.Connected {
 			v.Ready++
 		} else {
@@ -366,4 +384,37 @@ func (s *Server) bucket(ctx context.Context, p store.ProjectKey, loc *time.Locat
 	}
 	v.Scanned = ago(at, loc)
 	return v, nil
+}
+
+// routed sums up build router decisions by reason: how many, how many
+// went where the project's cache was, and both in words with the rest by
+// why ("12 — 9 to the project's cache, 3 by hash").
+func routed(m map[string]int) (total, warm int, text string) {
+	var hash, zone, unknown int
+	for k, n := range m {
+		total += n
+		switch route.Reason(k) {
+		case route.LocalWarm, route.ZoneWarm:
+			warm += n
+		case route.ZoneHash:
+			hash += n
+		case route.CrossZone:
+			zone += n
+		default: // route.UnknownLocal, route.UnknownHash, a reason of a newer router
+			unknown += n
+		}
+	}
+	var parts []string
+	for _, p := range []struct {
+		n    int
+		what string
+	}{{warm, "to the project's cache"}, {hash, "by hash: no cache held the project"}, {zone, "from another zone"}, {unknown, "job not known"}} {
+		if p.n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", p.n, p.what))
+		}
+	}
+	if total == 0 {
+		return 0, 0, ""
+	}
+	return total, warm, fmt.Sprintf("%d — %s", total, strings.Join(parts, ", "))
 }

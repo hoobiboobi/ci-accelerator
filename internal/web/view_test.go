@@ -285,3 +285,14 @@ func TestUsualTimes(t *testing.T) {
 		t.Errorf("web: %+v", w)
 	}
 }
+
+// The Nodes page sums up the routers' decisions exactly, by why.
+func TestRoutedText(t *testing.T) {
+	n, warm, text := routed(map[string]int{"local-warm": 5, "zone-warm": 4, "zone-hash": 2, "unknown-local": 1, "cross-zone": 1})
+	if n != 13 || warm != 9 || text != "13 — 9 to the project's cache, 2 by hash: no cache held the project, 1 from another zone, 1 job not known" {
+		t.Errorf("%d %d %q", n, warm, text)
+	}
+	if n, _, text := routed(nil); n != 0 || text != "" {
+		t.Errorf("no decisions: %d %q", n, text)
+	}
+}
