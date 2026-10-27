@@ -1,6 +1,11 @@
 # Cache per project: what BuildKit tells us, and a design
 
-Status: proposal (research and a spike, 2026-10-25). Nothing here is built.
+Status: proposal (research and a spike, 2026-10-25). Built and removed
+again on 2026-10-27, before a release: matching records to builds by
+description and creation time is a guess, and a figure on the Nodes page
+(with a removal action on it) must not stand on a guess. Nothing of it
+ships. The way to exact figures is upstream (below, "Not chosen"); a
+cache per project is a router pool (dedicated nodes), not attribution.
 
 ## Question
 
