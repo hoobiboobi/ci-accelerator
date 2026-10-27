@@ -9,6 +9,12 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 0.3.0 - 2026-10-27
+
+### Upgrade notes
+
 - **0.2.x does not upgrade in place: install again.** The console became
   the control plane, and every object and value of it has a new name, so
   Helm refuses the upgrade and says how to move:

@@ -6,9 +6,9 @@ description: >-
   serves the console, which explains every build: what came from cache,
   what came from another job, and why a step was rebuilt.
 type: application
-version: 0.2.5
+version: 0.3.0
 # The image is released with the charts and tagged v<appVersion>.
-appVersion: "0.2.5"
+appVersion: "0.3.0"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -24,7 +24,7 @@ annotations:
   artifacthub.io/prerelease: "false"
   artifacthub.io/images: |
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.2.5
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.0
       platforms:
         - linux/amd64
         - linux/arm64
