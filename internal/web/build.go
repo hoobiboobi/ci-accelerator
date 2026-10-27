@@ -106,6 +106,8 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 type BuildView struct {
 	Shell
 	ID      int64
+	// Warnings are the Dockerfile build checks that failed (BuildKit's).
+	Warnings []history.Warning
 	Name    string
 	Target  string
 	Status  Status
@@ -225,7 +227,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v := &BuildView{ID: id, Target: b.Target, Status: statusOf(p.Reason.Kind, b.Error, d.Built, running), Verdict: d.Verdict,
-		Ran: ran, Steps: len(b.Steps), Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b), DfName: p.DockerfileName,
+		Ran: ran, Steps: len(b.Steps), Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b), DfName: p.DockerfileName, Warnings: b.Warnings,
 		StepViews: d.Views, Node: shortDaemon(b.Daemon), Failed: b.Error != ""}
 	if !running {
 		v.Dur = duration(b.Completed.Sub(b.Started))

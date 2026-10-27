@@ -229,6 +229,9 @@ CREATE INDEX route_decisions_at ON route_decisions (at);
 CREATE INDEX builds_started ON builds (started_at);
 DROP INDEX builds_completed;
 
+-- The Dockerfile build checks that failed (BuildKit's own warnings), JSON.
+ALTER TABLE builds ADD COLUMN warnings TEXT NOT NULL DEFAULT '[]';
+
 `,
 }
 

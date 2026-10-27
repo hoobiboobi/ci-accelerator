@@ -85,6 +85,8 @@ type Build struct {
 	Steps        []Step
 	ContextBytes int64
 	Images       []string // pushed or exported image names
+	// Warnings are the Dockerfile build checks that failed.
+	Warnings []Warning
 	// Vertices this build executed or took from cache itself (its own
 	// digestMapping keys).
 	Vertices map[string]bool
@@ -166,6 +168,7 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 	}
 	b.Attribution = att
 	b.Steps, b.ContextBytes = b.steps(progress)
+	b.Warnings = warnings(progress)
 	return b, nil
 }
 
