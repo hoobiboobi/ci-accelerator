@@ -35,6 +35,10 @@ func (s *Store) Prune(ctx context.Context) (int64, error) {
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM image_days WHERE day < ?", dayOf(now)-int64(s.opts.KeepDays)); err != nil {
 		errs = append(errs, err)
 	}
+	// Removals from the cache are kept as long as the images' figures.
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM cache_actions WHERE at < ?", now.AddDate(0, 0, -s.opts.KeepDays).UnixMilli()); err != nil {
+		errs = append(errs, err)
+	}
 	for _, q := range []string{
 		"DELETE FROM step_defs WHERE last_seen < ?",
 		"DELETE FROM route_decisions WHERE at < ?",

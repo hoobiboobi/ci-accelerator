@@ -18,6 +18,7 @@ import (
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/cacheuse"
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -150,8 +151,15 @@ func (d *Daemon) Inspect(ctx context.Context) (Inspection, error) {
 		return in, err
 	}
 	records := make([]Record, len(du))
+	in.Records = make([]cacheuse.Record, len(du))
 	for i, r := range du {
 		records[i] = Record{Type: string(r.RecordType), Description: r.Description, Size: r.Size, LastUsed: r.LastUsedAt}
+		c := cacheuse.Record{ID: r.ID, Parents: r.Parents, Description: r.Description, Type: string(r.RecordType),
+			Size: r.Size, InUse: r.InUse, Mutable: r.Mutable, Created: r.CreatedAt}
+		if r.LastUsedAt != nil {
+			c.LastUsed = *r.LastUsedAt
+		}
+		in.Records[i] = c
 	}
 	in.Usage = Classify(records)
 	if d.probe != "" {
@@ -210,4 +218,33 @@ func imageName(ref string) string {
 	}
 	ref = strings.TrimPrefix(ref, "docker.io/library/")
 	return strings.TrimPrefix(ref, "docker.io/")
+}
+
+// Prune removes the records with these ids from the daemon's cache, those
+// nothing uses (BuildKit keeps a record a build holds, and a parent while a
+// child stays). It returns how many records went and their bytes.
+func (d *Daemon) Prune(ctx context.Context, ids []string) (int, int64, error) {
+	if len(ids) == 0 {
+		return 0, 0, nil
+	}
+	filter := make([]string, len(ids))
+	for i, id := range ids {
+		// One filter per record: BuildKit removes what matches any of them.
+		filter[i] = "id==" + id
+	}
+	ch := make(chan client.UsageInfo)
+	done := make(chan struct{})
+	var n int
+	var bytes int64
+	go func() {
+		defer close(done)
+		for u := range ch {
+			n++
+			bytes += u.Size
+		}
+	}()
+	err := d.c.Prune(ctx, ch, client.WithFilter(filter))
+	close(ch)
+	<-done
+	return n, bytes, err
 }

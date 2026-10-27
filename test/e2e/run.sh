@@ -905,14 +905,14 @@ s_runner() {
   # e2e only: every job on one build node, so the second job meets the
   # daemon whose cache the first one filled (the cache is per daemon).
   arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
-  sed -e "s|ci-accelerator-buildkit.ci-accelerator.svc|$SVC_HOST|" \
+  sed -e "s|ci-accelerator-router.ci-accelerator.svc|$SVC_HOST|" \
       -e "s|\"kubernetes.io/arch\" = \"amd64\"|\"kubernetes.io/arch\" = \"$arch\"|" \
       -e "s|ci-accelerator-buildkit-client|$CLIENT_SECRET|" \
       -e "s|^\( *\)\"ci-accelerator.io/node-role\" = \"build\"|&\\
 \1\"kubernetes.io/hostname\" = \"$BUILD_NODE\"|" \
       "${E2E_RUNNER_FRAGMENT:-$ROOT/integrations/gitlab-runner/values.yaml}" >"$frag"
   check "the fragment's ADJUST names were all replaced" \
-    eval '! grep -q "ci-accelerator-buildkit" "$frag"'
+    eval '! grep -Eq "ci-accelerator-(buildkit|router)" "$frag"'
   chart=$(pull_chart gitlab-runner "$RUNNER_CHART_VERSION" "$RUNNER_CHART_SHA256" "$RUNNER_REPO") \
     || { fail "pull the gitlab-runner chart"; return; }
   hc upgrade --install gitlab-runner "$chart" -n "$NS" -f "$frag" -f "$ROOT/test/e2e/runner-values.yaml" \
@@ -1064,7 +1064,7 @@ s_box() {
   JOB_SPEC=$(job_spec 778)
   run_job box "$BOX_JOBS_NS"
   check "a CI job through the box's runner succeeds" test "$(cat "$LOGS/job-box.state")" = success
-  check "the job talks to the box's daemons" job_printed box "BUILDKIT_REMOTE_ADDR=tcp://$BOX_REL-buildkit.$BOX_NS.svc:1234"
+  check "the job talks to the box's daemons through its router" job_printed box "BUILDKIT_REMOTE_ADDR=tcp://$BOX_REL-router.$BOX_NS.svc:1234"
   check "no Kubernetes API token in the box's job pod" job_printed box NO_SA_TOKEN
   node=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["items"][0]["spec"]["nodeName"])' "$LOGS/job-box.pod.json" 2>/dev/null)
   check "the box's job pod landed on a build node (${node:-none})" \
@@ -1097,6 +1097,7 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   box_console_policy
   box_split
   box_settle
+  box_router
   box_ui
   box_cache
   box_signin
@@ -1107,6 +1108,163 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   check "uninstall keeps the controller's store" quiet kc -n "$BOX_NS" get pvc "$BOX_REL-controller-data"
   kc -n "$BOX_NS" delete pvc "$BOX_REL-controller-data" --ignore-not-found >/dev/null 2>&1
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+}
+
+# route_job <name> <node> <project> <pipeline> <job> [seconds]: a CI job's
+# pod on <node>, annotated as the runner annotates its pods, that asks which
+# daemon it reaches through the router (ROUTED_TO <pod>) and builds a step
+# of its project through it (the step sleeps <seconds>). Log in
+# $LOGS/route-<name>.log; returns once the pod ended.
+route_job() {
+  local name=$1 node=$2 project=$3 pipeline=$4 job=$5 sleep=${6:-0} tp
+  tp=$(expected_traceparent "http://fake-gitlab.$NS.svc/" "$pipeline" "$job")
+  route_pod "$@" || return 1
+  route_wait "$name"
+}
+
+route_pod() {
+  local name=$1 node=$2 project=$3 pipeline=$4 job=$5 sleep=${6:-0} tp
+  tp=$(expected_traceparent "http://fake-gitlab.$NS.svc/" "$pipeline" "$job")
+  kc -n "$BOX_JOBS_NS" delete pod "route-$name" --ignore-not-found --wait=true >/dev/null 2>&1
+  kc -n "$BOX_JOBS_NS" apply -f - >/dev/null <<YAML || return 1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: route-$name
+  labels: {ci-accelerator.io/component: ci-job}
+  annotations:
+    job.runner.gitlab.com/id: "$job"
+    job.runner.gitlab.com/url: "http://fake-gitlab.$NS.svc/e2e/route-$project/-/jobs/$job"
+    job.runner.gitlab.com/name: "build-$name"
+    job.runner.gitlab.com/sha: "$(printf '%040d' "$pipeline")"
+    project.runner.gitlab.com/id: "$project"
+    ci-accelerator.io/pipeline-id: "$pipeline"
+    ci-accelerator.io/project-path: e2e/route-$project
+spec:
+  nodeName: $node
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  automountServiceAccountToken: false
+  containers:
+    - name: job
+      image: $IMAGE
+      command: [sh, -c]
+      args:
+        - >-
+          export TRACEPARENT=$tp &&
+          echo "ROUTED_TO \$(buildctl --addr tcp://$BOX_REL-router.$BOX_NS.svc:1234 --tlsdir /certs debug workers -v | sed -n 's/.*worker.hostname:[[:space:]]*//p' | head -n 1)" &&
+          mkdir -p /tmp/ctx &&
+          printf 'FROM alpine:3.22\nRUN echo route-$project-$ROUTE_ID && sleep $sleep && echo ROUTE_STEP_BUILT\n' > /tmp/ctx/Dockerfile &&
+          buildctl --addr tcp://$BOX_REL-router.$BOX_NS.svc:1234 --tlsdir /certs
+          build --frontend dockerfile.v0 --local context=/tmp/ctx --local dockerfile=/tmp/ctx --progress plain
+      volumeMounts:
+        - {name: certs, mountPath: /certs, readOnly: true}
+  volumes:
+    - {name: certs, secret: {secretName: $BOX_REL-buildkit-client}}
+YAML
+}
+
+route_wait() {
+  local name=$1
+  kc -n "$BOX_JOBS_NS" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/route-$name" --timeout=300s >/dev/null 2>&1
+  local rc=$?
+  kc -n "$BOX_JOBS_NS" logs "route-$name" >"$LOGS/route-$name.log" 2>&1
+  return $rc
+}
+
+# routed_to <name>: the daemon pod the job reached; built <name>: whether
+# it ran its step (else it came from the cache).
+routed_to() { sed -n 's/^ROUTED_TO //p' "$LOGS/route-$1.log" | head -n 1; }
+built() { grep -Eq '^#[0-9]+ [0-9.]+ ROUTE_STEP_BUILT$' "$LOGS/route-$1.log"; }
+
+# box_daemon_on <node>: the box's daemon pod on <node>.
+box_daemon_on() {
+  kc -n "$BOX_NS" get pods -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" \
+    -o jsonpath="{range .items[?(@.spec.nodeName=='$1')]}{.metadata.name}{end}"
+}
+
+# hash_node <project>: the build node the router's rendezvous hash gives a
+# project with no warm node (sha256 of "<instance>/<project>|<node>", the
+# highest first 8 bytes wins).
+hash_node() {
+  python3 - "$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)/$1" $BUILD_NODES <<'PY'
+import hashlib, sys
+key, nodes = sys.argv[1], sys.argv[2:]
+print(max(sorted(nodes), key=lambda n: hashlib.sha256((key + "|" + n).encode()).digest()[:8]))
+PY
+}
+
+# route_page <job>: the build page of the job's build says why the router
+# chose its node.
+route_page() {
+  local id
+  id=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/api/v1/builds?limit=200" 2>/dev/null \
+    | python3 -c 'import json,sys
+b = [x for x in json.load(sys.stdin)["builds"] if x.get("job") == int(sys.argv[1])]
+print(b[0]["id"] if b else "")' "$1")
+  [ -n "$id" ] || return 1
+  kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/builds/$id" 2>/dev/null \
+    | grep -q "$2"
+}
+
+# box_router: the box's CI jobs reach the daemons through the build router,
+# which sends a project's builds to the node where its cache is.
+box_router() {
+  local a b c pa pb pc d1 want gen
+  a=$(echo "$BUILD_NODES" | awk '{print $1}'); b=$(echo "$BUILD_NODES" | awk '{print $2}'); c=$(echo "$BUILD_NODES" | awk '{print $3}')
+  [ -n "$c" ] || c=$a
+  next_id; ROUTE_ID=$ID
+  check "the router runs on every build node" \
+    eventually 30 eval '[ "$(kc -n "$BOX_NS" get ds "$BOX_REL-router" -o jsonpath={.status.numberReady})" = "$(echo $BUILD_NODES | wc -w | tr -d " ")" ]'
+  # A new project's parallel jobs start on two nodes, through two routers:
+  # they meet on the project's daemon by hash, and share its step.
+  route_pod p1a "$a" 5001 9500 9501 6 || { fail "start a routed job"; return; }
+  route_pod p1b "$b" 5001 9500 9502 6 || { fail "start a routed job"; return; }
+  route_wait p1a; route_wait p1b
+  want=$(box_daemon_on "$(hash_node 5001)")
+  check "a new project's jobs on two nodes meet on its daemon by hash ($(routed_to p1a), $(routed_to p1b); hash: $want)" \
+    test -n "$want" -a "$(routed_to p1a)" = "$want" -a "$(routed_to p1b)" = "$want"
+  check "they share the step: it ran once" eval '[ "$(built p1a && echo 1)$(built p1b && echo 1)" = 1 ]'
+  # Later jobs of the project go where it built, from any node, from cache.
+  d1=$want
+  route_job p1c "$c" 5001 9510 9511 || { fail "a routed job (see $LOGS/route-p1c.log)"; return; }
+  check "a later job of the project goes to the node it built on ($(routed_to p1c))" test "$(routed_to p1c)" = "$d1"
+  check "and finds its step in the cache" eval '! built p1c'
+  check "the build page says why the router chose its node" eventually 30 route_page 9511 "Routed by"
+  # A connection from a pod the router does not know (no job): its node's daemon.
+  kc -n "$BOX_JOBS_NS" delete pod route-unknown --ignore-not-found --wait=true >/dev/null 2>&1
+  kc -n "$BOX_JOBS_NS" run route-unknown --image="$IMAGE" --restart=Never \
+    --overrides="{\"spec\":{\"nodeName\":\"$b\",\"terminationGracePeriodSeconds\":0,\"automountServiceAccountToken\":false,
+      \"containers\":[{\"name\":\"c\",\"image\":\"$IMAGE\",\"command\":[\"sh\",\"-c\",
+        \"buildctl --addr tcp://$BOX_REL-router.$BOX_NS.svc:1234 --tlsdir /certs debug workers -v | sed -n 's/.*worker.hostname:[[:space:]]*//p' | head -n 1; buildctl --addr tcp://\$(getent hosts $BOX_REL-buildkit-headless.$BOX_NS.svc | head -n 1 | cut -d' ' -f1):1234 --tlsdir /certs --tlsservername $BOX_REL-buildkit.$BOX_NS.svc --timeout 5 debug workers >/dev/null 2>&1 && echo DIRECT_OK || echo DIRECT_REFUSED\"],
+        \"volumeMounts\":[{\"name\":\"certs\",\"mountPath\":\"/certs\",\"readOnly\":true}]}],
+      \"volumes\":[{\"name\":\"certs\",\"secret\":{\"secretName\":\"$BOX_REL-buildkit-client\"}}]}}" >/dev/null 2>&1
+  kc -n "$BOX_JOBS_NS" wait --for=jsonpath='{.status.phase}'=Succeeded pod/route-unknown --timeout=120s >/dev/null 2>&1
+  kc -n "$BOX_JOBS_NS" logs route-unknown >"$LOGS/route-unknown.log" 2>&1
+  check "a pod that is no CI job reaches its own node's daemon" test "$(head -n 1 "$LOGS/route-unknown.log")" = "$(box_daemon_on "$b")"
+  # The jobs' certificate still opens the daemons, but only the routers
+  # (and the controller) may connect to them.
+  check "a CI job cannot reach a daemon around the router" grep -qx DIRECT_REFUSED "$LOGS/route-unknown.log"
+  # The controller away: the routers keep their last view.
+  kc -n "$BOX_NS" scale deploy "$BOX_REL-controller" --replicas 0 >/dev/null
+  kc -n "$BOX_NS" wait --for=delete pod -l "app.kubernetes.io/instance=$BOX_REL,app.kubernetes.io/component=controller" --timeout=120s >/dev/null 2>&1
+  route_job p1d "$b" 5001 9520 9521 || fail "a routed job without the controller (see $LOGS/route-p1d.log)"
+  check "without the controller a job still goes to its project's node ($(routed_to p1d))" test "$(routed_to p1d)" = "$d1"
+  kc -n "$BOX_NS" scale deploy "$BOX_REL-controller" --replicas 1 >/dev/null
+  kc -n "$BOX_NS" rollout status deploy "$BOX_REL-controller" --timeout=180s >/dev/null 2>&1 || fail "the controller did not come back"
+  # A router rollout while a build runs through it: the build finishes.
+  route_pod drain "$a" 5002 9530 9531 25 || { fail "start a long routed job"; return; }
+  check "a long build starts through the router" eventually 60 eval 'kc -n "$BOX_JOBS_NS" logs route-drain 2>/dev/null | grep -q "^#[0-9]* [0-9.]* route-5002"'
+  gen=$(kc -n "$BOX_NS" get ds "$BOX_REL-router" -o jsonpath='{.metadata.generation}')
+  kc -n "$BOX_NS" rollout restart ds "$BOX_REL-router" >/dev/null
+  check "a router rollout lets the running build finish" route_wait drain
+  check "it builds its step" built drain
+  check "the router rollout completes" quiet kc -n "$BOX_NS" rollout status ds "$BOX_REL-router" --timeout=600s
+  check "jobs are routed again after the rollout" route_job p1e "$a" 5001 9540 9541
+  check "to their project's node ($(routed_to p1e))" test "$(routed_to p1e)" = "$d1"
+  [ "$(kc -n "$BOX_NS" get ds "$BOX_REL-router" -o jsonpath='{.metadata.generation}')" -gt "$gen" ] || info "the router's generation did not change"
+  kc -n "$BOX_JOBS_NS" delete pod -l ci-accelerator.io/component=ci-job --field-selector=status.phase!=Running --ignore-not-found >/dev/null 2>&1
+  kc -n "$BOX_JOBS_NS" delete pod route-unknown --ignore-not-found >/dev/null 2>&1
 }
 
 # box_ui: the browser checks of test/ui against the box's console, which
@@ -1458,6 +1616,26 @@ refused_console() {
 box_settle() {
   local a b
   a=$(echo "$BUILD_NODES" | awk '{print $1}'); b=$(echo "$BUILD_NODES" | awk '{print $2}')
+  # These jobs pick their daemon themselves (the console's reasoning, not
+  # the router's, is checked here): a test-only policy opens the daemons to
+  # the jobs namespace, which the box's own admits through the router only.
+  kc -n "$BOX_NS" apply -f - >/dev/null <<YAML
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: e2e-direct}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/instance: $BOX_REL, ci-accelerator.io/component: buildkit}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: $BOX_JOBS_NS}}}]
+      ports: [{port: 1234, protocol: TCP}]
+YAML
+  box_settle_jobs "$a" "$b"
+  kc -n "$BOX_NS" delete networkpolicy e2e-direct --ignore-not-found >/dev/null
+}
+
+box_settle_jobs() {
+  local a=$1 b=$2
   local df
   df=$'FROM alpine:3.22\nCOPY files/ /files/\nRUN cat /files/app.txt && echo SETTLE_BUILT\n'
   next_id

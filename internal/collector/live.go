@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sort"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	controlapi "github.com/moby/buildkit/api/services/control"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/cacheuse"
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 )
 
@@ -56,6 +58,9 @@ type Inspection struct {
 	// daemon; nil without one. DiskErr: the probe did not answer.
 	Disk    *diskprobe.Disk
 	DiskErr string
+	// Records is every record of the cache, for whose they are; the
+	// collector stores them and does not keep them.
+	Records []cacheuse.Record `json:"-"`
 }
 
 // Inspector is a Source that can describe its daemon.
@@ -77,10 +82,16 @@ type DaemonState struct {
 // Inspect is how often daemons are described again.
 const InspectEvery = time.Minute
 
+// Pruner removes records from a daemon's cache.
+type Pruner interface {
+	Prune(ctx context.Context, ids []string) (records int, bytes int64, err error)
+}
+
 type live struct {
 	mu      sync.Mutex
 	daemons map[string]*DaemonState
 	active  map[string]map[string]Active
+	pruners map[string]Pruner
 	// changed is called when what pages show live changes.
 	changed func()
 }
@@ -112,6 +123,7 @@ func (l *live) forget(name string) {
 	l.mu.Lock()
 	delete(l.daemons, name)
 	delete(l.active, name)
+	delete(l.pruners, name)
 	l.mu.Unlock()
 	l.notify()
 }
@@ -211,6 +223,12 @@ func (c *Collector) inspect(ctx context.Context, name string, in Inspector) {
 				node = info.Node
 			}
 		}
+		if err == nil && node != "" {
+			if serr := c.store.CacheSnapshot(ctx, node, info.Records); serr != nil {
+				c.log.Warn("daemon's cache records not stored", "daemon", name, "err", serr)
+			}
+		}
+		info.Records = nil
 		c.live.inspected(name, info, err)
 		select {
 		case <-ctx.Done():
@@ -218,4 +236,23 @@ func (c *Collector) inspect(ctx context.Context, name string, in Inspector) {
 		case <-time.After(InspectEvery):
 		}
 	}
+}
+
+// ErrNoDaemon: no reachable daemon runs on the node.
+var ErrNoDaemon = errors.New("collector: no reachable daemon on that node")
+
+// Prune removes records from the cache of the daemon on node.
+func (c *Collector) Prune(ctx context.Context, node string, ids []string) (int, int64, error) {
+	c.live.mu.Lock()
+	var p Pruner
+	for name, d := range c.live.daemons {
+		if d.Connected && d.Inspection.Node == node && c.live.pruners[name] != nil {
+			p = c.live.pruners[name]
+		}
+	}
+	c.live.mu.Unlock()
+	if p == nil {
+		return 0, 0, ErrNoDaemon
+	}
+	return p.Prune(ctx, ids)
 }
