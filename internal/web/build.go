@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
+	"github.com/hoobiboobi/ci-accelerator/internal/route"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
@@ -308,6 +309,9 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		v.Trace = traceID(a)
 	}
 	v.Details = []KV{{"Build node", b.Daemon + paren(nodeHost[b.Daemon])}}
+	if p.Route != nil {
+		v.Details = append(v.Details, KV{"Routed by", routeText(*p.Route)})
+	}
 	if job.ID != 0 {
 		jt := timesOf(job, b.Started, b.Completed)
 		v.Details = append(v.Details, KV{"GitLab job", fmt.Sprintf("%s · %d · %s in all, %s of it building", job.Name, job.ID, duration(jt.Total), v.Dur)})
@@ -683,4 +687,23 @@ func ago(t time.Time, loc *time.Location) string { return stampOf(t, loc, "2 Jan
 // traceID is the trace id the runner gives a job.
 func traceID(a history.Attribution) string {
 	return fmt.Sprintf("01%s%012x%012x", a.Instance, a.Pipeline, a.Job)
+}
+
+// routeText says why the build router sent the job to the build's node.
+func routeText(d store.Decision) string {
+	node := d.Node
+	switch d.Reason {
+	case route.LocalWarm:
+		return fmt.Sprintf("the build router: the job's own node, %s, which built the project before", node)
+	case route.ZoneWarm:
+		if d.JobNode != "" && d.JobNode != node {
+			return fmt.Sprintf("the build router: %s, which built the project most recently (the job ran on %s)", node, d.JobNode)
+		}
+		return fmt.Sprintf("the build router: %s, which built the project most recently", node)
+	case route.ZoneHash:
+		return fmt.Sprintf("the build router: %s, the project's node by hash: no node had built the project in the last week", node)
+	case route.CrossZone:
+		return fmt.Sprintf("the build router: %s, in another zone: no daemon of the job's zone was ready", node)
+	}
+	return fmt.Sprintf("the build router: %s (%s)", node, d.Reason)
 }

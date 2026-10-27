@@ -203,6 +203,28 @@ CREATE TABLE cache_stores (
 	error      TEXT NOT NULL DEFAULT ''
 ) WITHOUT ROWID;
 `,
+	// 2: 0.3.0, the build router: the node each daemon runs on (a
+	// project's cache is warm on a node, whatever the daemon pod is
+	// called after a restart) and the routers' decisions.
+	`
+ALTER TABLE daemons ADD COLUMN node TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE route_decisions (
+	id         INTEGER PRIMARY KEY,
+	instance   INTEGER,
+	job_id     INTEGER,
+	project_id INTEGER,
+	node       TEXT NOT NULL,
+	daemon     TEXT NOT NULL,
+	reason     TEXT NOT NULL,
+	candidates INTEGER NOT NULL,
+	job_node   TEXT NOT NULL DEFAULT '',
+	at         INTEGER NOT NULL
+);
+CREATE INDEX route_decisions_job ON route_decisions (instance, job_id);
+CREATE INDEX route_decisions_at ON route_decisions (at);
+CREATE INDEX builds_started ON builds (started_at);
+`,
 }
 
 // outputSchema is the schema of a daily output file. Output files are

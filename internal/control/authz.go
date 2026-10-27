@@ -23,6 +23,20 @@ import (
 // (TokenReview) whose it is. Outside a cluster (development, tests) a
 // static token from a file does instead.
 
+// Role is what a caller is: the web reads the pages' data, a router reads
+// where projects are warm and reports where it sent jobs.
+type Role string
+
+const (
+	RoleWeb    Role = "web"
+	RoleRouter Role = "router"
+	// RoleAny is a static token's (outside a cluster): every role.
+	RoleAny Role = "any"
+)
+
+// may says whether a caller of role r may use what role want serves.
+func (r Role) may(want Role) bool { return r == want || r == RoleAny }
+
 // Errors of the caller's identity.
 var (
 	ErrUnauthenticated = errors.New("control: no valid token")
@@ -40,15 +54,15 @@ func bearer(r *http.Request) string {
 	return strings.TrimSpace(t)
 }
 
-// StaticToken lets through the callers that send token.
-func StaticToken(token string) func(*http.Request) error {
+// StaticToken lets through the callers that send token, in every role.
+func StaticToken(token string) func(*http.Request) (Role, error) {
 	want := []byte(token)
-	return func(r *http.Request) error {
+	return func(r *http.Request) (Role, error) {
 		got := []byte(bearer(r))
 		if len(got) == 0 || subtle.ConstantTimeCompare(got, want) != 1 {
-			return ErrUnauthenticated
+			return "", ErrUnauthenticated
 		}
-		return nil
+		return RoleAny, nil
 	}
 }
 
@@ -58,7 +72,7 @@ func StaticToken(token string) func(*http.Request) error {
 type TokenReviewer struct {
 	Kube     kubernetes.Interface
 	Audience string
-	Allow    map[string]bool // "namespace/name"
+	Allow    map[string]Role // "namespace/name"
 	// Keep is how long an answer is kept (default 5 minutes; a token
 	// lives for an hour at least).
 	Keep time.Duration
@@ -68,24 +82,25 @@ type TokenReviewer struct {
 }
 
 type review struct {
+	role  Role
 	err   error
 	until time.Time
 }
 
-// Authorize checks r's token.
-func (t *TokenReviewer) Authorize(r *http.Request) error {
+// Authorize checks r's token and says the caller's role.
+func (t *TokenReviewer) Authorize(r *http.Request) (Role, error) {
 	token := bearer(r)
 	if token == "" {
-		return ErrUnauthenticated
+		return "", ErrUnauthenticated
 	}
 	key := sha256.Sum256([]byte(token))
 	t.mu.Lock()
 	if a, ok := t.answers[key]; ok && time.Now().Before(a.until) {
 		t.mu.Unlock()
-		return a.err
+		return a.role, a.err
 	}
 	t.mu.Unlock()
-	err, keep := t.review(r.Context(), token)
+	role, err, keep := t.review(r.Context(), token)
 	if keep {
 		t.mu.Lock()
 		if t.answers == nil || len(t.answers) > 10000 {
@@ -98,31 +113,32 @@ func (t *TokenReviewer) Authorize(r *http.Request) error {
 		if err != nil {
 			k = 10 * time.Second
 		}
-		t.answers[key] = review{err: err, until: time.Now().Add(k)}
+		t.answers[key] = review{role: role, err: err, until: time.Now().Add(k)}
 		t.mu.Unlock()
 	}
-	return err
+	return role, err
 }
 
 // review asks Kubernetes; keep says whether the answer may be kept (not
 // when Kubernetes could not be asked).
-func (t *TokenReviewer) review(ctx context.Context, token string) (error, bool) {
+func (t *TokenReviewer) review(ctx context.Context, token string) (Role, error, bool) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	tr, err := t.Kube.AuthenticationV1().TokenReviews().Create(ctx, &authnv1.TokenReview{
 		Spec: authnv1.TokenReviewSpec{Token: token, Audiences: []string{t.Audience}},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("%w: Kubernetes could not check the token: %v", ErrUnauthenticated, err), false
+		return "", fmt.Errorf("%w: Kubernetes could not check the token: %v", ErrUnauthenticated, err), false
 	}
 	if !tr.Status.Authenticated {
-		return ErrUnauthenticated, true
+		return "", ErrUnauthenticated, true
 	}
 	ns, name, ok := serviceAccount(tr.Status.User.Username)
-	if !ok || !t.Allow[ns+"/"+name] {
-		return fmt.Errorf("%w (%s)", ErrForbidden, tr.Status.User.Username), true
+	role := t.Allow[ns+"/"+name]
+	if !ok || role == "" {
+		return "", fmt.Errorf("%w (%s)", ErrForbidden, tr.Status.User.Username), true
 	}
-	return nil, true
+	return role, nil, true
 }
 
 // serviceAccount splits system:serviceaccount:<namespace>:<name>.

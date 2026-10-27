@@ -28,6 +28,7 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
+	"github.com/hoobiboobi/ci-accelerator/internal/route"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
@@ -880,6 +881,35 @@ func TestGoneDaemon(t *testing.T) {
 	}
 	if page := get(t, ts, fmt.Sprintf("/builds/%d", row.ID)); !strings.Contains(page.body, "<b>old12</b> is gone") {
 		t.Errorf("no note that the daemon is gone")
+	}
+}
+
+// A build the router sent to its daemon says why there.
+func TestRoutedBuild(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	row := byPipe[keys[0]][0]
+	p, err := st.BuildPage(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := p.Build
+	a := b.Attribution
+	if p.Route != nil {
+		t.Fatalf("a route without a decision: %+v", p.Route)
+	}
+	d := store.Decision{Project: route.Project{Instance: a.Instance, ID: 42}, JobID: a.Job, Node: "node-2", Daemon: b.Daemon,
+		Reason: route.ZoneWarm, Cands: 3, JobNode: "node-1", At: b.Started.Add(-time.Second)}
+	other := d
+	other.Daemon, other.Node = "another-daemon", "node-3"
+	if err := st.SaveDecisions(ctx, []store.Decision{d, other}); err != nil {
+		t.Fatal(err)
+	}
+	page := get(t, ts, fmt.Sprintf("/builds/%d", row.ID))
+	page.safe(t)
+	if !strings.Contains(page.body, "node-2, which built the project most recently (the job ran on node-1)") ||
+		strings.Contains(page.body, "node-3") {
+		t.Errorf("the build page does not say why the router chose its node")
 	}
 }
 

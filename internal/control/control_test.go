@@ -45,7 +45,7 @@ func newStore(t *testing.T) *store.Store {
 }
 
 // serve starts a controller over st and a client of it.
-func serve(t *testing.T, st *store.Store, authorize func(*http.Request) error, token string) (*Client, *httptest.Server) {
+func serve(t *testing.T, st *store.Store, authorize func(*http.Request) (Role, error), token string) (*Client, *httptest.Server) {
 	t.Helper()
 	srv := &Server{Local: &Local{Store: st, Live: daemons{{Name: "d1", Connected: true}}}, Authorize: authorize,
 		Config: Config{Version: "v-test", Release: "box"}, Heartbeat: 50 * time.Millisecond}
@@ -161,6 +161,9 @@ func TestTokenReview(t *testing.T) {
 		case "web-token":
 			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, Audiences: []string{Audience},
 				User: authnv1.UserInfo{Username: "system:serviceaccount:box:box-web"}}
+		case "router-token":
+			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, Audiences: []string{Audience},
+				User: authnv1.UserInfo{Username: "system:serviceaccount:box:box-router"}}
 		case "other-token":
 			tr.Status = authnv1.TokenReviewStatus{Authenticated: true,
 				User: authnv1.UserInfo{Username: "system:serviceaccount:box:default"}}
@@ -169,18 +172,24 @@ func TestTokenReview(t *testing.T) {
 		}
 		return true, tr, nil
 	})
-	r := &TokenReviewer{Kube: kube, Audience: Audience, Allow: map[string]bool{"box/box-web": true}}
+	r := &TokenReviewer{Kube: kube, Audience: Audience, Allow: map[string]Role{"box/box-web": RoleWeb, "box/box-router": RoleRouter}}
+	role := Role("")
 	check := func(token string) error {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		return r.Authorize(req)
+		var err error
+		role, err = r.Authorize(req)
+		return err
 	}
-	if err := check("web-token"); err != nil {
-		t.Fatalf("the web: %v", err)
+	if err := check("web-token"); err != nil || role != RoleWeb {
+		t.Fatalf("the web: %s, %v", role, err)
 	}
-	if err := check("web-token"); err != nil || asked != 1 {
+	if err := check("router-token"); err != nil || role != RoleRouter {
+		t.Fatalf("a router: %s, %v", role, err)
+	}
+	if err := check("web-token"); err != nil || asked != 2 {
 		t.Fatalf("kept answer: %v, asked %d", err, asked)
 	}
 	if err := check("other-token"); !errors.Is(err, ErrForbidden) {

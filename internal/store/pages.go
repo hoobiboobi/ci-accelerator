@@ -76,6 +76,10 @@ type BuildPage struct {
 	OutputKept bool
 	// Printed is the steps that printed something, kept or not.
 	Printed map[int]bool
+	// Route is the build router's decision that sent the build's job to
+	// this daemon; nil when no router decided (no router, or a job it did
+	// not know).
+	Route *Decision
 }
 
 // StepRun is one build's run of a step identity, for its history.
@@ -256,6 +260,18 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 		}
 		if p.Pipeline, err = s.PipelineInfo(ctx, a.Instance, a.Pipeline); err != nil {
 			return nil, err
+		}
+		routes, err := s.JobRoutes(ctx, a.Instance, a.Job)
+		if err != nil {
+			return nil, err
+		}
+		// The latest decision for this build's daemon made before the build
+		// started (a job may connect, and build, several times).
+		for i := range routes {
+			d := routes[i]
+			if d.Daemon == st.Build.Daemon && !d.At.After(st.Build.Started.Add(time.Second)) {
+				p.Route = &d
+			}
 		}
 	}
 	return p, nil
