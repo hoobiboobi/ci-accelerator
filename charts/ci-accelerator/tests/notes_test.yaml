@@ -30,7 +30,7 @@ tests:
       gitlab-runner.enabled: false
     asserts:
       - matchRegexRaw:
-          pattern: 'No runner is installed: configure yours with integrations/gitlab-runner/values.yaml\n\(BUILDKIT_REMOTE_ADDR=tcp://box-buildkit.ci-accelerator.svc:1234\)'
+          pattern: 'No runner is installed: configure yours with integrations/gitlab-runner/values.yaml\n\(BUILDKIT_REMOTE_ADDR=tcp://box-router.ci-accelerator.svc:1234\)'
 
   - it: says nothing about metrics storage by default
     asserts:

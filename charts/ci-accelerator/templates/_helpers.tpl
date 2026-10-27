@@ -267,7 +267,7 @@ old console, with the way forward. lookup is empty under helm template and
 GitOps renders.
 */}}
 {{- define "ci-accelerator.refuseOld" -}}
-{{- $how := printf "ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place: the console became the control plane (a controller and a web) and its objects have new names. Remove the release (helm uninstall %s -n %s), wait until its pods are gone, and install 0.3.0; the daemons' cache on hostPath stays, and the old console's history stays on the PersistentVolumeClaim of its Deployment (<name>-data) until you delete it." .Release.Name .Release.Namespace }}
+{{- $how := printf "ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place: the console became the control plane (a controller and a web) and its objects have new names. Remove the release (helm uninstall %s -n %s), wait until its pods are gone, delete the daemons' certificate Secret (kubectl -n %s delete secret %s-tls: the new certificate names the build router; without cert-manager make it again with scripts/buildkit-certs.sh --router), and install 0.3.0; the daemons' cache on hostPath stays, and the old console's history stays on the PersistentVolumeClaim of its Deployment (<name>-data) until you delete it." .Release.Name .Release.Namespace .Release.Namespace (include "ci-accelerator.buildkitName" .) }}
 {{- if hasKey .Values "console" }}
 {{- fail (printf "values under console: are the 0.2.x console's: since 0.3.0 they are under control-plane: (the controller's pod settings and persistence under control-plane.controller, the web's under control-plane.web; see the upgrade notes). %s" $how) }}
 {{- end }}

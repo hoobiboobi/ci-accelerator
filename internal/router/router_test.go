@@ -64,13 +64,19 @@ func newBackend(t *testing.T, name string) *backend {
 }
 
 type view struct {
+	mu      sync.Mutex
 	daemons []route.Daemon
 	jobs    map[string]Job
 	warm    map[route.Project][]route.Activity
 }
 
-func (v *view) Daemons() []route.Daemon               { return v.daemons }
-func (v *view) Job(ip string) (Job, bool)             { j, ok := v.jobs[ip]; return j, ok }
+func (v *view) Daemons() []route.Daemon { return v.daemons }
+func (v *view) Job(ip string) (Job, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	j, ok := v.jobs[ip]
+	return j, ok
+}
 func (v *view) Warm(p route.Project) []route.Activity { return v.warm[p] }
 
 var projA = route.Project{Instance: "0a1b2c", ID: 7}
@@ -89,7 +95,7 @@ func setup(t *testing.T, v *view) (addr string, b1, b2 *backend, reports *[]stor
 	real := map[string]string{"10.9.0.1:1234": b1.ln.Addr().String(), "10.9.0.2:1234": b2.ln.Addr().String()}
 	var mu sync.Mutex
 	reports = &[]store.Decision{}
-	r := &Router{View: v, Node: "n1", Port: "1234",
+	r := &Router{View: v, Node: "n1", Port: "1234", IdentityWait: -1,
 		Report: func(d store.Decision) { mu.Lock(); *reports = append(*reports, d); mu.Unlock() },
 		Dial: func(ctx context.Context, addr string) (net.Conn, error) {
 			var d net.Dialer
@@ -390,5 +396,31 @@ func TestClusterFromKubernetes(t *testing.T) {
 	}
 	if d := c.Daemons(); d[0].Active != 4 {
 		t.Errorf("active builds %+v", d[0])
+	}
+}
+
+// A job's pod shows up in the watch a moment after its first connection:
+// the connection waits for it instead of going to its node's daemon.
+func TestWaitsForTheJobsPod(t *testing.T) {
+	v := &view{jobs: map[string]Job{}, warm: map[route.Project][]route.Activity{projA: {{Node: "n2", At: time.Now()}}}}
+	r := &Router{View: v, Node: "n1", IdentityWait: 2 * time.Second}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		v.mu.Lock()
+		v.jobs["10.1.1.1"] = Job{Project: projA, JobID: 7, Node: "n1"}
+		v.mu.Unlock()
+	}()
+	v.daemons = []route.Daemon{{Name: "bk-1", Node: "n1", Addr: "a", Ready: true}, {Name: "bk-2", Node: "n2", Addr: "b", Ready: true}}
+	start := time.Now()
+	r.awaitJob(context.Background(), "10.1.1.1")
+	d, _, err := r.Decide("10.1.1.1")
+	if err != nil || d.Daemon.Node != "n2" || time.Since(start) > 1500*time.Millisecond {
+		t.Errorf("got %+v %v after %s", d, err, time.Since(start))
+	}
+	// A pod that never shows up waits the whole time, then goes local.
+	start = time.Now()
+	r.awaitJob(context.Background(), "10.9.9.9")
+	if d, _, _ := r.Decide("10.9.9.9"); d.Reason != route.UnknownLocal || time.Since(start) < 2*time.Second {
+		t.Errorf("unknown: %+v after %s", d, time.Since(start))
 	}
 }

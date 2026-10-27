@@ -55,6 +55,11 @@ type Router struct {
 	// Dial connects to a daemon; nil: TCP with keepalive.
 	Dial func(ctx context.Context, addr string) (net.Conn, error)
 	Now  func() time.Time
+	// IdentityWait is how long a connection from an unknown address waits
+	// for its pod to show up in the watch: the kubelet reports a pod's
+	// address about when its container starts, and a job may connect at
+	// once (default 3 s; negative: not at all).
+	IdentityWait time.Duration
 
 	wg    sync.WaitGroup
 	mu    sync.Mutex
@@ -184,6 +189,7 @@ func (r *Router) Decide(ip string) (route.Decision, store.Decision, error) {
 func (r *Router) handle(ctx context.Context, c net.Conn) {
 	defer c.Close()
 	ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+	r.awaitJob(ctx, ip)
 	d, rec, err := r.Decide(ip)
 	if err != nil {
 		r.Log.Warn("connection refused: no daemon", "from", ip, "err", err)
@@ -200,8 +206,38 @@ func (r *Router) handle(ctx context.Context, c net.Conn) {
 	if r.Report != nil && rec.Reason != route.UnknownLocal && rec.Reason != route.UnknownHash {
 		r.Report(rec)
 	}
-	r.Log.Debug("routed", "from", ip, "job", rec.JobID, "daemon", d.Daemon.Name, "reason", d.Reason)
+	if rec.JobID != 0 {
+		r.Log.Info("routed", "from", ip, "job", rec.JobID, "project", rec.Project.Key(), "daemon", d.Daemon.Name,
+			"node", d.Daemon.Node, "reason", d.Reason)
+	} else {
+		r.Log.Info("routed a connection of no known CI job to its node's daemon", "from", ip, "daemon", d.Daemon.Name)
+	}
 	pipe(c, up)
+}
+
+// awaitJob waits up to IdentityWait for the pod with address ip to be
+// known.
+func (r *Router) awaitJob(ctx context.Context, ip string) {
+	wait := r.IdentityWait
+	if wait == 0 {
+		wait = 3 * time.Second
+	}
+	if _, ok := r.View.Job(ip); ok || wait < 0 {
+		return
+	}
+	deadline := time.Now().Add(wait)
+	t := time.NewTicker(50 * time.Millisecond)
+	defer t.Stop()
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if _, ok := r.View.Job(ip); ok {
+			return
+		}
+	}
 }
 
 // pipe copies both ways until both directions end. One side closing its

@@ -11,7 +11,14 @@ The runner takes jobs from {{ $runner.gitlabUrl }}; check that it registered:
   kubectl -n {{ .Release.Namespace }} logs deploy/{{ .Release.Name }}-gitlab-runner | grep -i -E 'registered|error'
 {{- else }}
 No runner is installed: configure yours with integrations/gitlab-runner/values.yaml
-(BUILDKIT_REMOTE_ADDR=tcp://{{ $bk }}.{{ .Release.Namespace }}.svc:1234).
+(BUILDKIT_REMOTE_ADDR={{ include "ci-accelerator.daemonsAddress" . }}).
+{{- end }}
+{{- if dig "router" "enabled" false .Values.global }}
+
+CI jobs connect to the build router ({{ include "ci-accelerator.routerName" . }}, on every build node),
+which sends each job to the daemon where its project built before; the
+build page says why. Its decisions:
+  kubectl -n {{ .Release.Namespace }} logs ds/{{ include "ci-accelerator.routerName" . }} | grep routed
 {{- end }}
 
 Build in a CI job (the job gets BUILDKIT_REMOTE_ADDR and the client
