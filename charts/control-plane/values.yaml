@@ -223,9 +223,13 @@ router:
   # -- How the Service picks a router: PreferSameNode (the job's node, any
   # other when it has none ready), Local (the job's node only) or Cluster.
   routing: PreferSameNode
-  # -- When no daemon of the job's zone (topology.kubernetes.io/zone of the
-  # daemons' nodes) is ready: true sends the job to another zone's daemon,
-  # false refuses the connection.
+  # -- Keep a job's builds in its zone (topology.kubernetes.io/zone of the
+  # daemons' nodes): a project then warms up once per zone. false: every
+  # daemon is one zone (zones close enough that crossing them costs
+  # nothing, or one zone label per node).
+  zones: true
+  # -- When no daemon of the job's zone is ready: true sends the job to
+  # another zone's daemon, false refuses the connection.
   crossZone: true
   # -- Skip a daemon running this many builds when another one is free; 0:
   # never (a busy warm daemon is usually still faster than a cold one).

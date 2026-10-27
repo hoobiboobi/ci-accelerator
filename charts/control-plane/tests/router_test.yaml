@@ -54,6 +54,7 @@ tests:
             - -controller=https://box-controller.ci-accelerator.svc:8443
             - -controller-ca=/api-tls/ca.crt
             - -token-file=/var/run/secrets/ci-accelerator/token
+            - -zones=true
             - -cross-zone=true
             - -overload=0
             - -warm-for=168h
@@ -75,6 +76,7 @@ tests:
     documentSelector: { path: kind, value: DaemonSet }
     set:
       router.crossZone: false
+      router.zones: false
       router.overloadBuilds: 6
       router.warmDays: 3
       router.drainSeconds: 1200
@@ -85,6 +87,7 @@ tests:
       gitlab.urlsFrom.configMap: urls
     asserts:
       - contains: { path: "spec.template.spec.containers[0].args", content: "-cross-zone=false" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-zones=false" }
       - contains: { path: "spec.template.spec.containers[0].args", content: "-overload=6" }
       - contains: { path: "spec.template.spec.containers[0].args", content: "-warm-for=72h" }
       - contains: { path: "spec.template.spec.containers[0].args", content: "-drain=1200s" }

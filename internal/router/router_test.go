@@ -424,3 +424,19 @@ func TestWaitsForTheJobsPod(t *testing.T) {
 		t.Errorf("unknown: %+v after %s", d, time.Since(start))
 	}
 }
+
+// One zone label per node (kind, or zones close together): with zones
+// kept, a job stays in its zone; ignored, it follows the warm node.
+func TestZones(t *testing.T) {
+	v := &view{jobs: map[string]Job{"10.1.1.1": {Project: projA, JobID: 7, Node: "n1"}},
+		warm: map[route.Project][]route.Activity{projA: {{Node: "n2", At: time.Now()}}},
+		daemons: []route.Daemon{{Name: "bk-1", Node: "n1", Zone: "a", Addr: "a", Ready: true}, {Name: "bk-2", Node: "n2", Zone: "b", Addr: "b", Ready: true}}}
+	r := &Router{View: v, Node: "n1"}
+	if d, _, _ := r.Decide("10.1.1.1"); d.Daemon.Node != "n1" || d.Reason != route.ZoneHash {
+		t.Errorf("zones kept: %+v", d)
+	}
+	r.IgnoreZones = true
+	if d, _, _ := r.Decide("10.1.1.1"); d.Daemon.Node != "n2" || d.Reason != route.ZoneWarm {
+		t.Errorf("zones ignored: %+v", d)
+	}
+}

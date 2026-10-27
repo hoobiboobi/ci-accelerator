@@ -39,6 +39,7 @@ func routerMain(args []string, log *slog.Logger) error {
 	caFile := fs.String("controller-ca", "/api-tls/ca.crt", "CA certificate the controller's certificate chains to")
 	tokenFile := fs.String("token-file", "/var/run/secrets/ci-accelerator/token", "file with the token sent to the controller")
 	crossZone := fs.Bool("cross-zone", true, "send a job to another zone's daemon when its zone has none ready")
+	zones := fs.Bool("zones", true, "keep jobs in their zone (topology.kubernetes.io/zone of the daemons' nodes); false: all daemons are one zone")
 	overload := fs.Int("overload", 0, "skip a daemon running this many builds when another is free (0: never)")
 	warmFor := fs.Duration("warm-for", 7*24*time.Hour, "how long a build keeps its project warm on a node")
 	drain := fs.Duration("drain", 300*time.Second, "how long open connections may finish after SIGTERM")
@@ -71,7 +72,7 @@ func routerMain(args []string, log *slog.Logger) error {
 	defer cancelWatch()
 	go func() { watchErr <- view.Watch(wctx, kube, *namespace, *service, *jobs) }()
 
-	r := &router.Router{View: view, Node: *node, Port: *port, Log: log,
+	r := &router.Router{View: view, Node: *node, Port: *port, Log: log, IgnoreZones: !*zones,
 		Policy: route.Policy{CrossZone: *crossZone, Overload: *overload, WarmFor: *warmFor}}
 	var rep *router.Reporter
 	if *controller != "" {
