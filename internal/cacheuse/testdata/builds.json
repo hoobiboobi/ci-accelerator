@@ -1,0 +1,158 @@
+[
+ {
+  "build": 1,
+  "target": "lint",
+  "started": "2026-10-27T08:40:38.671Z",
+  "completed": "2026-10-27T08:41:02.661Z",
+  "steps": [
+   {
+    "key": "[base 1/4]",
+    "name": "FROM docker.io/library/python:3.13-slim@sha256:b3575dcf816cdacc5292df77a6e3e59b8941631078373a045efa2ac1e9c5c3b2",
+    "state": "built",
+    "started": "2026-10-27T08:40:37.831Z",
+    "completed": "2026-10-27T08:40:41.713Z"
+   },
+   {
+    "key": "[base 2/4]",
+    "name": "RUN apt-get update && apt-get install -y --no-install-recommends curl     && rm -rf /var/lib/apt/lists/*",
+    "state": "received",
+    "started": "2026-10-27T08:40:41.715Z",
+    "completed": "2026-10-27T08:40:51.905Z"
+   },
+   {
+    "key": "[base 3/4]",
+    "name": "RUN useradd --create-home app",
+    "state": "received",
+    "started": "2026-10-27T08:40:51.92Z",
+    "completed": "2026-10-27T08:40:52.118Z"
+   },
+   {
+    "key": "[base 4/4]",
+    "name": "WORKDIR /app",
+    "state": "received",
+    "started": "2026-10-27T08:40:52.12Z",
+    "completed": "2026-10-27T08:40:52.179Z"
+   },
+   {
+    "key": "[deps 1/2]",
+    "name": "COPY requirements.txt .",
+    "state": "received",
+    "started": "2026-10-27T08:40:52.186Z",
+    "completed": "2026-10-27T08:40:52.216Z"
+   },
+   {
+    "key": "[deps 2/2]",
+    "name": "RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt",
+    "state": "received",
+    "started": "2026-10-27T08:40:52.218Z",
+    "completed": "2026-10-27T08:40:57.76Z"
+   },
+   {
+    "key": "[dev 1/2]",
+    "name": "COPY requirements-dev.txt .",
+    "state": "built",
+    "started": "2026-10-27T08:40:57.764Z",
+    "completed": "2026-10-27T08:40:57.789Z"
+   },
+   {
+    "key": "[dev 2/2]",
+    "name": "RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements-dev.txt",
+    "state": "built",
+    "started": "2026-10-27T08:40:57.791Z",
+    "completed": "2026-10-27T08:41:02.529Z"
+   },
+   {
+    "key": "[lint 1/2]",
+    "name": "COPY . .",
+    "state": "built",
+    "started": "2026-10-27T08:41:02.532Z",
+    "completed": "2026-10-27T08:41:02.564Z"
+   },
+   {
+    "key": "[lint 2/2]",
+    "name": "RUN ruff check .",
+    "state": "built",
+    "started": "2026-10-27T08:41:02.566Z",
+    "completed": "2026-10-27T08:41:02.658Z"
+   }
+  ]
+ },
+ {
+  "build": 3,
+  "target": "api",
+  "started": "2026-10-27T08:40:35.959Z",
+  "completed": "2026-10-27T08:41:07.451Z",
+  "steps": [
+   {
+    "key": "[base 1/4]",
+    "name": "FROM docker.io/library/python:3.13-slim@sha256:b3575dcf816cdacc5292df77a6e3e59b8941631078373a045efa2ac1e9c5c3b2",
+    "state": "built",
+    "started": "2026-10-27T08:40:37.831Z",
+    "completed": "2026-10-27T08:40:41.713Z"
+   },
+   {
+    "key": "[base 2/4]",
+    "name": "RUN apt-get update && apt-get install -y --no-install-recommends curl     && rm -rf /var/lib/apt/lists/*",
+    "state": "built",
+    "started": "2026-10-27T08:40:41.716Z",
+    "completed": "2026-10-27T08:40:51.906Z"
+   },
+   {
+    "key": "[base 3/4]",
+    "name": "RUN useradd --create-home app",
+    "state": "built",
+    "started": "2026-10-27T08:40:51.92Z",
+    "completed": "2026-10-27T08:40:52.118Z"
+   },
+   {
+    "key": "[base 4/4]",
+    "name": "WORKDIR /app",
+    "state": "built",
+    "started": "2026-10-27T08:40:52.121Z",
+    "completed": "2026-10-27T08:40:52.18Z"
+   },
+   {
+    "key": "[deps 1/2]",
+    "name": "COPY requirements.txt .",
+    "state": "built",
+    "started": "2026-10-27T08:40:52.186Z",
+    "completed": "2026-10-27T08:40:52.216Z"
+   },
+   {
+    "key": "[deps 2/2]",
+    "name": "RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt",
+    "state": "built",
+    "started": "2026-10-27T08:40:52.218Z",
+    "completed": "2026-10-27T08:40:57.76Z"
+   },
+   {
+    "key": "[app 1/2]",
+    "name": "COPY common/ ./common",
+    "state": "built",
+    "started": "2026-10-27T08:40:57.764Z",
+    "completed": "2026-10-27T08:40:57.789Z"
+   },
+   {
+    "key": "[app 2/2]",
+    "name": "RUN python -m compileall -q common",
+    "state": "built",
+    "started": "2026-10-27T08:40:57.791Z",
+    "completed": "2026-10-27T08:40:57.995Z"
+   },
+   {
+    "key": "[api 1/2]",
+    "name": "COPY api/ ./api",
+    "state": "built",
+    "started": "2026-10-27T08:40:57.996Z",
+    "completed": "2026-10-27T08:40:58.03Z"
+   },
+   {
+    "key": "[api 2/2]",
+    "name": "RUN python -m compileall -q api",
+    "state": "built",
+    "started": "2026-10-27T08:40:58.033Z",
+    "completed": "2026-10-27T08:40:58.243Z"
+   }
+  ]
+ }
+]

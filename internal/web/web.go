@@ -85,19 +85,20 @@ const MaxLogReads = 4
 
 // The templates of each page besides the layout and the shared parts.
 var pageFiles = map[string][]string{
-	"overview":  nil,
-	"builds":    nil,
-	"pipelines": nil,
-	"images":    nil,
-	"image":     nil,
-	"build":     {"dockerfile"},
-	"pipeline":  {"waterfall"},
-	"job":       nil,
-	"step":      nil,
-	"steppage":  {"step"},
-	"notfound":  nil,
-	"nodes":     nil,
-	"signin":    nil,
+	"overview":    nil,
+	"builds":      nil,
+	"pipelines":   nil,
+	"images":      nil,
+	"image":       nil,
+	"build":       {"dockerfile"},
+	"pipeline":    {"waterfall"},
+	"job":         nil,
+	"step":        nil,
+	"steppage":    {"step"},
+	"notfound":    nil,
+	"nodes":       nil,
+	"cacheremove": nil,
+	"signin":      nil,
 }
 
 // New parses the templates; a template that does not parse is a build
@@ -163,6 +164,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /builds/{id}", s.build)
 	mux.HandleFunc("GET /builds/{id}/steps/{step}", s.step)
 	mux.HandleFunc("GET /nodes", s.nodes)
+	mux.HandleFunc("GET /nodes/{node}/cache/{instance}/{id}", s.cacheRemove)
+	// A change: only from the console's own pages, with or without sign-in.
+	mux.Handle("POST /nodes/{node}/cache/{instance}/{id}", http.NewCrossOriginProtection().Handler(http.HandlerFunc(s.cacheRemove)))
 	mux.HandleFunc("GET /projects/{instance}/{id}", s.chooseProject)
 	mux.HandleFunc("GET /search-index", s.index)
 	mux.HandleFunc("GET /events", s.events)

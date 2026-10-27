@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
+	"github.com/hoobiboobi/ci-accelerator/internal/cacheuse"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -450,6 +451,21 @@ func (c *Client) Recent(ctx context.Context, limit int) (out []*store.Stored, er
 }
 
 func (c *Client) Ping(ctx context.Context) error { return c.call(ctx, "Ping", nil) }
+
+func (c *Client) CacheUsage(ctx context.Context) (out map[string]cacheuse.Usage, err error) {
+	err = c.call(ctx, "CacheUsage", nil, &out)
+	return
+}
+
+func (c *Client) CacheActions(ctx context.Context, limit int) (out []store.CacheAction, err error) {
+	err = c.call(ctx, "CacheActions", []any{limit}, &out)
+	return
+}
+
+func (c *Client) RemoveCache(ctx context.Context, node string, p store.ProjectKey, who string) (out store.CacheAction, err error) {
+	err = c.call(ctx, "RemoveCache", []any{node, p, who}, &out)
+	return
+}
 
 // liveFor is how long the daemons' state is reused while no change is
 // announced: a page reads it several times.

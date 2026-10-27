@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/cacheuse"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
@@ -47,6 +49,21 @@ type NodeCard struct {
 	Inspected                              bool
 	// Disk is the cache's filesystem, from the disk probe; nil without one.
 	Disk *DiskView
+	// Owners is whose the cache is, by project; nil before it is known.
+	Owners *OwnersView
+}
+
+// OwnersView is a node's cache by the projects whose builds made it.
+type OwnersView struct {
+	Rows     []OwnerRow
+	Pools    []KV
+	Coverage string
+}
+
+// OwnerRow is one project's layers on a node.
+type OwnerRow struct {
+	Name, Size, Remove string
+	Records            int
 }
 
 // DiskView is a daemon's disk: what fills it and how close it is to the
@@ -167,6 +184,15 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	daemons := s.data.Daemons()
+	usage, err := s.data.CacheUsage(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	names := map[store.ProjectKey]string{}
+	for _, p := range sh.Projects {
+		names[p.ProjectKey] = p.Path
+	}
 	images := map[string][]int64{}
 	var gc []collector.GCRule
 	shown := map[string]bool{}
@@ -232,6 +258,9 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 			v.Measured = "Read from the running daemons at " + stampOf(d.InspectedAt, loc, "15:04:05").Text
 		}
 		card.Disk = diskView(d.Inspection)
+		if u, ok := usage[d.Inspection.Node]; ok && d.Inspection.Node != "" {
+			card.Owners = s.ownersView(r, d.Inspection.Node, u, names)
+		}
 		v.Cards = append(v.Cards, card)
 	}
 	for _, name := range sortedKeys(images) {
@@ -366,4 +395,116 @@ func (s *Server) bucket(ctx context.Context, p store.ProjectKey, loc *time.Locat
 	}
 	v.Scanned = ago(at, loc)
 	return v, nil
+}
+
+// ownersView is a node's cache by project: the projects the viewer may
+// see by name, the rest summed up.
+func (s *Server) ownersView(r *http.Request, node string, u cacheuse.Usage, names map[store.ProjectKey]string) *OwnersView {
+	v := &OwnersView{Coverage: fmt.Sprintf("%.0f%% of %s attributed", 100*u.Attributed(), bytesText(u.Total))}
+	var others int64
+	for _, p := range u.Projects {
+		key := store.ProjectKey{Instance: p.Instance, ID: p.Project}
+		name, ok := names[key]
+		if !ok {
+			others += p.Bytes
+			continue
+		}
+		if name == "" {
+			name = "project " + strconv.FormatUint(p.Project, 10)
+		}
+		row := OwnerRow{Name: name, Size: bytesText(p.Bytes), Records: p.Records}
+		if s.mayRemoveCache(r) {
+			row.Remove = "/nodes/" + url.PathEscape(node) + "/cache/" + key.String()
+		}
+		if len(v.Rows) < 8 {
+			v.Rows = append(v.Rows, row)
+		} else {
+			others += p.Bytes
+		}
+	}
+	for _, kv := range []struct {
+		k string
+		n int64
+	}{{"Other projects", others}, {"Made by several projects at once", u.Shared}, {"Base images", u.Base},
+		{"Cache mounts (shared)", u.Mounts}, {"Build contexts", u.Contexts}, {"Not attributed", u.Unknown}, {"Other", u.Other}} {
+		if kv.n > 0 {
+			v.Pools = append(v.Pools, KV{kv.k, bytesText(kv.n)})
+		}
+	}
+	return v
+}
+
+// mayRemoveCache: removing cache is for admins, or for everyone who
+// reaches a console without sign-in.
+func (s *Server) mayRemoveCache(r *http.Request) bool {
+	if s.opt.Auth == nil {
+		return true
+	}
+	v := viewer(r)
+	return v != nil && v.Admin
+}
+
+// CacheRemoveView asks to confirm removing a project's cache from a node,
+// and says what happened.
+type CacheRemoveView struct {
+	Shell
+	Node, ProjectName, Size string
+	Records                 int
+	Done                    bool
+	Removed                 string
+	RemovedRecords          int
+	Err                     string
+}
+
+// cacheRemove serves /nodes/{node}/cache/{instance}/{id}: GET asks, POST
+// removes.
+func (s *Server) cacheRemove(w http.ResponseWriter, r *http.Request) {
+	if !s.mayRemoveCache(r) {
+		http.Error(w, "Removing cache is for the console's admins.", http.StatusForbidden)
+		return
+	}
+	node := r.PathValue("node")
+	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+	key := store.ProjectKey{Instance: r.PathValue("instance"), ID: id}
+	if err != nil || node == "" || len(key.Instance) != 6 {
+		s.notFound(w, r, "page")
+		return
+	}
+	ctx := r.Context()
+	sh, err := s.shell(r, "nodes", "")
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	sh.Title = "Remove a project's cache"
+	v := &CacheRemoveView{Node: node, ProjectName: "project " + r.PathValue("id")}
+	for _, p := range sh.Projects {
+		if p.ProjectKey == key && p.Path != "" {
+			v.ProjectName = p.Path
+		}
+	}
+	usage, err := s.data.CacheUsage(ctx)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	for _, p := range usage[node].Projects {
+		if p.Instance == key.Instance && p.Project == key.ID {
+			v.Size, v.Records = bytesText(p.Bytes), p.Records
+		}
+	}
+	if r.Method == http.MethodPost {
+		who := "console"
+		if vw := viewer(r); vw != nil {
+			who = vw.Username
+		}
+		a, err := s.data.RemoveCache(ctx, node, key, who)
+		v.Done, v.Removed, v.RemovedRecords = true, bytesText(a.Bytes), a.Records
+		if err != nil {
+			v.Err = err.Error()
+		}
+		s.log.Info("cache removed", "node", node, "project", key.String(), "who", who, "records", a.Records, "bytes", a.Bytes, "err", v.Err)
+	}
+	v.Shell = sh
+	s.render(w, "cacheremove", http.StatusOK, v)
 }

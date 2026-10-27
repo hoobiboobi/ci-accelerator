@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/cacheuse"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
@@ -801,6 +802,91 @@ func TestNodes(t *testing.T) {
 	}
 	if !strings.Contains(get(t, ts, "/").body, `class="wdot"`) {
 		t.Errorf("no warning dot for the unreachable daemon")
+	}
+}
+
+// pruning is a live view whose daemon on node-1 removes records.
+type pruning struct {
+	live
+	mu    sync.Mutex
+	asked []string
+}
+
+func (p *pruning) Prune(_ context.Context, node string, ids []string) (int, int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if node != "node-1" {
+		return 0, 0, collector.ErrNoDaemon
+	}
+	p.asked = append(p.asked, ids...)
+	return len(ids), int64(len(ids)) * 1000, nil
+}
+
+// The nodes page says whose each node's cache is, and an admin (anyone
+// without sign-in) may remove a project's part of it from the page only.
+func TestNodeCacheByProject(t *testing.T) {
+	pl := &pruning{live: live{{Name: "daemon-a", Connected: true, InspectedAt: testNow, Inspection: collector.Inspection{Node: "node-1"}}}}
+	ts, st, _, _ := consoleWith(t, testOpts{Live: pl})
+	if err := st.SetDaemonNode(ctx, "daemon-a", "node-1"); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := st.Recent(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recs []cacheuse.Record
+	for _, b := range recent {
+		for i, step := range b.Build.Steps {
+			if d := cacheuse.Describe(step.Key, step.Name); d != "" && step.State == history.Built {
+				recs = append(recs, cacheuse.Record{ID: fmt.Sprintf("%d-%d", b.ID, i), Description: d, Type: "regular", Size: 1000, Created: step.Completed})
+			}
+		}
+	}
+	recs = append(recs, cacheuse.Record{ID: "base", Description: "pulled from docker.io/library/alpine:3.22", Type: "regular", Size: 5 << 20, Created: testNow})
+	if err := st.CacheSnapshot(ctx, "node-1", recs); err != nil {
+		t.Fatal(err)
+	}
+	page := get(t, ts, "/nodes")
+	page.safe(t)
+	link := regexp.MustCompile(`href="(/nodes/node-1/cache/[0-9a-f]{6}/42)"`).FindStringSubmatch(page.body)
+	if !strings.Contains(page.body, "Cache by project") || !strings.Contains(page.body, "Base images") || link == nil {
+		t.Fatalf("no cache by project on the nodes page")
+	}
+	confirm := get(t, ts, html.UnescapeString(link[1]))
+	if confirm.status != http.StatusOK {
+		t.Fatalf("confirmation page: %d %s", confirm.status, confirm.body[:min(300, len(confirm.body))])
+	}
+	confirm.safe(t)
+	if !strings.Contains(confirm.body, "<form method=\"post\">") || len(pl.asked) != 0 {
+		t.Fatalf("the confirmation page does not ask, or removed already")
+	}
+	post := func(origin string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+html.UnescapeString(link[1]), nil)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+			req.Header.Set("Sec-Fetch-Site", "cross-site")
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if code := post("https://evil.example.com"); code != http.StatusForbidden || len(pl.asked) != 0 {
+		t.Fatalf("a post from another site: %d, removed %d", code, len(pl.asked))
+	}
+	if code := post(""); code != http.StatusOK || len(pl.asked) != len(recs)-1 {
+		t.Fatalf("removing: %d, asked to remove %d of %d layers", code, len(pl.asked), len(recs)-1)
+	}
+	for _, id := range pl.asked {
+		if id == "base" {
+			t.Error("a base image's layer removed with a project's cache")
+		}
+	}
+	if as, err := st.CacheActions(ctx, 5); err != nil || len(as) != 1 || as[0].Records != len(recs)-1 || as[0].Who != "console" {
+		t.Errorf("the removal is not recorded: %+v %v", as, err)
 	}
 }
 
