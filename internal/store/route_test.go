@@ -124,6 +124,15 @@ func TestWarmAndDecisions(t *testing.T) {
 	if counts, _ := s.DaemonCounts(ctx, time.Time{}); counts["bk-x"].Routed[string(route.ZoneHash)] != 2 {
 		t.Errorf("routed ever: %+v", counts["bk-x"])
 	}
+	// The projects each daemon built for, counted.
+	all, _ := s.DaemonCounts(ctx, time.Time{})
+	n := 0
+	for _, pb := range all["daemon-a"].Projects {
+		n += pb.Builds
+	}
+	if len(all["daemon-a"].Projects) == 0 || n > all["daemon-a"].Builds {
+		t.Errorf("projects of daemon-a: %+v (builds %d)", all["daemon-a"].Projects, all["daemon-a"].Builds)
+	}
 
 	// Decisions go with the builds' retention.
 	c.t = c.t.Add(s.opts.Keep + time.Hour)
