@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
 )
 
 // APIJob is a job as GitLab's API describes it.
