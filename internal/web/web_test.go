@@ -61,6 +61,7 @@ func consoleWith(t *testing.T, opt testOpts) (*httptest.Server, *store.Store, ma
 // served by start (plain or TLS).
 func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(http.Handler) *httptest.Server) (*httptest.Server, *store.Store, map[string]int64, *Server) {
 	t.Helper()
+	testLogs = &lockedBuffer{}
 	st, err := store.Open(ctx, t.TempDir(), store.Options{Now: func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }})
 	if err != nil {
 		t.Fatal(err)
@@ -133,12 +134,8 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 		}
 		ids[b.Ref] = id
 	}
-	var logTo io.Writer = io.Discard
-	if os.Getenv("WEB_TEST_LOG") != "" {
-		logTo = os.Stderr
-	}
 	backend, opt := options(st).wire(t, st)
-	srv, err := New(backend, slog.New(slog.NewTextHandler(logTo, nil)), opt)
+	srv, err := New(backend, testLogger(), opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,9 +148,39 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /livez", ok)
 	mux.HandleFunc("GET /api/v1/builds", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "[]") })
-	ts := start(Secure(srv.Gate(mux)))
+	ts := start(AccessLog(testLogger(), Secure(srv.Gate(mux))))
 	t.Cleanup(ts.Close)
 	return ts, st, ids, srv
+}
+
+// testLogs is what the last console built for a test logged, at the debug
+// level, through a handler that hides nothing: the tests read it for what
+// the code itself must never log.
+var testLogs *lockedBuffer
+
+func testLogger() *slog.Logger {
+	var to io.Writer = testLogs
+	if os.Getenv("WEB_TEST_LOG") != "" {
+		to = io.MultiWriter(testLogs, os.Stderr)
+	}
+	return slog.New(slog.NewTextHandler(to, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 type page struct {

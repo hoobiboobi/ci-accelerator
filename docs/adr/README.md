@@ -51,3 +51,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0045](0045-build-router.md) | The build router: each job to the daemon where its project is warm |
 | [0046](0046-cache-reuse.md) | Cache shared across projects; no per-project namespaces |
 | [0047](0047-figures-the-console-shows.md) | Figures the console shows: measured, recountable, from enough builds |
+| [0048](0048-logs.md) | Logs: one JSON line per event, info bounded by the work, no secrets |

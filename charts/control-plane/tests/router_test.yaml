@@ -93,6 +93,8 @@ tests:
             - -cross-zone=true
             - -overload=0
             - -drain=300s
+            - -log-level=info
+            - -log-format=json
       # The pod's grace covers the drain: running builds finish.
       - equal: { path: spec.template.spec.terminationGracePeriodSeconds, value: 315 }
       - equal: { path: 'spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds', value: 5 }

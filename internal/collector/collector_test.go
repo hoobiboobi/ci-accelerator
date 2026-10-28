@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -376,5 +377,49 @@ func TestOldRecordAfterANewerOneIsStored(t *testing.T) {
 	}
 	if _, ok := c.daemons[f.name].builds[first.Ref]; ok {
 		t.Error("the old record stays in memory")
+	}
+}
+
+// A build new to the store is one info line; the same record read again
+// after a restart (a new collector over the same store) is a debug line.
+func TestStoredBuildsAreLoggedOnce(t *testing.T) {
+	f := recorded(t)
+	c, s := newCollector(t)
+	var buf bytes.Buffer
+	c.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	r := f.recs[0]
+	if err := c.Record(ctx, f, r); err != nil {
+		t.Fatal(err)
+	}
+	again := New(s, instances, slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	if err := again.Record(ctx, f, r); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Count(out, `level=INFO msg="build stored"`) != 1 || strings.Count(out, `level=DEBUG msg="build stored again"`) != 1 ||
+		!strings.Contains(out, "build="+r.Ref) || !strings.Contains(out, "daemon="+f.name) {
+		t.Errorf("log:\n%s", out)
+	}
+}
+
+// BuildKit sends a record first without the client's trace, then again
+// with it: the build is logged when stored and when it gets its job.
+func TestBuildAttributedLater(t *testing.T) {
+	f := recorded(t)
+	c, _ := newCollector(t)
+	var buf bytes.Buffer
+	c.log = slog.New(slog.NewTextHandler(&buf, nil))
+	r := f.recs[0]
+	early := proto.Clone(r).(*controlapi.BuildHistoryRecord)
+	early.Trace, early.Generation = nil, r.Generation-1
+	for _, rec := range []*controlapi.BuildHistoryRecord{early, r} {
+		if err := c.Record(ctx, f, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := buf.String()
+	if !strings.Contains(out, `msg="build stored"`) || !strings.Contains(out, "attribution=unattributed") ||
+		!strings.Contains(out, `msg="build attributed"`) || !strings.Contains(out, " job=") {
+		t.Errorf("log:\n%s", out)
 	}
 }

@@ -73,6 +73,7 @@ spec:
             - -cross-zone={{ $v.crossZone }}
             - -overload={{ int $v.overloadBuilds }}
             - -drain={{ int $v.drainSeconds }}s
+            {{- include "control-plane.logArgs" (dict "root" $ "role" $v) | nindent 12 }}
           env:
             - name: CI_ACCELERATOR_NODE_NAME
               valueFrom:

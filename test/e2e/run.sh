@@ -1100,6 +1100,40 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
   check "the console stores the job's build, attributed and compared (project from the job pod)" eventually 60 box_console
   # The job's address leads to its build's page, which says why it took
   # its time. The instance is the trace id's GitLab part.
+  # Every line of the control plane's pods (and the disk probes) is one
+  # JSON object naming its role; each role logged its start and readiness,
+  # the controller the build it stored, and no line has a query string.
+  box_logs() {
+    local c
+    for c in controller web router; do
+      kc -n "$BOX_NS" logs -l "app.kubernetes.io/instance=$BOX_REL,app.kubernetes.io/component=$c" --tail=-1 \
+        >"$LOGS/box-log-$c.txt" 2>&1
+    done
+    kc -n "$BOX_NS" logs -l "app.kubernetes.io/instance=$BOX_REL,app.kubernetes.io/name=buildkit" -c disk-probe --tail=-1 \
+      >"$LOGS/box-log-disk-probe.txt" 2>&1
+    check "every log line of the control plane and the disk probes is JSON with its role, and each role started and got ready" \
+      python3 - "$LOGS" <<'PY'
+import json, sys
+ok = True
+for role, need in [("controller", ["starting", "ready", "build stored"]), ("web", ["starting", "ready"]),
+                   ("router", ["starting", "ready", "routed"]), ("disk-probe", ["starting", "ready"])]:
+    msgs = set()
+    for line in open(f"{sys.argv[1]}/box-log-{role}.txt"):
+        try:
+            m = json.loads(line)
+        except ValueError:
+            print(f"{role}: not JSON: {line.strip()[:200]}"); ok = False; continue
+        if m.get("role") != role:
+            print(f"{role}: a line of role {m.get('role')!r}"); ok = False
+        if "?" in m.get("path", "") or "code=" in line:
+            print(f"{role}: a query in the log: {line.strip()[:200]}"); ok = False
+        msgs.add(m.get("msg"))
+    for n in need:
+        if n not in msgs:
+            print(f"{role}: no {n!r} line"); ok = False
+sys.exit(0 if ok else 1)
+PY
+  }
   box_console_page() {
     kc -n "$JOBS_NS" exec client-build -- wget -qO- \
       "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/${box_tid:2:6}/$(job_id box)" 2>/dev/null >"$LOGS/box-console-page.html"
@@ -1107,6 +1141,7 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
       grep -q 'class="dl step st-built' "$LOGS/box-console-page.html"
   }
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
+  box_logs
   box_disk
   box_console_policy
   box_split

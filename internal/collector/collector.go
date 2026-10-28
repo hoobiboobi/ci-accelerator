@@ -125,6 +125,13 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 	for ref, x := range w.builds {
 		before[ref] = fingerprint(x)
 	}
+	// BuildKit completes a record before the client's trace is in it, and
+	// sends it again a few seconds later with it: that is when a build
+	// gets its pipeline and job.
+	gotJob := false
+	if old := w.builds[b.Ref]; old != nil {
+		gotJob = old.Attribution.State != history.Attributed && b.Attribution.State == history.Attributed
+	}
 	w.builds[b.Ref], w.gens[b.Ref] = b, gen
 	if b.Started.After(w.newest) {
 		w.newest = b.Started
@@ -152,6 +159,12 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 	sort.Slice(list, func(i, j int) bool { return list[i].Started.Before(list[j].Started) })
 	history.Link(list)
 
+	// A record read again (the stream starts over after a restart) is
+	// logged quietly: only a build new to the store is news.
+	known, err := c.store.Stored(ctx, b.Daemon, b.Ref)
+	if err != nil {
+		return err
+	}
 	// Save in start order, so that a build that executed a step is stored
 	// before the builds that received it.
 	type pipelineKey struct {
@@ -165,7 +178,8 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 				continue
 			}
 		}
-		if err := c.save(ctx, x, w.gens[x.Ref]); err != nil {
+		r, err := c.save(ctx, x, w.gens[x.Ref])
+		if err != nil {
 			if x == b {
 				// Not stored: the record is read again when it comes again.
 				delete(w.gens, b.Ref)
@@ -173,6 +187,7 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 			}
 			return err
 		}
+		c.logStored(x, r, x == b && !known, x == b && gotJob)
 		if a := x.Attribution; a.State == history.Attributed {
 			pipelines[pipelineKey{a.Instance, a.Pipeline}] = true
 		}
@@ -277,13 +292,48 @@ func (c *Collector) recompute(ctx context.Context, b *history.Build) (*history.B
 	return changed, nil
 }
 
-func (c *Collector) save(ctx context.Context, b *history.Build, gen int64) error {
+func (c *Collector) save(ctx context.Context, b *history.Build, gen int64) (history.Reason, error) {
 	r, err := c.reason(ctx, b)
 	if err != nil {
-		return err
+		return r, err
 	}
 	_, err = c.store.SaveBuild(ctx, store.Build{Build: b, Generation: gen, Reason: r})
-	return err
+	return r, err
+}
+
+// logStored says a build was stored: one line per build new to the store
+// and one when it gets its job (info), and one per build stored again, read
+// again after a restart or changed by what another one received (debug).
+func (c *Collector) logStored(b *history.Build, r history.Reason, arrived, gotJob bool) {
+	var built, cached, received int
+	for _, st := range b.Steps {
+		switch st.State {
+		case history.Built:
+			built++
+		case history.Cached:
+			cached++
+		case history.Received:
+			received++
+		}
+	}
+	args := []any{"build", b.Ref, "daemon", b.Daemon, "target", b.Target, "steps", len(b.Steps), "built", built, "cached", cached,
+		"received", received, "dur_ms", b.Completed.Sub(b.Started).Milliseconds(), "failed", b.Error != ""}
+	if a := b.Attribution; a.State == history.Attributed {
+		args = append(args, "gitlab", a.Instance, "pipeline", a.Pipeline, "job", a.Job)
+	} else {
+		args = append(args, "attribution", string(a.State))
+	}
+	if r.Kind != "" {
+		args = append(args, "reason", string(r.Kind))
+	}
+	switch {
+	case arrived:
+		c.log.Info("build stored", args...)
+	case gotJob:
+		c.log.Info("build attributed", args...)
+	default:
+		c.log.Debug("build stored again", args...)
+	}
 }
 
 // reason compares a build with the previous one of its project and target.

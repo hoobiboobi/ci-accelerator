@@ -131,6 +131,9 @@ spec:
             - disk-probe
             - -dir=/var/lib/buildkit
             - -listen=:{{ int64 (default 9180 $probe.port) }}
+            {{- with dig "logLevel" "" $probe }}
+            - -log-level={{ . }}
+            {{- end }}
           ports:
             - name: disk
               containerPort: {{ int64 (default 9180 $probe.port) }}

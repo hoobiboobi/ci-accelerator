@@ -222,7 +222,10 @@ func (r *Router) handle(ctx context.Context, c net.Conn) {
 	} else {
 		r.Log.Info("routed a connection of no known CI job to its node's daemon", "from", ip, "daemon", d.Daemon.Name)
 	}
-	pipe(c, up)
+	start := r.now()
+	in, out := pipe(c, up)
+	r.Log.Debug("closed", "from", ip, "job", rec.JobID, "daemon", d.Daemon.Name, "dur_ms", r.now().Sub(start).Milliseconds(),
+		"bytes_in", in, "bytes_out", out)
 }
 
 // awaitJob waits up to IdentityWait for the pod with address ip to be
@@ -253,12 +256,13 @@ func (r *Router) awaitJob(ctx context.Context, ip string) {
 // pipe copies both ways until both directions end. One side closing its
 // sending half is passed on (half-close), so a request can finish while
 // the answer still comes back.
-func pipe(a, b net.Conn) {
+func pipe(a, b net.Conn) (aToB, bToA int64) {
 	var wg sync.WaitGroup
 	wg.Add(2)
-	half := func(dst, src net.Conn) {
+	half := func(dst, src net.Conn, n *int64) {
 		defer wg.Done()
-		_, err := io.Copy(dst, src)
+		var err error
+		*n, err = io.Copy(dst, src)
 		if cw, ok := dst.(interface{ CloseWrite() error }); ok && err == nil {
 			cw.CloseWrite()
 		} else {
@@ -267,7 +271,8 @@ func pipe(a, b net.Conn) {
 			b.Close()
 		}
 	}
-	go half(b, a)
-	go half(a, b)
+	go half(b, a, &aToB)
+	go half(a, b, &bToA)
 	wg.Wait()
+	return aToB, bToA
 }

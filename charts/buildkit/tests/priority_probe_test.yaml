@@ -117,6 +117,15 @@ tests:
           path: spec.template.spec.containers[1].ports[0]
           value: {name: disk, containerPort: 9180, protocol: TCP}
 
+  - it: passes the probe a log level only when one is set (a new argument restarts every daemon)
+    template: daemonset.yaml
+    set:
+      diskProbe: { enabled: true, logLevel: debug }
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].args
+          value: [disk-probe, -dir=/var/lib/buildkit, -listen=:9180, -log-level=debug]
+
   - it: pulls the probe by digest when one is given
     template: daemonset.yaml
     set:

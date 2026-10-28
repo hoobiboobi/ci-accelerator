@@ -84,6 +84,18 @@ root = "/var/lib/buildkit"
 # --- end of config.extraConfig ---
 {{- end }}
 
+{{- $log := dig "log" dict .Values.config }}
+{{- if or $log.level $log.format }}
+
+[log]
+{{- with $log.level }}
+  level = {{ . | quote }}
+{{- end }}
+{{- with $log.format }}
+  format = {{ . | quote }}
+{{- end }}
+{{- end }}
+
 [grpc]
   # unix socket: used by the probes, never TLS. tcp: used by CI jobs, mutual
   # TLS: with a CA set, buildkitd requires a client certificate signed by it.

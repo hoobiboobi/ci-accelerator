@@ -47,7 +47,7 @@ func (o testOpts) wire(t *testing.T, st *store.Store) (Backend, Options) {
 		return local, opt
 	}
 	srv := &control.Server{Local: local, GitLab: gl, Auth: o.Auth, Config: control.ConfigFor(o.Version, o.Release, gl, o.Auth),
-		Authorize: control.StaticToken("test-token")}
+		Authorize: control.StaticToken("test-token"), Log: testLogger()}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	cctx, cancel := context.WithCancel(context.Background())

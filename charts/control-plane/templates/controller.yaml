@@ -81,6 +81,7 @@ spec:
             - -keep-days={{ int .Values.retention.days }}
             - -keep-output-days={{ int .Values.retention.outputDays }}
             - -release={{ .Release.Name }}
+            {{- include "control-plane.logArgs" (dict "root" $ "role" .Values.controller) | nindent 12 }}
             {{- if $token }}
             - -gitlab-token-file=/gitlab/token
             {{- end }}

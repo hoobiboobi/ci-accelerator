@@ -23,6 +23,27 @@ tests:
             - -controller=https://c-controller.ci-accelerator.svc:8443
             - -controller-ca=/api-tls/ca.crt
             - -token-file=/var/run/secrets/ci-accelerator/token
+            - -log-level=info
+            - -log-format=json
+
+  # Every role logs at log.level unless its own logLevel says otherwise.
+  - it: takes the log level of the role over the common one
+    template: web.yaml
+    documentIndex: 0
+    set:
+      log: { level: warn, format: text }
+      web.logLevel: debug
+    asserts:
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-log-level=debug" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-log-format=text" }
+      - notContains: { path: "spec.template.spec.containers[0].args", content: "-log-level=warn" }
+
+  - it: refuses a log level the roles do not know
+    template: web.yaml
+    set:
+      log.level: verbose
+    asserts:
+      - failedTemplate: {}
 
   # The web holds no key and no Kubernetes access: the CA alone, and a token
   # only the controller accepts.

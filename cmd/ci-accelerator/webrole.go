@@ -7,7 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,13 +17,16 @@ import (
 
 	"github.com/hoobiboobi/ci-accelerator/internal/api"
 	"github.com/hoobiboobi/ci-accelerator/internal/control"
+	"github.com/hoobiboobi/ci-accelerator/internal/logging"
 	"github.com/hoobiboobi/ci-accelerator/internal/web"
 )
 
 // webMain serves the pages, reading everything from the controller. It
 // keeps no state: any number of them can run.
-func webMain(args []string, log *slog.Logger) error {
+func webMain(args []string) error {
 	fs := flag.NewFlagSet("web", flag.ExitOnError)
+	var lf logging.Flags
+	lf.Register(fs)
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	listen := fs.String("listen", ":8080", "address of the pages, the JSON API and the health check")
 	controller := fs.String("controller", "", "the controller's API, https://host:port")
@@ -39,6 +42,11 @@ func webMain(args []string, log *slog.Logger) error {
 	if *controller == "" {
 		return errors.New("give -controller")
 	}
+	log, err := roleLog(lf, "web")
+	if err != nil {
+		return err
+	}
+	started(log, "listen", *listen, "controller", *controller, "log_level", lf.Level)
 	ca, err := os.ReadFile(*caFile)
 	if err != nil {
 		return fmt.Errorf("-controller-ca: %w", err)
@@ -65,10 +73,14 @@ func webMain(args []string, log *slog.Logger) error {
 		http.Error(w, "The console is starting: its controller has not answered yet.", http.StatusServiceUnavailable)
 	}))
 	handler.Store(&starting)
-	srv := &http.Server{Addr: *listen, ReadHeaderTimeout: 10 * time.Second,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { (*handler.Load()).ServeHTTP(w, r) })}
+	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second, ErrorLog: logging.ErrorLog(log),
+		Handler: web.AccessLog(log, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { (*handler.Load()).ServeHTTP(w, r) }))}
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http", "err", err)
 			stop()
 		}
@@ -115,15 +127,18 @@ func webMain(args []string, log *slog.Logger) error {
 	pages.Register(mux)
 	ready := web.Secure(pages.Gate(mux))
 	handler.Store(&ready)
-	log.Info("web", "listen", *listen, "controller", *controller, "version", versionString(), "sign_in", cfg.SignIn)
+	log.Info("ready", "listen", ln.Addr().String(), "controller_version", cfg.Version, "sign_in", cfg.SignIn, "gitlab", cfg.GitLab)
 	var err2 error
 	select {
 	case <-ctx.Done():
 	case <-changed:
 		err2 = errors.New("the controller's setup changed: starting again")
 	}
+	log.Info("stopping")
+	begin := time.Now()
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	srv.Shutdown(sctx)
+	log.Info("stopped", "dur_ms", time.Since(begin).Milliseconds())
 	return err2
 }

@@ -29,6 +29,21 @@ tests:
           path: data["buildkitd.toml"]
           pattern: '(?m)^\[grpc\.tls\]\n  cert = "/etc/buildkitd-tls/tls\.crt"\n  key = "/etc/buildkitd-tls/tls\.key"\n  ca = "/etc/buildkitd-tls/ca\.crt"$'
 
+  # buildkitd's log: buildkit's defaults unless set, so the config (and
+  # every daemon) does not change for it.
+  - it: writes [log] only when its level or format is set
+    asserts:
+      - notMatchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '(?m)^\[log\]'
+  - it: passes the log level and format to buildkitd
+    set:
+      config.log: { level: debug, format: json }
+    asserts:
+      - matchRegex:
+          path: data["buildkitd.toml"]
+          pattern: '(?m)^\[log\]\n  level = "debug"\n  format = "json"$'
+
   - it: never enables the unauthenticated debug server
     asserts:
       - notMatchRegex:

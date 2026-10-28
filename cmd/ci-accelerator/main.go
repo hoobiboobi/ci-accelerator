@@ -11,12 +11,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -26,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/api"
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
@@ -34,6 +38,7 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
+	"github.com/hoobiboobi/ci-accelerator/internal/logging"
 	"github.com/hoobiboobi/ci-accelerator/internal/podwatch"
 	"github.com/hoobiboobi/ci-accelerator/internal/runnercache"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -49,6 +54,7 @@ type config struct {
 	data, discover, tlsDir, serverName, listen string
 	jobsNamespace, kubeconfig, kubeContext     string
 	gitlabTokenFile, release, signIn           string
+	logLevel                                   string
 	caches, namespace                          string
 	devAssets                                  string
 	cacheEvery                                 time.Duration
@@ -90,19 +96,20 @@ func main() {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		role, args = args[0], args[1:]
 	}
-	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	// Until a role has read its flags, and for the error it ends with.
+	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{ReplaceAttr: logging.Redact}))
 	var err error
 	switch role {
 	case "disk-probe":
 		err = diskProbe(args)
 	case "", "all":
-		err = controllerMain(args, false, log)
+		err = controllerMain(args, false)
 	case "controller":
-		err = controllerMain(args, true, log)
+		err = controllerMain(args, true)
 	case "web":
-		err = webMain(args, log)
+		err = webMain(args)
 	case "router":
-		err = routerMain(args, log)
+		err = routerMain(args)
 	default:
 		fmt.Fprintf(os.Stderr, "ci-accelerator: no role %q (all, controller, web, router, disk-probe)\n", role)
 		os.Exit(2)
@@ -113,21 +120,49 @@ func main() {
 	}
 }
 
+// logOut is where the roles log (the tests read it).
+var logOut io.Writer = os.Stderr
+
+// roleLog is a role's logger from its flags; client-go's own log (klog)
+// goes to it too, so every line of a pod is one JSON object.
+func roleLog(f logging.Flags, role string) (*slog.Logger, error) {
+	log, err := logging.New(logOut, f, role)
+	if err != nil {
+		return nil, err
+	}
+	klog.SetSlogLogger(log.With("source", "client-go"))
+	return log, nil
+}
+
+// started logs a role's start: its version and the settings it runs with
+// (never a secret: files of secrets by whether they are given).
+func started(log *slog.Logger, cfg ...any) {
+	log.Info("starting", "version", versionString(), "go", runtime.Version(), slog.Group("config", cfg...))
+}
+
 func diskProbe(args []string) error {
 	fs := flag.NewFlagSet("disk-probe", flag.ExitOnError)
 	dir := fs.String("dir", "/var/lib/buildkit", "directory whose filesystem is reported")
 	listen := fs.String("listen", ":9180", "address of GET /disk and /healthz")
+	var lf logging.Flags
+	lf.Register(fs)
 	fs.Parse(args)
+	log, err := roleLog(lf, "disk-probe")
+	if err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	slog.Info("disk probe", "dir", *dir, "listen", *listen, "version", versionString())
-	return diskprobe.Serve(ctx, *listen, *dir)
+	started(log, "dir", *dir, "listen", *listen, "log_level", lf.Level)
+	return diskprobe.Serve(ctx, *listen, *dir, log)
 }
 
-func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
+func controllerMain(args []string, splitRole bool) error {
 	var c config
 	var daemons, gitlabURLs, allow, allowRouter list
 	fs := flag.NewFlagSet("controller", flag.ExitOnError)
+	var lf logging.Flags
+	lf.Register(fs)
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	fs.StringVar(&c.data, "data", "/data", "directory of the store")
 	fs.StringVar(&c.discover, "discover", "", "headless Service host:port; every address it resolves to is a daemon")
@@ -166,6 +201,15 @@ func controllerMain(args []string, splitRole bool, log *slog.Logger) error {
 	c.daemons = daemons
 	c.gitlabURLs = append(gitlabURLs, split(os.Getenv("GITLAB_URLS"))...)
 	c.split, c.apiAllow, c.apiAllowRouter = splitRole, allow, allowRouter
+	c.logLevel = lf.Level
+	role := "all"
+	if splitRole {
+		role = "controller"
+	}
+	log, err := roleLog(lf, role)
+	if err != nil {
+		return err
+	}
 	return run(c, log)
 }
 
@@ -203,6 +247,23 @@ func run(c config, log *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	gitlabRead := "none"
+	switch {
+	case c.signIn != "":
+		gitlabRead = "each person's own (sign-in)"
+	case c.gitlabTokenFile != "":
+		gitlabRead = "the installation's"
+	}
+	cfg := []any{"data", c.data, "discover", c.discover, "daemons", len(c.daemons), "jobs_namespace", c.jobsNamespace,
+		"gitlab", hosts(c.gitlabURLs), "gitlab_read", gitlabRead, "runner_caches", c.caches != "", "keep_days", c.keepDays,
+		"keep_output_days", c.keepOutputDays, "release", c.release, "log_level", c.logLevel}
+	if c.split {
+		cfg = append(cfg, "api_listen", c.apiListen, "api_allow", []string(c.apiAllow), "api_allow_router", []string(c.apiAllowRouter),
+			"warm_for", c.warmFor.String())
+	} else {
+		cfg = append(cfg, "listen", c.listen)
+	}
+	started(log, cfg...)
 
 	st, err := store.Open(ctx, c.data, store.Options{Keep: time.Duration(c.keepDays) * 24 * time.Hour, KeepOutput: c.keepOutputDays})
 	if err != nil {
@@ -251,6 +312,7 @@ func run(c config, log *slog.Logger) error {
 			return errors.New("-gitlab-token-file and -sign-in exclude each other: with sign-in GitLab is read with each person's own token")
 		}
 		client := gitlab.New(c.gitlabURLs)
+		client.Log = log
 		if signIn, err = loadSignIn(c.signIn, c.gitlabURLs, st, client, log); err != nil {
 			return err
 		}
@@ -264,7 +326,9 @@ func run(c config, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: gitlab.New(c.gitlabURLs), Store: st, Log: log},
+		client := gitlab.New(c.gitlabURLs)
+		client.Log = log
+		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: client, Store: st, Log: log},
 			Token: gitlab.Token(strings.TrimSpace(string(token)))}
 	}
 	// "Files or node" is settled without anyone opening a page: with the
@@ -289,16 +353,20 @@ func run(c config, log *slog.Logger) error {
 		api := &control.Server{Local: local, GitLab: gl, Auth: signIn, Log: log, Authorize: authorize,
 			Routes: &control.Routes{Store: st, Live: col, Log: log, Window: c.warmFor},
 			Config: control.ConfigFor(versionString(), c.release, gl, signIn)}
-		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second,
+		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, ErrorLog: logging.ErrorLog(log),
 			TLSConfig: &cryptotls.Config{MinVersion: cryptotls.VersionTLS12, GetCertificate: certs}}
 		srv.RegisterOnShutdown(api.Stop)
+		ln, err := net.Listen("tcp", c.apiListen)
+		if err != nil {
+			return err
+		}
 		go func() {
-			if err := srv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := srv.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Error("controller API", "err", err)
 				stop()
 			}
 		}()
-		log.Info("controller", "api", c.apiListen, "version", versionString())
+		log.Info("ready", "api_listen", ln.Addr().String())
 	} else {
 		opt := web.Options{Release: c.release, Version: versionString()}
 		if c.devAssets != "" {
@@ -319,19 +387,40 @@ func run(c config, log *slog.Logger) error {
 		mux.Handle("GET /healthz", apiRoutes)
 		mux.Handle("GET /api/", apiRoutes)
 		pages.Register(mux)
-		srv = &http.Server{Addr: c.listen, Handler: web.Secure(pages.Gate(mux)), ReadHeaderTimeout: 10 * time.Second}
+		srv = &http.Server{Addr: c.listen, Handler: web.AccessLog(log, web.Secure(pages.Gate(mux))), ReadHeaderTimeout: 10 * time.Second,
+			ErrorLog: logging.ErrorLog(log)}
+		ln, err := net.Listen("tcp", c.listen)
+		if err != nil {
+			return err
+		}
 		go func() {
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Error("http", "err", err)
 				stop()
 			}
 		}()
+		log.Info("ready", "listen", ln.Addr().String())
 	}
 	go prune(ctx, st, signIn, log)
 	sup.Run(ctx)
+	log.Info("stopping")
+	begin := time.Now()
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return srv.Shutdown(sctx)
+	err = srv.Shutdown(sctx)
+	log.Info("stopped", "dur_ms", time.Since(begin).Milliseconds())
+	return err
+}
+
+// hosts are the GitLab instances' hosts, for the log.
+func hosts(urls []string) []string {
+	var out []string
+	for _, u := range urls {
+		if p, err := url.Parse(u); err == nil && p.Host != "" {
+			out = append(out, p.Host)
+		}
+	}
+	return out
 }
 
 // apiAuthorizer says who may call the controller: a static token from a
@@ -409,6 +498,15 @@ func watchJobs(ctx context.Context, c config, client kubernetes.Interface, st *s
 					log.Warn("job not stored", "job", j.JobID, "err", err)
 					return
 				}
+				// Once when its build container starts (and again for a
+				// running job after a restart); the pod's earlier events
+				// at debug.
+				args := []any{"job", j.JobID, "pipeline", j.PipelineID, "project", j.ProjectID, "name", j.Name, "node", j.Node}
+				if !j.PodRunning.IsZero() {
+					log.Info("job started", args...)
+				} else {
+					log.Debug("job pod seen", args...)
+				}
 				if err := col.JobKnown(ctx, j.Instance, j.JobID); err != nil {
 					log.Warn("job's builds not compared", "job", j.JobID, "err", err)
 				}
@@ -416,7 +514,9 @@ func watchJobs(ctx context.Context, c config, client kubernetes.Interface, st *s
 			Gone: func(ctx context.Context, j store.Job, at time.Time) {
 				if err := st.JobEnded(ctx, j.Instance, j.JobID, at); err != nil {
 					log.Warn("job end not stored", "job", j.JobID, "err", err)
+					return
 				}
+				log.Info("job ended", "job", j.JobID, "pipeline", j.PipelineID, "project", j.ProjectID)
 			},
 		})
 		if err != nil {

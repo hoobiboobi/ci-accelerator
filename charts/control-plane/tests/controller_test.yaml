@@ -32,6 +32,8 @@ tests:
             - -keep-days=30
             - -keep-output-days=3
             - -release=c
+            - -log-level=info
+            - -log-format=json
 
   # The box passes names from its own values: rendered with tpl.
   - it: renders the daemons, the jobs namespace and the server name with tpl

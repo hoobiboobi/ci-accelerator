@@ -32,6 +32,8 @@ Kubernetes: `>=1.34.0-0`
 | config.gc.reservedSpace | string | `"10GB"` | The capped policies never reclaim below this much cache. Age-based policies (cache mounts, local context) still expire by age. |
 | config.gcPolicy | list | `[]` | Replace the chart's GC policies entirely. Each item: filters, all, keepDuration, reservedSpace, maxUsedSpace, minFreeSpace. Filters use buildkit's prune syntax, e.g. "type==exec.cachemount". |
 | config.history | object | `{"maxAge":"48h","maxEntries":1000}` | Build history, which the controller reads (it copies each record when it completes, and reads the history again after a restart). Keys: maxAge (duration) and maxEntries (int). Set both, or neither: a key that is not set becomes 0, not the buildkit default (48h / 50); maxEntries 0 stops recording new history, and maxAge alone drops the 50-entry floor. 1000 records cover about an hour of a busy farm; buildkit's own 50 last minutes there. |
+| config.log.format | string | `""` | json or text; empty: text. |
+| config.log.level | string | `""` | error, warn, info or debug; empty: info. |
 | config.maxParallelism | int | `0` | Max concurrently running build operations per daemon: RUN, COPY/ADD and source operations (image pulls, git, local context). 0 = unlimited, which is buildkit's default (not the CPU count). Production ran 28 on a 48-CPU daemon. |
 | config.maxRegistryConcurrency | int | `0` | Max concurrent connections per registry; 0 keeps the buildkit default (4). Pushes that get stuck hold their slot and can hang every build on the daemon (moby/buildkit#7275); the probes do not detect that. |
 | config.workerOCI | object | `{}` | Extra keys for the [worker.oci] table, e.g. {snapshotter: native}. Values: strings, numbers, booleans or lists. The keys the chart sets (enabled, gc, max-parallelism, gcpolicy) are rejected. |
@@ -40,6 +42,7 @@ Kubernetes: `>=1.34.0-0`
 | diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
 | diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator"` | The ci-accelerator image: mirror it together with the control plane's. |
 | diskProbe.image.tag | string | `""` | Default: v0.3.0, the release that last changed the probe program or its image; pinned, so a chart release alone does not restart every daemon. |
+| diskProbe.logLevel | string | `""` | Its log level (debug adds a line per reading); empty: info. Set, it restarts every daemon once. |
 | diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the daemons tell it to the control plane as a worker label. |
 | diskProbe.resources | object | `{"limits":{"memory":"32Mi"},"requests":{"cpu":"5m","memory":"16Mi"}}` | The probe's resources (it reads one number a minute). |
 | extraEnv | list | `[]` | Extra environment variables for the daemon container. |

@@ -31,6 +31,9 @@ import (
 // token of the person whose page asked.
 type Client struct {
 	HTTP *http.Client
+	// Log, when set, gets a debug line per request (host and path, never
+	// the query or a header) and an info line when GitLab limits the rate.
+	Log *slog.Logger
 	// bases maps an instance (trace-id prefix) to its API root.
 	bases map[string]string
 }
@@ -96,9 +99,18 @@ func (c *Client) doRange(ctx context.Context, cred Credential, u, rng string) (*
 		if rng != "" {
 			req.Header.Set("Range", rng)
 		}
+		start := time.Now()
 		res, err := c.HTTP.Do(req)
 		if err != nil {
 			return nil, err
+		}
+		if c.Log != nil {
+			args := []any{"gitlab", req.URL.Host, "path", req.URL.Path, "status", res.StatusCode, "dur_ms", time.Since(start).Milliseconds()}
+			if res.StatusCode == http.StatusTooManyRequests {
+				c.Log.Info("gitlab rate limited", append(args, "until", retryAfter(res.Header, time.Now()))...)
+			} else {
+				c.Log.Debug("gitlab request", args...)
+			}
 		}
 		if res.StatusCode != http.StatusUnauthorized {
 			return res, nil

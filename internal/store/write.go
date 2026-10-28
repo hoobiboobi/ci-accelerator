@@ -30,6 +30,15 @@ var states = map[history.StepState]int{history.Cached: 0, history.Built: 1, hist
 
 var attributions = map[history.AttributionState]int{history.Unattributed: 0, history.Attributed: 1, history.Ambiguous: 2}
 
+// Stored says whether a daemon's record is stored already: a stream read
+// again after a restart replays records the store has.
+func (s *Store) Stored(ctx context.Context, daemon, ref string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM builds b JOIN daemons d ON d.id = b.daemon_id WHERE d.name = ? AND b.ref = ?`,
+		daemon, ref).Scan(&n)
+	return n > 0, err
+}
+
 // SaveBuild stores a build, its steps, its reason and its graph, and then
 // its steps' output. It returns the build's id.
 func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {

@@ -299,6 +299,14 @@
             "maxEntries": { "type": "integer", "minimum": 0 }
           }
         },
+        "log": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "level": { "type": "string", "enum": ["", "debug", "info", "warn", "error"] },
+            "format": { "type": "string", "enum": ["", "json", "text"] }
+          }
+        },
         "cdi": {
           "type": "object",
           "additionalProperties": false,
@@ -416,6 +424,7 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "port": { "type": "integer", "minimum": 1024, "maximum": 65535, "not": { "const": 1234 } },
+        "logLevel": { "type": "string", "enum": ["", "debug", "info", "warn", "error"] },
         "image": {
           "type": "object",
           "additionalProperties": false,

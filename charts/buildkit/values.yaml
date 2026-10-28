@@ -285,6 +285,16 @@ config:
   cdi:
     enabled: false
 
+  # buildkitd's own log ([log] in buildkitd.toml). Empty keeps buildkit's
+  # defaults (text, info); set, it changes the config and restarts every
+  # daemon once. debug logs every step of every build and a stack for each
+  # failed call: for a while, to find something out.
+  log:
+    # -- error, warn, info or debug; empty: info.
+    level: ""
+    # -- json or text; empty: text.
+    format: ""
+
   # -- Max concurrent connections per registry; 0 keeps the buildkit default
   # (4). Pushes that get stuck hold their slot and can hang every build on
   # the daemon (moby/buildkit#7275); the probes do not detect that.
@@ -438,6 +448,9 @@ diskProbe:
   # -- Its port (GET /disk, /healthz); the daemons tell it to the control
   # plane as a worker label.
   port: 9180
+  # -- Its log level (debug adds a line per reading); empty: info. Set, it
+  # restarts every daemon once.
+  logLevel: ""
   image:
     # -- The ci-accelerator image: mirror it together with the control plane's.
     repository: ghcr.io/hoobiboobi/ci-accelerator

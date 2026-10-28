@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 )
@@ -51,9 +52,11 @@ func (s *Supervisor) Run(ctx context.Context) {
 		} else {
 			fails = 0
 			seen := map[string]bool{}
+			var added, removed []string
 			for _, a := range addrs {
 				seen[a] = true
 				if running[a] == nil {
+					added = append(added, a)
 					actx, cancel := context.WithCancelCause(ctx)
 					running[a] = cancel
 					wg.Add(1)
@@ -67,7 +70,12 @@ func (s *Supervisor) Run(ctx context.Context) {
 				if !seen[a] {
 					cancel(ErrGone)
 					delete(running, a)
+					removed = append(removed, a)
 				}
+			}
+			if len(added)+len(removed) > 0 {
+				sort.Strings(removed)
+				s.Log.Info("daemons changed", "added", added, "removed", removed, "total", len(running))
 			}
 		}
 		select {

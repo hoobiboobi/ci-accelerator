@@ -337,6 +337,45 @@ limit on build nodes.
 - **Someone removed from a project still sees it.** GitLab's answer on a
   project is kept for 10 minutes (a refusal for 90 seconds).
 
+## Reading the logs
+
+Every pod of the control plane writes one JSON object per line on stderr,
+each with its `role`:
+
+| Pod | Command |
+|---|---|
+| controller | `kubectl logs deploy/<release>-controller` |
+| web | `kubectl logs deploy/<release>-web` |
+| build router | `kubectl logs ds/<release>-router` (one pod per build node: add `--all-containers` or pick the node's pod) |
+| disk probe | `kubectl logs ds/<release>-buildkit -c disk-probe` |
+| BuildKit | `kubectl logs ds/<release>-buildkit -c buildkitd` |
+
+At the default level (`info`) a role says when it starts (with the settings
+it runs with), when it is ready, stops and has stopped; the controller adds
+a line for every stored build (`build stored`: daemon, steps built and
+cached, the reason) and one when it gets its pipeline and job
+(`build attributed`: BuildKit sends a record a few seconds before the
+client's trace is in it), every job start and end, every change of the
+daemons and every sign-in and sign-out; the router one per routed
+connection (`routed`: job, project, daemon, reason). Repeated warnings (a
+daemon or GitLab down) are written once a minute with how many were held
+back (`suppressed`).
+
+To find something out, raise the level for a while:
+`--set control-plane.log.level=debug` (or one role's
+`control-plane.<controller|web|router>.logLevel`) adds a line per request,
+GitLab call, controller API call and closed router connection;
+`control-plane.log.format=text` is easier to read by eye. Changing either
+restarts the control plane's pods, not the daemons. BuildKit's own log is
+`buildkit.config.log.level`/`format` and the disk probe's
+`buildkit.diskProbe.logLevel`; setting those restarts every daemon once, and
+BuildKit at `debug` writes a stack for every failed call, so turn it back
+afterwards.
+
+No log carries a token, a cookie, a query string (an OAuth callback's code
+and state), a build argument, step output or a commit title: the roles log
+ids, paths and counts, and mask anything that looks like a GitLab token.
+
 ## Helm
 
 - **Upgrades:** use `helm upgrade --reset-then-reuse-values`. With

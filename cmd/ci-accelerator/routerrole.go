@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/control"
+	"github.com/hoobiboobi/ci-accelerator/internal/logging"
 	"github.com/hoobiboobi/ci-accelerator/internal/route"
 	"github.com/hoobiboobi/ci-accelerator/internal/router"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -22,8 +22,10 @@ import (
 
 // routerMain proxies the CI jobs' connections to the build daemon where
 // their project's cache is.
-func routerMain(args []string, log *slog.Logger) error {
+func routerMain(args []string) error {
 	fs := flag.NewFlagSet("router", flag.ExitOnError)
+	var lf logging.Flags
+	lf.Register(fs)
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	listen := fs.String("listen", ":1234", "address the CI jobs connect to")
 	health := fs.String("health", ":8080", "address of /livez and /readyz")
@@ -57,6 +59,13 @@ func routerMain(args []string, log *slog.Logger) error {
 	case len(urls) == 0:
 		return errors.New("give at least one -gitlab-url (or $GITLAB_URLS)")
 	}
+	log, err := roleLog(lf, "router")
+	if err != nil {
+		return err
+	}
+	started(log, "listen", *listen, "health", *health, "node", *node, "daemons", *namespace+"/"+*service, "jobs_namespace", *jobs,
+		"gitlab", hosts(urls), "controller", *controller, "zones", *zones, "cross_zone", *crossZone, "overload", *overload,
+		"drain", drain.String(), "log_level", lf.Level)
 	kube, err := kubeClient(config{})
 	if err != nil {
 		return err
@@ -117,7 +126,7 @@ func routerMain(args []string, log *slog.Logger) error {
 		}
 		fmt.Fprint(w, "ok")
 	})
-	hs := &http.Server{Addr: *health, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	hs := &http.Server{Addr: *health, Handler: mux, ReadHeaderTimeout: 10 * time.Second, ErrorLog: logging.ErrorLog(log)}
 	go func() {
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("health", "err", err)
@@ -128,8 +137,7 @@ func routerMain(args []string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	log.Info("router", "listen", *listen, "node", *node, "daemons", *namespace+"/"+*service, "jobs", *jobs,
-		"controller", *controller, "version", versionString())
+	log.Info("ready", "listen", ln.Addr().String())
 	go func() {
 		if err := <-watchErr; err != nil && ctx.Err() == nil {
 			log.Error("watching the daemons and jobs", "err", err)
@@ -142,5 +150,6 @@ func routerMain(args []string, log *slog.Logger) error {
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	hs.Shutdown(sctx)
+	log.Info("stopped")
 	return err
 }
