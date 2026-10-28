@@ -225,7 +225,13 @@ func TestResaveKeepsWhatGitLabSettled(t *testing.T) {
 	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
 		t.Errorf("after reading it again: %s %q", k, via)
 	}
-	// The collector's pipeline pass asks it again too.
+	// The collector's pipeline pass comes to the same conclusion from a
+	// witness, then asks it again: GitLab's answer stays.
+	witness := open
+	witness.Kind, witness.By = history.OtherNode, b.Ref
+	if err := s.SetReason(ctx, b.Ref, b.Daemon, witness); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.SetReason(ctx, b.Ref, b.Daemon, open); err != nil {
 		t.Fatal(err)
 	}
