@@ -332,3 +332,9 @@ holds "console" (or fullnameOverride). Read by name: no list. */}}
 {{- if $signIn }}{{ $_ := set $setup "signInConfig" (include "control-plane.signInConfig" .) }}{{ end }}
 {{- toJson $setup | sha256sum | trunc 16 }}
 {{- end }}
+
+{{/* The log flags of a role: dict "root" . "role" <the role's values>. */}}
+{{- define "control-plane.logArgs" -}}
+- -log-level={{ .role.logLevel | default .root.Values.log.level }}
+- -log-format={{ .root.Values.log.format }}
+{{- end }}

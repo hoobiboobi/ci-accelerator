@@ -25,6 +25,7 @@ Kubernetes: `>=1.34.0-0`
 | controller.api.clusterDomain | string | `"cluster.local"` | Cluster domain in the API certificate's names. |
 | controller.api.port | int | `8443` | The API's port. |
 | controller.api.tls.existingSecret | string | `""` | Secret with the API's server certificate (tls.crt, tls.key, and ca.crt that it chains to) for the name <release>-controller; empty: issued by cert-manager from the daemons' CA (server auth only). Needed with tls.existingSecret. |
+| controller.logLevel | string | `""` | The controller's log level; empty: log.level. |
 | controller.nodeSelector | object | `{}` |  |
 | controller.persistence | object | `{"existingClaim":"","size":"10Gi","storageClass":""}` | The store. SQLite needs block storage (ReadWriteOnce): never NFS or another shared file system. The claim <release>-controller-data is kept when the release is removed. |
 | controller.podAnnotations | object | `{}` |  |
@@ -59,6 +60,8 @@ Kubernetes: `>=1.34.0-0`
 | imagePullSecrets | list | `[]` |  |
 | jobs.namespace | string | `""` | Namespace of the CI job pods, read for job names, pipelines and commits. Empty: builds are kept without them. Rendered with tpl. |
 | jobs.rbac | object | `{"create":true}` | A Role and RoleBinding there that let the controller get, list and watch pods. Without them, give that access some other way. |
+| log.format | string | `"json"` | json, or text (key=value) for reading by eye. |
+| log.level | string | `"info"` | The least important events logged: error, warn, info (a line per stored build, job start and end, routed connection, sign-in) or debug (also every request, GitLab call and API call: for a while, to find something out). Each role's logLevel overrides it. |
 | nameOverride | string | `""` | Name of the app (app.kubernetes.io/name). Default: control-plane. |
 | networkPolicy.deniedComponents | list | `["buildkit"]` | Pods of this namespace whose ci-accelerator.io/component label is one of these may not reach the web: the daemons, whose network every build shares. |
 | networkPolicy.deniedNamespaces | list | `[]` | More namespaces whose pods may not reach the web (the jobs namespace is always one when jobs.namespace is set). Rendered with tpl. |
@@ -71,6 +74,7 @@ Kubernetes: `>=1.34.0-0`
 | router.drainSeconds | int | `300` | Seconds open connections (running builds) may finish when a router stops; the pod's grace period is this plus preStopSleepSeconds and 10. |
 | router.enabled | string | `nil` | Run the router; default: global.router.enabled (the box sets it). The runners then use tcp://<release>-router.<namespace>.svc:1234, and the daemons' certificate must name that Service (the buildkit chart does with global.router.service). |
 | router.healthPort | int | `8080` | The port of /livez and /readyz. |
+| router.logLevel | string | `""` | The router's log level; empty: log.level. |
 | router.nodeSelector | object | `{}` | Merged over global.buildNodes.selector. |
 | router.overloadBuilds | int | `0` | Skip a daemon running this many builds when another one is free; 0: never (a busy warm daemon is usually still faster than a cold one). |
 | router.podAnnotations | object | `{}` |  |
@@ -93,6 +97,7 @@ Kubernetes: `>=1.34.0-0`
 | tls.certManager.renewBeforePercentage | int | `33` |  |
 | tls.existingSecret | string | `""` | Secret with the controller's client certificate (ca.crt, tls.crt, tls.key) signed by the daemons' CA; empty: issued by cert-manager. |
 | web.affinity | object | `{}` |  |
+| web.logLevel | string | `""` | The web's log level; empty: log.level. |
 | web.nodeSelector | object | `{}` |  |
 | web.podAnnotations | object | `{}` |  |
 | web.podLabels | object | `{}` |  |

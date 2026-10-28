@@ -54,6 +54,7 @@ spec:
             - -controller=https://{{ include "control-plane.controllerName" . }}.{{ .Release.Namespace }}.svc:{{ int .Values.controller.api.port }}
             - -controller-ca=/api-tls/ca.crt
             - -token-file=/var/run/secrets/ci-accelerator/token
+            {{- include "control-plane.logArgs" (dict "root" $ "role" $v) | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ int $v.port }}

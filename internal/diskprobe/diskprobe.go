@@ -9,9 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"syscall"
 	"time"
+
+	"github.com/hoobiboobi/ci-accelerator/internal/logging"
 )
 
 // Disk is a filesystem's size, in bytes and inodes. Free counts the blocks
@@ -53,22 +57,40 @@ func Handler(dir string, stat func(string) (Disk, error)) http.Handler {
 	return mux
 }
 
-// Serve answers on addr until ctx ends.
-func Serve(ctx context.Context, addr, dir string) error {
+// Serve answers on addr until ctx ends, logging to log: a statfs that
+// fails at most once a minute, each answer at the debug level.
+func Serve(ctx context.Context, addr, dir string, log *slog.Logger) error {
 	if _, err := Stat(dir); err != nil {
 		return fmt.Errorf("disk probe: %w", err)
 	}
-	srv := &http.Server{Addr: addr, Handler: Handler(dir, Stat), ReadHeaderTimeout: 5 * time.Second,
+	every := &logging.Every{Period: time.Minute}
+	stat := func(d string) (Disk, error) {
+		disk, err := Stat(d)
+		if err != nil {
+			every.Warn(log, d, "statfs failed", "dir", d, "err", err)
+		} else {
+			log.Debug("disk read", "free", disk.Free, "available", disk.Available)
+		}
+		return disk, err
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Handler: Handler(dir, stat), ReadHeaderTimeout: 5 * time.Second, ErrorLog: logging.ErrorLog(log),
 		ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 8 << 10}
 	go func() {
 		<-ctx.Done()
+		log.Info("stopping")
 		shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(shut)
 	}()
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	log.Info("ready", "listen", ln.Addr().String())
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	log.Info("stopped")
 	return nil
 }
 

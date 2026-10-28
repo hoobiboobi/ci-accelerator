@@ -575,7 +575,17 @@ func (a *Auth) end(ctx context.Context, id []byte) error {
 			}
 		}
 	}
-	return a.store.DeleteSession(ctx, id)
+	if err := a.store.DeleteSession(ctx, id); err != nil {
+		return err
+	}
+	if a.log != nil {
+		host := ""
+		if in := a.insts[x.Instance]; in != nil {
+			host = in.host
+		}
+		a.log.Info("signed out", "gitlab", host, "user", x.Username)
+	}
+	return nil
 }
 
 // revoke asks GitLab to revoke a token; GitLab revokes its refresh token

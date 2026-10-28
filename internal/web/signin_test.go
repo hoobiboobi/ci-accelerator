@@ -99,7 +99,7 @@ func signedIn(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *
 		client := gitlab.New([]string{gl})
 		client.HTTP = via
 		a, err := auth.New(auth.Config{PublicURL: "https://127.0.0.1", Key: make([]byte, 32), HTTP: via, Now: g.now,
-			Instances: []auth.Instance{{URL: gl, ClientID: "cid", Secret: "sec", Admins: []string{"root"}}}}, st, client, nil)
+			Instances: []auth.Instance{{URL: gl, ClientID: "cid", Secret: "client-secret-value", Admins: []string{"root"}}}}, st, client, testLogger())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -456,5 +456,15 @@ func TestSignOut(t *testing.T) {
 	page := fetch(t, alice, ts, "GET", "/auth/sign-in?e=out", nil)
 	if !strings.Contains(page.body, "You are signed out") {
 		t.Error("the sign-in page does not say the person signed out")
+	}
+	// Signing in and out, reading pages: the log says who, never with what.
+	logs := testLogs.String()
+	if !strings.Contains(logs, `msg="signed in"`) || !strings.Contains(logs, `msg="signed out" gitlab=gitlab.example.com user=alice`) || !strings.Contains(logs, "msg=request") {
+		t.Errorf("the log lacks the sign-in or the requests:\n%s", logs)
+	}
+	for _, secret := range []string{"at-alice", "rt-alice", "client-secret-value", "code=alice", "state=", "__Host-"} {
+		if strings.Contains(logs, secret) {
+			t.Errorf("the log carries %q", secret)
+		}
 	}
 }

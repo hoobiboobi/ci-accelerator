@@ -92,6 +92,18 @@ workflow copies them into the GitHub release.
   rest folded; the reader's project first; projects the reader may not
   see as a count, never by name). A daemon replaced by a rollout answers
   with its node's current daemon.
+- Logs: every role writes one JSON object per line with its role, a
+  `starting` line with the settings it runs with, `ready`, `stopping` and
+  `stopped`, and a line per stored build, job start and end, change of the
+  daemons, sign-in and sign-out and routed connection; at `debug` also
+  every request, GitLab call, controller API call and closed router
+  connection. client-go's and the HTTP servers' own messages go through the
+  same log. Tokens, cookies, query strings, build arguments and step output
+  are never logged, and anything shaped like a GitLab token is masked.
+  Values: `control-plane.log.level`/`format` and each role's `logLevel`;
+  `buildkit.config.log.level`/`format` and `buildkit.diskProbe.logLevel`
+  (empty by default: the daemons do not change). Every role takes
+  `-log-level` and `-log-format`.
 - The build page shows BuildKit's Dockerfile build checks that failed
   (rule, line, link), what each executed step's processes used (CPU time,
   time held back by a CPU limit, disk read and written, from BuildKit's

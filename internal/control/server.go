@@ -258,6 +258,10 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such method", http.StatusNotFound)
 		return
 	}
+	start := time.Now()
+	defer func() {
+		s.Log.Debug("api call", "method", r.PathValue("method"), "dur_ms", time.Since(start).Milliseconds())
+	}()
 	var raw []json.RawMessage
 	if err := json.NewDecoder(io.LimitReader(r.Body, 32<<20)).Decode(&raw); err != nil {
 		http.Error(w, "arguments: "+err.Error(), http.StatusBadRequest)

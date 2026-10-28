@@ -145,6 +145,17 @@ retention:
   # -- Days the steps' output is kept.
   outputDays: 7
 
+# The roles' own logs (kubectl logs): one JSON object per line. Never in
+# them: tokens, cookies, query strings, build arguments, step output.
+log:
+  # -- The least important events logged: error, warn, info (a line per
+  # stored build, job start and end, routed connection, sign-in) or debug
+  # (also every request, GitLab call and API call: for a while, to find
+  # something out). Each role's logLevel overrides it.
+  level: info
+  # -- json, or text (key=value) for reading by eye.
+  format: json
+
 # The controller (Deployment <release>-controller, one pod): the store, the
 # collector, the job-pod watch, the sessions and every GitLab token. The
 # web reads it over its API.
@@ -181,6 +192,8 @@ controller:
   affinity: {}
   podLabels: {}
   podAnnotations: {}
+  # -- The controller's log level; empty: log.level.
+  logLevel: ""
 
 # The web (Deployment and Service <release>-web): the console's pages and
 # its JSON API. It keeps nothing, so any number of its pods can run.
@@ -200,6 +213,8 @@ web:
   affinity: {}
   podLabels: {}
   podAnnotations: {}
+  # -- The web's log level; empty: log.level.
+  logLevel: ""
 
 # The build router (DaemonSet on the build nodes and Service
 # <release>-router): CI jobs connect to it instead of to the daemons'
@@ -257,6 +272,8 @@ router:
   # -- Namespaces whose pods may connect to the router; default: the jobs
   # namespace. Rendered with tpl.
   clientNamespaces: []
+  # -- The router's log level; empty: log.level.
+  logLevel: ""
 
 # Who may connect. CI jobs and their builds (RUN steps share the daemons'
 # network) run untrusted code in the same cluster, and without sign-in the
