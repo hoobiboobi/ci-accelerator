@@ -13,17 +13,21 @@ tests:
           pattern: 'DaemonSet box-buildkit'
       - matchRegexRaw:
           pattern: 'CI jobs run in namespace ci-accelerator-jobs \(created by this release, Pod Security baseline; deleted with it\)'
+      # The component of this release, as the release notes print it; its
+      # integrity is checked against ci/gitlab/build.yml by the component's
+      # tests. The runner's tags are the user's (0.3.1 printed a job without
+      # tags, which a runner that takes only tagged jobs never runs).
       - matchRegexRaw:
-          pattern: 'buildctl --addr "\$BUILDKIT_REMOTE_ADDR" --tlsdir "\$BUILDKIT_TLS_DIR"'
+          pattern: '  include:\n    - remote: https://raw\.githubusercontent\.com/hoobiboobi/ci-accelerator/v\d+\.\d+\.\d+[^/]*/ci/gitlab/build\.yml\n      integrity: sha256-[A-Za-z0-9+/]{43}=\n      inputs:\n        runner-tags: \[<the runner.s tags>\]'
 
-  # The build job's image is the BuildKit release the daemons run, not the
-  # box's own version (0.2.0 and 0.2.1 printed moby/buildkit:<box version>).
-  - it: gives the build job the daemons' BuildKit image
+  # buildctl's image is the BuildKit release the daemons run, not the box's
+  # own version (0.2.0 and 0.2.1 printed moby/buildkit:<box version>).
+  - it: names the daemons' BuildKit image for buildctl without the component
     asserts:
       - matchRegexRaw:
-          pattern: 'image: moby/buildkit:v\d+\.\d+\.\d+\n'
+          pattern: 'BUILDKIT_TLS_DIR for buildctl in moby/buildkit:v\d+\.\d+\.\d+\.\n'
       - notMatchRegexRaw:
-          pattern: 'image: moby/buildkit:\d'
+          pattern: 'moby/buildkit:\d'
 
   - it: points to the fragment without its own runner
     set:
@@ -58,7 +62,7 @@ tests:
       - notMatchRegexRaw:
           pattern: 'preview'
       - matchRegexRaw:
-          pattern: 'Without GitLab access it shows image builds, their steps and cache\nverdicts, but no job results or runner waits\. More \(README, "The console"\):\n  - a GitLab token with read_api \(control-plane\.gitlab\.token\.existingSecret\):'
+          pattern: 'Without GitLab access it shows image builds, their steps and cache\nverdicts, but no job results or runner waits\. More \(README, "Setting up\nthe console"\):\n  - a GitLab token with read_api \(control-plane\.gitlab\.token\.existingSecret\):'
       # Without global.console.url the redirect URI shows where the address goes.
       - matchRegexRaw:
           pattern: '      <global\.console\.url>/auth/callback/051b90\n'

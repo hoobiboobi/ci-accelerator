@@ -3,8 +3,9 @@
 # the three charts carry the tag's version, the umbrella depends on exactly
 # those buildkit and control-plane versions, the control plane's appVersion
 # (the ci-accelerator image tag, v<appVersion>) is the same, the README and docs/gitops.md install
-# it, the README's one-node upgrade uses the quickstart's Helm, and
-# CHANGELOG.md has an entry with upgrade notes for it.
+# it, the README's one-node upgrade uses the quickstart's Helm, the box's
+# notes carry the component's integrity, the disk probe's image is a
+# released one, and CHANGELOG.md has an entry with upgrade notes for it.
 # Prints the version on success.
 #
 #   scripts/check-release-version.sh v0.1.0
@@ -64,6 +65,16 @@ for f in README.md ci/gitlab/README.md; do
   grep -qF -- "hoobiboobi/ci-accelerator/$tag/ci/gitlab/build.yml" "$ROOT/$f" \
     || { echo "$f does not include the component from $tag" >&2; fail=1; }
 done
+# The box's install notes print the include with the component's integrity.
+integrity="sha256-$(openssl dgst -sha256 -binary "$ROOT/ci/gitlab/build.yml" | base64)"
+grep -qxF -- "$integrity" "$ROOT/charts/ci-accelerator/templates/_helpers.tpl" \
+  || { echo "charts/ci-accelerator/templates/_helpers.tpl: componentIntegrity is not $integrity (ci/gitlab/build.yml)" >&2; fail=1; }
+# The disk probe's image is this release's or a released one, whose digest
+# the release notes print and both charts list.
+probe=$(sed -n 's/.*default "\(v[0-9][^"]*\)" \$img\.tag.*/\1/p' "$ROOT/charts/buildkit/templates/_helpers.tpl")
+if [ "$probe" != "$tag" ] && ! grep -q "^$probe: sha256:[0-9a-f]\{64\}\$" "$ROOT/charts/buildkit/templates/_helpers.tpl"; then
+  echo "charts/buildkit: the disk probe runs ci-accelerator:$probe, which is neither $tag nor among the released images" >&2; fail=1
+fi
 # The README's upgrade command for the one-node install uses the Helm the
 # script installs.
 qs_helm=$(awk -F= '/^HELM_VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")

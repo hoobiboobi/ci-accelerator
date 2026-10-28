@@ -457,7 +457,9 @@ diskProbe:
     # -- Default: v0.3.0, the release that last changed the probe program or
     # its image; pinned, so a chart release alone does not restart every daemon.
     tag: ""
-    # -- When set, the image is pulled by digest (tag is kept for readability).
+    # -- When set, the image is pulled by digest (tag is kept for readability;
+    # the release notes list the probe's). Under the default tag, the digest
+    # of another release is refused.
     digest: ""
     pullPolicy: IfNotPresent
   # -- The probe's resources (it reads one number a minute).

@@ -333,12 +333,37 @@ Pinned on purpose: a default of v<chart version> made every chart release
 restart all daemons (the pod template changed), for a probe whose program
 had not.
 */}}
+{{/*
+The released ci-accelerator images (ghcr.io/hoobiboobi/ci-accelerator) by tag,
+with their index digests from the release notes. A digest pinned for one
+release would run that release under another tag (the runtime pulls by
+digest), so a pin of a listed digest under a different tag is refused.
+Every release adds its own line afterwards (test/released-images.sh keeps
+the list the same in charts/buildkit and charts/control-plane and checks the
+last published release is in it).
+*/}}
+{{- define "buildkit.releasedImages" -}}
+v0.3.0: sha256:785091522e89806379d527acff74cbadf6dc6f8371bb31adc408cace2af842a2
+v0.3.1: sha256:e7252ed4cd63943a63b7876410005080050d51fe52f4f3c6f843663a03fb18f0
+{{- end }}
+
 {{- define "buildkit.diskProbeImage" -}}
 {{- $img := dig "image" dict (.Values.diskProbe | default dict) }}
 {{- $repo := default "ghcr.io/hoobiboobi/ci-accelerator" $img.repository }}
 {{- $tag := default "v0.3.0" $img.tag }}
-{{- if $img.digest }}
-{{- printf "%s:%s@%s" $repo $tag $img.digest }}
+{{- $digest := toString (default "" $img.digest) }}
+{{- /* A digest pinned for another release under the default tag would run
+that release as the probe's (the default tag moves when the probe changes). */}}
+{{- if and $digest (not $img.tag) }}
+{{- $released := include "buildkit.releasedImages" . | fromYaml }}
+{{- range $v, $d := $released }}
+{{- if and (eq (toString $d) $digest) (ne $v $tag) }}
+{{- fail (printf "diskProbe.image.digest (buildkit.diskProbe.image.digest in the box) is the digest of the %s image, but the disk probe runs %s: its digest is %s" $v $tag (default "in its release notes" (get $released $tag))) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $digest }}
+{{- printf "%s:%s@%s" $repo $tag $digest }}
 {{- else }}
 {{- printf "%s:%s" $repo $tag }}
 {{- end }}

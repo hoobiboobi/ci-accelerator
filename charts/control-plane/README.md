@@ -70,7 +70,7 @@ Kubernetes: `>=1.34.0-0`
 | global.tls.issuerRef.group | string | `"cert-manager.io"` |  |
 | global.tls.issuerRef.kind | string | `"ClusterIssuer"` |  |
 | global.tls.issuerRef.name | string | `""` |  |
-| image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability). |
+| image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability). Under the default tag, the digest of another release is refused: set the new release's digest on upgrade. |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator"` |  |
 | image.tag | string | `""` | Default: v<appVersion>. |
@@ -107,7 +107,7 @@ Kubernetes: `>=1.34.0-0`
 | router.zones | bool | `true` | Keep a job's builds in its zone (topology.kubernetes.io/zone of the daemons' nodes): a project then warms up once per zone. false: every daemon is one zone (zones close enough that crossing them costs nothing, or one zone label per node). |
 | signIn | object | `{"enabled":false,"gitlab":[],"sessionKey":{"existingSecret":"","key":"key"},"url":""}` | Sign-in through GitLab. Each person signs in with a GitLab the runners serve and sees the projects whose jobs GitLab lets them read (Reporter or more, or public pipelines); GitLab is read with their own token. GitLab never calls the console: the browser carries the redirects. |
 | signIn.gitlab | list | `[]` | One OAuth application per GitLab (User or Group Settings > Applications, or Admin > Applications on your own GitLab): confidential, scopes openid and read_api, redirect URI <url>/auth/callback/<id> (the NOTES and the controller's log print it).   url: exactly as the runners have it; may be left empty when the        console serves one GitLab   existingSecret: a Secret with the keys client-id and client-secret   admins: GitLab usernames who see everything (builds of no known        project, the JSON API) |
-| signIn.sessionKey | object | `{"existingSecret":"","key":"key"}` | A Secret holding 32 random bytes in base64 (openssl rand -base64 32); it seals each session's GitLab token. Changing it signs everyone out. |
+| signIn.sessionKey | object | `{"existingSecret":"","key":"key"}` | A Secret holding 32 random bytes in base64 (openssl rand -base64 32); it seals each session's GitLab token. Changing it signs everyone out. With Flux or Argo CD (SOPS, Sealed Secrets, External Secrets): docs/gitops.md, "The session key". |
 | signIn.url | string | `""` | Where browsers reach the console: https (an Ingress or a gateway you add), or http only on localhost (a port-forward). Default: global.console.url. Rendered with tpl. |
 | tls.certManager.duration | string | `"8760h"` |  |
 | tls.certManager.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | Default: global.tls.issuerRef. Rendered with tpl. |

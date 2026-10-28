@@ -25,6 +25,8 @@ image:
   # -- Default: v<appVersion>.
   tag: ""
   # -- When set, the image is pulled by digest (tag is kept for readability).
+  # Under the default tag, the digest of another release is refused: set
+  # the new release's digest on upgrade.
   digest: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
@@ -88,6 +90,8 @@ signIn:
   url: ""
   # -- A Secret holding 32 random bytes in base64 (openssl rand -base64 32);
   # it seals each session's GitLab token. Changing it signs everyone out.
+  # With Flux or Argo CD (SOPS, Sealed Secrets, External Secrets):
+  # docs/gitops.md, "The session key".
   sessionKey:
     existingSecret: ""
     key: key

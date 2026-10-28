@@ -100,6 +100,38 @@ tests:
     asserts:
       - matchRegex: { path: "spec.template.spec.containers[0].image", pattern: '^ghcr\.io/hoobiboobi/ci-accelerator:v[0-9.]+(-[0-9A-Za-z.-]+)?@sha256:0{64}$' }
 
+  # The README told 0.3.1's users to pin the digest; helm upgrade
+  # --reset-then-reuse-values keeps it, and under the next chart's tag the
+  # runtime would go on pulling 0.3.1 by its digest.
+  - it: refuses a digest of an earlier release under this chart's tag
+    chart:
+      appVersion: 9.9.9
+    set:
+      image.digest: sha256:785091522e89806379d527acff74cbadf6dc6f8371bb31adc408cace2af842a2
+    asserts:
+      - failedTemplate: { errorPattern: "image.digest \\(control-plane.image.digest in the box\\) is the digest of the v0.3.0 image, but this chart runs v9.9.9: set the digest of v9.9.9 from its release notes, or remove the digest" }
+  # The refusal says "remove the digest"; Helm removes a key set to null.
+  - it: takes a null digest as none
+    set:
+      image.digest: null
+    asserts:
+      - matchRegex: { path: "spec.template.spec.containers[0].image", pattern: '^ghcr\.io/hoobiboobi/ci-accelerator:v[0-9.]+(-[0-9A-Za-z.-]+)?$' }
+  - it: takes an earlier release's digest with its tag (pinning that release on purpose)
+    chart:
+      appVersion: 9.9.9
+    set:
+      image.tag: v0.3.0
+      image.digest: sha256:785091522e89806379d527acff74cbadf6dc6f8371bb31adc408cace2af842a2
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].image", value: "ghcr.io/hoobiboobi/ci-accelerator:v0.3.0@sha256:785091522e89806379d527acff74cbadf6dc6f8371bb31adc408cace2af842a2" }
+  - it: takes a release's own digest under its own tag
+    chart:
+      appVersion: 0.3.1
+    set:
+      image.digest: sha256:e7252ed4cd63943a63b7876410005080050d51fe52f4f3c6f843663a03fb18f0
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].image", value: "ghcr.io/hoobiboobi/ci-accelerator:v0.3.1@sha256:e7252ed4cd63943a63b7876410005080050d51fe52f4f3c6f843663a03fb18f0" }
+
   # A chart release that changes nothing else must not restart the controller.
   - it: keeps the chart version out of the pod template
     asserts:
