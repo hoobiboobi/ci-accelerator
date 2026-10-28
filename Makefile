@@ -194,7 +194,7 @@ chart-docs-check: $(HELM_DOCS) ## Fail when a chart README is out of date (make 
 .PHONY: artifacthub-metadata
 artifacthub-metadata: $(ORAS) ## Push artifacthub/<chart>.yml to every chart's OCI repository (CHARTS_REPO=ghcr.io/<owner>/charts)
 	@[ -n "$(CHARTS_REPO)" ] || { echo "set CHARTS_REPO=ghcr.io/<owner>/charts" >&2; exit 2; }
-	@for c in buildkit control-plane ci-accelerator; do \
+	@for c in buildkit ci-accelerator; do \
 		rm -rf $(TOOLS)/artifacthub && mkdir -p $(TOOLS)/artifacthub && cp artifacthub/$$c.yml $(TOOLS)/artifacthub/artifacthub-repo.yml && \
 		(cd $(TOOLS)/artifacthub && $(ORAS) push "$(CHARTS_REPO)/$$c:artifacthub.io" \
 			--config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \

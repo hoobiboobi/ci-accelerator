@@ -83,17 +83,15 @@ RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02
 # UPGRADE_FROM_DIR=<dir> takes ci-accelerator-<v>.tgz and buildkit-<v>.tgz
 # from a directory instead (a packaged tree, to rehearse the next upgrade;
 # no checksums), with UPGRADE_FROM_VALUES for what it needs on kind.
-UPGRADE_FROM=${UPGRADE_FROM:-0.2.5}
-UPGRADE_FROM_SHA256=44bc28794b084dd259e4f16431f8597b0eca9326151716e570bcd26c49394e82
-UPGRADE_FROM_BUILDKIT_SHA256=d6a8f227450d0224992a868cefc4fc3d24b48172c07d8c08915bcc00c32f40e5
+UPGRADE_FROM=${UPGRADE_FROM:-0.3.0}
+UPGRADE_FROM_SHA256=81874e4360486174d600130f2b7d80fcb606039beecd69b8c57d4850650fb632
+UPGRADE_FROM_BUILDKIT_SHA256=2fbcaa355c54230c1bc4a32d78c6cf954d195d8959e62239043810271fc89616
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 UPGRADE_FROM_DIR=${UPGRADE_FROM_DIR:-}
 UPGRADE_FROM_VALUES=${UPGRADE_FROM_VALUES:-$ROOT/test/e2e/box-values-old.yaml}
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
-# then restarts every daemon; say so in the upgrade notes). 1 for 0.3.0:
-# the daemons label their worker with whether their cache persists and
-# their disk probe's port (the buildkit chart's upgrade notes say so).
-UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
+# then restarts every daemon; say so in the upgrade notes).
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # An S3 store for the runner cache (MinIO publishes no images any more):

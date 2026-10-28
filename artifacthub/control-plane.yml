@@ -1,9 +1,0 @@
-# Artifact Hub repository metadata for oci://ghcr.io/hoobiboobi/charts/control-plane,
-# pushed as the tag artifacthub.io of that repository (make artifacthub-metadata;
-# the release and the artifacthub workflow do it). repositoryID is the id
-# Artifact Hub shows for the repository: it makes the publisher verified.
-# The repository is new in 0.3.0: add its id here once it is registered,
-# then run the artifacthub workflow.
-owners:
-  - name: Aleksei Bondarenko
-    email: standprojectmail@gmail.com

@@ -77,7 +77,7 @@ About half an hour later [Artifact Hub](https://artifacthub.io/packages/helm/ci-
 
 Then check the release the way a user installs it on one machine: run the Quickstart workflow by hand with the release's version (`gh workflow run quickstart.yml -f release=<v>`). It downloads `quickstart.sh` from the release, checks it against `SHA256SUMS` and installs from the registry on a clean runner.
 
-A package pushed for the first time is private: make it public under the repository's Packages (`charts/control-plane` and `ci-accelerator` came with 0.3.0; register `charts/control-plane` on Artifact Hub and put its repository id into `artifacthub/control-plane.yml`). Then install the umbrella from the registry on a kind cluster and run a build, as the README quickstart does.
+A package pushed for the first time is private: make it public under the repository's Packages. Artifact Hub lists the box and the daemons' chart (`artifacthub/ci-accelerator.yml`, `artifacthub/buildkit.yml`); the control plane's chart is published on ghcr.io only, since it is of no use without the daemons. Then install the umbrella from the registry on a kind cluster and run a build, as the README quickstart does.
 
 ## 6. After the release
 
