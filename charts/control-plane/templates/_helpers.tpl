@@ -119,10 +119,38 @@ nothing else does not restart the pods.
 {{- toYaml (merge $own $pod (default (dict) .root.Values.commonLabels)) }}
 {{- end }}
 
+{{/*
+The released ci-accelerator images (ghcr.io/hoobiboobi/ci-accelerator) by tag,
+with their index digests from the release notes. A digest pinned for one
+release would run that release under another tag (the runtime pulls by
+digest), so a pin of a listed digest under a different tag is refused.
+Every release adds its own line afterwards (test/released-images.sh keeps
+the list the same in charts/buildkit and charts/control-plane and checks the
+last published release is in it).
+*/}}
+{{- define "control-plane.releasedImages" -}}
+v0.3.0: sha256:785091522e89806379d527acff74cbadf6dc6f8371bb31adc408cace2af842a2
+v0.3.1: sha256:e7252ed4cd63943a63b7876410005080050d51fe52f4f3c6f843663a03fb18f0
+{{- end }}
+
+{{/*
+The image: repository:tag@digest when a digest is set. The tag follows the
+chart (v<appVersion>) unless set; a digest pinned for an earlier release and
+kept by helm upgrade --reset-then-reuse-values would go on running that
+release under the new tag, so it is refused with the way forward.
+*/}}
 {{- define "control-plane.image" -}}
 {{- $tag := default (printf "v%s" .Chart.AppVersion) .Values.image.tag }}
-{{- if .Values.image.digest }}
-{{- printf "%s:%s@%s" .Values.image.repository $tag .Values.image.digest }}
+{{- $digest := toString (default "" .Values.image.digest) }}
+{{- if and $digest (not .Values.image.tag) }}
+{{- range $released, $d := include "control-plane.releasedImages" . | fromYaml }}
+{{- if and (eq (toString $d) $digest) (ne $released $tag) }}
+{{- fail (printf "image.digest (control-plane.image.digest in the box) is the digest of the %s image, but this chart runs %s: set the digest of %s from its release notes, or remove the digest" $released $tag $tag) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $digest }}
+{{- printf "%s:%s@%s" .Values.image.repository $tag $digest }}
 {{- else }}
 {{- printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}

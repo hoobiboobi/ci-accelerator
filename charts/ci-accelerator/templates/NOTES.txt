@@ -17,18 +17,22 @@ No runner is installed: configure yours with integrations/gitlab-runner/values.y
 
 CI jobs connect to the build router ({{ include "ci-accelerator.routerName" . }}, on every build node),
 which sends each job to the daemon where its project built before; the
-build page says why. Its decisions:
-  kubectl -n {{ .Release.Namespace }} logs ds/{{ include "ci-accelerator.routerName" . }} | grep routed
+build page says why. Its decisions, from every router pod:
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=router --prefix --tail=-1 | grep routed
 {{- end }}
 
-Build in a CI job (the job gets BUILDKIT_REMOTE_ADDR and the client
-certificate in BUILDKIT_TLS_DIR):
+Build in a CI job with the GitLab CI component: it builds the project's
+Dockerfile on the build farm and pushes $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+with the job token (README, "A first build"):
 
-  build:
-    image: moby/buildkit:{{ .Subcharts.buildkit.Chart.AppVersion }}
-    script:
-      - buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR"
-          build --frontend dockerfile.v0 --local context=. --local dockerfile=.
+  include:
+    - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v{{ .Chart.Version }}/ci/gitlab/build.yml
+      integrity: {{ include "ci-accelerator.componentIntegrity" . }}
+      inputs:
+        runner-tags: [<the runner's tags>]   # leave out if the runner takes untagged jobs
+
+Without the component, the job gets BUILDKIT_REMOTE_ADDR and the client
+certificate in BUILDKIT_TLS_DIR for buildctl in moby/buildkit:{{ .Subcharts.buildkit.Chart.AppVersion }}.
 
 {{- $otel := .Values.buildkit.otel | default dict }}
 {{- if or (index .Values "victoria-metrics-single") (index .Values "victoria-traces-single") (contains "ci-accelerator.vmService" (toString $otel.metricsEndpoint)) (contains "ci-accelerator.vtService" (toString $otel.tracesEndpoint)) }}
@@ -89,7 +93,8 @@ whoever reaches it, so keep it inside the cluster:
 {{- $cu := trimSuffix "/" (dig "console" "url" "" (default (dict) .Values.global)) }}
 {{- if not (dig "gitlab" "token" "existingSecret" "" $cp) }}
 Without GitLab access it shows image builds, their steps and cache
-verdicts, but no job results or runner waits. More (README, "The console"):
+verdicts, but no job results or runner waits. More (README, "Setting up
+the console"):
   - a GitLab token with read_api (control-plane.gitlab.token.existingSecret):
     job results, runner waits, "files or node" by comparing commits;
   - sign-in through GitLab (control-plane.signIn): each person sees the
@@ -98,8 +103,8 @@ verdicts, but no job results or runner waits. More (README, "The console"):
 {{- else }}
 With its GitLab token it also shows job results and runner waits and
 settles "files or node" by comparing commits. Sign-in through GitLab
-(control-plane.signIn; README, "The console") would show each person only
-the projects GitLab lets them read; its redirect URI would be
+(control-plane.signIn; README, "Setting up the console") would show each
+person only the projects GitLab lets them read; its redirect URI would be
   {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
 {{- end }}
 {{- end }}

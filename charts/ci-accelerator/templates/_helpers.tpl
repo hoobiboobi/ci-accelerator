@@ -243,3 +243,12 @@ the release name holds "console". Read by name: no list of Deployments. */}}
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+The include line of the GitLab CI component of this release (ci/gitlab/build.yml
+at the tag v<chart version>): its integrity is the sha256 of that file, kept
+equal to it by the component's tests and the release check.
+*/}}
+{{- define "ci-accelerator.componentIntegrity" -}}
+sha256-STsZ7pnPREbwJNdpCo69UlOCFOtgORUuEb9xJBT/xnY=
+{{- end }}

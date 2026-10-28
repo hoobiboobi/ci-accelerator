@@ -42,7 +42,7 @@ Kubernetes: `>=1.34.0-0`
 | config.maxRegistryConcurrency | int | `0` | Max concurrent connections per registry; 0 keeps the buildkit default (4). Pushes that get stuck hold their slot and can hang every build on the daemon (moby/buildkit#7275); the probes do not detect that. |
 | config.workerOCI | object | `{}` | Extra keys for the [worker.oci] table, e.g. {snapshotter: native}. Values: strings, numbers, booleans or lists. The keys the chart sets (enabled, gc, max-parallelism, gcpolicy) are rejected. |
 | diskProbe.enabled | bool | `false` | Run the probe. Off here (no controller to read it); the box turns it on. |
-| diskProbe.image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability). |
+| diskProbe.image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability; the release notes list the probe's). Under the default tag, the digest of another release is refused. |
 | diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
 | diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator"` | The ci-accelerator image: mirror it together with the control plane's. |
 | diskProbe.image.tag | string | `""` | Default: v0.3.0, the release that last changed the probe program or its image; pinned, so a chart release alone does not restart every daemon. |
