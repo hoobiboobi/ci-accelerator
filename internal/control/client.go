@@ -420,8 +420,8 @@ func (c *Client) Output(ctx context.Context, buildID int64, step int) (out strin
 	return
 }
 
-func (c *Client) DaemonCounts(ctx context.Context, since time.Time) (out map[string]store.DaemonCount, err error) {
-	err = c.call(ctx, "DaemonCounts", []any{since}, &out)
+func (c *Client) DaemonCounts(ctx context.Context, since time.Time, in store.ProjectsIn) (out map[string]store.DaemonCount, err error) {
+	err = c.call(ctx, "DaemonCounts", []any{since, in}, &out)
 	return
 }
 

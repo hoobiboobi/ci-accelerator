@@ -81,6 +81,13 @@ workflow copies them into the GitHub release.
 - Compare any two builds of an image (`/builds/<id>/compare`, linked from
   the build page): time, commit, node, build arguments, the Dockerfiles'
   differing lines and every step's state and time side by side.
+- A page per build daemon (`/nodes/<daemon>`, linked from the Nodes table,
+  the build page and Ctrl+K): its builds, rebuilds, running builds, cache
+  by kind and largest cache mounts, disk, the build router's decisions by
+  reason, its garbage collection, and the projects it built for (25, the
+  rest folded; the reader's project first; projects the reader may not
+  see as a count, never by name). A daemon replaced by a rollout answers
+  with its node's current daemon.
 - The build page shows BuildKit's Dockerfile build checks that failed
   (rule, line, link), what each executed step's processes used (CPU time,
   time held back by a CPU limit, disk read and written, from BuildKit's
@@ -95,9 +102,13 @@ workflow copies them into the GitHub release.
   GitLab's comparisons of commits asked for before, which are stored
   (they never change) and also settle a build again after the controller
   restarts.
-- The Nodes page counts the build router's decisions of the last 24 hours
-  per daemon (to the project's cache, by hash, another zone, job unknown)
-  and names the projects each daemon built for.
+- The Nodes page is one table of the daemons, the ones that need
+  attention first (not reachable, a disk warning, a cache that could not be
+  read; a filter shows only those), with disk, cache, builds, rebuilds for
+  want of cache, running builds, projects and the build router's
+  decisions; one note per problem naming its nodes; "where <project>
+  built" for the project the pages show; base images held by more than one
+  node as a table.
 - The time from a job's start to its build is split by the job pod's own
   timestamps: the runner preparing the pod, the pod starting (scheduled,
   images pulled), the runner attaching, checkout and script. On the

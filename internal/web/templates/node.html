@@ -1,0 +1,50 @@
+{{define "node"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+{{with .Row}}
+  <header class="phead"><div class="crumbs"><a href="/nodes" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/nodes">Nodes</a><span class="sepr">/</span><span>{{.Short}}</span></div>
+    <div class="titlerow"><h1 class="t mono" tabindex="-1">{{.Short}}</h1>{{if .Ready}}<span class="chip received">{{icon "s_cached" 11}}Ready</span>{{else}}<span class="chip failed">{{icon "warn" 11}}Not reachable for {{.Down}}</span>{{end}}</div>
+    <div class="sub">{{with .Node}}<span>on <code>{{.}}</code></span>{{end}}{{with .Version}}<span>BuildKit {{.}}</span>{{end}}<span>{{if $.Persists}}cache survives restarts (hostPath){{else}}cache lives with the pod{{end}}</span>{{with $.Measured}}<span>{{.}}</span>{{end}}<span class="mono muted">{{.Name}}</span></div></header>
+  {{if not .Ready}}<div class="callout warn" role="note">{{icon "warn" 16}}<div><b class="k">Not reachable</b>The console cannot read its build history; its jobs' builds appear once it is back. The figures below are the builds stored before.</div></div>{{end}}
+  {{with .Err}}<div class="callout warn" role="note">{{icon "warn" 16}}<div><b class="k">Its cache could not be read</b>{{.}}</div></div>{{end}}
+  <div class="tiles">
+    <div class="tile"><span class="k">Builds, 24 hours</span><span class="v">{{.Builds}}</span><span class="s">for {{.Projects}} project{{if ne .Projects 1}}s{{end}}</span></div>
+    <div class="tile"><span class="k">Rebuilt for want of cache here</span><span class="v">{{.Farm}}</span><span class="s">{{if .Unclear}}<span class="wtxt" title="whether the files changed or the cache was gone is unclear">+{{.Unclear}} unclear</span>{{else}}24 hours{{end}}</span></div>
+    <div class="tile"><span class="k">Running now</span><span class="v">{{.Running}}</span><span class="s">{{$.RunningNote}}</span></div>
+    {{if .Inspected}}<div class="tile"><span class="k">Cache</span><span class="v">{{bytes .Cache}}</span><span class="s">as BuildKit counts it</span></div>{{end}}
+    {{with .Disk}}{{if not .Err}}<div class="tile"><span class="k">Available to pods</span><span class="v{{if eq .Level "crit"}} tone-crit{{else if eq .Level "warn"}} tone-warn{{end}}">{{.Avail}}</span><span class="s">of the cache's disk</span></div>{{end}}{{end}}
+  </div>
+  <div class="cards2">
+    <section class="box" aria-labelledby="cbT"><div class="boxh"><h2 class="h" id="cbT">Cache by BuildKit</h2>{{if .Inspected}}<span class="muted">{{bytes .Cache}}</span>{{end}}</div>
+      {{if .Inspected}}{{if .Segs}}<div class="pad"><div class="sstack" role="img" aria-label="{{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>
+        <div class="legend">{{range .Segs}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{.Size}}</b></span>{{end}}</div></div>{{else}}<p class="muted pad">The cache is empty.</p>{{end}}
+      {{with $.Mounts}}<table><thead><tr><th>Largest cache mounts</th><th class="num">Size</th><th class="num">Kept until</th></tr></thead><tbody>{{range .}}<tr><td class="mono wrapany">{{.Name}}</td><td class="num">{{.Size}}</td><td class="num">{{if .Until}}{{.Until}}{{else}}<span class="muted">—</span>{{end}}</td></tr>{{end}}
+        {{with $.MoreMounts}}<tr><td colspan="3" class="muted">and {{.}} smaller mount{{if ne . 1}}s{{end}}</td></tr>{{end}}</tbody></table>{{end}}
+      {{else}}<p class="muted pad">Reading its cache…</p>{{end}}</section>
+    <section class="box" aria-labelledby="dkT"><div class="boxh"><h2 class="h" id="dkT">Disk</h2><span class="muted">the cache's filesystem</span></div>
+      {{with .Disk}}{{if .Err}}<p class="muted pad">The disk probe did not answer ({{.Err}}).</p>{{else}}<div class="pad ndisk">
+        <div class="sstack" role="img" aria-label="Disk: {{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>
+        <div class="legend">{{range .Segs}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{.Size}}</b></span>{{end}}</div>
+        <div class="nkv mt8">{{range .Rows}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>
+        {{if .Notes}}<div class="callout {{if eq .Level "crit"}}bad{{else}}warn{{end}}" role="note">{{icon "warn" 15 "i"}}<div><b class="k">{{if eq .Level "crit"}}The disk is nearly full{{else}}Disk space{{end}}</b>{{range .Notes}}<span class="dnote">{{.Text}}</span>{{end}}</div></div>{{end}}</div>{{end}}
+      {{else}}<p class="muted pad">No disk probe runs next to this daemon.</p>{{end}}</section>
+  </div>
+{{end}}
+  <section class="box" aria-labelledby="pbT"><div class="boxh"><h2 class="h" id="pbT">Projects built here</h2><span class="muted">24 hours{{if .Built}} · the most builds first{{end}}</span></div>
+    {{if .Built}}<div class="tbox flat"><table class="ptable"><thead><tr><th>Project</th><th class="num">Builds</th><th class="sh"><span class="sr">Share of the most builds</span></th></tr></thead><tbody>{{range .Built}}{{template "nprow" .}}{{end}}</tbody></table></div>
+    {{with .More}}<details class="foldrow" id="projects-more"><summary>{{len .}} more project{{if ne (len .) 1}}s{{end}}</summary><div class="tbox flat"><table class="ptable"><tbody>{{range .}}{{template "nprow" .}}{{end}}</tbody></table></div></details>{{end}}
+    {{else}}<p class="muted pad">{{if .Unreadable}}None you can read.{{else}}No build of a known project in 24 hours.{{end}}</p>{{end}}
+    {{with .Unreadable}}<p class="muted sm pad">{{.}} more project{{if ne . 1}}s{{end}} you cannot read built here too; {{if eq . 1}}its{{else}}their{{end}} builds count in the figures above.</p>{{end}}</section>
+  <div class="cards2">
+    {{with .RoutedRows}}<section class="box" aria-labelledby="rtT"><div class="boxh"><h2 class="h" id="rtT">Sent here by the build router</h2><span class="muted">24 hours · {{$.Row.Routed}} connection{{if ne $.Row.Routed 1}}s{{end}}</span></div>
+      <div class="nkv pad">{{range .}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div></section>{{end}}
+    <section class="box" aria-labelledby="rnT"><div class="boxh"><h2 class="h" id="rnT">Running now</h2><span class="muted">{{len .Active}} build{{if ne (len .Active) 1}}s{{end}}</span></div>
+      {{if .Active}}<table><thead><tr><th>Image</th><th class="num">Running for</th></tr></thead><tbody>{{range .Active}}<tr><td class="mono wrapany">{{.Target}}</td><td class="num">{{.For}}{{if .Stuck}} <span class="chip warn">stuck?</span>{{end}}</td></tr>{{end}}</tbody></table>{{else}}<p class="muted pad">Nothing runs here now.</p>{{end}}</section>
+  </div>
+  <details class="box fold" id="node-gc"><summary>{{icon "chev" 14 "chev"}}<b>Garbage collection on this node</b><span class="muted">as the daemon reports it</span></summary>
+    <div class="pad">{{with .Caps}}<div class="nkv">{{range .}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>{{end}}
+    <div class="nkv mt8">{{range .GC}}<span>{{.What}}</span><span>{{.Rule}}</span>{{else}}<span>Policies</span><span>not reported yet</span>{{end}}</div></div></details>
+  {{with .Replaced}}<p class="muted sm">{{.}} more build{{if ne . 1}}s{{end}} on this node in 24 hours ran on its daemons replaced since (a rollout or a restart).</p>{{end}}
+</div>
+{{end}}
+{{define "nprow"}}<tr{{if .Current}} class="cur" aria-current="true"{{end}}><td><a href="{{.URL}}">{{.Name}}</a>{{if .Current}} <span class="chip plain">this project</span>{{end}}</td><td class="num">{{.Builds}}</td><td class="sh"><div class="share" aria-hidden="true"><i style="width: {{.Share}}%"></i></div></td></tr>{{end}}

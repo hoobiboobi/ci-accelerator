@@ -145,6 +145,7 @@ type BuildView struct {
 	Ref, SHA   string
 	Commit     string
 	Node       string
+	NodeURL    string // the daemon's page, while it runs
 	PipeURL    string
 	PipeLabel  string
 	GitLabURL  string
@@ -327,6 +328,9 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if daemons := s.data.Daemons(); len(daemons) > 0 {
 		for _, dm := range daemons {
 			nodeHost[dm.Name] = dm.Inspection.Node
+		}
+		if _, ok := nodeHost[b.Daemon]; ok {
+			v.NodeURL = nodeURL(b.Daemon)
 		}
 		// The daemon that held the cache was replaced since.
 		if k := p.Reason.Kind; (k == history.OtherNode || k == history.CacheElsewhere) && p.Reason.Old != "" {

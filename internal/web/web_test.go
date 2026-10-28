@@ -803,17 +803,20 @@ type live []collector.DaemonState
 
 func (l live) Daemons() []collector.DaemonState { return l }
 
-// The nodes page shows each daemon's cache and running builds.
+// The Nodes page: one row per daemon, the ones that need attention first,
+// one note per problem naming its nodes; what is the same everywhere below.
+// A daemon's page: its cache, mounts, router decisions, running builds.
 func TestNodes(t *testing.T) {
 	started := testNow.Add(-42 * time.Second)
 	daemons := live{{Name: "box-buildkit-abcde", Connected: true, InspectedAt: testNow,
-		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1",
+		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1", Persists: true,
 			GC: []collector.GCRule{{Filters: []string{"type==exec.cachemount"}, Keep: 336 * time.Hour}, {MaxUsed: 40 << 30, MinFree: 16 << 30}},
 			Usage: collector.Usage{Total: 300 << 20, Images: 200 << 20, Layers: 90 << 20, Mounts: 10 << 20,
 				ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20, "golang:1.27": 300 << 20},
 				MountList:  []collector.Mount{{Description: "cached mount /root/.cache/pip from exec x", Size: 10 << 20, LastUsed: testNow}}}},
 		Active: []collector.Active{{Daemon: "box-buildkit-abcde", Target: "api" + evil, Started: started}}},
-		{Name: "box-buildkit-fghij", Connected: false, Inspection: collector.Inspection{Usage: collector.Usage{ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20}}}}}
+		{Name: "box-buildkit-fghij", Connected: false, Since: testNow.Add(-2 * time.Hour),
+			Inspection: collector.Inspection{Node: "node-2", Usage: collector.Usage{ImageSizes: map[string]int64{"python:3.13-slim": 200 << 20}}}}}
 	ts, st, _, _ := consoleWith(t, testOpts{Live: daemons, Release: "box"})
 	var ds []store.Decision
 	for i, r := range []route.Reason{route.LocalWarm, route.ZoneWarm, route.ZoneHash} {
@@ -827,11 +830,12 @@ func TestNodes(t *testing.T) {
 	}
 	nodes := get(t, ts, "/nodes")
 	nodes.safe(t)
-	for _, want := range []string{"1 ready of 2", "on node-1", "300 MiB", "/root/.cache/pip cache mount", "Duplicate cache",
-		"python:3.13-slim", "Keep cache up to", "40.0 GiB per node", "14 days after last use", "Running now", "Unreachable", "release <code>box</code>",
-		"replaced since", "<span>Sent here by the build router, 24 hours</span><span>3 — 2 to the project&#39;s cache, 1 by hash: no cache held the project</span>",
-		"<span>Sent here by the build router, 24 hours</span><span>0</span>",
-		"The build router, 24 hours: 3 build connections, 2 to a node whose cache held the project&#39;s layers (66%)."} {
+	for _, want := range []string{"1 ready of 2", "release <code>box</code>", "BuildKit v0.33.1 on every node",
+		`<a href="/nodes/box-buildkit-abcde">`, "node-1", `class="mark lv-bad"`, "not reachable for 2\u00a0h 0\u00a0min",
+		"<b class=\"k\">A daemon is not reachable</b>", "On fghij on node-2 (for 2\u00a0h 0\u00a0min).",
+		"Base images on more than one node", "python:3.13-slim", "Keep cache up to", "40.0 GiB per node", "14 days after last use",
+		"replaced since", `3 <span class="muted">· 66 %</span>`, "<b>1</b> running now; <b>1</b> needs attention.",
+		"The build router, 24 hours: 3 build connections, 2 to a node that had built the project before (66 %)."} {
 		if !strings.Contains(nodes.body, want) {
 			t.Errorf("nodes page lacks %q", want)
 		}
@@ -839,8 +843,97 @@ func TestNodes(t *testing.T) {
 	if strings.Contains(nodes.body, "golang:1.27") {
 		t.Errorf("an image on one node listed as duplicate")
 	}
+	if strings.Index(nodes.body, "/nodes/box-buildkit-fghij") > strings.Index(nodes.body, "/nodes/box-buildkit-abcde") {
+		t.Errorf("the daemon that is not reachable is not the first row")
+	}
 	if !strings.Contains(get(t, ts, "/").body, `class="wdot"`) {
 		t.Errorf("no warning dot for the unreachable daemon")
+	}
+	// Only the daemons that need attention.
+	att := get(t, ts, "/nodes?show=attention")
+	att.safe(t)
+	if strings.Contains(att.body, `href="/nodes/box-buildkit-abcde"`) || !strings.Contains(att.body, `href="/nodes/box-buildkit-fghij"`) ||
+		!strings.Contains(att.body, "1 daemon needs nothing") {
+		t.Errorf("the attention filter shows the wrong daemons")
+	}
+	// The daemon's own page.
+	node := get(t, ts, "/nodes/box-buildkit-abcde")
+	node.safe(t)
+	for _, want := range []string{"on <code>node-1</code>", "cache survives restarts (hostPath)", "/root/.cache/pip cache mount", "300 MiB",
+		"Running now", "Running for", "42\u00a0s", "Sent here by the build router",
+		"<span>To a node that had built the project</span><span>2 · 66.7 %</span>", "<span>By hash: no node had built the project</span><span>1 · 33.3 %</span>",
+		"Garbage collection on this node", "14 days after last use", `data-live-nodes="true"`} {
+		if !strings.Contains(node.body, want) {
+			t.Errorf("node page lacks %q", want)
+		}
+	}
+	if down := get(t, ts, "/nodes/box-buildkit-fghij"); !strings.Contains(down.body, "Not reachable for 2\u00a0h 0\u00a0min") {
+		t.Errorf("the page of a daemon that is not reachable does not say so")
+	}
+	// Search leads to the daemon's page.
+	if idx := get(t, ts, "/search-index"); !strings.Contains(idx.body, `"/nodes/box-buildkit-abcde"`) {
+		t.Errorf("search does not lead to a node's page")
+	}
+}
+
+// The page of a daemon that is gone (a rollout replaced it) says so and
+// leads to the daemons there are, its own node's first.
+func TestNodeGone(t *testing.T) {
+	ts, _, _, _ := consoleWith(t, testOpts{Live: live{{Name: "daemon-b", Connected: true, Inspection: collector.Inspection{Node: "node-9"}}}})
+	p := get(t, ts, "/nodes/daemon-a") // the fixtures' builds ran on daemon-a
+	p.safe(t)
+	if p.status != http.StatusNotFound || !strings.Contains(p.body, "No daemon named daemon-a is reached now") ||
+		!strings.Contains(p.body, `href="/nodes/daemon-b"`) {
+		t.Errorf("a gone daemon's page: %d", p.status)
+	}
+	if p := get(t, ts, "/nodes/no-such-daemon"); p.status != http.StatusNotFound {
+		t.Errorf("an unknown daemon: %d", p.status)
+	}
+}
+
+// A node's page lists 25 projects and folds the rest, the current one
+// first; projects the reader may not see are a count, never a name.
+func TestNodeProjectList(t *testing.T) {
+	var built []store.ProjectBuilds
+	var readable []store.Project
+	for i := 1; i <= 200; i++ {
+		k := store.ProjectKey{Instance: "abcdef", ID: uint64(i)}
+		built = append(built, store.ProjectBuilds{ProjectKey: k, Builds: 300 - i})
+		if i%10 != 0 { // every tenth is not readable
+			readable = append(readable, store.Project{ProjectKey: k, Path: fmt.Sprintf("group/p%d", i)})
+		}
+	}
+	cur := store.ProjectKey{Instance: "abcdef", ID: 151}
+	shown, more, hidden := builtFor(built, readable, cur)
+	if len(shown) != nodeProjects || len(shown)+len(more) != 180 || hidden != 20 {
+		t.Fatalf("shown %d, more %d, hidden %d", len(shown), len(more), hidden)
+	}
+	if !shown[0].Current || shown[0].Name != "group/p151" || shown[1].Name != "group/p1" || shown[1].Share != "100.0" {
+		t.Errorf("the current project is not first or the order is off: %+v %+v", shown[0], shown[1])
+	}
+	for _, p := range append(shown, more...) {
+		if n, _ := strconv.Atoi(strings.TrimPrefix(p.Name, "group/p")); n%10 == 0 {
+			t.Errorf("a project the reader may not see is listed: %s", p.Name)
+		}
+	}
+	// Few projects: no fold.
+	if shown, more, _ := builtFor(built[:3], readable, cur); len(shown) != 3 || more != nil {
+		t.Errorf("three projects: %d shown, %d folded", len(shown), len(more))
+	}
+}
+
+// Fifty nodes with one warning give one note naming them, not fifty.
+func TestNodeNotes(t *testing.T) {
+	var rows []NodeRow
+	for i := 0; i < 50; i++ {
+		rows = append(rows, NodeRow{Short: fmt.Sprintf("d%02d", i), Node: fmt.Sprintf("n%02d", i), Ready: true,
+			Disk: &DiskView{Level: "warn", Notes: []DiskNote{{"warn", "Under 15 % available."}}}})
+	}
+	rows[3].Disk = &DiskView{Level: "crit", Notes: []DiskNote{{"crit", "Under 10 % available."}}}
+	rows[7].Ready, rows[7].Down = false, "5\u00a0min"
+	notes := nodeNotes(rows)
+	if len(notes) != 3 || notes[0].Title != "A daemon is not reachable" || notes[1].Level != "crit" || len(notes[2].Nodes) != 48 {
+		t.Errorf("notes: %+v", notes)
 	}
 }
 
@@ -986,7 +1079,7 @@ func TestRoutedBuild(t *testing.T) {
 	// The Nodes page counts them, the page as a whole and per daemon.
 	nodes := get(t, ts, "/nodes")
 	nodes.safe(t)
-	if !strings.Contains(nodes.body, "The build router, 24 hours: 2 build connections, 2 to a node whose cache held the project&#39;s layers (100%).") {
+	if !strings.Contains(nodes.body, "The build router, 24 hours: 2 build connections, 2 to a node that had built the project before (100 %).") {
 		t.Errorf("the Nodes page does not sum up the router's decisions")
 	}
 }
@@ -1584,8 +1677,13 @@ func TestNodesDisk(t *testing.T) {
 	ts, _, _, _ := consoleWith(t, testOpts{Live: full})
 	p := get(t, ts, "/nodes")
 	p.safe(t)
-	if !strings.Contains(p.body, "The disk is nearly full") || !strings.Contains(p.body, `class="callout bad"`) || strings.Count(p.body, `class="ndisk"`) != 2 {
-		t.Error("Nodes does not show the disks and the full one")
+	if !strings.Contains(p.body, "The disk is nearly full") || !strings.Contains(p.body, `class="callout bad"`) || !strings.Contains(p.body, "On a.") ||
+		!strings.Contains(p.body, `class="mark lv-crit"`) || !strings.Contains(p.body, `<span class="tone-crit">6 %</span>`) ||
+		strings.Index(p.body, `href="/nodes/daemon-a"`) > strings.Index(p.body, `href="/nodes/daemon-b"`) {
+		t.Error("Nodes does not show the disks, the full one first")
+	}
+	if n := get(t, ts, "/nodes/daemon-a"); !strings.Contains(n.body, `class="pad ndisk"`) || !strings.Contains(n.body, "Available to pods") {
+		t.Error("the node's page does not show its disk")
 	}
 	if !strings.Contains(get(t, ts, "/pipelines").body, `aria-label="A build node&#39;s disk is nearly full"`) {
 		t.Error("a nearly full disk does not light the Nodes item")
@@ -1783,18 +1881,26 @@ func TestNoUsualFromAFewBuilds(t *testing.T) {
 	}
 }
 
-// A node's card names the projects its daemon built for, with counts,
-// escaped like every value from a job.
+// The Nodes page says where the current project built; a node's page names
+// the projects its daemon built for, with counts, escaped like every value
+// from a job.
 func TestNodesProjects(t *testing.T) {
 	ts, st, _, _ := consoleWith(t, testOpts{Live: live{{Name: "daemon-a", Connected: true}}})
-	counts, err := st.DaemonCounts(ctx, testNow.Add(-24*time.Hour))
+	counts, err := st.DaemonCounts(ctx, testNow.Add(-24*time.Hour), store.ProjectsIn{All: true})
 	if err != nil || len(counts["daemon-a"].Projects) == 0 {
 		t.Fatalf("fixtures: %+v %v", counts["daemon-a"], err)
 	}
 	pb := counts["daemon-a"].Projects[0]
-	page := get(t, ts, "/nodes")
+	nodes := get(t, ts, "/nodes")
+	nodes.safe(t)
+	if !strings.Contains(nodes.body, `id="wbT">Where `) ||
+		!regexp.MustCompile(`<a class="link mono" href="/nodes/daemon-a">a</a></td><td class="num">`+strconv.Itoa(pb.Builds)+`</td>`).MatchString(nodes.body) {
+		t.Errorf("Nodes does not say where the project built (%d builds)", pb.Builds)
+	}
+	page := get(t, ts, "/nodes/daemon-a")
 	page.safe(t)
-	if !regexp.MustCompile(`<span>Projects built here, 24 hours</span><span>example/[^<]* \(` + strconv.Itoa(pb.Builds) + `\)`).MatchString(page.body) {
-		t.Errorf("the card does not name the project with its %d builds", pb.Builds)
+	if !regexp.MustCompile(`<tr class="cur" aria-current="true"><td><a href="/projects/[0-9a-f]+/42\?to=/builds">example/[^<]*</a> <span class="chip plain">this project</span></td><td class="num">` +
+		strconv.Itoa(pb.Builds) + `</td>`).MatchString(page.body) {
+		t.Errorf("the node's page does not name the project with its %d builds", pb.Builds)
 	}
 }

@@ -198,9 +198,27 @@ func TestConsoleQueries(t *testing.T) {
 		t.Errorf("pipeline %+v %v", pl, err)
 	}
 
-	counts, err := s.DaemonCounts(ctx, time.Time{})
+	counts, err := s.DaemonCounts(ctx, time.Time{}, ProjectsIn{All: true})
 	if err != nil || counts["daemon-a"].Builds != len(bs) || counts["daemon-a"].Last.IsZero() {
 		t.Errorf("daemon counts %+v %v", counts, err)
+	}
+	// Per project: its builds (the fixtures have one build of no known
+	// project), rebuilds and last build, and only the projects asked for.
+	a := counts["daemon-a"]
+	if a.ProjectCount != 1 || len(a.Projects) != 1 || a.Projects[0].ProjectKey != key {
+		t.Fatalf("daemon-a per project %+v", a)
+	}
+	if p := a.Projects[0]; p.Builds != a.Builds-1 || p.Farm != a.Farm || p.Unclear != a.Unclear || !p.Last.Equal(a.Last) {
+		t.Errorf("project %v on daemon-a: builds %d farm %d unclear %d last %v; daemon %+v", p.ProjectKey, p.Builds, p.Farm, p.Unclear, p.Last, a)
+	}
+	if none, _ := s.DaemonCounts(ctx, time.Time{}, ProjectsIn{}); none["daemon-a"].Projects != nil || none["daemon-a"].ProjectCount != 1 {
+		t.Errorf("no projects asked for: %+v", none["daemon-a"])
+	}
+	if one, _ := s.DaemonCounts(ctx, time.Time{}, ProjectsIn{Only: key}); len(one["daemon-a"].Projects) != 1 {
+		t.Errorf("the one project asked for: %+v", one["daemon-a"])
+	}
+	if other, _ := s.DaemonCounts(ctx, time.Time{}, ProjectsIn{Only: ProjectKey{Instance: key.Instance, ID: 43}}); other["daemon-a"].Projects != nil {
+		t.Errorf("another project's builds listed: %+v", other["daemon-a"])
 	}
 }
 
