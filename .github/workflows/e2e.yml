@@ -38,7 +38,7 @@ jobs:
           - group: daemons
             scenarios: netpol otel cache dedup routing local bump graceful persist sigkill badconfig gc debug probes
     env:
-      CI_HELM_VERSION: v4.3.0
+      CI_HELM_VERSION: v4.3.1
       # A step's own env is not visible in its `if`.
       DOCKERHUB_LOGIN: ${{ secrets.DOCKERHUB_TOKEN != '' }}
     steps:
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.0-${{ hashFiles('Makefile') }}
+          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.1-${{ hashFiles('Makefile') }}
 
       # 14 GB of disk hold four kind nodes and every image the e2e pulls only
       # without the runner's preinstalled toolchains.

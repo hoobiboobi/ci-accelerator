@@ -26,7 +26,7 @@ SCRIPT=$ROOT/scripts/quickstart.sh
 LOGS=${QUICKSTART_LOGS:-$(mktemp -d)}
 mkdir -p "$LOGS"
 NS=ci-accelerator
-BUILD_IMAGE=moby/buildkit:v0.33.1
+BUILD_IMAGE=moby/buildkit:v0.34.1
 PASSED=0 FAILED=0
 
 pass() { PASSED=$((PASSED + 1)); echo "  PASS  $*"; }

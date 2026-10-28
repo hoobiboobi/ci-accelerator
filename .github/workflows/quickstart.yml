@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      CI_HELM_VERSION: v4.3.0
+      CI_HELM_VERSION: v4.3.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.0-${{ hashFiles('Makefile') }}
+          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.1-${{ hashFiles('Makefile') }}
 
       - name: The charts of this tree, with their dependencies
         if: ${{ !inputs.release }}

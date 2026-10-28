@@ -411,7 +411,7 @@ reaches over https.
    script installed:
 
    ```sh
-   sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.0/helm upgrade ci-accelerator \
+   sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
      oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.0 \
      -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait
    ```
@@ -542,10 +542,6 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   builds make progress. Stuck registry pushes can hang all builds on one
   daemon without failing a probe (moby/buildkit#7275).
 - **Upstream BuildKit issues that matter here:**
-  - cancelling one of several concurrent builds that share a step can
-    crash the daemon (moby/buildkit#7253): every build on that node fails
-    and the pod restarts. Fixed in BuildKit v0.34.0, which this release does
-    not ship yet;
   - a cancelled build can fail another build that shares its steps
     (moby/buildkit#7268);
   - heap retained after builds (moby/buildkit#7181);

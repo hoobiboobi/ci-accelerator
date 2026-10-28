@@ -51,7 +51,7 @@ tests:
           pattern: '^buildkit-[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
       - equal:
           path: metadata.labels["app.kubernetes.io/version"]
-          value: v0.33.1
+          value: v0.34.1
       - equal:
           path: metadata.labels["ci-accelerator.io/component"]
           value: buildkit
@@ -476,7 +476,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+          value: moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
 
   - it: uses the tag alone when the digest is cleared
     template: daemonset.yaml

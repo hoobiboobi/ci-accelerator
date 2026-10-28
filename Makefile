@@ -46,13 +46,13 @@ RUNNER_CHART_VERSION := 0.93.0
 RUNNER_CHART_SHA256  := a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 
 # Helm, kind and kubectl for CI runners (Linux), where nothing is installed:
-# `make ci-tools CI_HELM_VERSION=v3.22.0` puts them into .tools/bin.
+# `make ci-tools CI_HELM_VERSION=v3.22.1` puts them into .tools/bin.
 # Locally, the installed helm/kind/kubectl are used.
-CI_HELM_VERSION ?= v4.3.0
-HELM_SHA256_v3.22.0_linux_amd64 := 1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb
-HELM_SHA256_v3.22.0_linux_arm64 := f14e804dfee240f55525b667488fe9adca349e63e00c9af634c0beb1421ac310
-HELM_SHA256_v4.3.0_linux_amd64  := 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
-HELM_SHA256_v4.3.0_linux_arm64  := 31c5794dd55c66a51e6b7d2e2ac7a114ae8b1de41ff1d9ba51748ac973b06a08
+CI_HELM_VERSION ?= v4.3.1
+HELM_SHA256_v3.22.1_linux_amd64 := 896cf63684a42a723d61c980369d6e588330927deb13676ca0d85006dd6da0ea
+HELM_SHA256_v3.22.1_linux_arm64 := 4c29e286b279d170fa048ddfc3e4e83dcd069ca9c52102766ba672d7149e694d
+HELM_SHA256_v4.3.1_linux_amd64  := 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
+HELM_SHA256_v4.3.1_linux_arm64  := 8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88
 KIND_VERSION := v0.33.0
 KIND_SHA256_linux_amd64 := aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
 KIND_SHA256_linux_arm64 := 20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2

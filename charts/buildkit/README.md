@@ -1,6 +1,6 @@
 # buildkit
 
-![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.33.1](https://img.shields.io/badge/AppVersion-v0.33.1-informational?style=flat-square)
+![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.34.1](https://img.shields.io/badge/AppVersion-v0.34.1-informational?style=flat-square)
 
 Persistent BuildKit daemons as a shared build service for CI, with probe and garbage-collection defaults derived from a production setup.
 
@@ -56,7 +56,7 @@ Kubernetes: `>=1.34.0-0`
 | global.router.enabled | bool | `false` |  |
 | global.router.service | string | `""` | The router's Service in this namespace. Rendered with tpl. |
 | global.tls.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | cert-manager issuer for the daemons' and the clients' certificates (tls.source=certManager). Empty name: the chart creates a CA dedicated to this release (see tls.certManager). Your own issuer must be dedicated to these daemons too (any certificate it signs gets in) and must put ca.crt into the Secrets it fills (CA or Vault issuers do, ACME does not). Client certificates in other namespaces need a ClusterIssuer. |
-| image.digest | string | `"sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"` | Image index digest. The runtime pulls by digest when it is set, so change or clear it together with tag (another tag with this default digest is refused). Default: the digest of the appVersion tag (multi-arch index). |
+| image.digest | string | `"sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c"` | Image index digest. The runtime pulls by digest when it is set, so change or clear it together with tag (another tag with this default digest is refused). Default: the digest of the appVersion tag (multi-arch index). |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"moby/buildkit"` |  |
 | image.tag | string | `""` | Defaults to the chart appVersion. |

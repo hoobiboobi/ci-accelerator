@@ -2147,7 +2147,7 @@ s_badconfig() {
   fi
   broken=$(kc -n "$NS" get pods -l "app.kubernetes.io/instance=$REL" \
     -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].ready}{"\n"}{end}' | awk '$2 != "true" {print $1; exit}')
-  # buildkitd v0.33.1 usually reports the bad key; now and then it panics
+  # buildkitd usually reports the bad key; now and then it panics
   # in the config decoder instead (seen once in CI): both are the config.
   if kc -n "$NS" logs "$broken" 2>/dev/null | grep -qiE 'failed to (load|parse) config|cannot decode|mirrors'; then
     pass "the broken daemon logs the config error"

@@ -24,14 +24,14 @@ annotations:
   artifacthub.io/prerelease: "false"
   artifacthub.io/images: |
     - name: buildkit
-      image: moby/buildkit:v0.33.1
+      image: moby/buildkit:v0.34.1
     - name: ci-accelerator
       image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.0
       platforms:
         - linux/amd64
         - linux/arm64
     - name: gitlab-runner
-      image: registry.gitlab.com/gitlab-org/gitlab-runner:alpine-v19.4.1
+      image: registry.gitlab.com/gitlab-org/gitlab-runner:alpine-v19.4.2
   artifacthub.io/links: |
     - name: Website and documentation
       url: https://ci-accelerator.io/docs/
