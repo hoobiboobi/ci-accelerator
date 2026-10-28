@@ -223,7 +223,7 @@ func startParts(t jobTimes, build time.Time) []startPart {
 	for _, p := range []startPart{
 		{"runner", "The runner preparing the job's pod", t.Start, c},
 		{"podwait", "The job's pod starting: scheduled, images pulled", c, r},
-		{"runner", "Checkout and the job's script up to the build", r, build},
+		{"runner", "The runner attaching to the pod, the checkout and the job's script up to the build", r, build},
 	} {
 		if p.To.Sub(p.From) >= 50*time.Millisecond {
 			out = append(out, p)
