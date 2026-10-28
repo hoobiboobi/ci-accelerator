@@ -69,7 +69,27 @@ func (s *Server) settleLater(r *http.Request, p store.ProjectKey) {
 // not 0), asking GitLab at most calls times; it returns how many it
 // settled either way.
 func (s *Server) settle(ctx context.Context, api GitLab, p store.ProjectKey, only int64, calls int) (int, error) {
-	pending, err := s.data.Elsewhere(ctx, p, s.now().Add(-31*24*time.Hour), 2000)
+	return SettleProject(ctx, s.data, api, p, s.now(), only, calls)
+}
+
+// SettleData is what settling reads and writes.
+type SettleData interface {
+	Elsewhere(ctx context.Context, p store.ProjectKey, since time.Time, limit int) ([]store.Elsewhere, error)
+	SettleElsewhere(ctx context.Context, settled []store.Settled) error
+}
+
+// Changer tells which files changed between two commits of a project.
+type Changer interface {
+	Changed(ctx context.Context, instance string, project uint64, from, to string) ([]string, bool, error)
+}
+
+// SettleProject decides a project's CacheElsewhere builds of the last 31
+// days before now (only build only, when not 0) with GitLab's comparison
+// of the commits, asking at most calls times. It returns how many it
+// settled, and GitLab's rate limit when it stopped on one. The pages use it
+// with the reader's token; the controller with the installation's.
+func SettleProject(ctx context.Context, data SettleData, api Changer, p store.ProjectKey, now time.Time, only int64, calls int) (int, error) {
+	pending, err := data.Elsewhere(ctx, p, now.Add(-31*24*time.Hour), 2000)
 	if err != nil {
 		return 0, err
 	}
@@ -112,7 +132,7 @@ func (s *Server) settle(ctx context.Context, api GitLab, p store.ProjectKey, onl
 		}
 		out = append(out, decideByDiff(e, d.files, d.complete, d.err))
 	}
-	if err := s.data.SettleElsewhere(ctx, out); err != nil {
+	if err := data.SettleElsewhere(ctx, out); err != nil {
 		return 0, err
 	}
 	return len(out), stop

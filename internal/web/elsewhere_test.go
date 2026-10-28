@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -108,5 +109,31 @@ func TestFilesChangedNamedOnlyWhenVerified(t *testing.T) {
 	}
 	if fingerprint(verified, rowStatus(verified)) == fingerprint(witness, rowStatus(witness)) {
 		t.Error("a verified files row shares the unverified group")
+	}
+}
+
+type noChange struct{ calls int }
+
+func (c *noChange) Changed(context.Context, string, uint64, string, string) ([]string, bool, error) {
+	c.calls++
+	return []string{"docs/readme.md"}, true, nil
+}
+
+// The controller settles every project's open rebuilds without a page
+// being opened: it finds the projects, and each pass closes them.
+func TestSettleProjectsWithoutAPage(t *testing.T) {
+	_, st, _ := console(t)
+	ps, err := st.ElsewhereProjects(ctx, time.Time{})
+	if err != nil || len(ps) == 0 {
+		t.Fatalf("fixtures: no project with an open rebuild (%v, %v)", ps, err)
+	}
+	c := &noChange{}
+	for _, p := range ps {
+		if n, err := SettleProject(ctx, st, c, p, testNow, 0, 25); err != nil || n == 0 {
+			t.Errorf("%s: settled %d, %v", p, n, err)
+		}
+	}
+	if left, _ := st.ElsewhereProjects(ctx, time.Time{}); len(left) != 0 {
+		t.Errorf("still open: %v", left)
 	}
 }

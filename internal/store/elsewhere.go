@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -22,6 +23,28 @@ type Elsewhere struct {
 	// one; empty when the previous build ran on the same daemon. It decides
 	// whether a no-change outcome is "other node" or an evicted cache.
 	Old string
+}
+
+// ElsewhereProjects returns the projects with builds since t whose reason
+// is CacheElsewhere and that nothing has settled yet.
+func (s *Store) ElsewhereProjects(ctx context.Context, since time.Time) ([]ProjectKey, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT instance, project_id FROM builds INDEXED BY builds_elsewhere
+		WHERE reason_kind = 'cache-elsewhere' AND reason_via = '' AND started_at >= ? AND instance IS NOT NULL AND project_id IS NOT NULL`,
+		since.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProjectKey
+	for rows.Next() {
+		var instance int64
+		var project uint64
+		if err := rows.Scan(&instance, &project); err != nil {
+			return nil, err
+		}
+		out = append(out, ProjectKey{Instance: fmt.Sprintf("%06x", instance), ID: project})
+	}
+	return out, rows.Err()
 }
 
 // Elsewhere returns a project's builds since t whose reason is

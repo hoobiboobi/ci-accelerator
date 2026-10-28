@@ -267,6 +267,11 @@ func run(c config, log *slog.Logger) error {
 		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: gitlab.New(c.gitlabURLs), Store: st, Log: log},
 			Token: gitlab.Token(strings.TrimSpace(string(token)))}
 	}
+	if gl != nil && gl.Token != nil {
+		// With the installation's token nobody has to open a page for
+		// "files or node" to be settled.
+		go settleRebuilds(ctx, st, gl, log)
+	}
 	local := &control.Local{Store: st, Live: col}
 	var srv *http.Server
 	if c.split {
@@ -506,6 +511,40 @@ func scanCache(ctx context.Context, s runnercache.Store, ns string, kube kuberne
 		return aws.Credentials{AccessKeyID: ak, SecretAccessKey: sk, Source: "secret " + s.Secret}, nil
 	})
 	return runnercache.Lister{Store: s, Keys: keys}.Scan(ctx, time.Now())
+}
+
+// settleRebuilds settles the rebuilds whose cache was elsewhere with
+// GitLab's comparison of the commits, every project at most 25 requests a
+// minute, pausing while GitLab rate-limits.
+func settleRebuilds(ctx context.Context, st *store.Store, gl *control.LocalGitLab, log *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Minute):
+		}
+		ps, err := st.ElsewhereProjects(ctx, time.Now().Add(-31*24*time.Hour))
+		if err != nil {
+			log.Warn("settling rebuilds", "err", err)
+			continue
+		}
+		for _, p := range ps {
+			if !gl.Knows(p.Instance) {
+				continue
+			}
+			n, err := web.SettleProject(ctx, st, gl, p, time.Now(), 0, 25)
+			if n > 0 {
+				log.Info("settled rebuilds with GitLab", "project", p.String(), "builds", n)
+			}
+			var rl *gitlab.RateLimited
+			if errors.As(err, &rl) {
+				break
+			}
+			if err != nil {
+				log.Warn("settling rebuilds", "project", p.String(), "err", err)
+			}
+		}
+	}
 }
 
 // prune applies retention once an hour, and ends idle sessions.
