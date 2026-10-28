@@ -87,6 +87,9 @@ type BuildPage struct {
 	// reason names (Reason.Old), by daemon name, as the daemons said when
 	// the console last read them; a daemon gone since keeps its node.
 	Nodes map[string]string
+	// Persists says, by daemon name, whether the daemon's cache outlives
+	// its pod (hostPath), as its worker said.
+	Persists map[string]bool
 }
 
 // StepRun is one build's run of a step identity, for its history.
@@ -283,18 +286,20 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 			}
 		}
 	}
-	p.Nodes = map[string]string{}
+	p.Nodes, p.Persists = map[string]string{}, map[string]bool{}
 	for _, name := range []string{st.Build.Daemon, p.Reason.Old} {
 		if name == "" {
 			continue
 		}
 		var node string
-		if err := s.db.QueryRowContext(ctx, "SELECT node FROM daemons WHERE name = ?", name).Scan(&node); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		var persists bool
+		if err := s.db.QueryRowContext(ctx, "SELECT node, persists FROM daemons WHERE name = ?", name).Scan(&node, &persists); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
 		if node != "" {
 			p.Nodes[name] = node
 		}
+		p.Persists[name] = persists
 	}
 	return p, nil
 }

@@ -179,7 +179,7 @@ func FailedStep(prev, cur *Build) (Reason, bool) {
 	for i := range cur.Steps {
 		s := &cur.Steps[i]
 		// Steps stopped because another one failed say "canceled".
-		if s.State == Built && s.Error != "" && !strings.Contains(s.Error, "context canceled") {
+		if s.State == Built && s.Error != "" && !Canceled(s.Error) {
 			failed = s
 			break
 		}
@@ -199,6 +199,11 @@ func FailedStep(prev, cur *Build) (Reason, bool) {
 		if p.Name == failed.Name {
 			return Reason{}, false
 		}
+	}
+	// "New" needs the previous build's every step: one that failed, or
+	// whose top came from the cache, reported only some of them.
+	if prev.Error != "" || !prev.complete() {
+		return Reason{}, false
 	}
 	return Reason{Kind: NewStep, Step: *failed}, true
 }

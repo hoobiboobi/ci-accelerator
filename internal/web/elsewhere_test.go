@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
@@ -135,5 +136,47 @@ func TestSettleProjectsWithoutAPage(t *testing.T) {
 	}
 	if left, _ := st.ElsewhereProjects(ctx, time.Time{}); len(left) != 0 {
 		t.Errorf("still open: %v", left)
+	}
+}
+
+type flaky struct{ err error }
+
+func (f flaky) Changed(context.Context, string, uint64, string, string) ([]string, bool, error) {
+	return nil, false, f.err
+}
+
+// fakeSettle is a store of open rebuilds for SettleProject.
+type fakeSettle struct {
+	open    []store.Elsewhere
+	settled []store.Settled
+}
+
+func (f *fakeSettle) Elsewhere(context.Context, store.ProjectKey, time.Time, int) ([]store.Elsewhere, error) {
+	return f.open, nil
+}
+
+func (f *fakeSettle) SettleElsewhere(_ context.Context, s []store.Settled) error {
+	f.settled = append(f.settled, s...)
+	return nil
+}
+
+// GitLab failing for a moment leaves the rebuilds open; GitLab saying no
+// (a 4xx) settles them as unresolved.
+func TestSettleKeepsOpenOnATransientError(t *testing.T) {
+	open := []store.Elsewhere{{ID: 1, SHA: "b", PrevSHA: "a", Paths: []string{"api"}}, {ID: 2, SHA: "b", PrevSHA: "a", Paths: []string{"web"}}}
+	p := store.ProjectKey{Instance: "abcdef", ID: 42}
+	f := &fakeSettle{open: open}
+	if n, err := SettleProject(ctx, f, flaky{errors.New("dial tcp: i/o timeout")}, p, testNow, 0, 25); err == nil || n != 0 || len(f.settled) != 0 {
+		t.Errorf("a network error settled %d (%+v), err %v", n, f.settled, err)
+	}
+	f = &fakeSettle{open: open}
+	SettleProject(ctx, f, flaky{&gitlab.StatusError{Code: 502, Status: "502 Bad Gateway"}}, p, testNow, 0, 25)
+	if len(f.settled) != 0 {
+		t.Errorf("a 502 settled %+v", f.settled)
+	}
+	f = &fakeSettle{open: open}
+	SettleProject(ctx, f, flaky{&gitlab.StatusError{Code: 404, Status: "404 Not Found"}}, p, testNow, 0, 25)
+	if len(f.settled) != 2 || !strings.HasPrefix(f.settled[0].Via, "unresolved") {
+		t.Errorf("a 404 did not settle them as unresolved: %+v", f.settled)
 	}
 }
