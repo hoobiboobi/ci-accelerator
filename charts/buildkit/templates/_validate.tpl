@@ -46,6 +46,15 @@ by digest: another tag with it would still run the appVersion image. */}}
 {{- fail (printf "image.tag is %s, but image.digest is still the digest of %s, and the runtime pulls by digest: set image.digest to the digest of %s (or to \"\" to pull by tag)." (toString $v.image.tag) .Chart.AppVersion (toString $v.image.tag)) }}
 {{- end }}
 
+{{- /* An earlier chart's default digest with this chart's tag runs the
+earlier BuildKit under the new name: helm upgrade --reuse-values keeps the
+old computed values. One entry per earlier default. */}}
+{{- $earlier := dict "sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea" "v0.33.1" }}
+{{- $was := get $earlier (toString $v.image.digest) }}
+{{- if and $was (eq (toString (default .Chart.AppVersion $v.image.tag)) .Chart.AppVersion) }}
+{{- fail (printf "image.digest is the digest of BuildKit %s, an earlier chart's default (helm upgrade --reuse-values keeps it), while the image is %s: the daemons would keep running %s. Upgrade with --reset-then-reuse-values, or set image.digest to \"\" (this chart's default)." $was .Chart.AppVersion $was) }}
+{{- end }}
+
 {{- /* Client namespaces may be templates: check what they render to. */}}
 {{- $clientNamespaces := include "buildkit.tlsClientNamespaces" . | fromJsonArray }}
 {{- range $clientNamespaces }}

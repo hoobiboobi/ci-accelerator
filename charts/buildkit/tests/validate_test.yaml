@@ -18,6 +18,15 @@ tests:
       - failedTemplate:
           errorPattern: 'image.tag is v0.35.0, but image.digest is still the digest of v0.34.1'
 
+  # helm upgrade --reuse-values keeps the earlier chart's digest: the new
+  # tag would name an old image.
+  - it: refuses an earlier chart's default digest under this chart's tag
+    set:
+      image.digest: sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+    asserts:
+      - failedTemplate:
+          errorPattern: 'image.digest is the digest of BuildKit v0.33.1, an earlier chart.s default .helm upgrade --reuse-values keeps it., while the image is v0.34.1'
+
   - it: accepts another tag with its own digest or without one
     set:
       image.tag: v0.35.0

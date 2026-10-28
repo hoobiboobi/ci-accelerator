@@ -196,7 +196,11 @@ None.
   whose chain uses them now fail verification). v0.34.0 also fixes a
   daemon panic when one of several builds sharing a step is cancelled
   (moby/buildkit#7253). The CI component's client image and the
-  ci-accelerator image's build use the same BuildKit.
+  ci-accelerator image's build use the same BuildKit. The buildkit chart
+  refuses an earlier chart's default digest under its own tag: `helm
+  upgrade --reuse-values` keeps the old computed digest, and the daemons
+  would go on running the old BuildKit under the new name (seen on a test
+  install); upgrade with `--reset-then-reuse-values`.
 - The box's runner image is gitlab-runner alpine-v19.4.2 (was 19.4.1,
   built with Go 1.26.5): the 19.4 line's rebuild on Go 1.26.10, taken
   the day after its release under the security-patch rule (ADR-0041).
