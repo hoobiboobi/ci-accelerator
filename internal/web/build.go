@@ -336,6 +336,21 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// The texts name daemons by their pod's short name: with the node
+	// known, say which node that is.
+	for _, dn := range []string{p.Reason.Old, b.Daemon} {
+		if n := p.Nodes[dn]; n != "" && dn != "" {
+			v.Verdict.Detail = template.HTML(strings.ReplaceAll(string(v.Verdict.Detail), "node <b>"+e(shortDaemon(dn))+"</b>",
+				"node <b>"+e(n)+"</b> (daemon "+e(shortDaemon(dn))+")"))
+		}
+	}
+	if r := p.Reason; r.Kind == history.OtherNode && r.Old != "" && r.Old != b.Daemon {
+		// The same node, another daemon: the node's daemon was replaced and
+		// its cache went with it; the job did not move.
+		if node := p.Nodes[r.Old]; node != "" && node == p.Nodes[b.Daemon] {
+			v.Verdict = replacedDaemon(v.Verdict, r, p.Via, d.Name, node, b.Daemon)
+		}
+	}
 	if a.State == history.Attributed {
 		v.Trace = traceID(a)
 	}
@@ -856,4 +871,28 @@ func firstReader(steps []history.Step, before string, ps []string) *history.Step
 		}
 	}
 	return nil
+}
+
+// replacedDaemon says why a build ran again when its image's previous
+// build ran on the same node, under a daemon replaced since: the step did
+// not change, and the cache went with the old daemon.
+func replacedDaemon(v Verdict, r history.Reason, via string, name func(string) string, node, daemon string) Verdict {
+	proof := ""
+	switch {
+	case strings.HasPrefix(via, "same commit"):
+		proof = " (the previous build built the same commit)"
+	case viaVerified(via):
+		proof = fmt.Sprintf(" (GitLab's comparison of the commits, <code>%s</code>, shows no change in what it copies)", e(strings.TrimPrefix(via, "gitlab ")))
+	case r.By != "":
+		proof = fmt.Sprintf(" (<b>%s</b> in this pipeline found it in its cache)", e(name(r.By)))
+	}
+	at := ""
+	if r.Step.Line > 0 {
+		at = fmt.Sprintf(" (Dockerfile line %d)", r.Step.Line)
+	}
+	v.Title = "Rebuilt because the build daemon on this node was replaced, and its cache with it."
+	v.Detail = template.HTML(fmt.Sprintf("%s%s did not change%s. The image's previous build ran on daemon <b>%s</b> on node <b>%s</b>; that daemon was replaced there by <b>%s</b>, which builds this job (a rollout, an eviction or a deleted pod), and a daemon whose cache is not on a persistent volume starts empty.",
+		code(r.Step.Name), at, proof, e(shortDaemon(r.Old)), e(node), e(shortDaemon(daemon))))
+	v.Hint = "<b>What helps:</b> keep the cache on the node's own disk (<code>buildkit.storage.type: hostPath</code>): it outlives the daemon's pod. With an emptyDir cache every rollout of the daemons empties it."
+	return v
 }

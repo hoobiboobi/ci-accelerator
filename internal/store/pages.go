@@ -83,6 +83,10 @@ type BuildPage struct {
 	// this daemon; nil when no router decided (no router, or a job it did
 	// not know).
 	Route *Decision
+	// Nodes are the build nodes of the build's daemon and of the daemon its
+	// reason names (Reason.Old), by daemon name, as the daemons said when
+	// the console last read them; a daemon gone since keeps its node.
+	Nodes map[string]string
 }
 
 // StepRun is one build's run of a step identity, for its history.
@@ -277,6 +281,19 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 			if d.Daemon == st.Build.Daemon && !d.At.After(st.Build.Started.Add(time.Second)) {
 				p.Route = &d
 			}
+		}
+	}
+	p.Nodes = map[string]string{}
+	for _, name := range []string{st.Build.Daemon, p.Reason.Old} {
+		if name == "" {
+			continue
+		}
+		var node string
+		if err := s.db.QueryRowContext(ctx, "SELECT node FROM daemons WHERE name = ?", name).Scan(&node); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if node != "" {
+			p.Nodes[name] = node
 		}
 	}
 	return p, nil
