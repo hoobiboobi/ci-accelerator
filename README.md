@@ -524,7 +524,9 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   built it last; when that daemon is not ready, the job goes to another
   node: it succeeds, with a cold cache there. The router knows a job by its
   pod's address: with a CNI that hides it (SNAT inside the cluster) every
-  job goes to its own node's daemon, as without the router.
+  job goes to its own node's daemon, as without the router, after the
+  router waited up to 3 s for a pod with that address to appear (a job's
+  pod can connect before the router has seen it).
 - **emptyDir mode:** the cache lives only as long as the pod, so every
   rollout empties it. Use `hostPath` on a dedicated disk in production.
 - **What uninstall leaves behind:**
