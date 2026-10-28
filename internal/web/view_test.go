@@ -244,7 +244,7 @@ func TestDuration(t *testing.T) {
 func TestUsageFacts(t *testing.T) {
 	got := usageFacts(history.Usage{CPU: 9 * time.Second, Throttled: time.Second, ReadBytes: 2_000_000, WriteBytes: 0}, 3*time.Second)
 	if len(got) != 3 || got[0].K != "CPU time" || !strings.Contains(got[0].V, "3.0 cores busy on average") ||
-		got[1].K != "Held back by a CPU limit" || got[2].V != "read 2 MiB, wrote 0 B" {
+		got[1].K != "Held back by a CPU limit" || got[2].K != "Read from disk while it ran" || got[2].V != "1.9 MiB" {
 		t.Errorf("%+v", got)
 	}
 	if got := usageFacts(history.Usage{}, time.Second); len(got) != 0 {
@@ -368,5 +368,14 @@ func TestSignalHint(t *testing.T) {
 	}
 	if signalHint("exit code: 143") == "" || signalHint("exit code: 1370") != "" {
 		t.Error("143 not read, or 1370 read as 137")
+	}
+}
+
+func TestBytesText(t *testing.T) {
+	for n, want := range map[int64]string{0: "0 B", 1023: "1023 B", 1536: "1.5 KiB", 10 << 10: "10 KiB", 1_572_864: "1.5 MiB",
+		10_433_331: "9.9 MiB", 10_438_574: "10 MiB", 300 << 20: "300 MiB", 3 << 30: "3.0 GiB", 2 << 40: "2.00 TiB"} {
+		if got := bytesText(n); got != want {
+			t.Errorf("%d: %q, want %q", n, got, want)
+		}
 	}
 }
