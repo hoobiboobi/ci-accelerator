@@ -569,7 +569,7 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 		kind += " · " + jobName
 	}
 	if p.Pipeline != nil {
-		kind += " · #" + shortID(p.Pipeline.ID)
+		kind += " · #" + strconv.FormatUint(p.Pipeline.ID, 10)
 	}
 	sd.Kind = kind
 	switch v.State {
