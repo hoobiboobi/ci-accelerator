@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -73,7 +74,7 @@ func whyShort(b store.BuildRow) string {
 		if st.Label == "Canceled" {
 			return "the job was canceled while it built"
 		}
-		return "failed: " + clip(firstLine(b.Error), 90)
+		return "failed: " + clip(failureText(b.Error), 90)
 	}
 	switch b.Reason {
 	case history.FirstBuild:
@@ -109,6 +110,19 @@ func whyShort(b store.BuildRow) string {
 		return "last built on another node"
 	}
 	return fmt.Sprintf("%d step%s ran; nothing to compare with", b.Built, plural(b.Built))
+}
+
+var processFailed = regexp.MustCompile(`^process "/bin/sh -c (.*)" did not complete successfully: (exit code: \d+)`)
+
+// failureText shortens BuildKit's "process \"/bin/sh -c CMD\" did not
+// complete successfully: exit code: N" to "RUN CMD: exit code N"; other
+// errors keep their first line.
+func failureText(err string) string {
+	line := firstLine(err)
+	if m := processFailed.FindStringSubmatch(line); m != nil {
+		return "RUN " + m[1] + ": " + strings.Replace(m[2], "code:", "code", 1)
+	}
+	return line
 }
 
 // replacedHere says whether a build ran on the node where the daemon its

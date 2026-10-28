@@ -413,7 +413,7 @@ func reasonText(b store.BuildRow, st Status) string {
 		}
 		return "Steps ran with no earlier build to compare with"
 	case "failed":
-		return "Failed: " + clip(firstLine(b.Error), 120)
+		return "Failed: " + clip(failureText(b.Error), 120)
 	case "farm":
 		switch {
 		case b.Reason == history.NotInCache, b.Reason == history.OtherNode && replacedHere(b) && b.OldPersists:
