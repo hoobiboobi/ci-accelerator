@@ -126,8 +126,17 @@ tag defaults to the chart appVersion.
 */}}
 {{- define "buildkit.image" -}}
 {{- $tag := default .Chart.AppVersion .Values.image.tag }}
-{{- if .Values.image.digest }}
-{{- printf "%s:%s@%s" .Values.image.repository $tag .Values.image.digest }}
+{{- $digest := toString .Values.image.digest }}
+{{- /* helm upgrade --reuse-values keeps the computed values of the release
+before, the earlier chart's default digest among them: under this chart's
+tag it would run the earlier BuildKit under the new name (the runtime pulls
+by digest). An earlier default counts as this chart's default; pinning an
+earlier BuildKit takes its tag too. */}}
+{{- if and (eq $tag .Chart.AppVersion) (has $digest (list "sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea")) }}
+{{- $digest = "sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c" }}
+{{- end }}
+{{- if $digest }}
+{{- printf "%s:%s@%s" .Values.image.repository $tag $digest }}
 {{- else }}
 {{- printf "%s:%s" .Values.image.repository $tag }}
 {{- end }}
