@@ -136,6 +136,22 @@ changed its source address) and sent it to its own node's daemon.
        /usr/bin/buildctl --addr unix:///run/buildkit/buildkitd.sock du | tail -3
      ```
 
+**The job is slow before its build starts.** The build page's details
+("Before the build") split the time from the job's start to the build,
+from the job's pod as Kubernetes records it (whole seconds):
+
+- *the runner preparing the job's pod*: the runner creating the pod;
+- *the job's pod starting*: the pod waiting to be scheduled and its images
+  pulled. Long here: the build nodes are full (pods pending: `kubectl
+  get pods -n <jobs namespace>` and the scheduler's events), or a job image
+  is pulled again (pin images by digest and keep them on the nodes);
+- *the runner attaching to the pod, the checkout and the job's script up
+  to the build*: the runner notices the running pod by polling (several
+  seconds), then clones the repository (`GIT_DEPTH`) and runs the script
+  before `buildctl`.
+
+The pipeline's timeline draws the same parts on each job's bar.
+
 ## Builds hang
 
 - **Every build on one daemon hangs, but the daemon still answers its
