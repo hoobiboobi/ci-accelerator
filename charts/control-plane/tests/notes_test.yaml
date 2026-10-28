@@ -1,0 +1,22 @@
+suite: NOTES
+templates:
+  - NOTES.txt
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+tests:
+  - it: names the router's address and the certificate it needs when the router runs
+    set:
+      router.enabled: true
+      jobs.namespace: ci-jobs
+    asserts:
+      - matchRegexRaw:
+          pattern: "CI jobs reach the\\s+daemons at tcp://box-router.ci-accelerator.svc:1234"
+      - matchRegexRaw:
+          pattern: "certificate must name that Service"
+  - it: says nothing of a router that does not run
+    asserts:
+      - notMatchRegexRaw:
+          pattern: build router
