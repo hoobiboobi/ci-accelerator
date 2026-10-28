@@ -46,6 +46,7 @@ type NodeCard struct {
 	Running                                int
 	RunningNote                            string
 	Routed                                 string // the routers' decisions for it, 24 hours
+	Projects                               string // the projects it built for, 24 hours (those the reader may see)
 	Total, Images, Layers, Mounts          int64
 	Segs                                   []NSeg
 	MountRows                              []KV
@@ -172,6 +173,21 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	daemons := s.data.Daemons()
+	paths := map[store.ProjectKey]string{}
+	if ps, err := s.data.Projects(ctx); err == nil {
+		for _, p := range ps {
+			paths[p.ProjectKey] = p.Path
+		}
+	}
+	mayCache := map[store.ProjectKey]bool{}
+	mayP := func(k store.ProjectKey) bool {
+		ok, seen := mayCache[k]
+		if !seen {
+			ok = s.may(r, k.Instance, k.ID)
+			mayCache[k] = ok
+		}
+		return ok
+	}
 	images := map[string][]int64{}
 	var gc []collector.GCRule
 	shown := map[string]bool{}
@@ -197,6 +213,18 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		card := NodeCard{Name: d.Name, Short: shortDaemon(d.Name), Node: d.Inspection.Node, Version: d.Inspection.Version,
 			Ready: d.Connected, Builds: c.Builds, Farm: c.Farm, Unclear: c.Unclear, Running: len(d.Active), Err: d.InspectErr,
 			Inspected: !d.InspectedAt.IsZero()}
+		var ps []string
+		for _, pb := range c.Projects {
+			if !mayP(pb.ProjectKey) {
+				continue
+			}
+			name := paths[pb.ProjectKey]
+			if name == "" {
+				name = "project " + strconv.FormatUint(pb.ID, 10)
+			}
+			ps = append(ps, fmt.Sprintf("%s (%d)", name, pb.Builds))
+		}
+		card.Projects = strings.Join(ps, ", ")
 		if n, _, text := routed(c.Routed); n > 0 {
 			card.Routed = text
 		} else if len(all) > 0 {

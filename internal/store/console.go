@@ -178,6 +178,15 @@ type DaemonCount struct {
 	// Routed counts the build routers' decisions for this daemon by their
 	// reason (route.Reason): one per connection a router sent here.
 	Routed map[string]int
+	// Projects are the projects it built for since t, the most builds
+	// first (builds of no known project are left out).
+	Projects []ProjectBuilds
+}
+
+// ProjectBuilds is how many builds a daemon ran for one project.
+type ProjectBuilds struct {
+	ProjectKey
+	Builds int
 }
 
 // DaemonCounts returns, per daemon name, its builds started since t.
@@ -206,6 +215,9 @@ func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]D
 		return nil, err
 	}
 	rows.Close()
+	if err := s.projectsPerDaemon(ctx, since, out); err != nil {
+		return nil, err
+	}
 	routed, err := s.db.QueryContext(ctx, `SELECT daemon, reason, count(*) FROM route_decisions WHERE at >= ? GROUP BY daemon, reason`, since.UnixMilli())
 	if err != nil {
 		return nil, err
@@ -227,6 +239,33 @@ func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]D
 		out[name] = c
 	}
 	return out, routed.Err()
+}
+
+// projectsPerDaemon fills each daemon's projects built since t.
+func (s *Store) projectsPerDaemon(ctx context.Context, since time.Time, out map[string]DaemonCount) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT d.name, b.instance, b.project_id, count(*) FROM builds b INDEXED BY builds_started
+		JOIN daemons d ON d.id = b.daemon_id
+		WHERE b.started_at >= ? AND b.instance IS NOT NULL AND b.project_id IS NOT NULL
+		GROUP BY d.name, b.instance, b.project_id ORDER BY count(*) DESC`, since.UnixMilli())
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			name     string
+			instance int64
+			p        ProjectBuilds
+		)
+		if err := rows.Scan(&name, &instance, &p.ID, &p.Builds); err != nil {
+			return err
+		}
+		p.Instance = fmt.Sprintf("%06x", instance)
+		c := out[name]
+		c.Projects = append(c.Projects, p)
+		out[name] = c
+	}
+	return rows.Err()
 }
 
 // JobEnded records when a job's pod went away, which is when the job

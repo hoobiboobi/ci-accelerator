@@ -1782,3 +1782,19 @@ func TestNoUsualFromAFewBuilds(t *testing.T) {
 		}
 	}
 }
+
+// A node's card names the projects its daemon built for, with counts,
+// escaped like every value from a job.
+func TestNodesProjects(t *testing.T) {
+	ts, st, _, _ := consoleWith(t, testOpts{Live: live{{Name: "daemon-a", Connected: true}}})
+	counts, err := st.DaemonCounts(ctx, testNow.Add(-24*time.Hour))
+	if err != nil || len(counts["daemon-a"].Projects) == 0 {
+		t.Fatalf("fixtures: %+v %v", counts["daemon-a"], err)
+	}
+	pb := counts["daemon-a"].Projects[0]
+	page := get(t, ts, "/nodes")
+	page.safe(t)
+	if !regexp.MustCompile(`<span>Projects built here, 24 hours</span><span>example/[^<]* \(` + strconv.Itoa(pb.Builds) + `\)`).MatchString(page.body) {
+		t.Errorf("the card does not name the project with its %d builds", pb.Builds)
+	}
+}
