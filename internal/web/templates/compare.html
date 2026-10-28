@@ -1,0 +1,42 @@
+{{define "compare"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+<header class="phead">
+  <div class="crumbs"><a href="/builds/{{.Self}}" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/builds">Builds</a><span class="sepr">/</span><a href="/builds/{{.Self}}">{{.Name}}</a><span class="sepr">/</span><span>Compare</span></div>
+  <div class="titlerow"><h1 class="t" tabindex="-1">Compare two builds of {{.Name}}</h1></div>
+  <div class="sub"><span>What BuildKit recorded for each, side by side; differences marked.</span></div>
+</header>
+{{if .A.ID}}
+<section class="box" aria-labelledby="cfT"><div class="boxh"><h2 class="h" id="cfT">The builds</h2>{{with .GitLabDiff}}<a class="link" href="{{.}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 12}} the commits compared in GitLab</a>{{end}}</div>
+  <div class="tbox"><table class="cmp"><thead><tr><th></th><th><a class="link" href="{{.A.URL}}">{{.A.Label}}</a> {{template "status" .A.Status}}</th><th><a class="link" href="{{.B.URL}}">{{.B.Label}}</a> {{template "status" .B.Status}}</th></tr></thead><tbody>
+    {{range .Facts}}<tr{{if .Differs}} class="dif"{{end}}><th scope="row">{{.K}}</th><td>{{.A}}</td><td>{{.B}}</td></tr>{{end}}
+  </tbody></table></div>
+</section>
+
+<section class="box" aria-labelledby="caT"><div class="boxh"><h2 class="h" id="caT">Build arguments</h2></div>
+  {{if .Args}}<div class="tbox"><table class="cmp"><tbody>{{range .Args}}<tr{{if .Differs}} class="dif"{{end}}><th scope="row" class="mono">{{.K}}</th><td class="mono">{{if .A}}{{.A}}{{else}}<span class="muted">not set</span>{{end}}</td><td class="mono">{{if .B}}{{.B}}{{else}}<span class="muted">not set</span>{{end}}</td></tr>{{end}}</tbody></table></div>
+  {{else}}<p class="muted pad">Neither build set a build argument.</p>{{end}}
+</section>
+
+<section class="box" aria-labelledby="cdT"><div class="boxh"><h2 class="h" id="cdT">Dockerfile</h2></div>
+  {{if not .DfKnown}}<p class="muted pad">One of the builds has no Dockerfile on record (a failed build records none).</p>
+  {{else if .Dockerfile}}<div class="diff cmpdiff" role="group" aria-label="Dockerfile lines that differ">{{range .Dockerfile}}{{if .Gap}}<div class="gap">…</div>{{end}}<div class="{{if eq .Op "-"}}del{{else if eq .Op "+"}}add{{end}}">{{.Op}} {{.Text}}</div>{{end}}</div>
+  {{else}}<p class="muted pad">The same Dockerfile.</p>{{end}}
+</section>
+
+<section class="box" aria-labelledby="csT"><div class="boxh"><h2 class="h" id="csT">Steps</h2><span class="muted">by their place in the Dockerfile</span></div>
+  <div class="tbox"><table class="cmp steps"><thead><tr><th>Step</th><th>Earlier</th><th>Later</th><th class="num">Time</th></tr></thead><tbody>
+  {{range .Steps}}<tr{{if or .Changed (ne .StateA .StateB)}} class="dif"{{end}}><td><span class="mono">{{.Key}}</span> {{.Name}}{{with .NameA}}<div class="diff"><div class="del">- {{.}}</div></div>{{end}}</td>
+    <td>{{if .StateA}}{{template "stchip" .StateA}} {{.DA}}{{else}}<span class="muted" title="Not in the build's records: a later step came from the cache, or the step did not exist">not reported</span>{{end}}</td>
+    <td>{{if .StateB}}{{template "stchip" .StateB}} {{.DB}}{{else}}<span class="muted" title="Not in the build's records: a later step came from the cache, or the step does not exist">not reported</span>{{end}}</td>
+    <td class="num">{{if .Delta}}<span class="{{if .Slower}}slow{{else}}fast{{end}}">{{.Delta}}</span>{{end}}</td></tr>{{end}}
+  </tbody></table></div>
+</section>
+{{else}}
+<p class="muted">{{if .Picks}}Pick a build to compare with.{{else}}No other build of {{.Name}} on record to compare with.{{end}}</p>
+{{end}}
+{{with .Picks}}<section class="box" aria-labelledby="cpT"><div class="boxh"><h2 class="h" id="cpT">Compare with another build of {{$.Name}}</h2><span class="muted">the last {{len .}}</span></div>
+  <ul class="picks">{{range .}}<li><a class="link{{if .Current}} cur{{end}}" href="{{.URL}}"{{if .Current}} aria-current="true"{{end}}>{{.Label}}</a> {{template "status" .Status}}</li>{{end}}</ul>
+</section>{{end}}
+</div>
+{{end}}

@@ -21,7 +21,7 @@
 {{with .LogURL}}<details class="box fold"><summary>{{icon "chev" 14 "chev"}}<b>Job log</b><span class="muted">the end of it, read from GitLab when you open this</span></summary><div class="pad">{{template "logbox" .}}</div></details>{{end}}
 {{with .Others}}<p class="others">This job ran {{add (len .) 1}} builds: {{range $i, $o := .}}{{if $i}}, {{end}}<a class="link" href="{{$o.URL}}">{{$o.Target}}</a> ({{$o.Dur}}, {{$o.Status.Label}}){{end}}.</p>{{end}}
 
-<section class="box" aria-labelledby="chgT"><div class="boxh"><h2 class="h" id="chgT">What changed since the previous build</h2>{{if .PrevURL}}<a class="link" href="{{.PrevURL}}">{{.PrevLabel}}</a>{{end}}</div>
+<section class="box" aria-labelledby="chgT"><div class="boxh"><h2 class="h" id="chgT">What changed since the previous build</h2>{{if .PrevURL}}<a class="link" href="{{.PrevURL}}">{{.PrevLabel}}</a> · <a class="link" href="/builds/{{.ID}}/compare">compare with any build</a>{{end}}</div>
   {{if .PrevURL}}{{if .Changes}}<dl class="chg">{{range .Changes}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}</dl>{{else}}<p class="muted pad">Nothing BuildKit records differs.</p>{{end}}
   {{else}}<p class="muted pad">No earlier build of {{if .Target}}{{.Target}}{{else}}this target{{end}} on record.</p>{{end}}
 </section>
