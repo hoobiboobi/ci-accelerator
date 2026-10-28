@@ -72,10 +72,14 @@ func (s *Server) settle(ctx context.Context, api GitLab, p store.ProjectKey, onl
 	return SettleProject(ctx, s.data, api, p, s.now(), only, calls)
 }
 
-// SettleData is what settling reads and writes.
+// SettleData is what settling reads and writes: the open rebuilds, their
+// answers, and GitLab's comparisons of commits already asked for (they
+// never change, so a rebuild read again is settled without asking again).
 type SettleData interface {
 	Elsewhere(ctx context.Context, p store.ProjectKey, since time.Time, limit int) ([]store.Elsewhere, error)
 	SettleElsewhere(ctx context.Context, settled []store.Settled) error
+	Compared(ctx context.Context, p store.ProjectKey, from, to string) ([]string, bool, bool, error)
+	SaveCompare(ctx context.Context, p store.ProjectKey, from, to string, files []string, complete bool) error
 }
 
 // Changer tells which files changed between two commits of a project.
@@ -87,7 +91,9 @@ type Changer interface {
 // days before now (only build only, when not 0) with GitLab's comparison
 // of the commits, asking at most calls times. It returns how many it
 // settled, and GitLab's rate limit when it stopped on one. The pages use it
-// with the reader's token; the controller with the installation's.
+// with the reader's token; the controller with the installation's, or
+// with api nil (sign-in on: no token of its own) from the comparisons
+// stored before, which never change.
 func SettleProject(ctx context.Context, data SettleData, api Changer, p store.ProjectKey, now time.Time, only int64, calls int) (int, error) {
 	pending, err := data.Elsewhere(ctx, p, now.Add(-31*24*time.Hour), 2000)
 	if err != nil {
@@ -117,7 +123,17 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 		k := pair{e.PrevSHA, e.SHA}
 		d := diffs[k]
 		if d == nil {
-			if stop != nil || calls <= 0 {
+			files, complete, ok, err := data.Compared(ctx, p, k.from, k.to)
+			if err != nil {
+				return 0, err
+			}
+			if ok {
+				d = &diff{files, complete, nil}
+				diffs[k] = d
+			}
+		}
+		if d == nil {
+			if api == nil || stop != nil || calls <= 0 {
 				continue
 			}
 			calls--
@@ -136,6 +152,11 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 			}
 			d = &diff{files, complete, err}
 			diffs[k] = d
+			if err == nil {
+				if err := data.SaveCompare(ctx, p, k.from, k.to, files, complete); err != nil {
+					return 0, err
+				}
+			}
 		}
 		out = append(out, decideByDiff(e, d.files, d.complete, d.err))
 	}

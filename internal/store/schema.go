@@ -229,6 +229,22 @@ CREATE INDEX route_decisions_at ON route_decisions (at);
 CREATE INDEX builds_started ON builds (started_at);
 DROP INDEX builds_completed;
 
+-- GitLab's comparison of two commits of a project (it never changes):
+-- the files that differ, and whether GitLab listed them all. Settling a
+-- rebuild works from it again after the build is read again, without
+-- asking GitLab.
+CREATE TABLE compares (
+	instance   INTEGER NOT NULL,
+	project_id INTEGER NOT NULL,
+	from_sha   TEXT NOT NULL,
+	to_sha     TEXT NOT NULL,
+	files      TEXT NOT NULL,
+	complete   INTEGER NOT NULL,
+	at         INTEGER NOT NULL,
+	PRIMARY KEY (instance, project_id, from_sha, to_sha)
+) WITHOUT ROWID;
+CREATE INDEX compares_at ON compares (at);
+
 -- When Kubernetes created a job's pod and started its build container
 -- (whole seconds, as Kubernetes records them).
 ALTER TABLE jobs ADD COLUMN pod_created_at INTEGER;

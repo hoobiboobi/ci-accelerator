@@ -267,11 +267,14 @@ func run(c config, log *slog.Logger) error {
 		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: gitlab.New(c.gitlabURLs), Store: st, Log: log},
 			Token: gitlab.Token(strings.TrimSpace(string(token)))}
 	}
+	// "Files or node" is settled without anyone opening a page: with the
+	// installation's token by asking GitLab, with sign-in (no token of its
+	// own) from the comparisons the pages stored, which never change.
+	var changer web.Changer
 	if gl != nil && gl.Token != nil {
-		// With the installation's token nobody has to open a page for
-		// "files or node" to be settled.
-		go settleRebuilds(ctx, st, gl, log)
+		changer = gl
 	}
+	go settleRebuilds(ctx, st, changer, log)
 	local := &control.Local{Store: st, Live: col}
 	var srv *http.Server
 	if c.split {
@@ -514,9 +517,10 @@ func scanCache(ctx context.Context, s runnercache.Store, ns string, kube kuberne
 }
 
 // settleRebuilds settles the rebuilds whose cache was elsewhere with
-// GitLab's comparison of the commits, every project at most 25 requests a
-// minute, pausing while GitLab rate-limits.
-func settleRebuilds(ctx context.Context, st *store.Store, gl *control.LocalGitLab, log *slog.Logger) {
+// GitLab's comparison of the commits once a minute: the stored ones first,
+// then (with gl) at most 25 requests per project, pausing while GitLab
+// rate-limits.
+func settleRebuilds(ctx context.Context, st *store.Store, gl web.Changer, log *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -529,9 +533,6 @@ func settleRebuilds(ctx context.Context, st *store.Store, gl *control.LocalGitLa
 			continue
 		}
 		for _, p := range ps {
-			if !gl.Knows(p.Instance) {
-				continue
-			}
 			n, err := web.SettleProject(ctx, st, gl, p, time.Now(), 0, 25)
 			if n > 0 {
 				log.Info("settled rebuilds with GitLab", "project", p.String(), "builds", n)

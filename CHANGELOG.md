@@ -88,10 +88,13 @@ workflow copies them into the GitHub release.
 - A failed build says whether the step that failed is new or changed in
   it (with the old and new line); exit codes 137 and 143 are read as the
   signals they are.
-- With the installation's GitLab token, the controller settles "files or
-  node" for every project in the background (GitLab's comparison of the
-  commits, at most 25 requests a minute per project), so the Overview
-  and the lists are right without anyone opening a page first.
+- The controller settles "files or node" for every project in the
+  background, so the Overview and the lists are right without anyone
+  opening a page first: with the installation's GitLab token by asking
+  GitLab (at most 25 requests a minute per project), and in any case from
+  GitLab's comparisons of commits asked for before, which are stored
+  (they never change) and also settle a build again after the controller
+  restarts.
 - The Nodes page counts the build router's decisions of the last 24 hours
   per daemon (to the project's cache, by hash, another zone, job unknown)
   and names the projects each daemon built for.

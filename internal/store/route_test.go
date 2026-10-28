@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/route"
 )
 
@@ -190,126 +189,30 @@ func TestJobPodTimes(t *testing.T) {
 	}
 }
 
-// A build read again after a restart asks the same open question; what
-// GitLab's comparison settled stays. A different question resets it.
-func TestResaveKeepsWhatGitLabSettled(t *testing.T) {
+// GitLab's comparisons are kept, looked up by the two commits, and go with
+// retention.
+func TestCompares(t *testing.T) {
 	c := &clock{time.Now()}
 	s := open(t, t.TempDir(), c)
-	bs := fixtures(t, s.SecretKey())
-	saveJobs(t, s, bs)
-	b := bs[len(bs)-1]
-	var step history.Step
-	for _, st := range b.Steps {
-		if st.State == history.Built && st.StepID != "" {
-			step = st
-		}
+	p := ProjectKey{Instance: "abcdef", ID: 42}
+	if _, _, ok, err := s.Compared(ctx, p, "a", "b"); ok || err != nil {
+		t.Fatalf("before: %v %v", ok, err)
 	}
-	open := history.Reason{Kind: history.CacheElsewhere, Step: step, Old: "daemon-x", New: b.Daemon, Paths: []string{"api"}}
-	id, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: open})
-	if err != nil {
+	if err := s.SaveCompare(ctx, p, "a", "b", []string{"api/main.go"}, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SettleElsewhere(ctx, []Settled{{ID: id, Kind: history.OtherNode, Via: "same commit abcdef12"}}); err != nil {
+	files, complete, ok, err := s.Compared(ctx, p, "a", "b")
+	if !ok || err != nil || !complete || len(files) != 1 || files[0] != "api/main.go" {
+		t.Fatalf("after: %v %v %v %v", files, complete, ok, err)
+	}
+	if _, _, ok, _ := s.Compared(ctx, p, "b", "a"); ok {
+		t.Error("the reverse comparison found")
+	}
+	c.t = c.t.Add(s.opts.Keep + time.Hour)
+	if _, err := s.Prune(ctx); err != nil {
 		t.Fatal(err)
 	}
-	reason := func() (history.ReasonKind, string) {
-		p, err := s.BuildPage(ctx, id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return p.Reason.Kind, p.Via
+	if _, _, ok, _ := s.Compared(ctx, p, "a", "b"); ok {
+		t.Error("kept past retention")
 	}
-	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: open}); err != nil {
-		t.Fatal(err)
-	}
-	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
-		t.Errorf("after reading it again: %s %q", k, via)
-	}
-	// Read again before its previous build is known (no reason yet): the
-	// answer and its step stay.
-	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
-		t.Errorf("after reading it again without a reason: %s %q", k, via)
-	}
-	if p, _ := s.BuildPage(ctx, id); p.Reason.Step.Key != step.Key || p.Reason.Old != "daemon-x" {
-		t.Errorf("the answer lost its step or daemon: %+v", p.Reason)
-	}
-	// Read again before its received steps are linked: another first
-	// rebuilt step for a moment, the answer stays.
-	early := same0(open)
-	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: early}); err != nil {
-		t.Fatal(err)
-	}
-	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
-		t.Errorf("after an early read at another step: %s %q", k, via)
-	}
-	// Read again with a witness's conclusion: the proof stays too.
-	same := open
-	same.Kind = history.OtherNode
-	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: same}); err != nil {
-		t.Fatal(err)
-	}
-	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
-		t.Errorf("after reading it again with a witness: %s %q", k, via)
-	}
-	// The collector's pipeline pass comes to the same conclusion from a
-	// witness, then asks it again: GitLab's answer stays.
-	witness := open
-	witness.Kind, witness.By = history.OtherNode, b.Ref
-	if err := s.SetReason(ctx, b.Ref, b.Daemon, witness); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetReason(ctx, b.Ref, b.Daemon, open); err != nil {
-		t.Fatal(err)
-	}
-	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
-		t.Errorf("after the collector set it again: %s %q", k, via)
-	}
-	other := open
-	other.Old = "daemon-y"
-	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: other}); err != nil {
-		t.Fatal(err)
-	}
-	if k, via := reason(); k != history.CacheElsewhere || via != "" {
-		t.Errorf("another question kept the old answer: %s %q", k, via)
-	}
-}
-
-// An "unresolved" non-answer is not kept: reading the build again opens
-// the question, to be asked again.
-func TestResaveReopensUnresolved(t *testing.T) {
-	c := &clock{time.Now()}
-	s := open(t, t.TempDir(), c)
-	bs := fixtures(t, s.SecretKey())
-	saveJobs(t, s, bs)
-	b := bs[len(bs)-1]
-	var step history.Step
-	for _, st := range b.Steps {
-		if st.State == history.Built && st.StepID != "" {
-			step = st
-		}
-	}
-	open := history.Reason{Kind: history.CacheElsewhere, Step: step, Old: "daemon-x", New: b.Daemon}
-	id, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: open})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SettleElsewhere(ctx, []Settled{{ID: id, Kind: history.CacheElsewhere, Via: "unresolved: 403 Forbidden"}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: open}); err != nil {
-		t.Fatal(err)
-	}
-	if p, _ := s.BuildPage(ctx, id); p.Via != "" {
-		t.Errorf("unresolved kept: %q", p.Via)
-	}
-}
-
-// same0 is r as a record read before its received steps are linked gives
-// it: the same conclusion at an earlier step.
-func same0(r history.Reason) history.Reason {
-	r.Kind, r.Step = history.OtherNode, history.Step{Key: "[base 2/2]", Name: "RUN mkdir -p /app"}
-	return r
 }

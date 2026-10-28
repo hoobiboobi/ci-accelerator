@@ -107,7 +107,7 @@ func (s *Server) Stop() {
 var (
 	backendMethods = []string{"Projects", "Builds", "Branches", "Targets", "StepCounts", "ImageDays", "PipelineList",
 		"JobsOf", "BuildsOf", "PipelineInfo", "PipelineProject", "PipelineJobs", "Job", "JobBuilds", "BuildPage", "Refs",
-		"Previous", "StepHistory", "Output", "DaemonCounts", "ProjectCache", "Elsewhere", "SettleElsewhere",
+		"Previous", "StepHistory", "Output", "DaemonCounts", "ProjectCache", "Elsewhere", "SettleElsewhere", "Compared", "SaveCompare",
 		"Recent", "Ping", "Daemons"}
 	gitlabMethods = []string{"Ensure", "JobLogPart", "Changed", "Status"}
 	authMethods   = []string{"BeginWith", "FinishWith", "LoadCookie", "EndCookie"}
