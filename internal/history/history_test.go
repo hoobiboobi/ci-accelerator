@@ -373,3 +373,46 @@ func TestFailedStep(t *testing.T) {
 		t.Error("explained a build that did not fail")
 	}
 }
+
+// A previous build whose top came from the cache reports only the steps
+// above the hit (seen on a live install: 2 of 10). Its provenance still
+// has every step, so a rebuilt step is still compared with the same step,
+// never called new (the reason a full step list gives stays the same).
+func TestFirstRebuildAfterATopCacheHit(t *testing.T) {
+	bs := loadFixtures(t)
+	compared := 0
+	for i, cur := range bs {
+		var prev *Build
+		for j := i - 1; j >= 0; j-- {
+			if bs[j].Target == cur.Target && bs[j].Error == "" {
+				prev = bs[j]
+				break
+			}
+		}
+		if prev == nil || len(prev.Steps) < 2 {
+			continue
+		}
+		full, ok := FirstRebuild(prev, cur)
+		if !ok {
+			continue
+		}
+		top := *prev
+		top.Steps = prev.Steps[len(prev.Steps)-1:]
+		got, ok := FirstRebuild(&top, cur)
+		if !ok || got.Kind == NewStep && full.Kind != NewStep {
+			t.Errorf("%s: %s with the full previous build, %s (%v) after a top cache hit", cur.Target, full.Kind, got.Kind, ok)
+			continue
+		}
+		switch full.Kind {
+		case CacheElsewhere, NotInCache, OtherNode, FirstBuild, BaseImageChanged:
+			if got.Kind != full.Kind || got.Step.Key != full.Step.Key {
+				t.Errorf("%s: %s at %s with the full previous build, %s at %s after a top cache hit", cur.Target, full.Kind, full.Step.Key, got.Kind, got.Step.Key)
+			}
+		}
+		compared++
+	}
+	if compared == 0 {
+		t.Fatal("no rebuilt build to compare")
+	}
+	t.Logf("%d rebuilds compared", compared)
+}
