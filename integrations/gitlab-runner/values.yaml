@@ -14,7 +14,7 @@
 # 19.4.0 lists pod events on every poll and overloaded API servers; 19.4.1
 # fixes that. The chart 0.93.0 default would be 19.4.0.
 image:
-  tag: alpine-v19.4.1
+  tag: alpine-v19.4.2
 
 # ADJUST: your GitLab.
 gitlabUrl: https://gitlab.example.com/

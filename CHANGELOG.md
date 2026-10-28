@@ -187,6 +187,25 @@ None.
 - "Wrote 0 B" for steps that wrote files (a cgroup counts block I/O only);
   1.5 MiB was shown as 2 MiB.
 
+### Security
+
+- The daemons run BuildKit v0.34.1 (was v0.33.1, which has no newer
+  patch): built with Go 1.26.10, it is free of the Go runtime's
+  advisories govulncheck finds reachable in v0.33.1 (net/http, TLS,
+  x509: the revoked eMudhra intermediates; image pulls from a registry
+  whose chain uses them now fail verification). v0.34.0 also fixes a
+  daemon panic when one of several builds sharing a step is cancelled
+  (moby/buildkit#7253). The CI component's client image and the
+  ci-accelerator image's build use the same BuildKit.
+- The box's runner image is gitlab-runner alpine-v19.4.2 (was 19.4.1,
+  built with Go 1.26.5): the 19.4 line's rebuild on Go 1.26.10, taken
+  the day after its release under the security-patch rule (ADR-0041).
+  The values fragment for an existing runner says the same.
+- quickstart.sh installs Helm v4.3.1 (was 4.3.0), whose Go runtime and
+  golang.org/x/net carry the fixes 4.3.0 lacks; CI checks with v4.3.1
+  and v3.22.1 (security-patch rule; both are two weeks old on
+  2026-10-29).
+
 ## 0.2.5 - 2026-10-26
 
 ### Upgrade notes

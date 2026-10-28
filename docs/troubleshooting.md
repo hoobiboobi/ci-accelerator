@@ -168,12 +168,6 @@ The pipeline's timeline draws the same parts on each job's bar.
   `buildctl --timeout` only bounds connecting.
 - **A build fails with `failed to get state for index`.** Another build
   that shared its steps was cancelled (moby/buildkit#7268). Retry the job.
-- **Every build on one node fails at once and its daemon restarts after a
-  job was cancelled.** With concurrent builds sharing a step, cancelling one
-  at the moment the step finishes can crash buildkitd (`panic` in
-  `flightcontrol` in the previous container's log:
-  `kubectl -n <ns> logs <daemon pod> --previous`), moby/buildkit#7253.
-  Retry the jobs. Fixed in BuildKit v0.34.0.
 
 ## Disk, inodes and processes
 

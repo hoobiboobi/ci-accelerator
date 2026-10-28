@@ -26,7 +26,7 @@ jobs:
       packages: write   # ghcr.io
       id-token: write   # keyless signing
     env:
-      CI_HELM_VERSION: v4.3.0
+      CI_HELM_VERSION: v4.3.1
       CHARTS_REPO: ghcr.io/${{ github.repository_owner }}/charts
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.0-${{ hashFiles('Makefile') }}
+          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.1-${{ hashFiles('Makefile') }}
 
       - name: Check the tag against the charts
         id: version

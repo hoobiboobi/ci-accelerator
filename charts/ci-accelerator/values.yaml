@@ -102,7 +102,7 @@ gitlab-runner:
   # 19.4.0 (the chart's default) lists pod events on every poll and
   # overloaded API servers; 19.4.1 fixes that.
   image:
-    tag: alpine-v19.4.1
+    tag: alpine-v19.4.2
   # -- Required: your GitLab, e.g. https://gitlab.example.com/
   gitlabUrl: ""
   runners:
