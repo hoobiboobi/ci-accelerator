@@ -229,6 +229,10 @@ CREATE INDEX route_decisions_at ON route_decisions (at);
 CREATE INDEX builds_started ON builds (started_at);
 DROP INDEX builds_completed;
 
+-- From this schema on, builds.built_ms is the wall time of the executed
+-- steps (their intervals' union: parallel stages count once), no longer
+-- the sum of their durations.
+
 -- The Dockerfile build checks that failed (BuildKit's own warnings), JSON.
 ALTER TABLE builds ADD COLUMN warnings TEXT NOT NULL DEFAULT '[]';
 

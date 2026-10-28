@@ -119,7 +119,7 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 		}
 		v := Verdict{Tone: "cached", Kicker: kicker, Title: template.HTML(title)}
 		if saved > 0 {
-			v.Detail = template.HTML(fmt.Sprintf("Cache saved about %s of build time.", duration(saved)))
+			v.Detail = template.HTML(fmt.Sprintf("When they last ran, these steps took %s together.", duration(saved)))
 		}
 		if recLine != "" {
 			v.Detail = template.HTML(strings.TrimSpace(string(v.Detail) + " " + recLine))

@@ -339,7 +339,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		v.Details = append(v.Details, KV{"Build context sent", bytesText(b.ContextBytes)})
 	}
 	if p.Saved > 0 {
-		v.Details = append(v.Details, KV{"Time the cache saved, about", duration(p.Saved)})
+		v.Details = append(v.Details, KV{"Steps not run here took, when they last ran", duration(p.Saved)})
 	}
 	if t := parallelText(b); t != "" {
 		v.Details = append(v.Details, KV{"Executed steps", t})

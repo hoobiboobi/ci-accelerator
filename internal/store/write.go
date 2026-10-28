@@ -132,13 +132,13 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		}
 	}
 	paths, _ := json.Marshal(nonNil(r.Paths))
-	var built, builtMs int64
+	var built int64
 	for _, st := range b.Steps {
 		if st.State == history.Built && !strings.HasPrefix(st.Name, "FROM ") {
 			built++
-			builtMs += st.Duration().Milliseconds()
 		}
 	}
+	builtMs := b.ExecutedTime().Milliseconds()
 	saved, err := s.timeSaved(ctx, tx, b.Build, instance, project)
 	if err != nil {
 		return 0, err
