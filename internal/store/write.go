@@ -290,8 +290,12 @@ func (s *Store) SetReason(ctx context.Context, ref, daemon string, r history.Rea
 			reason_step = (SELECT idx FROM steps WHERE build_id = builds.id AND key = ? ORDER BY idx LIMIT 1),
 			reason_by = (SELECT id FROM builds b WHERE b.ref = ? LIMIT 1)
 		WHERE ref = ? AND daemon_id = (SELECT id FROM daemons WHERE name = ?)
+			-- GitLab's comparison settled this very question: keep its answer.
+			AND NOT (? = 'cache-elsewhere' AND reason_via != '' AND reason_old = ?
+				AND reason_step IS (SELECT idx FROM steps WHERE build_id = builds.id AND key = ? ORDER BY idx LIMIT 1))
 		RETURNING instance, pipeline_id`,
-		string(r.Kind), r.Old, r.New, r.Arg, string(paths), r.Step.Key, nullString(r.By), ref, daemon).Scan(&instance, &pipeline)
+		string(r.Kind), r.Old, r.New, r.Arg, string(paths), r.Step.Key, nullString(r.By), ref, daemon,
+		string(r.Kind), r.Old, r.Step.Key).Scan(&instance, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
