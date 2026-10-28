@@ -662,7 +662,7 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "step", http.StatusOK, sd)
 		return
 	}
-	sh, err := s.shell(r, "pipes", "")
+	sh, err := s.shell(r, "builds", "")
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -456,10 +456,6 @@ func (a *Auth) FinishWith(ctx context.Context, instance, login string, q url.Val
 	return p.To, base64.RawURLEncoding.EncodeToString(cookie), nil
 }
 
-func (a *Auth) setSession(w http.ResponseWriter, cookie []byte) {
-	SetSessionCookie(w, base64.RawURLEncoding.EncodeToString(cookie), a.cfg.Idle)
-}
-
 // redactErr keeps an OAuth error's code and drops the response body.
 func redactErr(err error) error {
 	var re *oauth2.RetrieveError

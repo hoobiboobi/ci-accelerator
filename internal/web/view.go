@@ -10,12 +10,16 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 )
 
-// Segment is one part of where a build's time went.
+// Segment is one part of where a build's time went: the stretches of time
+// it took (Spans, merged where they overlap) and their total wall time D.
 type Segment struct {
 	Class, Label string
 	D            time.Duration
-	X, W         float64 // position and width in a 0..1000 bar
+	Spans        []Span
 }
+
+// Span is a stretch of time.
+type Span struct{ From, To time.Time }
 
 // StepView is one step of a build page.
 type StepView struct {

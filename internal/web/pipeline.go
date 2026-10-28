@@ -241,7 +241,7 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []sto
 		}
 	}
 	cp := criticalPath(wjobs)
-	return waterfall(title, wjobs, start, false), wjobs[crit].Name, cp, drawn, nil
+	return waterfall(title, wjobs, start), wjobs[crit].Name, cp, drawn, nil
 }
 
 func jobsWithBuilds(rows []store.BuildRow) map[uint64]bool {
