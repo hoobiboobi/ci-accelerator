@@ -475,6 +475,46 @@ async function buildList(s) {
   await s.go("/builds?group=pipeline");
   check("builds: grouped by pipeline", await s.eval(`document.querySelectorAll("a.pgh").length > 0`));
   check("builds: no errors", s.take().length === 0);
+  await comparePick(s);
+}
+
+// Picking two builds to compare: the list's button, the first pick (marked,
+// the list narrowed to its image), the second (the comparison, this build
+// marked); x on a build page compares it.
+async function comparePick(s) {
+  await s.go("/builds");
+  await s.click('.titlerow .tools a[aria-pressed="false"]', 1200);
+  const one = await s.eval(`(() => {
+    const rows = [...document.querySelectorAll(".blist.pick a.brow")];
+    const n = {}; rows.forEach(r => { const t = r.querySelector(".bn").textContent; n[t] = (n[t] || 0) + 1; });
+    // An image built at least twice gives a second pick; else any row.
+    const twice = rows.find(r => n[r.querySelector(".bn").textContent] > 1);
+    const row = twice || rows[0];
+    if (row) row.id = "pickme";
+    return { url: location.search, bar: !!document.querySelector(".pickbar"), href: row ? row.getAttribute("href") : "", twice: !!twice };
+  })()`);
+  check("compare: the builds list's button starts picking", /pick=1/.test(one.url) && one.bar && /[?&]a=\d+/.test(one.href), JSON.stringify(one));
+  if (!one.href || !one.twice) return;
+  await s.click("#pickme", 1200);
+  const two = await s.eval(`(() => {
+    const next = document.querySelector(".blist.pick a.brow");
+    if (next) next.id = "pickme2";
+    return { url: location.search, picked: document.querySelectorAll(".brow.picked").length, next: next ? next.getAttribute("href") : "",
+      label: next ? next.getAttribute("aria-label") : "", names: new Set([...document.querySelectorAll(".brow .bn")].map(b => b.firstChild.textContent.trim())).size };
+  })()`);
+  check("compare: the first pick is marked and every other row compares with it",
+    /[?&]a=\d+/.test(two.url) && two.picked === 1 && /^\/builds\/\d+\/compare\?with=\d+$/.test(two.next) && /^compare with /.test(two.label) && two.names === 1, JSON.stringify(two));
+  if (!two.next) return;
+  await s.click("#pickme2", 1200);
+  const cmp = await s.eval(`({ path: location.pathname, search: location.search, self: document.querySelectorAll(".chip.self").length,
+    tinted: !!document.querySelector("table.cmp.self-a, table.cmp.self-b"), cur: !!document.querySelector('.picks li.cur a[aria-current="true"]') })`);
+  check("compare: the second pick opens the comparison, this build marked", /^\/builds\/\d+\/compare$/.test(cmp.path) && /^\?with=\d+$/.test(cmp.search) &&
+    cmp.self >= 2 && cmp.tinted && cmp.cur, JSON.stringify(cmp));
+  const build = cmp.path.replace("/compare", "");
+  await s.go(build);
+  await s.key("x", { wait: 1200 });
+  check("compare: x on a build page compares it", (await s.eval("location.pathname")) === build + "/compare");
+  check("compare: no errors", s.take().length === 0);
 }
 
 // A job that built no image: its page reads the end of its log from

@@ -1,20 +1,25 @@
 {{define "builds"}}{{template "layout" .}}{{end}}
 {{define "content"}}
 <div class="page">
-  <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div><div class="titlerow"><h1 class="t" tabindex="-1">Builds</h1></div></header>
+  <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div><div class="titlerow"><h1 class="t" tabindex="-1">Builds</h1>
+    <div class="tools"><a class="btn" href="{{.PickURL}}" aria-pressed="{{if .F.Pick}}true{{else}}false{{end}}">{{icon "cmp" 13}}<span>Compare two builds</span></a></div></div></header>
+  {{if .F.Pick}}<div class="pickbar" role="status">{{icon "cmp" 14}}{{with .Anchor}}<span>Comparing with <b>{{.Target}}</b>{{with .PipeLabel}} · {{.}}{{end}} · <span title="{{.When.UTC}}">{{.When}}</span> {{template "status" .Status}} — <b>pick the second build</b></span><a class="btn" href="{{$.Again}}">Change</a>
+    {{else}}<span><b>Pick the first build</b> — then a second one of the same image.</span>{{end}}<a class="btn ml" href="{{.Cancel}}">{{icon "x" 12}}Cancel</a></div>
+  {{with .Anchor}}<p class="muted">Only builds of <b>{{.Target}}</b> are listed: two builds are compared when they are of the same image.</p>{{end}}{{end}}
   <form class="filters" method="get" action="/builds" data-autosubmit>
     <label><span>Branch</span><select name="branch" id="fBranch"><option value="">All branches</option>{{$b := .F.Branch}}{{range .Branches}}<option value="{{.}}" {{if eq . $b}}selected{{end}}>{{.}}</option>{{end}}</select></label>
     <label><span>Outcome</span><select name="outcome" id="fOutcome">{{range .Outcomes}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
-    <label><span>Image</span><select name="image" id="fImage"><option value="">All images</option>{{$i := .F.Image}}{{range .Targets}}<option value="{{.}}" {{if eq . $i}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+    <label><span>Image</span><select name="image" id="fImage"{{if .Anchor}} disabled title="set by the build picked first"{{end}}><option value="">All images</option>{{$i := .F.Image}}{{range .Targets}}<option value="{{.}}" {{if eq . $i}}selected{{end}}>{{.}}</option>{{end}}</select></label>
     {{if .Mine}}<label class="chk"><input type="checkbox" name="mine" value="1" id="fMine" {{if .F.Mine}}checked{{end}}><span>Mine</span></label>{{end}}
     <label class="chk"><input type="checkbox" name="group" value="pipeline" id="fGroup" {{if .F.Group}}checked{{end}}><span>Group by pipeline</span></label>
+    {{if .F.Pick}}<input type="hidden" name="pick" value="1">{{with .F.A}}<input type="hidden" name="a" value="{{.}}">{{end}}{{end}}
     <button class="btn" type="submit">Apply</button>
   </form>
   {{if .Groups}}
     {{range .Groups}}<section class="box pgroup"><a class="boxh pgh" href="{{.URL}}"><h2 class="h">{{.Title}}</h2><span class="muted">{{.Ref}} · <span class="mono">{{.SHA}}</span> · {{.Label}}{{if .Rebuilt}} · {{.Rebuilt}} not from cache{{end}}</span></a>
-      <div class="blist">{{range .Items}}{{template "brow" .}}{{end}}</div></section>{{end}}
+      <div class="blist{{if $.F.Pick}} pick{{end}}">{{range .Items}}{{template "brow" .}}{{end}}</div></section>{{end}}
   {{else if .Items}}
-  <section class="box"><div class="blist">{{range .Items}}{{template "brow" .}}{{end}}</div></section>
+  <section class="box"><div class="blist{{if .F.Pick}} pick{{end}}">{{range .Items}}{{template "brow" .}}{{end}}</div></section>
   {{else}}
   <div class="empty"><b>No build matches.</b><p>{{if .F.Before}}No older builds.{{else}}Change the filters, or wait for the next build.{{end}}</p></div>
   {{end}}

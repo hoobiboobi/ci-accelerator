@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -127,6 +128,10 @@ type BuildItem struct {
 	PipeLabel       string
 	Pipeline        uint64
 	Quiet           bool // came from the cache: shown, but quietly
+	// Picked: the build picked first to compare (picking a pair); Label
+	// says what the row does then.
+	Picked bool
+	Label  string
 }
 
 func (s *Server) item(b store.BuildRow, usual map[string]usualTime, loc *time.Location) BuildItem {
@@ -209,6 +214,12 @@ type BuildsView struct {
 	Older    string      // the next page's address
 	Newest   string      // the first page's address, on a later page
 	Mine     bool        // the "Mine" filter is offered (a person is signed in)
+	// Picking two builds to compare: the button's address (into or out
+	// of picking), and the first build picked.
+	PickURL string
+	Anchor  *BuildItem
+	// Cancel leaves picking; Again picks the first build anew.
+	Cancel, Again string
 }
 
 // Filters are the list's filters, as its address carries them.
@@ -216,6 +227,9 @@ type Filters struct {
 	Branch, Outcome, Image string
 	Mine, Group            bool
 	Before                 int64
+	// Pick: picking two builds to compare; A is the first one picked.
+	Pick bool
+	A    int64
 }
 
 // Option is one choice of a filter.
@@ -233,8 +247,12 @@ type PipeGroup struct {
 
 func filtersOf(r *http.Request) Filters {
 	q := r.URL.Query()
-	f := Filters{Branch: q.Get("branch"), Outcome: q.Get("outcome"), Image: q.Get("image"), Mine: q.Get("mine") == "1", Group: q.Get("group") == "pipeline"}
+	f := Filters{Branch: q.Get("branch"), Outcome: q.Get("outcome"), Image: q.Get("image"), Mine: q.Get("mine") == "1", Group: q.Get("group") == "pipeline",
+		Pick: q.Get("pick") == "1"}
 	f.Before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
+	if f.Pick {
+		f.A, _ = strconv.ParseInt(q.Get("a"), 10, 64)
+	}
 	if _, ok := outcomeLabels[f.Outcome]; !ok {
 		f.Outcome = ""
 	}
@@ -258,6 +276,12 @@ func (f Filters) Query() url.Values {
 	}
 	if f.Group {
 		v.Set("group", "pipeline")
+	}
+	if f.Pick {
+		v.Set("pick", "1")
+		if f.A > 0 {
+			v.Set("a", strconv.FormatInt(f.A, 10))
+		}
 	}
 	return v
 }
@@ -286,6 +310,21 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 	s.settleLater(r, sh.Project.ProjectKey)
 	sh.Title = "Builds"
 	f := filtersOf(r)
+	// Picking the second build of a pair: the list shows the first one's
+	// image in its project, so every row can be compared with it.
+	var anchor *built
+	if f.A > 0 {
+		if anchor, err = s.anchor(r, f.A); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if anchor == nil {
+			f.A = 0
+		} else {
+			f.Image = anchor.Page.Build.Target
+			pinProject(&sh, anchor.Page.Build.Attribution.Instance, projectOf(anchor.Page))
+		}
+	}
 	v := &BuildsView{F: f, Mine: sh.Viewer != nil}
 	for _, k := range []string{"", "rebuilt", "cached", "change", "farm", "unclear", "failed"} {
 		v.Outcomes = append(v.Outcomes, Option{Value: k, Label: outcomeLabels[k], On: f.Outcome == k})
@@ -331,6 +370,7 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 	for _, b := range rows {
 		v.Items = append(v.Items, s.item(b, st.usual, zone(r)))
 	}
+	s.picking(v, anchor, zone(r))
 	if f.Group {
 		at := map[uint64]int{}
 		for _, it := range v.Items {
@@ -352,6 +392,59 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Shell = sh
 	s.render(w, "builds", http.StatusOK, v)
+}
+
+// anchor is the build picked first to compare, nil when it is not there
+// or the reader may not see it (picking then starts over).
+func (s *Server) anchor(r *http.Request, id int64) (*built, error) {
+	p, err := s.data.BuildPage(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !s.mayBuild(r, p)) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.explain(r.Context(), p)
+}
+
+// picking turns the list's rows into the choice of a pair: a row picks the
+// first build, then a row opens its comparison with the first one.
+func (s *Server) picking(v *BuildsView, anchor *built, loc *time.Location) {
+	f := v.F
+	out := f
+	out.Pick, out.A = false, 0
+	if !f.Pick {
+		in := f
+		in.Pick, in.Before = true, 0
+		v.PickURL = in.URL()
+		return
+	}
+	v.PickURL, v.Cancel = out.URL(), out.URL()
+	again := f
+	again.A = 0
+	v.Again = again.URL()
+	if anchor != nil {
+		b := anchor.Page.Build
+		it := BuildItem{ID: anchor.Page.ID, URL: fmt.Sprintf("/builds/%d", anchor.Page.ID), Target: orDefault(b.Target),
+			Status: statusOf(anchor.Page.Reason.Kind, b.Error, anchor.Built, b.Completed.IsZero()), When: clockStamp(b.Started, inZone(s.now(), loc))}
+		if p := anchor.Page.Pipeline; p != nil {
+			it.PipeLabel = "#" + strconv.FormatUint(p.ID, 10)
+		}
+		v.Anchor = &it
+	}
+	for i := range v.Items {
+		it := &v.Items[i]
+		switch {
+		case v.Anchor == nil:
+			pick := f
+			pick.A = it.ID
+			it.URL, it.Label = pick.URL(), "pick "+it.Target+" "+it.PipeLabel+" to compare"
+		case it.ID == v.Anchor.ID:
+			it.Picked, it.URL = true, ""
+		default:
+			it.URL, it.Label = fmt.Sprintf("/builds/%d/compare?with=%d", v.Anchor.ID, it.ID), "compare with "+it.Target+" "+it.PipeLabel
+		}
+	}
 }
 
 // ---- reasons, grouped ----
@@ -706,6 +799,7 @@ type ImageView struct {
 	Reasons             []Reason
 	Recent              []BuildItem
 	ListURL             string
+	PickURL             string // picks two of its builds to compare
 	Year                *YearView
 }
 
@@ -847,6 +941,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(bs) == 0 {
 		v.ListURL = Filters{Image: target}.URL()
+		v.PickURL = Filters{Image: target, Pick: true}.URL()
 		v.Shell = sh
 		s.render(w, "image", http.StatusOK, v)
 		return
@@ -904,6 +999,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		v.Recent = append(v.Recent, s.item(b, st, zone(r)))
 	}
 	v.ListURL = Filters{Image: target}.URL()
+	v.PickURL = Filters{Image: target, Pick: true}.URL()
 	v.Shell = sh
 	s.render(w, "image", http.StatusOK, v)
 }

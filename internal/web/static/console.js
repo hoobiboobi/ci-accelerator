@@ -574,6 +574,13 @@
     { kind: "Command", label: "Keyboard shortcuts", sub: "?", run: () => openHelp() },
     { kind: "Command", label: "Collapse sidebar", sub: "[", run: () => setCollapsed(app.dataset.collapsed !== "true") },
   ];
+  // Comparing builds: from anywhere, and this build when one is open.
+  function compareCommands() {
+    const out = [{ kind: "Command", label: "Compare two builds", sub: "pick them in the builds list", url: "/builds?pick=1" }];
+    const ctx = $("#ctx", main);
+    if (ctx && ctx.dataset.build) out.unshift({ kind: "Command", label: "Compare this build with another", sub: "x", url: "/builds/" + ctx.dataset.build + "/compare" });
+    return out;
+  }
   function fuzzy(q, s) {
     const t = s.toLowerCase();
     const sub = t.indexOf(q);
@@ -597,7 +604,7 @@
   }
   function search() {
     const q = palQ.value.trim().toLowerCase();
-    const items = (index || []).concat(commands);
+    const items = (index || []).concat(commands, compareCommands());
     results = [];
     items.forEach(it => {
       if (!q) { results.push({ it, idx: [], score: 0 }); return; }
@@ -744,6 +751,7 @@
       case "[": setCollapsed(app.dataset.collapsed !== "true"); return;
       case "e": if ($('[data-act="toggleall"]', main)) toggleAll(); return;
       case "c": { const ctx = $("#ctx", main); if (ctx && ctx.dataset.trace) copy(ctx.dataset.trace); return; }
+      case "x": { const ctx = $("#ctx", main); if (ctx && ctx.dataset.build) location.href = "/builds/" + ctx.dataset.build + "/compare"; return; }
     }
   });
 

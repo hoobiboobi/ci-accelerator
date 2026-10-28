@@ -78,9 +78,13 @@ workflow copies them into the GitHub release.
   why its node was chosen.
 - `scripts/buildkit-certs.sh --router <prefix>` adds the router's names to
   the daemons' certificate.
-- Compare any two builds of an image (`/builds/<id>/compare`, linked from
-  the build page): time, commit, node, build arguments, the Dockerfiles'
-  differing lines and every step's state and time side by side.
+- Compare any two builds of an image (`/builds/<id>/compare`): time,
+  commit, node, build arguments, the Dockerfiles' differing lines and
+  every step's state and time side by side, with the page's own build
+  marked "this build" and its column tinted. A Compare button on the build
+  page (key `x`), "Compare two builds" on the builds list (pick the first
+  build, the list narrows to its image, pick the second), "compare two" on
+  an image's page, and both in Ctrl+K.
 - A page per build daemon (`/nodes/<daemon>`, linked from the Nodes table,
   the build page and Ctrl+K): its builds, rebuilds, running builds, cache
   by kind and largest cache mounts, disk, the build router's decisions by
