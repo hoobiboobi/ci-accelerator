@@ -1,9 +1,9 @@
+# Build a container image on the ci-accelerator build farm: the job sends
+# its context through the build router to a BuildKit daemon, which builds
+# with the shared cache and pushes. Runs only on a ci-accelerator runner.
+# (A comment, not spec:description: GitLab before 18.10 refuses that key,
+# and this component works from GitLab 17.9 on.)
 spec:
-  description: >-
-    Build a container image on the ci-accelerator build farm: the job sends
-    its context to a BuildKit daemon (through the build router, the one
-    where the project built before), which builds with the shared cache and
-    pushes. Runs only on a ci-accelerator runner.
   inputs:
     job-name:
       description: Name of the job, so a pipeline can build several images.

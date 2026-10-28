@@ -87,6 +87,12 @@ app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' charts/buildkit/C
 digest=$(awk '/^  digest:/ {gsub(/"/, "", $2); print $2; exit}' charts/buildkit/values.yaml)
 if [ "$IMAGE" = "moby/buildkit:$app@$digest" ]; then echo "  ok    buildkit-image is the daemons' release ($app)"; pass=$((pass + 1));
 else echo "  FAIL  buildkit-image $IMAGE, the daemons run moby/buildkit:$app@$digest"; failn=$((failn + 1)); fi
+# The box's install notes print the component's include with its
+# integrity: the sha256 of this file.
+want="sha256-$(openssl dgst -sha256 -binary "$COMPONENT" | base64)"
+got=$(sed -n '/define "ci-accelerator.componentIntegrity"/{n;p;}' charts/ci-accelerator/templates/_helpers.tpl)
+if [ "$got" = "$want" ]; then echo "  ok    the box's notes print the component's integrity"; pass=$((pass + 1));
+else echo "  FAIL  charts/ci-accelerator/templates/_helpers.tpl componentIntegrity is $got, the component's is $want"; failn=$((failn + 1)); fi
 run_case "defaults: context, Dockerfile, push with the job token" 0 -- \
   'argv:^context=\.$' 'argv:^dockerfile=\.$' 'argv:^filename=Dockerfile$' \
   'argv:^type=image,"name=registry\.example\.com/g/p:abc123",push=true$' \

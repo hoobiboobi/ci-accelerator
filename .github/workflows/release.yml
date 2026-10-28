@@ -20,7 +20,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 60
     permissions:
       contents: write   # the GitHub Release
       packages: write   # ghcr.io
@@ -50,6 +50,27 @@ jobs:
       # The same checks as on every push; the dependencies are vendored here.
       - name: Lint, unit tests, schema validation
         run: make deps lint unittest validate
+
+      # The GitLab CI component as the release notes publish it: the file at
+      # this tag on GitHub is the one whose integrity they print, and when it
+      # changed since the previous release, a real GitLab (the oldest the
+      # component claims and the runner's minor) reads it from there. 0.3.1
+      # shipped a component GitLab refused; a refusal stops here.
+      - name: The GitLab CI component
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPONENT_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/ci/gitlab/build.yml
+        run: |
+          make component-test
+          curl -fsSL "$COMPONENT_URL" -o "$RUNNER_TEMP/published.yml"
+          cmp "$RUNNER_TEMP/published.yml" ci/gitlab/build.yml
+          prev=$(gh release list --exclude-drafts --exclude-pre-releases --limit 50 --json tagName -q '.[].tagName' | grep -v "^$GITHUB_REF_NAME\$" | head -1 || true)
+          if [ -n "$prev" ] && curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$prev/ci/gitlab/build.yml" -o "$RUNNER_TEMP/previous.yml" \
+              && cmp -s "$RUNNER_TEMP/previous.yml" ci/gitlab/build.yml; then
+            echo "the component is the same file as in $prev, which a real GitLab read before its release"
+          else
+            make component-gitlab-test GITLAB=all
+          fi
 
       # Reproducible archives: Helm 4 stamps every file with
       # SOURCE_DATE_EPOCH, and the archive's own mtime becomes the OCI
@@ -197,6 +218,19 @@ jobs:
             echo '```'
             cat dist/digests
             echo '```'
+            # The disk probe next to each daemon runs the image of the release
+            # that last changed it: its own digest to pin.
+            image_digest=$(sed -n "s|^ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator@||p" dist/digests | head -n 1)
+            test -n "$image_digest" || { echo "no digest for the ci-accelerator image in dist/digests" >&2; exit 1; }
+            probe_tag=$(sed -n 's/.*default "\(v[0-9][^"]*\)" .img\.tag.*/\1/p' charts/buildkit/templates/_helpers.tpl)
+            if [ "$probe_tag" = "v$VERSION" ]; then
+              probe_digest=$image_digest
+            else
+              probe_digest=$(sed -n "s/^$probe_tag: //p" charts/buildkit/templates/_helpers.tpl)
+            fi
+            test -n "$probe_digest" || { echo "no digest for the disk probe's image $probe_tag" >&2; exit 1; }
+            echo
+            echo "To pin the box's images by digest (README, \"Install\"): \`--set control-plane.image.digest=$image_digest\` (ci-accelerator:v$VERSION) and, for the disk probe next to each daemon (ci-accelerator:$probe_tag), \`--set buildkit.diskProbe.image.digest=$probe_digest\`. The daemons' BuildKit image is pinned by digest already."
           } > dist/notes.md
           prerelease=()
           case "$VERSION" in *-*) prerelease=(--prerelease) ;; esac

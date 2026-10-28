@@ -153,5 +153,19 @@ literal `$`.
 
 ## Tests
 
-`ci/gitlab/test/run.sh` (in `make component-test`) runs the job's script in
-its own image against a fake buildctl, one case per input and failure.
+- `ci/gitlab/test/run.sh` (`make component-test`) runs the job's script in
+  its own image against a fake buildctl, one case per input and failure.
+- `ci/gitlab/test/gitlab.sh` (`make component-gitlab-test`) boots GitLab CE
+  in Docker, at 17.9 (the oldest this component supports) and at the
+  runner's minor, and has GitLab itself read pipelines that include the
+  component: CI lint and pipeline simulation with every kind of input, the
+  job GitLab builds from it (stage, tags, image, variables, an untouched
+  script), and the inputs and integrity hashes it must refuse. Every pull
+  request that changes `ci/gitlab/` runs it, and a release whose component
+  changed runs it on the file at its tag on GitHub before anything is
+  published.
+- The end-to-end scenario `component` (`SCENARIOS=component make e2e`) runs
+  real pipelines in that GitLab on the box's runner: checkout, build
+  through the router, push to GitLab's registry with the job token, the
+  digest in a later job, the cache on the second pipeline, a failing build,
+  and the console's pages for those jobs.

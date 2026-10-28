@@ -287,8 +287,10 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 	@cmp -s LICENSE $(UMBRELLA)/LICENSE || { echo "$(UMBRELLA)/LICENSE differs from LICENSE"; exit 1; }
 	@$(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml >/dev/null \
 		|| { $(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml; exit 1; }
+	@echo "==> released images"
+	@test/released-images.sh
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh scripts/vulncheck.sh scripts/ci-changes.sh test/ci-changes.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh scripts/vulncheck.sh scripts/ci-changes.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -316,6 +318,10 @@ $(NODE):
 .PHONY: component-test
 component-test: ## The GitLab CI component's job script against a fake buildctl, in its own image (needs docker, ruby)
 	@ci/gitlab/test/run.sh
+
+.PHONY: component-gitlab-test
+component-gitlab-test: ## The component through a real GitLab CE (GITLAB=min|current|all, default all): lint and pipeline simulation with every kind of input (needs docker, ruby)
+	@ci/gitlab/test/gitlab.sh lint $${GITLAB:-all}
 
 .PHONY: ui-test
 ui-test: $(NODE) ## Browser checks of the console's pages on its fixtures (needs Chrome; CHROME=<path> to pick one)
