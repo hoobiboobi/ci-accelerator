@@ -532,14 +532,21 @@ func settleRebuilds(ctx context.Context, st *store.Store, gl web.Changer, log *s
 			log.Warn("settling rebuilds", "err", err)
 			continue
 		}
+		ask := gl // nil for the rest of the pass once GitLab rate-limits
 		for _, p := range ps {
-			n, err := web.SettleProject(ctx, st, gl, p, time.Now(), 0, 25)
+			api := ask
+			if k, ok := api.(interface{ Knows(string) bool }); ok && !k.Knows(p.Instance) {
+				api = nil // a GitLab the console has no token for: stored comparisons only
+			}
+			n, err := web.SettleProject(ctx, st, api, p, time.Now(), 0, 25)
 			if n > 0 {
 				log.Info("settled rebuilds with GitLab's comparisons", "project", p.String(), "builds", n)
 			}
 			var rl *gitlab.RateLimited
 			if errors.As(err, &rl) {
-				break
+				// The other projects are still settled from what is stored.
+				ask = nil
+				continue
 			}
 			if err != nil {
 				log.Warn("settling rebuilds", "project", p.String(), "err", err)

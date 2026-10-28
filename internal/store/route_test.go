@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/route"
 )
 
@@ -214,5 +215,40 @@ func TestCompares(t *testing.T) {
 	}
 	if _, _, ok, _ := s.Compared(ctx, p, "a", "b"); ok {
 		t.Error("kept past retention")
+	}
+}
+
+// An answer is stored only on the question it answers: a build saved
+// again since with other paths or another previous daemon stays open.
+func TestSettleOnlyTheQuestionAsked(t *testing.T) {
+	c := &clock{time.Now()}
+	s := open(t, t.TempDir(), c)
+	bs := fixtures(t, s.SecretKey())
+	saveJobs(t, s, bs)
+	b := bs[len(bs)-1]
+	var step history.Step
+	for _, st := range b.Steps {
+		if st.State == history.Built && st.StepID != "" {
+			step = st
+		}
+	}
+	id, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: history.Reason{Kind: history.CacheElsewhere, Step: step, Old: "bk-x", Paths: []string{"api"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := Settled{ID: id, Kind: history.FilesChanged, Paths: []string{"web/x"}, Via: "gitlab a..b", Asked: true, Old: "bk-x", Open: []string{"web"}}
+	if err := s.SettleElsewhere(ctx, []Settled{stale}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.BuildPage(ctx, id); p.Via != "" {
+		t.Errorf("an answer to another question stored: %q", p.Via)
+	}
+	right := stale
+	right.Open, right.Paths = []string{"api"}, []string{"api/main.go"}
+	if err := s.SettleElsewhere(ctx, []Settled{right}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.BuildPage(ctx, id); p.Via != "gitlab a..b" || p.Reason.Kind != history.FilesChanged {
+		t.Errorf("the answer to its question not stored: %q %s", p.Via, p.Reason.Kind)
 	}
 }

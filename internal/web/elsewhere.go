@@ -114,10 +114,10 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 		}
 		switch {
 		case e.SHA == "" || e.PrevSHA == "":
-			out = append(out, store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: a commit is not known"})
+			out = append(out, asked(store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: a commit is not known"}, e))
 			continue
 		case e.SHA == e.PrevSHA:
-			out = append(out, store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: "same commit " + short(e.SHA, 8)})
+			out = append(out, asked(store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: "same commit " + short(e.SHA, 8)}, e))
 			continue
 		}
 		k := pair{e.PrevSHA, e.SHA}
@@ -158,12 +158,18 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 				}
 			}
 		}
-		out = append(out, decideByDiff(e, d.files, d.complete, d.err))
+		out = append(out, asked(decideByDiff(e, d.files, d.complete, d.err), e))
 	}
 	if err := data.SettleElsewhere(ctx, out); err != nil {
 		return 0, err
 	}
 	return len(out), stop
+}
+
+// asked ties an answer to the question it answers.
+func asked(s store.Settled, e store.Elsewhere) store.Settled {
+	s.Asked, s.Old, s.Open = true, e.Old, e.Paths
+	return s
 }
 
 // decideByDiff settles one build with the files GitLab says changed
