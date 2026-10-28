@@ -9,7 +9,7 @@
 <header class="phead">
   <div class="crumbs"><a href="{{if .PipeURL}}{{.PipeURL}}{{else}}/builds{{end}}" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/builds">Builds</a>{{if .PipeURL}}<span class="sepr">/</span><a href="{{.PipeURL}}">{{.PipeLabel}}</a>{{end}}<span class="sepr">/</span><span>{{.Name}}</span></div>
   <div class="titlerow"><h1 class="t" tabindex="-1">{{.Name}}</h1>{{template "statuslong" .Status}}
-    {{if .GitLabURL}}<div class="tools"><a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab job</span></a></div>{{end}}</div>
+    <div class="tools">{{if .PrevURL}}<a class="btn" href="/builds/{{.ID}}/compare" title="Compare with another build of this image (x)">{{icon "cmp" 13}}<span class="lbl2">Compare</span></a>{{end}}{{if .GitLabURL}}<a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab job</span></a>{{end}}</div></div>
   <div class="sub">{{if .Commit}}<span class="q">“{{.Commit}}”</span>{{end}}{{if .SHA}}<span><span class="mono">{{.SHA}}</span>{{with .Ref}} on {{.}}{{end}}</span>{{end}}{{if .Target}}<span>target <span class="mono">{{.Target}}</span></span>{{end}}<span>node {{if .NodeURL}}<a class="link mono" href="{{.NodeURL}}">{{.Node}}</a>{{else}}<span class="mono">{{.Node}}</span>{{end}}</span></div>
 </header>
 
@@ -21,7 +21,7 @@
 {{with .LogURL}}<details class="box fold"><summary>{{icon "chev" 14 "chev"}}<b>Job log</b><span class="muted">the end of it, read from GitLab when you open this</span></summary><div class="pad">{{template "logbox" .}}</div></details>{{end}}
 {{with .Others}}<p class="others">This job ran {{add (len .) 1}} builds: {{range $i, $o := .}}{{if $i}}, {{end}}<a class="link" href="{{$o.URL}}">{{$o.Target}}</a> ({{$o.Dur}}, {{$o.Status.Label}}){{end}}.</p>{{end}}
 
-<section class="box" aria-labelledby="chgT"><div class="boxh"><h2 class="h" id="chgT">What changed since the previous build</h2>{{if .PrevURL}}<a class="link" href="{{.PrevURL}}">{{.PrevLabel}}</a> · <a class="link" href="/builds/{{.ID}}/compare">compare with any build</a>{{end}}</div>
+<section class="box" aria-labelledby="chgT"><div class="boxh"><h2 class="h" id="chgT">What changed since the previous build</h2>{{if .PrevURL}}<a class="link" href="{{.PrevURL}}">{{.PrevLabel}}</a> · <a class="link" href="/builds/{{.ID}}/compare">compare side by side</a>{{end}}</div>
   {{if .PrevURL}}{{if .Changes}}<dl class="chg">{{range .Changes}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}</dl>{{else}}<p class="muted pad">Nothing BuildKit records differs.</p>{{end}}
   {{else}}<p class="muted pad">No earlier build of {{if .Target}}{{.Target}}{{else}}this target{{end}} on record.</p>{{end}}
 </section>

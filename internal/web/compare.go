@@ -28,6 +28,13 @@ type CompareView struct {
 	GitLabDiff   string // GitLab's comparison of the two commits
 	Picks        []CmpPick
 	Self         int64
+	// This is the build the page belongs to, That the one compared with
+	// (A and B are the same two by time).
+	This, That CmpSide
+	// PickURL picks another build in the builds list.
+	PickURL string
+	// Message says why nothing is compared.
+	Message string
 }
 
 // CmpSide is one of the two builds.
@@ -36,6 +43,7 @@ type CmpSide struct {
 	URL    string
 	Label  string // "#pipeline · when"
 	Status Status
+	Self   bool // the build the page belongs to
 }
 
 // CmpFact is one recorded fact of both builds.
@@ -58,7 +66,8 @@ type CmpStep struct {
 type CmpPick struct {
 	URL, Label string
 	Status     Status
-	Current    bool
+	Current    bool // compared with now
+	Previous   bool // the image's build before this one
 }
 
 // DiffLine is a line of a unified diff: Op is " ", "-" or "+".
@@ -101,7 +110,8 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pinProject(&sh, sb.Attribution.Instance, project)
-	v := &CompareView{Name: orDefault(sb.Target), Target: sb.Target, Self: id}
+	v := &CompareView{Name: orDefault(sb.Target), Target: sb.Target, Self: id,
+		PickURL: Filters{Image: sb.Target, Pick: true, A: id}.URL()}
 	sh.Title = "Compare builds of " + v.Name
 	v.Shell = sh
 	loc := zone(r)
@@ -116,21 +126,23 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	with := int64(0)
+	with, prevID := int64(0), int64(0)
+	if prev, _, err := s.data.Previous(ctx, sb); err == nil && prev != nil {
+		with, prevID = prev.ID, prev.ID
+	}
 	if q := r.URL.Query().Get("with"); q != "" {
 		if with, err = strconv.ParseInt(q, 10, 64); err != nil {
 			s.notFound(w, r, "build")
 			return
 		}
-	} else if prev, _, err := s.data.Previous(ctx, sb); err == nil && prev != nil {
-		with = prev.ID
 	}
 	for _, b := range rows {
 		if b.ID == id {
 			continue
 		}
 		v.Picks = append(v.Picks, CmpPick{URL: fmt.Sprintf("/builds/%d/compare?with=%d", id, b.ID),
-			Label: pipeLabel(b.Pipeline) + clockStamp(b.Started, inZone(s.now(), loc)).Text, Status: rowStatus(b), Current: b.ID == with})
+			Label: pipeLabel(b.Pipeline) + clockStamp(b.Started, inZone(s.now(), loc)).Text, Status: rowStatus(b), Current: b.ID == with,
+			Previous: b.ID == prevID})
 	}
 	if with == 0 || with == id {
 		s.render(w, "compare", http.StatusOK, v)
@@ -147,6 +159,10 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 	}
 	ob := other.Page.Build
 	if ob.Target != sb.Target || projectOf(other.Page) != project || ob.Attribution.Instance != sb.Attribution.Instance {
+		v.Message = "Build " + strconv.FormatInt(with, 10) + " is not a build of " + v.Name + " in this project: only two builds of one image are compared."
+		for i := range v.Picks {
+			v.Picks[i].Current = false
+		}
 		s.render(w, "compare", http.StatusBadRequest, v)
 		return
 	}
@@ -161,9 +177,13 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 			label = pipeLabel(p.ID) + label
 		}
 		return CmpSide{ID: d.Page.ID, URL: fmt.Sprintf("/builds/%d", d.Page.ID), Label: label,
-			Status: statusOf(d.Page.Reason.Kind, bb.Error, d.Built, bb.Completed.IsZero())}
+			Status: statusOf(d.Page.Reason.Kind, bb.Error, d.Built, bb.Completed.IsZero()), Self: d.Page.ID == id}
 	}
 	v.A, v.B = side(a), side(b)
+	v.This, v.That = v.B, v.A
+	if v.A.Self {
+		v.This, v.That = v.A, v.B
+	}
 	v.Facts = compareFacts(a, b)
 	v.Args = compareArgs(a.Page.Build.BuildArgs, b.Page.Build.BuildArgs)
 	if a.Page.Dockerfile != "" && b.Page.Dockerfile != "" {

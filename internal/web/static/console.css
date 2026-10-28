@@ -927,3 +927,18 @@ a.boxh:hover { background: var(--hover); }
   .ophone { display: none; }
   .tile { flex-basis: 40%; }
 }
+
+/* Comparing two builds: picking the pair, marking which is which */
+.pickbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line)); border-radius: 8px; background: color-mix(in oklab, var(--accent) 12%, var(--panel)); font-size: 13px; }
+.pickbar .ml { margin-left: auto; }
+.blist.pick a.brow:hover { background: color-mix(in oklab, var(--accent) 8%, var(--panel)); }
+.brow.picked { background: color-mix(in oklab, var(--accent) 14%, var(--panel)); box-shadow: inset 3px 0 0 var(--accent); }
+.chip.self { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, var(--line)); background: color-mix(in oklab, var(--accent) 12%, var(--panel)); }
+.chip.other { color: var(--ink-2); }
+.btn[aria-pressed="true"] { background: color-mix(in oklab, var(--accent) 18%, var(--panel)); border-color: var(--accent); color: var(--ink); }
+.cmpsel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; font-size: 13px; color: var(--ink-2); }
+.cmpsel .btn { margin-left: 6px; }
+.cmp thead th { white-space: normal; }
+.cmp.self-a td:nth-child(2), .cmp.self-a thead th:nth-child(2), .cmp.self-b td:nth-child(3), .cmp.self-b thead th:nth-child(3) { background: color-mix(in oklab, var(--accent) 7%, var(--panel)); }
+.cmp.self-a thead th:nth-child(2), .cmp.self-b thead th:nth-child(3) { box-shadow: inset 0 2px 0 var(--accent); }
+.picks li.cur { margin: 0 -6px; padding: 2px 6px; border-radius: 6px; background: color-mix(in oklab, var(--accent) 10%, var(--panel)); }

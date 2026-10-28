@@ -1784,6 +1784,79 @@ func TestCompareBuilds(t *testing.T) {
 	if !offered {
 		t.Errorf("the build page does not offer the comparison")
 	}
+	// Which is which: the page's own build is "this build", its column
+	// tinted, the other one marked current in the list to pick from.
+	selfA := a.Started.Before(b.Started)
+	tint := "self-b"
+	if selfA {
+		tint = "self-a"
+	}
+	if !strings.Contains(page.body, `<table class="cmp `+tint+`">`) || strings.Count(page.body, `<span class="chip self">this build</span>`) < 2 ||
+		!strings.Contains(page.body, `<span class="chip other">compared with</span>`) ||
+		!regexp.MustCompile(`<li class="cur"><a class="link" href="/builds/\d+/compare\?with=`+strconv.FormatInt(b.ID, 10)+`" aria-current="true">`).MatchString(page.body) {
+		t.Errorf("the compare page does not mark this build and the other one")
+	}
+	if !strings.Contains(page.body, fmt.Sprintf(`<div class="cmpsel"><span class="chip self">this build</span><a class="link" href="/builds/%d">`, a.ID)) ||
+		!strings.Contains(page.body, fmt.Sprintf(`<span class="muted">compared with</span><a class="link" href="/builds/%d">`, b.ID)) {
+		t.Errorf("the head of the compare page does not say which build is this one")
+	}
+	if !strings.Contains(page.body, fmt.Sprintf(`href="/builds?a=%d&amp;image=`, a.ID)) {
+		t.Errorf("no way to pick another build in the list")
+	}
+	for tgt, rows := range byTarget {
+		if tgt != a.Target {
+			if p := get(t, ts, fmt.Sprintf("/builds/%d/compare?with=%d", a.ID, rows[0].ID)); !strings.Contains(p.body, "only two builds of one image are compared") {
+				t.Errorf("builds of two images: the page does not say why")
+			}
+			break
+		}
+	}
+}
+
+// Picking a pair in the builds list: the first pick narrows the list to its
+// image and is marked, every other row opens its comparison with it; the
+// filters and the pages keep the picking; a build the reader may not see
+// starts it over.
+func TestComparePick(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	var first store.BuildRow
+	targets := map[string]int{}
+	for _, k := range keys {
+		for _, b := range byPipe[k] {
+			targets[b.Target]++
+			if targets[b.Target] == 2 && first.ID == 0 {
+				first = b
+			}
+		}
+	}
+	if first.ID == 0 {
+		t.Fatal("fixtures: no image with two builds")
+	}
+	list := get(t, ts, "/builds")
+	if !strings.Contains(list.body, `href="/builds?pick=1" aria-pressed="false"`) {
+		t.Errorf("the builds list does not offer picking")
+	}
+	one := get(t, ts, "/builds?pick=1")
+	one.safe(t)
+	if !strings.Contains(one.body, "Pick the first build") || !strings.Contains(one.body, fmt.Sprintf(`href="/builds?a=%d&amp;pick=1"`, first.ID)) ||
+		!strings.Contains(one.body, `<input type="hidden" name="pick" value="1">`) || !strings.Contains(one.body, `href="/builds" aria-pressed="true"`) {
+		t.Errorf("step one: rows do not pick the first build")
+	}
+	two := get(t, ts, fmt.Sprintf("/builds?pick=1&a=%d", first.ID))
+	two.safe(t)
+	if !strings.Contains(two.body, `<div class="brow picked" aria-current="true">`) || !strings.Contains(two.body, "pick the second build") ||
+		!regexp.MustCompile(fmt.Sprintf(`href="/builds/%d/compare\?with=\d+" aria-label="compare with `, first.ID)).MatchString(two.body) ||
+		!strings.Contains(two.body, fmt.Sprintf(`<input type="hidden" name="a" value="%d">`, first.ID)) {
+		t.Errorf("step two: the first build is not marked or rows do not compare")
+	}
+	if strings.Count(two.body, `class="brow`) != targets[first.Target] {
+		t.Errorf("step two lists %d rows, the image has %d builds", strings.Count(two.body, `class="brow`), targets[first.Target])
+	}
+	// An unknown first build starts over.
+	if p := get(t, ts, "/builds?pick=1&a=999999999"); !strings.Contains(p.body, "Pick the first build") {
+		t.Errorf("an unknown first build is not ignored")
+	}
 }
 
 func TestLineDiff(t *testing.T) {

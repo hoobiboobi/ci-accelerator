@@ -31,7 +31,7 @@
       {{if .Reasons}}<div class="rlist">{{range .Reasons}}<a class="rrow" href="{{.URL}}"><span class="rs">{{template "status" .Status}}</span><span class="rt">{{.Text}}</span><span class="rn">{{.N}}</span><span class="rl">{{dur .Lost}}</span></a>{{end}}</div>
       {{else}}<p class="muted pad">It was not rebuilt.</p>{{end}}</section>
   </div>
-  <section class="box" aria-labelledby="lbT"><div class="boxh"><h2 class="h" id="lbT">Latest builds</h2><a class="link" href="{{.ListURL}}">All builds of {{.Name}}</a></div>
+  <section class="box" aria-labelledby="lbT"><div class="boxh"><h2 class="h" id="lbT">Latest builds</h2><a class="link" href="{{.ListURL}}">All builds of {{.Name}}</a> · <a class="link" href="{{.PickURL}}">compare two</a></div>
     <div class="blist">{{range .Recent}}{{template "brow" .}}{{end}}</div></section>
   {{end}}
 </div>

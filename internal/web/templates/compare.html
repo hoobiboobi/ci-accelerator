@@ -4,17 +4,21 @@
 <header class="phead">
   <div class="crumbs"><a href="/builds/{{.Self}}" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/builds">Builds</a><span class="sepr">/</span><a href="/builds/{{.Self}}">{{.Name}}</a><span class="sepr">/</span><span>Compare</span></div>
   <div class="titlerow"><h1 class="t" tabindex="-1">Compare two builds of {{.Name}}</h1></div>
-  <div class="sub"><span>What BuildKit recorded for each, side by side; differences marked.</span></div>
+  {{if .A.ID}}<div class="cmpsel"><span class="chip self">this build</span><a class="link" href="{{.This.URL}}"><b>{{.This.Label}}</b></a> {{template "status" .This.Status}}
+    <span class="muted">compared with</span><a class="link" href="{{.That.URL}}"><b>{{.That.Label}}</b></a> {{template "status" .That.Status}}
+    <a class="btn" href="{{.PickURL}}">{{icon "cmp" 13}}Pick another build</a></div>
+  {{else}}<div class="sub"><span>What BuildKit recorded for each, side by side; differences marked.</span></div>{{end}}
 </header>
+{{with .Message}}<div class="callout warn" role="note">{{icon "warn" 16}}<div><b class="k">Not compared</b>{{.}}</div></div>{{end}}
 {{if .A.ID}}
 <section class="box" aria-labelledby="cfT"><div class="boxh"><h2 class="h" id="cfT">The builds</h2>{{with .GitLabDiff}}<a class="link" href="{{.}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 12}} the commits compared in GitLab</a>{{end}}</div>
-  <div class="tbox"><table class="cmp"><thead><tr><th></th><th><a class="link" href="{{.A.URL}}">{{.A.Label}}</a> {{template "status" .A.Status}}</th><th><a class="link" href="{{.B.URL}}">{{.B.Label}}</a> {{template "status" .B.Status}}</th></tr></thead><tbody>
+  <div class="tbox"><table class="cmp {{if .A.Self}}self-a{{else}}self-b{{end}}"><thead><tr><th></th><th><span class="muted">Earlier</span> <a class="link" href="{{.A.URL}}">{{.A.Label}}</a> {{template "status" .A.Status}} {{template "cmpwho" .A}}</th><th><span class="muted">Later</span> <a class="link" href="{{.B.URL}}">{{.B.Label}}</a> {{template "status" .B.Status}} {{template "cmpwho" .B}}</th></tr></thead><tbody>
     {{range .Facts}}<tr{{if .Differs}} class="dif"{{end}}><th scope="row">{{.K}}</th><td>{{.A}}</td><td>{{.B}}</td></tr>{{end}}
   </tbody></table></div>
 </section>
 
 <section class="box" aria-labelledby="caT"><div class="boxh"><h2 class="h" id="caT">Build arguments</h2></div>
-  {{if .Args}}<div class="tbox"><table class="cmp"><tbody>{{range .Args}}<tr{{if .Differs}} class="dif"{{end}}><th scope="row" class="mono">{{.K}}</th><td class="mono">{{if .A}}{{.A}}{{else}}<span class="muted">not set</span>{{end}}</td><td class="mono">{{if .B}}{{.B}}{{else}}<span class="muted">not set</span>{{end}}</td></tr>{{end}}</tbody></table></div>
+  {{if .Args}}<div class="tbox"><table class="cmp {{if .A.Self}}self-a{{else}}self-b{{end}}"><tbody>{{range .Args}}<tr{{if .Differs}} class="dif"{{end}}><th scope="row" class="mono">{{.K}}</th><td class="mono">{{if .A}}{{.A}}{{else}}<span class="muted">not set</span>{{end}}</td><td class="mono">{{if .B}}{{.B}}{{else}}<span class="muted">not set</span>{{end}}</td></tr>{{end}}</tbody></table></div>
   {{else}}<p class="muted pad">Neither build set a build argument.</p>{{end}}
 </section>
 
@@ -25,7 +29,7 @@
 </section>
 
 <section class="box" aria-labelledby="csT"><div class="boxh"><h2 class="h" id="csT">Steps</h2><span class="muted">by their place in the Dockerfile</span></div>
-  <div class="tbox"><table class="cmp steps"><thead><tr><th>Step</th><th>Earlier</th><th>Later</th><th class="num">Time</th></tr></thead><tbody>
+  <div class="tbox"><table class="cmp steps {{if .A.Self}}self-a{{else}}self-b{{end}}"><thead><tr><th>Step</th><th>Earlier {{template "cmpwho" .A}}</th><th>Later {{template "cmpwho" .B}}</th><th class="num">Time</th></tr></thead><tbody>
   {{range .Steps}}<tr{{if or .Changed (ne .StateA .StateB)}} class="dif"{{end}}><td><span class="mono">{{.Key}}</span> {{.Name}}{{with .NameA}}<div class="diff"><div class="del">- {{.}}</div></div>{{end}}</td>
     <td>{{if .StateA}}{{template "stchip" .StateA}} {{.DA}}{{else}}<span class="muted" title="Not in the build's records: a later step came from the cache, or the step did not exist">not reported</span>{{end}}</td>
     <td>{{if .StateB}}{{template "stchip" .StateB}} {{.DB}}{{else}}<span class="muted" title="Not in the build's records: a later step came from the cache, or the step does not exist">not reported</span>{{end}}</td>
@@ -35,8 +39,9 @@
 {{else}}
 <p class="muted">{{if .Picks}}Pick a build to compare with.{{else}}No other build of {{.Name}} on record to compare with.{{end}}</p>
 {{end}}
-{{with .Picks}}<section class="box" aria-labelledby="cpT"><div class="boxh"><h2 class="h" id="cpT">Compare with another build of {{$.Name}}</h2><span class="muted">the last {{len .}}</span></div>
-  <ul class="picks">{{range .}}<li><a class="link{{if .Current}} cur{{end}}" href="{{.URL}}"{{if .Current}} aria-current="true"{{end}}>{{.Label}}</a> {{template "status" .Status}}</li>{{end}}</ul>
+{{with .Picks}}<section class="box" aria-labelledby="cpT"><div class="boxh"><h2 class="h" id="cpT">Compare with another build of {{$.Name}}</h2><span class="muted">the last {{len .}} · <a class="link" href="{{$.PickURL}}">pick in the builds list</a></span></div>
+  <ul class="picks">{{range .}}<li{{if .Current}} class="cur"{{end}}><a class="link" href="{{.URL}}"{{if .Current}} aria-current="true"{{end}}>{{.Label}}</a> {{template "status" .Status}}{{if .Current}} <span class="chip self">compared with now</span>{{end}}{{if .Previous}} <span class="chip plain">previous</span>{{end}}</li>{{end}}</ul>
 </section>{{end}}
 </div>
 {{end}}
+{{define "cmpwho"}}{{if .Self}}<span class="chip self">this build</span>{{else}}<span class="chip other">compared with</span>{{end}}{{end}}

@@ -16,7 +16,7 @@
 {{define "statuslong"}}<span class="stat st-{{.Key}}">{{icon .Icon 12}}{{.Long}}</span>{{end}}
 
 {{/* One build as a row of a list. */}}
-{{define "brow"}}<a class="brow{{if .Quiet}} quiet{{end}}" href="{{.URL}}"><span class="bt" title="{{.When.UTC}}">{{.When}}</span><span class="bn">{{.Target}}</span><span class="bs">{{template "status" .Status}}</span><span class="bw">{{.Why}}</span><span class="bd{{if .Slower}} slow{{end}}"{{if .Slower}} title="slower than 95% of this image&#39;s rebuilds in the last 7 days"{{end}}>{{.Dur}}</span><span class="bp">{{.Ref}}{{with .PipeLabel}} · {{.}}{{end}}</span></a>{{end}}
+{{define "brow"}}{{if .Picked}}<div class="brow picked" aria-current="true">{{else}}<a class="brow{{if .Quiet}} quiet{{end}}" href="{{.URL}}"{{with .Label}} aria-label="{{.}}"{{end}}>{{end}}<span class="bt" title="{{.When.UTC}}">{{.When}}</span><span class="bn">{{.Target}}{{if .Picked}} <span class="chip self">comparing with</span>{{end}}</span><span class="bs">{{template "status" .Status}}</span><span class="bw">{{.Why}}</span><span class="bd{{if .Slower}} slow{{end}}"{{if .Slower}} title="slower than 95% of this image&#39;s rebuilds in the last 7 days"{{end}}>{{.Dur}}</span><span class="bp">{{.Ref}}{{with .PipeLabel}} · {{.}}{{end}}</span>{{if .Picked}}</div>{{else}}</a>{{end}}{{end}}
 
 {{/* An image's last builds, oldest to newest. */}}
 {{define "strip"}}<span class="strip">{{range .}}<a class="sq st-{{.Status.Key}}" href="{{.URL}}" title="{{.Title}}" aria-label="{{.Title}}"></a>{{end}}</span>{{end}}
