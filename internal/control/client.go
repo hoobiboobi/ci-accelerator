@@ -435,6 +435,15 @@ func (c *Client) Elsewhere(ctx context.Context, p store.ProjectKey, since time.T
 	return
 }
 
+func (c *Client) Compared(ctx context.Context, p store.ProjectKey, from, to string) (files []string, complete, ok bool, err error) {
+	err = c.call(ctx, "Compared", []any{p, from, to}, &files, &complete, &ok)
+	return
+}
+
+func (c *Client) SaveCompare(ctx context.Context, p store.ProjectKey, from, to string, files []string, complete bool) error {
+	return c.call(ctx, "SaveCompare", []any{p, from, to, files, complete})
+}
+
 func (c *Client) SettleElsewhere(ctx context.Context, settled []store.Settled) error {
 	return c.call(ctx, "SettleElsewhere", []any{settled})
 }

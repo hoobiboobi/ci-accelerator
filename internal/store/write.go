@@ -157,18 +157,9 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			target = excluded.target, dockerfile_id = excluded.dockerfile_id, build_args = excluded.build_args,
 			started_at = excluded.started_at, completed_at = excluded.completed_at, error = excluded.error,
 			context_bytes = excluded.context_bytes, images = excluded.images,
-			-- A build read again (the controller restarted and replayed the
-			-- daemons' history) keeps what GitLab's comparison decided, when
-			-- it is the same open question again: the same step, the same
-			-- previous daemon.
-			reason_kind = CASE WHEN `+keepSettled+` THEN builds.reason_kind ELSE excluded.reason_kind END,
-			reason_step = CASE WHEN `+keepSettled+` THEN builds.reason_step ELSE excluded.reason_step END,
-			reason_old = CASE WHEN `+keepSettled+` THEN builds.reason_old ELSE excluded.reason_old END,
-			reason_new = CASE WHEN `+keepSettled+` THEN builds.reason_new ELSE excluded.reason_new END,
-			reason_arg = CASE WHEN `+keepSettled+` THEN builds.reason_arg ELSE excluded.reason_arg END,
-			reason_paths = CASE WHEN `+keepSettled+` THEN builds.reason_paths ELSE excluded.reason_paths END,
-			reason_by = CASE WHEN `+keepSettled+` THEN builds.reason_by ELSE excluded.reason_by END,
-			reason_via = CASE WHEN `+keepSettled+` THEN builds.reason_via ELSE '' END, saved_ms = excluded.saved_ms,
+			reason_kind = excluded.reason_kind, reason_step = excluded.reason_step, reason_old = excluded.reason_old,
+			reason_new = excluded.reason_new, reason_arg = excluded.reason_arg, reason_paths = excluded.reason_paths,
+			reason_by = excluded.reason_by, reason_via = '', saved_ms = excluded.saved_ms,
 			output_day = COALESCE(excluded.output_day, builds.output_day),
 			built = excluded.built, built_ms = excluded.built_ms, warnings = excluded.warnings
 		WHERE excluded.generation >= builds.generation
@@ -292,12 +283,8 @@ func (s *Store) SetReason(ctx context.Context, ref, daemon string, r history.Rea
 			reason_step = (SELECT idx FROM steps WHERE build_id = builds.id AND key = ? ORDER BY idx LIMIT 1),
 			reason_by = (SELECT id FROM builds b WHERE b.ref = ? LIMIT 1)
 		WHERE ref = ? AND daemon_id = (SELECT id FROM daemons WHERE name = ?)
-			-- GitLab's comparison settled this question: keep its answer when
-			-- the new reason asks it again or comes to the same conclusion.
-			AND NOT (reason_via != '' AND reason_kind != 'cache-elsewhere' AND (? = '' OR ((? = 'cache-elsewhere' OR ? = reason_kind) AND reason_old = ?)))
 		RETURNING instance, pipeline_id`,
-		string(r.Kind), r.Old, r.New, r.Arg, string(paths), r.Step.Key, nullString(r.By), ref, daemon,
-		string(r.Kind), string(r.Kind), string(r.Kind), r.Old).Scan(&instance, &pipeline)
+		string(r.Kind), r.Old, r.New, r.Arg, string(paths), r.Step.Key, nullString(r.By), ref, daemon).Scan(&instance, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -387,17 +374,6 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 	}
 	return nil
 }
-
-// keepSettled is the upsert's test that a stored answer of GitLab's
-// comparison (not an "unresolved" non-answer, which a later read may
-// settle) is still the answer: the new reason has none yet, asks the same
-// question again or reaches the same conclusion, against the same
-// previous daemon. The step is not compared: the answer is about the two
-// commits, and a record read again before its received steps are linked
-// names another first rebuilt step for a moment.
-const keepSettled = `(builds.reason_via != '' AND builds.reason_kind != 'cache-elsewhere'
-	AND (excluded.reason_kind = '' OR ((excluded.reason_kind = 'cache-elsewhere' OR excluded.reason_kind = builds.reason_kind)
-		AND excluded.reason_old = builds.reason_old)))`
 
 // identity converts a step identity (16 hex characters) to its column value.
 func identity(h string) (int64, error) {

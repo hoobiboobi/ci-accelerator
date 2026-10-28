@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,6 +24,32 @@ type Elsewhere struct {
 	// one; empty when the previous build ran on the same daemon. It decides
 	// whether a no-change outcome is "other node" or an evicted cache.
 	Old string
+}
+
+// Compared returns GitLab's comparison of two commits as stored by
+// SaveCompare: the changed files and whether the list is complete; ok is
+// false when it was not stored.
+func (s *Store) Compared(ctx context.Context, p ProjectKey, from, to string) (files []string, complete, ok bool, err error) {
+	var raw string
+	err = s.db.QueryRowContext(ctx, `SELECT files, complete FROM compares WHERE instance = ? AND project_id = ? AND from_sha = ? AND to_sha = ?`,
+		nullInstance(p.Instance), nullUint(p.ID), from, to).Scan(&raw, &complete)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, false, nil
+	}
+	if err != nil {
+		return nil, false, false, err
+	}
+	err = json.Unmarshal([]byte(raw), &files)
+	return files, complete, err == nil, err
+}
+
+// SaveCompare stores GitLab's comparison of two commits of a project.
+func (s *Store) SaveCompare(ctx context.Context, p ProjectKey, from, to string, files []string, complete bool) error {
+	raw, _ := json.Marshal(nonNil(files))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO compares (instance, project_id, from_sha, to_sha, files, complete, at) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (instance, project_id, from_sha, to_sha) DO UPDATE SET files = excluded.files, complete = excluded.complete, at = excluded.at`,
+		nullInstance(p.Instance), nullUint(p.ID), from, to, string(raw), complete, s.opts.Now().UnixMilli())
+	return err
 }
 
 // ElsewhereProjects returns the projects with builds since t whose reason

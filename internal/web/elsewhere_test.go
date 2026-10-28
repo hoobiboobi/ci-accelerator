@@ -160,6 +160,14 @@ func (f *fakeSettle) SettleElsewhere(_ context.Context, s []store.Settled) error
 	return nil
 }
 
+func (f *fakeSettle) Compared(context.Context, store.ProjectKey, string, string) ([]string, bool, bool, error) {
+	return nil, false, false, nil
+}
+
+func (f *fakeSettle) SaveCompare(context.Context, store.ProjectKey, string, string, []string, bool) error {
+	return nil
+}
+
 // GitLab failing for a moment leaves the rebuilds open; GitLab saying no
 // (a 4xx) settles them as unresolved.
 func TestSettleKeepsOpenOnATransientError(t *testing.T) {
@@ -225,5 +233,62 @@ func TestUnclearGroupsByText(t *testing.T) {
 	}
 	if len(seen) != 4 {
 		t.Errorf("groups %v", seen)
+	}
+}
+
+// memSettle keeps comparisons like the store does.
+type memSettle struct {
+	fakeSettle
+	compares map[string][]string
+}
+
+func (m *memSettle) Compared(_ context.Context, _ store.ProjectKey, from, to string) ([]string, bool, bool, error) {
+	f, ok := m.compares[from+".."+to]
+	return f, true, ok, nil
+}
+
+func (m *memSettle) SaveCompare(_ context.Context, _ store.ProjectKey, from, to string, files []string, _ bool) error {
+	m.compares[from+".."+to] = files
+	return nil
+}
+
+type countChanged struct {
+	n     int
+	files []string
+}
+
+func (c *countChanged) Changed(context.Context, string, uint64, string, string) ([]string, bool, error) {
+	c.n++
+	return c.files, true, nil
+}
+
+// A comparison asked for once settles the rebuild again after it was read
+// again, without GitLab: with sign-in the controller has no token, and the
+// answer is worked out again from the current data, never kept stale.
+func TestSettleFromStoredComparisons(t *testing.T) {
+	p := store.ProjectKey{Instance: "abcdef", ID: 42}
+	open := []store.Elsewhere{{ID: 7, SHA: "b", PrevSHA: "a", Paths: []string{"services/api"}, Old: "bk-old"}}
+	m := &memSettle{fakeSettle: fakeSettle{open: open}, compares: map[string][]string{}}
+	gl := &countChanged{files: []string{"services/api/main.go"}}
+	if n, err := SettleProject(ctx, m, gl, p, testNow, 0, 25); n != 1 || err != nil || gl.n != 1 {
+		t.Fatalf("first pass: %d %v, %d calls", n, err, gl.n)
+	}
+	// Read again: open once more. No GitLab now (api nil).
+	m.settled = nil
+	if n, err := SettleProject(ctx, m, nil, p, testNow, 0, 25); n != 1 || err != nil || m.settled[0].Kind != history.FilesChanged {
+		t.Fatalf("from the stored comparison: %d %v %+v", n, err, m.settled)
+	}
+	// The same commits, but the step now copies other files: worked out
+	// again, not the earlier answer.
+	m.open[0].Paths = []string{"services/web"}
+	m.settled = nil
+	SettleProject(ctx, m, nil, p, testNow, 0, 25)
+	if len(m.settled) != 1 || m.settled[0].Kind != history.OtherNode {
+		t.Errorf("not worked out again: %+v", m.settled)
+	}
+	// Without a stored comparison and without GitLab: left open.
+	m2 := &memSettle{fakeSettle: fakeSettle{open: []store.Elsewhere{{ID: 8, SHA: "c", PrevSHA: "b", Paths: []string{"x"}}}}, compares: map[string][]string{}}
+	if n, _ := SettleProject(ctx, m2, nil, p, testNow, 0, 25); n != 0 || len(m2.settled) != 0 {
+		t.Errorf("settled without anything to settle with: %+v", m2.settled)
 	}
 }
