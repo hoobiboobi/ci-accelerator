@@ -380,7 +380,7 @@ cleanup() {
     echo "logs and diagnostics: $LOGS (rerun with KEEP=1 to keep the cluster state)"
   fi
   if [ "$KEEP" = "1" ]; then
-    echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS (and $OTHER_NS, $OBS_NS) and $STATE_DIR on the nodes (make e2e-clean removes them)"
+    echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS, $OTHER_NS, $OBS_NS, $PSA_NS, $BOX_NS, $BOX_JOBS_NS, $UPG_NS, $UPG_JOBS_NS (those that exist) and $STATE_DIR on the nodes (make e2e-clean removes them)"
     return
   fi
   echo; echo "== [$(elapsed)] cleanup"
@@ -1026,14 +1026,23 @@ box_disk() {
   check "the Nodes page shows every daemon's disk" eventually 150 box_nodes_disk
 }
 
+# e2e_image <scenario>: builds the tree's ci-accelerator:e2e image and
+# loads it into kind, once per run (box and upgrade both use it).
+E2E_IMAGE_BUILT=
+e2e_image() {
+  [ -n "$E2E_IMAGE_BUILT" ] && return 0
+  make -C "$ROOT" image LOCAL_IMAGE=ci-accelerator:e2e >"$LOGS/$1-image.log" 2>&1 \
+    || { fail "build the ci-accelerator image (see $LOGS/$1-image.log)"; return 1; }
+  E2E_IMAGE_BUILT=1
+}
+
 s_box() {
-  step "box: charts/ci-accelerator installs daemons, runner, jobs namespace and storage that work together"
+  step "box: charts/ci-accelerator installs daemons, runner, jobs namespace and control plane that work together"
   local node arch box_tid
   ensure_ns "$BOX_NS" privileged
   ensure_fake_gitlab "$BOX_NS" || return
   make -C "$ROOT" deps >"$LOGS/box-deps.log" 2>&1 || { fail "make deps (see $LOGS/box-deps.log)"; return; }
-  make -C "$ROOT" image LOCAL_IMAGE=ci-accelerator:e2e >"$LOGS/box-image.log" 2>&1 \
-    || { fail "build the ci-accelerator image (see $LOGS/box-image.log)"; return; }
+  e2e_image box || return
   arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
   local extra=(-f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml")
   for f in ${E2E_BOX_EXTRA_VALUES:-}; do extra+=(-f "$f"); done
@@ -1116,8 +1125,7 @@ sys.exit(0 if b and (b[0].get("reason") or {}).get("kind") == "first-build" and 
 # of its project through it (the step sleeps <seconds>). Log in
 # $LOGS/route-<name>.log; returns once the pod ended.
 route_job() {
-  local name=$1 node=$2 project=$3 pipeline=$4 job=$5 sleep=${6:-0} tp
-  tp=$(expected_traceparent "http://fake-gitlab.$NS.svc/" "$pipeline" "$job")
+  local name=$1
   route_pod "$@" || return 1
   route_wait "$name"
 }
@@ -1692,8 +1700,7 @@ s_upgrade() {
   ensure_ns "$UPG_NS" privileged
   ensure_fake_gitlab "$UPG_NS" || return
   make -C "$ROOT" deps >"$LOGS/upgrade-deps.log" 2>&1 || { fail "make deps (see $LOGS/upgrade-deps.log)"; return; }
-  make -C "$ROOT" image LOCAL_IMAGE=ci-accelerator:e2e >"$LOGS/upgrade-image.log" 2>&1 \
-    || { fail "build the ci-accelerator image (see $LOGS/upgrade-image.log)"; return; }
+  e2e_image upgrade || return
   if [ -n "$UPGRADE_FROM_DIR" ]; then
     old_chart=$UPGRADE_FROM_DIR/ci-accelerator-$UPGRADE_FROM.tgz
     old_bk=$UPGRADE_FROM_DIR/buildkit-$UPGRADE_FROM.tgz

@@ -529,7 +529,7 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   rollout empties it. Use `hostPath` on a dedicated disk in production.
 - **What uninstall leaves behind:**
   - with hostPath: the cache on the nodes;
-  - the console's volume, if the console was enabled;
+  - the controller's volume `<release>-controller-data` (the console's history), kept on purpose;
   - the CA key in cert-manager's namespace.
 
 **Operations.**
