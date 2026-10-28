@@ -73,6 +73,18 @@ workflow copies them into the GitHub release.
   why its node was chosen.
 - `scripts/buildkit-certs.sh --router <prefix>` adds the router's names to
   the daemons' certificate.
+- Compare any two builds of an image (`/builds/<id>/compare`, linked from
+  the build page): time, commit, node, build arguments, the Dockerfiles'
+  differing lines and every step's state and time side by side.
+- The build page shows BuildKit's Dockerfile build checks that failed
+  (rule, line, link), what each executed step's processes used (CPU time,
+  time held back by a CPU limit, disk read and written, from BuildKit's
+  cgroup totals), and how much step time ran in parallel.
+- A failed build says whether the step that failed is new or changed in
+  it (with the old and new line); exit codes 137 and 143 are read as the
+  signals they are.
+- The Nodes page counts the build router's decisions of the last 24 hours
+  per daemon (to the project's cache, by hash, another zone, job unknown).
 
 ### Changed
 
@@ -88,6 +100,23 @@ workflow copies them into the GitHub release.
 - One binary, `ci-accelerator`, with roles: `controller`, `web`,
   `disk-probe`, and `all` (the default: controller and web in one process,
   for development).
+- Every median and p95 the console shows is a nearest-rank percentile (one
+  of the measured times); the build page's "usual" time took the upper
+  middle value of an even count before, the daily figures the lower one.
+  "Usual" says how many builds it is the median of.
+- Byte sizes use binary units with their names (KiB, MiB, GiB).
+- The pipeline timeline draws a build's parts where its steps ran (the
+  union of their intervals), not the sum of parallel steps' times.
+
+### Fixed
+
+- A rebuild after a build whose last steps came from the cache was called
+  "new step"; it is now compared with the step in that build's records.
+- "Read new lines" at the end of a finished job's log showed the whole log
+  again (gitlab.com leaves Content-Range out of a 416 answer).
+- A live page stopped hearing of a project for good after one failed
+  permission check at GitLab.
+- With sign-in, `/livez` answered with a redirect to the sign-in page.
 
 ## 0.2.5 - 2026-10-26
 
