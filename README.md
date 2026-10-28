@@ -300,9 +300,13 @@ values.
 - **Defaults:** amd64 build nodes, jobs in namespace `ci-accelerator-jobs`
   (created by the release), the build cache in an `emptyDir` (see below).
 - **arm64 build nodes:** add `--set global.jobs.architecture=arm64`.
-- **Production:** pin the control plane's image by digest with
-  `--set control-plane.image.digest=sha256:...` (the release notes list
-  it); the daemons' image is pinned by digest already.
+- **Production:** pin the ci-accelerator images by digest, both listed in
+  the release notes: the control plane's with
+  `--set control-plane.image.digest=sha256:...`, and the disk probe's next
+  to each daemon (it runs the image of the release that last changed it)
+  with `--set buildkit.diskProbe.image.digest=sha256:...`. The daemons'
+  BuildKit image is pinned by digest already. A digest belongs to one
+  release: upgrades set the new one (see [Upgrading](#upgrading)).
 - **Without cert-manager:** `buildkit.tls.source=existingSecret` with four
   certificates from one CA that `scripts/buildkit-certs.sh` makes (the
   daemons' with the router's names, the jobs' client, the controller's
@@ -457,16 +461,17 @@ reaches over https.
    scopes `openid` and `read_api`, redirect URI
    `<global.console.url>/auth/callback/<id>`, where `<id>` identifies the
    GitLab instance (the first six hex digits of the sha256 of its URL;
-   the install notes print the exact URI). Put the application's id and
-   secret into a Secret:
+   the install notes print the exact URI). Put the application's ID and
+   secret, as GitLab shows them, into a Secret:
 
    ```sh
    kubectl -n ci-accelerator create secret generic console-gitlab-oauth \
-     --from-file=client-id=./client-id --from-file=client-secret=./client-secret
+     --from-literal=client-id=... --from-literal=client-secret=gloas-...
    ```
 
 3. Create a session key; it seals each person's GitLab token at rest, and
-   changing it signs everyone out:
+   changing it signs everyone out (with Flux or Argo CD, see
+   [docs/gitops.md](docs/gitops.md#the-session-key)):
 
    ```sh
    kubectl -n ci-accelerator create secret generic console-session \
@@ -505,11 +510,15 @@ Every role of the control plane (controller, web, router, disk probe)
 writes one JSON object per line with its `role`: when it starts (with the
 settings it runs with), is ready, stops and has stopped, and a line per
 stored build, job start and end, change of the daemons, sign-in and
-sign-out and routed connection. To see where the router sent jobs:
+sign-out and routed connection. To see where the routers sent jobs (one
+router pod per build node, each logs the jobs on its node):
 
 ```sh
-kubectl -n ci-accelerator logs ds/ci-accelerator-router | grep routed
+kubectl -n ci-accelerator logs -l app.kubernetes.io/component=router --prefix --tail=-1 | grep routed
 ```
+
+With `-l`, kubectl prints only the last 10 lines of each pod unless
+`--tail=-1` is given.
 
 `control-plane.log.level=debug` (or one role's
 `control-plane.<controller|web|router>.logLevel`) adds every request,
@@ -562,8 +571,13 @@ helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --ver
 ```
 
 `--reset-then-reuse-values` keeps your values and takes the new version's
-defaults for everything else. The end-to-end tests upgrade the previous
-release this way before every change to the charts or the code is merged
+defaults for everything else. With the images pinned by digest, add the new
+release's digests from its notes (`--set control-plane.image.digest=...`,
+and `buildkit.diskProbe.image.digest` when the notes name another probe
+image): a kept digest of the release before would run that release under
+the new version, so the charts refuse it and say which version they run.
+The end-to-end tests upgrade the previous release this way before every
+change to the charts or the code is merged
 ([ADR-0027](docs/adr/0027-upgrades-and-branches.md)).
 
 **From 0.2.x to 0.3.0: install again.** 0.3.0 split the console into the
@@ -728,6 +742,15 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   console starts with an empty history ([Upgrading](#upgrading)).
 - **Without sign-in and without a token** the console shows no runner wait
   times and cannot compare commits, so "files or node" stays "unclear".
+- **Images are told apart by Dockerfile target.** Builds without a target
+  (the CI component's default) are named by the repository they push to,
+  and each is compared with the previous build that pushed the same
+  repository; but the Images page and the daily figures put all of a
+  project's builds without a target in one row. Give each image its own
+  target, or one project per image, to see them apart there.
+- **A failed build's Dockerfile** comes from BuildKit's stored error: only
+  the failed step's lines are marked (BuildKit records no provenance for a
+  failed build), and a canceled build has none.
 
 **Scope.**
 - **GitLab only.** GitHub Actions support (through Actions Runner

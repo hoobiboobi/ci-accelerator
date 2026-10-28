@@ -9,7 +9,76 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.3.1 or 0.3.0, `helm upgrade` in place; the daemons stay as they
+  are. A control plane pinned by digest
+  (`control-plane.image.digest`, as the README told production installs)
+  needs the new release's digest from its notes: the chart now refuses the
+  digest of an earlier release under its own tag, which would run that
+  release under the new name.
+- On its first start the controller removes the builds 0.3.0 and 0.3.1
+  stored twice after a daemon pod was replaced on a hostPath, and sums up
+  the images' daily figures again from the first such day. The schema
+  version stays: `helm rollback` to 0.3.1 keeps working (that release then
+  logs "record not stored" for the records a replaced pod sends again,
+  instead of storing them twice).
+
+### Fixed
+
+- The GitLab CI component of 0.3.1 is refused by GitLab ("header:spec
+  config description is too long (maximum is 256 characters)"): every
+  pipeline that included it failed without jobs. Since 0.2.3 it also did
+  not work on GitLab 17.9 to 18.9, which know no `spec:description` at
+  all. The component has no `spec:description` any more and works from
+  GitLab 17.9 on, as its README says; its tests now run it through real
+  GitLab CE (17.9 and 19.4) whenever it changes, from its tag on GitHub
+  before a release, and in an end-to-end pipeline on the box.
+- The console stored every build a second time when a daemon pod was
+  replaced on a hostPath (a drain, an eviction, a rollout): the new pod
+  sends the old pod's history again, which is on that disk. Counts,
+  medians and the job pages doubled; a build record is now stored once.
+- Pinning by digest covered only the control plane: the disk probe next
+  to each daemon still ran ci-accelerator:v0.3.0 by tag. The README and
+  the release notes name its digest (`buildkit.diskProbe.image.digest`),
+  and a pinned digest of another release is refused there too.
+- The command for the router's decisions (README "Logs", install notes)
+  read one router pod; it reads every router now, and the log commands
+  with `-l` print every line (`--tail=-1`), not the last 10 of each pod.
+- The install notes' example job had no runner tags, so a runner that
+  takes only tagged jobs never ran it; the notes print the component's
+  include with its integrity instead. They point to the README's
+  "Setting up the console".
+- The README's sign-in step creates the OAuth Secret with
+  `--from-literal`, as every other Secret in the instructions.
+- A running pipeline's page in the console was empty until the pipeline
+  ended ("No job of this pipeline built an image", and grey bars on a
+  timeline that was not shown). It now shows the timeline with the running
+  jobs, how many run and wait, and asks for itself again every 15 seconds
+  while the pipeline runs; the list's card says "running for" and counts
+  waiting jobs instead of "did not run". A job counts as running on
+  GitLab's word or a pod start in the last 24 hours, so a pod that went
+  away while the controller was down no longer keeps a job running. The
+  job page that a job's log links to is live and turns into the build's
+  page once the build is stored.
+- Builds without a Dockerfile target (the CI component's default) were
+  called "the default target", their image page listed every build of the
+  project, and the image filter and compare picks led nowhere. They are
+  named by the repository they push to (several tags of one push are split),
+  have their own image page and filter, and each build is compared with the
+  previous build that pushed the same repository, not with another
+  Dockerfile's.
+- A failed build had no Dockerfile view: BuildKit records no provenance for
+  it. The console now reads the Dockerfile and the failed step's lines from
+  BuildKit's stored error; a parse error marks its line, a canceled build
+  says it has none, and stages a failed build never reached are no longer
+  dimmed. Failed builds still in BuildKit's history get theirs when 0.3.2
+  starts; older ones stay without.
+- The session key's error says what the text decoded to.
+
+### Added
+
+- docs/gitops.md: how to make the console's session key with Flux or Argo
+  CD (by hand, SOPS, Sealed Secrets, or External Secrets' Password
+  generator, whose defaults the console refuses).
 
 ## 0.3.1 - 2026-10-28
 
@@ -41,6 +110,15 @@ None.
 - The release notes said `--set control-plane.enabled=false` leaves the
   console out; the router is part of it, so `global.router.enabled=false`
   is needed too, or the install fails.
+
+### Known issues
+
+- The GitLab CI component of this release does not work: GitLab refuses
+  its header ("header:spec config description is too long (maximum is 256
+  characters)") and the pipeline fails without jobs. Fixed in 0.3.2; until
+  then include the component of v0.3.0 (the same job) on GitLab 18.10 or
+  newer. The components of 0.2.3 to 0.3.1 do not work on GitLab 17.9 to
+  18.9 at all (they use `spec:description`, which those versions refuse).
 
 ## 0.3.0 - 2026-10-28
 

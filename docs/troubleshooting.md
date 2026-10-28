@@ -36,6 +36,8 @@ names the fix; the common ones:
 | `gitlab-runner.runners.config does not render to valid TOML` | Your own `runners.config` (or a value it uses) breaks the TOML; the message names the line |
 | `global.buildNodes.selector has kubernetes.io/arch=...` | Set `global.jobs.architecture` to the same architecture |
 | `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
+| `image.digest (control-plane.image.digest in the box) is the digest of the v... image, but this chart runs v...` | The digest pinned for the release before, kept by the upgrade: set the new release's digest from its notes, or remove it |
+| `diskProbe.image.digest (buildkit.diskProbe.image.digest in the box) is the digest of the v... image, but the disk probe runs v...` | Set the digest the message names (the release notes list it too), or remove it |
 | `priorityclasses.scheduling.k8s.io is forbidden` | The installer may not create cluster-scoped objects: `buildkit.priorityClass.create=false`, or name an existing class in `buildkit.priorityClassName` (and the same class, or `""`, in `control-plane.router.priorityClassName`) |
 | `clusterroles.rbac.authorization.k8s.io is forbidden` | The controller checks its callers' ServiceAccount tokens with a TokenReview, which needs a ClusterRole and its binding: install with the right to create them |
 | `ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place`, or `release ... has the console of ci-accelerator 0.2.x` | 0.3.0 renamed every object and value of the console: uninstall, wait for the pods, install again ([below](#upgrading-from-02x-to-030)) |
@@ -516,8 +518,8 @@ says otherwise.
 | Pod | Command |
 |---|---|
 | controller | `kubectl -n ci-accelerator logs deploy/ci-accelerator-controller` |
-| web | `kubectl -n ci-accelerator logs deploy/ci-accelerator-web` (one of its pods; `-l app.kubernetes.io/component=web --prefix` for all) |
-| build router | `kubectl -n ci-accelerator logs -l app.kubernetes.io/component=router --prefix` (one pod per build node; a job's connections go to the router on its node) |
+| web | `kubectl -n ci-accelerator logs deploy/ci-accelerator-web` (one of its pods; `-l app.kubernetes.io/component=web --prefix --tail=-1` for all) |
+| build router | `kubectl -n ci-accelerator logs -l app.kubernetes.io/component=router --prefix --tail=-1` (one pod per build node; a job's connections go to the router on its node; with `-l`, kubectl prints only the last 10 lines of each pod unless `--tail=-1` is given) |
 | disk probe | `kubectl -n ci-accelerator logs <daemon pod> -c disk-probe` |
 | BuildKit | `kubectl -n ci-accelerator logs <daemon pod> -c buildkitd` |
 
