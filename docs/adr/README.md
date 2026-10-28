@@ -52,3 +52,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0046](0046-cache-reuse.md) | Cache shared across projects; no per-project namespaces |
 | [0047](0047-figures-the-console-shows.md) | Figures the console shows: measured, recountable, from enough builds |
 | [0048](0048-logs.md) | Logs: one JSON line per event, info bounded by the work, no secrets |
+| [0049](0049-ci-runs-what-a-change-touches.md) | CI runs what a change touches; one aggregating result per workflow |

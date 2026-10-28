@@ -1,11 +1,11 @@
 #!/bin/sh
 # Every e2e scenario runs in exactly one group of the e2e workflow's
-# matrix: a scenario added to test/e2e/run.sh and forgotten there would
-# never run in CI.
+# matrix (scripts/ci-changes.sh prints it): a scenario added to
+# test/e2e/run.sh and forgotten there would never run in CI.
 set -eu
 cd "$(dirname "$0")/.."
 all=$(sed -n 's/^ALL_SCENARIOS="\(.*\)"$/\1/p' test/e2e/run.sh)
-grouped=$(sed -n 's/^ *scenarios: //p' .github/workflows/e2e.yml)
+grouped=$(grep -o '"scenarios":"[^"]*"' scripts/ci-changes.sh | sed 's/"scenarios":"//; s/"$//')
 [ -n "$all" ] && [ -n "$grouped" ] || { echo "e2e matrix: scenarios not found"; exit 1; }
 bad=0
 for s in $all; do

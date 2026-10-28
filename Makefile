@@ -288,7 +288,7 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 	@$(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml >/dev/null \
 		|| { $(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml; exit 1; }
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh scripts/vulncheck.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh scripts/vulncheck.sh scripts/ci-changes.sh test/ci-changes.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -388,6 +388,7 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 	done
 	@test/runner-config-parity.sh $(HELM) $(RUNNER_CHART)
 	@test/e2e-matrix.sh
+	@test/ci-changes.sh
 
 .PHONY: template
 template: deps ## Render every chart with default values (plus the required ones) to stdout
