@@ -84,11 +84,18 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		// An image source is resolved in every build and never marked
 		// cached: it only counts when the image changed.
 		if img := cur.prov.imageSource(s.StepID); img != "" {
-			p, ok := prevSteps[s.Key]
-			if prev == nil || !ok || prev.prov == nil {
+			if prev == nil || prev.prov == nil {
 				continue
 			}
-			if old := prev.prov.imageSource(p.StepID); old != "" && old != img {
+			old := ""
+			if p, ok := prevSteps[s.Key]; ok && p.StepID != "" {
+				old = prev.prov.imageSource(p.StepID)
+			} else {
+				// Not reported (below a cache hit): the image the previous
+				// build used instead, when that is unambiguous.
+				old = prev.prov.replacedImage(cur.prov, img)
+			}
+			if old != "" && old != img {
 				return Reason{Kind: BaseImageChanged, Step: s, Old: old, New: img}, true
 			}
 			continue
@@ -98,7 +105,18 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		}
 		p, ok := prevSteps[s.Key]
 		if !ok || p.StepID == "" {
-			return Reason{Kind: NewStep, Step: s}, true
+			// A build whose last steps came from the cache reports only
+			// those: BuildKit never loads the steps below a cache hit. Its
+			// provenance still holds every step, so the same step (same
+			// identity: its operation and all below it) is found there.
+			if !prev.prov.has(s.Identity) {
+				if len(prev.Steps) < len(prev.prov.Steps) && !prev.complete() {
+					// Not reported and not the same: new, or changed.
+					return Reason{Kind: StepChanged, Step: s}, true
+				}
+				return Reason{Kind: NewStep, Step: s}, true
+			}
+			p = Step{Identity: s.Identity}
 		}
 		if p.Identity == s.Identity {
 			crossDaemon := prev.Daemon != "" && cur.Daemon != "" && prev.Daemon != cur.Daemon
@@ -183,6 +201,68 @@ func FailedStep(prev, cur *Build) (Reason, bool) {
 		}
 	}
 	return Reason{Kind: NewStep, Step: *failed}, true
+}
+
+// has reports whether the build's provenance holds a step of this identity.
+func (p *Provenance) has(identity string) bool {
+	if p == nil || identity == "" {
+		return false
+	}
+	for _, v := range p.Identity {
+		if v == identity {
+			return true
+		}
+	}
+	return false
+}
+
+// replacedImage is the image p used that cur does not, when cur's img is
+// not among p's and exactly one of p's images is gone: the image img
+// replaced. Empty otherwise.
+func (p *Provenance) replacedImage(cur *Provenance, img string) string {
+	mine, theirs := map[string]bool{}, map[string]bool{}
+	for id := range p.Steps {
+		if i := p.imageSource(id); i != "" {
+			mine[i] = true
+		}
+	}
+	if mine[img] {
+		return ""
+	}
+	for id := range cur.Steps {
+		if i := cur.imageSource(id); i != "" {
+			theirs[i] = true
+		}
+	}
+	gone := ""
+	for i := range mine {
+		if !theirs[i] {
+			if gone != "" {
+				return ""
+			}
+			gone = i
+		}
+	}
+	return gone
+}
+
+// complete reports whether the build reported a step for every executed or
+// cached operation of its provenance that has a Dockerfile line: a build
+// whose top came from the cache reports only the steps above the hit.
+func (b *Build) complete() bool {
+	if b.prov == nil {
+		return true
+	}
+	reported := map[string]bool{}
+	for _, s := range b.Steps {
+		reported[s.StepID] = true
+	}
+	for id := range b.prov.Lines {
+		if !reported[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // rebuiltAny reports whether the build executed a step other than resolving

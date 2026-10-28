@@ -134,8 +134,17 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 			Title:  template.HTML(fmt.Sprintf("First build of target <code>%s</code> on record — nothing to compare with yet.", e(b.Target))),
 			Detail: template.HTML(d)}
 	case history.StepChanged, history.NewStep:
+		what := "this step changed"
+		switch {
+		case r.Kind == history.NewStep:
+			what = "this step is new"
+		case r.Old == "":
+			// The previous build did not report the step (its top came
+			// from the cache), and its records hold no step like it.
+			what = "this step is new or changed"
+		}
 		v := Verdict{Tone: "built", Kicker: "Dockerfile changed",
-			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: this step changed.", code(r.Step.Name), at)),
+			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: %s.", code(r.Step.Name), at, what)),
 			Detail: template.HTML(strings.TrimSpace("Every step after it was rebuilt too, because its input is new. " + recLine))}
 		if r.Old != "" && r.Old != r.New {
 			v.Diff = []string{r.Old, r.New}
