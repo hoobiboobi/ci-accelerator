@@ -90,10 +90,10 @@ UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 UPGRADE_FROM_DIR=${UPGRADE_FROM_DIR:-}
 UPGRADE_FROM_VALUES=${UPGRADE_FROM_VALUES:-$ROOT/test/e2e/box-values-old.yaml}
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
-# then restarts every daemon; say so in the upgrade notes). 0 since 0.2.4:
-# the disk probe's image tag is pinned, so a release alone changes nothing
-# in the daemon pods.
-UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
+# then restarts every daemon; say so in the upgrade notes). 1 for 0.3.0:
+# the daemons label their worker with whether their cache persists and
+# their disk probe's port (the buildkit chart's upgrade notes say so).
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # An S3 store for the runner cache (MinIO publishes no images any more):
@@ -1371,6 +1371,10 @@ EOF_S3
     --set control-plane.caches.every=15s --wait --timeout 6m >"$LOGS/box-cache-upgrade.log" 2>&1 \
     || { fail "turn on the runner cache and a tier (see $LOGS/box-cache-upgrade.log)"; return; }
   check "the tier's runner pod is ready" eventually 60 eval '[ "$(kc -n "$BOX_NS" get deploy "$BOX_REL-runner-deploy" -o jsonpath={.status.readyReplicas})" = 1 ]'
+  # The main runner restarted with the cache settings; until its old pod
+  # is gone it still asks the stand-in GitLab for jobs, without them.
+  check "only the main runner's new pod asks for jobs" \
+    eventually 180 eval '[ "$(kc -n "$BOX_NS" get pods -l "app=$BOX_REL-gitlab-runner" --no-headers 2>/dev/null | wc -l | tr -d " ")" = 1 ]'
   # A job with cache: keyword, as GitLab sends it.
   cache_spec() {
     python3 - "$IMAGE" "$1" <<'PY'

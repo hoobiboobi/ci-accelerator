@@ -54,6 +54,11 @@ workflow copies them into the GitHub release.
   `scripts/buildkit-certs.sh --router <release>`. The daemons admit only
   the routers and the controller. To keep jobs talking to the daemons
   directly, set `global.router.enabled=false`.
+- `charts/buildkit` on its own (upgraded in place): the daemons restart
+  once, as on any rollout (an `emptyDir` cache starts empty). Their
+  BuildKit worker now says whether its cache persists (`hostPath`) and,
+  with the disk probe, the probe's port, so the control plane needs no
+  values for either.
 - The controller checks the web's ServiceAccount tokens with a
   TokenReview: the chart adds a ClusterRole that allows only that, and its
   binding. Whoever installs the chart needs the right to create them.
