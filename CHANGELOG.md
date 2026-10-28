@@ -147,7 +147,9 @@ workflow copies them into the GitHub release.
   permission check at GitLab.
 - With sign-in, `/livez` answered with a redirect to the sign-in page.
 - A settled "files or node" went back to unclear whenever the controller
-  restarted (it reads the daemons' history again).
+  restarted (it reads the daemons' history again) and stayed so until
+  someone opened the project; it is settled again within a minute now,
+  from the stored comparison.
 - A pipeline's duration differed between its card and its timeline.
 - "Wrote 0 B" for steps that wrote files (a cgroup counts block I/O only);
   1.5 MiB was shown as 2 MiB.
