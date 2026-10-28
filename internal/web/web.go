@@ -97,6 +97,7 @@ var pageFiles = map[string][]string{
 	"steppage":  {"step"},
 	"notfound":  nil,
 	"nodes":     nil,
+	"compare":   nil,
 	"signin":    nil,
 }
 
@@ -162,6 +163,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /jobs/{instance}/{id}/log", s.jobLog)
 	mux.HandleFunc("GET /builds/{id}", s.build)
 	mux.HandleFunc("GET /builds/{id}/steps/{step}", s.step)
+	mux.HandleFunc("GET /builds/{id}/compare", s.compare)
 	mux.HandleFunc("GET /nodes", s.nodes)
 	mux.HandleFunc("GET /projects/{instance}/{id}", s.chooseProject)
 	mux.HandleFunc("GET /search-index", s.index)

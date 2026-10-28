@@ -869,3 +869,14 @@ a.boxh:hover { background: var(--hover); }
 .ndisk { display: grid; gap: 8px; }
 .ndisk .legend { margin-top: 0; }
 .dnote { display: block; }
+/* Two builds side by side. */
+.cmp { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cmp th, .cmp td { text-align: left; padding: 6px 12px; border-top: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.cmp thead th { border-top: 0; color: var(--ink-3); font-weight: 500; }
+.cmp tbody th { color: var(--ink-3); font-weight: 400; white-space: nowrap; }
+.cmp tr.dif td { font-weight: 600; }
+.cmp tr.dif th { color: var(--ink); }
+.cmp .diff { margin-top: 4px; }
+.cmpdiff .gap { color: var(--ink-3); }
+.picks { list-style: none; margin: 0; padding: 8px 14px 12px; display: grid; gap: 6px; font-size: 13px; }
+.picks .cur { font-weight: 600; }

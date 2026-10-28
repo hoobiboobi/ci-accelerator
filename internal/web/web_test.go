@@ -1613,3 +1613,76 @@ func TestFoldedRowsAreHiddenByTheServer(t *testing.T) {
 		t.Fatalf("checked %d timeline rows and %d step rows", checkedWF, checkedSteps)
 	}
 }
+
+// Two builds of one image side by side: facts, arguments, the Dockerfile's
+// differing lines and every step by its place.
+func TestCompareBuilds(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	byTarget := map[string][]store.BuildRow{}
+	for _, k := range keys {
+		for _, b := range byPipe[k] {
+			byTarget[b.Target] = append(byTarget[b.Target], b)
+		}
+	}
+	var a, b store.BuildRow
+	for _, rows := range byTarget {
+		if len(rows) >= 2 {
+			a, b = rows[0], rows[1]
+			break
+		}
+	}
+	if a.ID == 0 {
+		t.Fatal("fixtures: no image with two builds")
+	}
+	page := get(t, ts, fmt.Sprintf("/builds/%d/compare?with=%d", a.ID, b.ID))
+	page.safe(t)
+	for _, want := range []string{"Compare two builds of", "<h2 class=\"h\" id=\"cfT\">The builds</h2>", "Steps run", "id=\"csT\">Steps</h2>",
+		fmt.Sprintf(`href="/builds/%d"`, a.ID), fmt.Sprintf(`href="/builds/%d"`, b.ID)} {
+		if !strings.Contains(page.body, want) {
+			t.Errorf("compare page lacks %q", want)
+		}
+	}
+	// Without ?with: the previous build, and a list to pick from.
+	if p := get(t, ts, fmt.Sprintf("/builds/%d/compare", b.ID)); !strings.Contains(p.body, "Compare with another build of") {
+		t.Errorf("no builds to pick from")
+	}
+	// Builds of different images are not compared.
+	for tgt, rows := range byTarget {
+		if tgt != a.Target {
+			if p := get(t, ts, fmt.Sprintf("/builds/%d/compare?with=%d", a.ID, rows[0].ID)); p.status != 400 || strings.Contains(p.body, "id=\"csT\"") {
+				t.Errorf("compared builds of %s and %s: %d", a.Target, tgt, p.status)
+			}
+			break
+		}
+	}
+	offered := false
+	for _, x := range []store.BuildRow{a, b} {
+		offered = offered || strings.Contains(get(t, ts, fmt.Sprintf("/builds/%d", x.ID)).body, fmt.Sprintf(`href="/builds/%d/compare"`, x.ID))
+	}
+	if !offered {
+		t.Errorf("the build page does not offer the comparison")
+	}
+}
+
+func TestLineDiff(t *testing.T) {
+	a := "FROM a\nRUN 1\nRUN 2\nRUN 3\nRUN 4\nRUN 5\nRUN 6\nCOPY x\n"
+	b := "FROM a\nRUN 1\nRUN 2\nRUN 3\nRUN 4\nRUN 5\nRUN 6\nCOPY y\nRUN 7\n"
+	var got []string
+	for _, l := range lineDiff(a, b, 1) {
+		s := l.Op + l.Text
+		if l.Gap {
+			s = "…" + s
+		}
+		got = append(got, s)
+	}
+	if want := []string{" RUN 6", "-COPY x", "+COPY y", "+RUN 7"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("diff %q", got)
+	}
+	if lineDiff(a, a, 2) != nil {
+		t.Error("a diff of equal texts")
+	}
+	if d := lineDiff("A\nB\nC\nD\nE\nF\nG\n", "A2\nB\nC\nD\nE\nF\nG2\n", 1); len(d) != 6 || !d[3].Gap {
+		t.Errorf("two changes far apart: %+v", d)
+	}
+}
