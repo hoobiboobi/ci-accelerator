@@ -119,6 +119,12 @@ type Settled struct {
 	Kind  history.ReasonKind
 	Paths []string
 	Via   string
+	// Asked: the answer is to the question Elsewhere listed (its previous
+	// daemon Old and paths Open); a build saved again since with another
+	// question keeps it open.
+	Asked bool
+	Old   string
+	Open  []string
 }
 
 // SettleElsewhere stores what became of Elsewhere builds and sums their
@@ -145,10 +151,12 @@ func (s *Store) SettleElsewhere(ctx context.Context, settled []Settled) error {
 		}
 		var started int64
 		var instance, pipeline sql.NullInt64
+		open, _ := json.Marshal(nonNil(st.Open))
 		err := tx.QueryRowContext(ctx, `UPDATE builds SET reason_kind = ?, reason_via = ?,
 				reason_paths = COALESCE(?, reason_paths)
 			WHERE id = ? AND reason_kind = 'cache-elsewhere' AND reason_via = ''
-			RETURNING started_at, instance, pipeline_id`, kind, st.Via, paths, st.ID).Scan(&started, &instance, &pipeline)
+				AND (NOT ? OR (reason_old = ? AND reason_paths = ?))
+			RETURNING started_at, instance, pipeline_id`, kind, st.Via, paths, st.ID, st.Asked, st.Old, string(open)).Scan(&started, &instance, &pipeline)
 		if err == sql.ErrNoRows {
 			continue
 		}
