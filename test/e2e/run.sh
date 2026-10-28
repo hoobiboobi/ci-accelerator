@@ -1152,7 +1152,7 @@ PY
   box_console_page() {
     kc -n "$JOBS_NS" exec client-build -- wget -qO- \
       "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/${box_tid:2:6}/$(job_id box)" 2>/dev/null >"$LOGS/box-console-page.html"
-    grep -q 'First build of target <code>' "$LOGS/box-console-page.html" &&
+    grep -q 'First build of <code>' "$LOGS/box-console-page.html" &&
       grep -q 'class="dl step st-built' "$LOGS/box-console-page.html"
   }
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
@@ -1373,8 +1373,8 @@ sys.exit(0 if one and two and one["steps"].get("built") and not two["steps"].get
     [ -n "$path" ] && kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080$path" 2>/dev/null >"$1.html" &&
       grep -q "$3" "$1.html"
   }
-  check "the console's page for the first job explains its build" \
-    comp_page "$LOGS/component-build-1.trace" "$j1" 'First build of target <code>'
+  check "the console's page for the first job explains its build, named by the repository it pushed" \
+    comp_page "$LOGS/component-build-1.trace" "$j1" "First build of <code>$COMP_GL:5050/root/app</code>"
   check "the console's page for the second job says it came from cache" \
     comp_page "$LOGS/component-build-2.trace" "$j2" 'Nothing was rebuilt'
   # A failed build has no provenance; its Dockerfile comes from BuildKit's
