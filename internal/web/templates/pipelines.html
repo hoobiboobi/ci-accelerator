@@ -20,11 +20,11 @@
     <a class="pc-head" href="{{.URL}}">
       <span class="pstate ps-{{.State.Key}}">{{icon .State.Icon 12}}{{.State.Label}}</span>
       <span class="pc-title">{{.Title}}</span>
-      <span class="pc-dur">{{if .Dur}}{{.Dur}}{{else}}—{{end}}</span>
+      <span class="pc-dur">{{if .Dur}}{{if .Running}}running for {{end}}{{.Dur}}{{else}}—{{end}}</span>
       <span class="pc-meta">{{with .Ref}}<span>{{.}}</span>{{end}}{{with .SHA}}<span class="mono">{{.}}</span>{{end}}{{with .Who}}<span>{{.}}</span>{{end}}<span title="{{.When.UTC}}">{{.When}}</span></span>
     </a>
     <div class="pc-facts">
-      <span><b>{{.Jobs}}</b> job{{if ne .Jobs 1}}s{{end}}{{if .NotRun}} · {{.NotRun}} did not run{{end}}</span>
+      <span><b>{{.Jobs}}</b> job{{if ne .Jobs 1}}s{{end}}{{if .Waiting}} · {{.Waiting}} waiting{{end}}{{if .Manual}} · {{.Manual}} manual{{end}}{{if .NotRun}} · {{.NotRun}} did not run{{end}}</span>
       {{if .Waited}}<span title="from GitLab: how long each job was pending before a runner took it">waiting for a runner: usually <b>{{.Waited}}</b>, longest <b>{{.Longest}}</b> <span class="muted">({{.LongJ}})</span>{{if .WaitedLong}} · <b>{{.WaitedLong}}</b> job{{if ne .WaitedLong 1}}s{{end}} over 10 s{{end}}</span>{{end}}
       {{with .Images}}<span>{{.}}</span>{{end}}
     </div>

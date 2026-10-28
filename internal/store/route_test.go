@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -250,5 +252,117 @@ func TestSettleOnlyTheQuestionAsked(t *testing.T) {
 	}
 	if p, _ := s.BuildPage(ctx, id); p.Via != "gitlab a..b" || p.Reason.Kind != history.FilesChanged {
 		t.Errorf("the answer to its question not stored: %q %s", p.Via, p.Reason.Kind)
+	}
+}
+
+// A store of 0.3.0/0.3.1 where a daemon pod replaced on a hostPath had
+// its records stored again under the new pod: on the next start the copies
+// go, what pointed at them points at the builds they copied, the images'
+// daily figures from the first copy's day on are dropped (the next rollup
+// sums them up again), a ref is stored once, and the schema version stays
+// (helm rollback to 0.3.1 opens the store).
+func TestStartDropsReplayedCopies(t *testing.T) {
+	dir := t.TempDir()
+	all := repairs
+	repairs = "SELECT 1" // the store as 0.3.1 left it
+	day := int64(20000)  // 2024-10-04
+	c := &clock{time.UnixMilli((day + 5) * 86400000)}
+	s, err := Open(ctx, dir, Options{Now: c.now})
+	repairs = all
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := func(d int64, h int64) int64 { return d*86400000 + h*3600000 }
+	for _, q := range []string{
+		"INSERT INTO daemons (id, name, node) VALUES (1, 'bk-old', 'node-1'), (2, 'bk-new', 'node-1')",
+		"INSERT INTO projects (instance, project_id, path) VALUES (1, 42, 'example/app')",
+		// An older build, and two builds of day+1 that the new pod sent again.
+		fmt.Sprintf(`INSERT INTO builds (id, daemon_id, ref, generation, attribution, instance, pipeline_id, job_id, project_id, target, started_at, completed_at)
+			VALUES (1, 1, 'ref-0', 1, 1, 1, 6, 7, 42, 'api', %d, %d),
+			       (2, 1, 'ref-1', 1, 1, 1, 7, 8, 42, 'api', %d, %d),
+			       (3, 1, 'ref-2', 1, 1, 1, 7, 9, 42, 'api', %d, %d),
+			       (4, 2, 'ref-1', 1, 1, 1, 7, 8, 42, 'api', %d, %d),
+			       (5, 2, 'ref-2', 1, 1, 1, 7, 9, 42, 'api', %d, %d),
+			       (6, 2, 'ref-3', 1, 1, 1, 8, 10, 42, 'api', %d, %d)`,
+			ms(day, 1), ms(day, 2), ms(day+1, 1), ms(day+1, 2), ms(day+1, 3), ms(day+1, 4),
+			ms(day+1, 1), ms(day+1, 2), ms(day+1, 3), ms(day+1, 4), ms(day+3, 1), ms(day+3, 2)),
+		// The copies' reason and received step point at a copy, and so does
+		// the new pod's own build.
+		"UPDATE builds SET reason_kind = 'step-changed', reason_by = 4 WHERE id IN (5, 6)",
+		`INSERT INTO steps (build_id, idx, key, state, start_ms, dur_ms, received_from) VALUES
+			(2, 0, 'a', 1, 0, 10, NULL), (4, 0, 'a', 1, 0, 10, NULL), (5, 0, 'a', 2, 0, 10, 4), (6, 0, 'a', 2, 0, 10, 4)`,
+		fmt.Sprintf(`INSERT INTO image_days (instance, project_id, target, day, builds, cached, change, farm, unclear, failed,
+			built_ms, cached_p50_ms, rebuilt_p50_ms, rebuilt_p95_ms) VALUES
+			(1, 42, 'api', %d, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0), (1, 42, 'api', %d, 4, 0, 4, 0, 0, 0, 0, 0, 0, 0)`, day, day+1),
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+	s = open(t, dir, c)
+
+	rows, err := s.db.Query("SELECT b.id, d.name, b.ref, COALESCE(b.reason_by, 0) FROM builds b JOIN daemons d ON d.id = b.daemon_id ORDER BY b.id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for rows.Next() {
+		var id, by int64
+		var daemon, ref string
+		if err := rows.Scan(&id, &daemon, &ref, &by); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%d %s %s by=%d", id, daemon, ref, by))
+	}
+	rows.Close()
+	want := []string{"1 bk-old ref-0 by=0", "2 bk-old ref-1 by=0", "3 bk-old ref-2 by=0", "6 bk-new ref-3 by=2"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("builds after the migration:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	var steps, from2 int
+	if err := s.db.QueryRow("SELECT count(*), count(*) FILTER (WHERE received_from = 2) FROM steps").Scan(&steps, &from2); err != nil {
+		t.Fatal(err)
+	}
+	if steps != 2 || from2 != 1 {
+		t.Fatalf("steps after the migration: %d, received from build 2: %d (want 2, 1)", steps, from2)
+	}
+	var days []int64
+	if rows, err := s.db.Query("SELECT day FROM image_days ORDER BY day"); err != nil {
+		t.Fatal(err)
+	} else {
+		for rows.Next() {
+			var d int64
+			if err := rows.Scan(&d); err != nil {
+				t.Fatal(err)
+			}
+			days = append(days, d)
+		}
+		rows.Close()
+	}
+	if len(days) != 1 || days[0] != day {
+		t.Fatalf("image days after the migration: %v, want only %d (the copies' day is summed up again)", days, day)
+	}
+	if err := s.Rollup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var builds int
+	if err := s.db.QueryRow("SELECT builds FROM image_days WHERE day = ?", day+1).Scan(&builds); err != nil || builds != 2 {
+		t.Fatalf("day %d summed up again: %d builds (%v), want 2", day+1, builds, err)
+	}
+	// A ref is stored once from now on, whichever pod sends it.
+	if _, err := s.db.Exec("INSERT INTO builds (daemon_id, ref, generation, attribution, started_at) VALUES (2, 'ref-1', 1, 0, 0)"); err == nil {
+		t.Fatal("a second row for ref-1 was accepted")
+	}
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+		t.Fatalf("schema version %d (%v), want 2: 0.3.1 refuses a newer one", version, err)
+	}
+	// Starting again changes nothing.
+	s.Close()
+	s = open(t, dir, c)
+	var n int
+	if err := s.db.QueryRow("SELECT count(*) FROM builds").Scan(&n); err != nil || n != 4 {
+		t.Fatalf("%d builds after a second start (%v), want 4", n, err)
 	}
 }

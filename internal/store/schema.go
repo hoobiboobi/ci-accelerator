@@ -282,3 +282,33 @@ CREATE TABLE IF NOT EXISTS outputs (
 	data    BLOB NOT NULL
 );
 `
+
+// repairs run on every start, after the migrations. They fix data and add
+// what the releases since the schema version tolerate, so they never move
+// the schema version: helm rollback to such a release keeps working on the
+// same store.
+//
+// A build record is stored once. Its ref is BuildKit's random id of the
+// build. A daemon pod that replaced another on the same hostPath keeps its
+// history and sends the old pod's records again: 0.3.0 and 0.3.1 stored each
+// of them a second time under the new pod. The copies go (the build stored
+// first stays, and what pointed at a copy points at it), the images' daily
+// figures from the first copy's day on are summed up again by the next
+// rollup (from a day whose builds are all still here), and a unique index
+// keeps a ref once: 0.3.0 and 0.3.1 then fail to store such a record again
+// instead of storing it twice.
+var repairs = `
+CREATE TEMP TABLE build_copies AS
+	SELECT b.id, b.started_at, (SELECT min(o.id) FROM builds o WHERE o.ref = b.ref) AS keep
+	FROM builds b WHERE b.id <> (SELECT min(o.id) FROM builds o WHERE o.ref = b.ref);
+UPDATE builds SET reason_by = (SELECT keep FROM build_copies c WHERE c.id = builds.reason_by)
+	WHERE reason_by IN (SELECT id FROM build_copies);
+UPDATE steps SET received_from = (SELECT keep FROM build_copies c WHERE c.id = steps.received_from)
+	WHERE received_from IN (SELECT id FROM build_copies);
+DELETE FROM image_days WHERE day >= (
+	SELECT CASE WHEN EXISTS (SELECT 1 FROM builds WHERE started_at < f.day * 86400000) THEN f.day ELSE f.day + 1 END
+	FROM (SELECT min(started_at) / 86400000 AS day FROM build_copies) f);
+DELETE FROM builds WHERE id IN (SELECT id FROM build_copies);
+DROP TABLE build_copies;
+CREATE UNIQUE INDEX IF NOT EXISTS builds_ref ON builds (ref);
+`

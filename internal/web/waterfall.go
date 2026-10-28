@@ -58,6 +58,10 @@ type Waterfall struct {
 	Ticks []Tick
 	Span  time.Duration
 	Jobs  int
+	// Running: some job on it has not ended (the legend says how it looks).
+	Running bool
+	// Unfinished: the pipeline still runs, so no critical path is shown.
+	Unfinished bool
 }
 
 // Tick is a time mark.
@@ -224,7 +228,7 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 	}
 	w := &Waterfall{Ticks: ticksFor(span), Span: span, Jobs: len(jobs)}
 	// The pipeline ends with its last job (end above).
-	lab, ll := labelAfter(end, fmt.Sprintf("%s · %d jobs", duration(end.Sub(start)), len(jobs)))
+	lab, ll := labelAfter(end, fmt.Sprintf("%s · %d job%s", duration(end.Sub(start)), len(jobs), plural(len(jobs))))
 	w.Rows = append(w.Rows, WFRow{ID: "p", Kind: "pipe", Glyph: "pipes", Icon: "pipes", Name: pipeName, Open: true, Kids: len(jobs) > 0,
 		Bars: []WFBar{{Class: "pipe", L: "0", W: width(end.Sub(start))}}, Label: lab, LabelL: ll, Text: strings.ToLower(pipeName)})
 	for ji, j := range jobs {
@@ -258,8 +262,12 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 			row.Label, row.LabelL = labelAfter(j.Times.End, waitedFor(j.Times)+fmt.Sprintf("%s · job · %s in BuildKit", duration(j.Times.Total), duration(b.Completed.Sub(b.Started))))
 		} else {
 			class := "job"
-			if j.Note == "failed" {
+			switch j.Note {
+			case "failed":
 				class = "job-failed"
+			case "running":
+				class = "job-running"
+				w.Running = true
 			}
 			row.Bars = append(row.Bars, WFBar{Class: class, L: at(j.Times.Start), W: width(j.Times.End.Sub(j.Times.Start)), Title: j.Note + ": " + duration(j.Times.Total)})
 			label := waitedFor(j.Times) + duration(j.Times.Total)

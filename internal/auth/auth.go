@@ -114,15 +114,26 @@ type inst struct {
 	admins       map[string]bool
 }
 
-// ParseKey reads a session key: 32 bytes, base64.
+// ParseKey reads a session key: 32 bytes, base64. The error says what the
+// text decoded to: a generator's default (External Secrets' Password: 24
+// characters, not base64) is the likely mistake.
 func ParseKey(b []byte) ([]byte, error) {
 	s := strings.TrimSpace(string(b))
+	got := -1
 	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.RawURLEncoding} {
-		if k, err := enc.DecodeString(s); err == nil && len(k) == 32 {
+		k, err := enc.DecodeString(s)
+		if err == nil && len(k) == 32 {
 			return k, nil
 		}
+		if err == nil && got < 0 {
+			got = len(k)
+		}
 	}
-	return nil, errors.New("auth: the session key must be 32 bytes in base64 (openssl rand -base64 32)")
+	const how = "the session key must be 32 bytes in base64 (openssl rand -base64 32; External Secrets' Password generator: length 32, encoding base64)"
+	if got < 0 {
+		return nil, fmt.Errorf("auth: the session key is not base64: %s", how)
+	}
+	return nil, fmt.Errorf("auth: the session key decodes to %d bytes: %s", got, how)
 }
 
 // New checks cfg. client must know every instance's URL: the console

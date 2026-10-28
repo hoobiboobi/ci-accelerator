@@ -798,7 +798,7 @@ a.boxh:hover { background: var(--hover); }
 .wfv .lab b { color: var(--ink); font-weight: 500; }
 .wfv .lab .i { width: 11px; height: 11px; }
 .c-queue { background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--ink-3) 70%, transparent) 0 1.5px, transparent 1.5px 3.5px); }
-.c-job { background: color-mix(in oklab, var(--ink-3) 75%, var(--panel)); } .c-job-failed { background: var(--del); } .c-pipe { background: var(--ink-3); }
+.c-job { background: color-mix(in oklab, var(--ink-3) 75%, var(--panel)); } .c-job-failed { background: var(--del); } .c-job-running { background: color-mix(in oklab, var(--accent) 55%, var(--panel)); } .c-pipe { background: var(--ink-3); }
 .c-after { background: repeating-linear-gradient(45deg, var(--runner) 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 1px var(--runner); }
 .wg.job { background: var(--sel); color: var(--ink-3); } .wg.change { background: var(--built-bg); color: var(--built); } .wg.farm { background: var(--node-bg); color: var(--node); } .wg.unclear { background: var(--warn-bg); color: var(--warn); } .wg.failed { background: color-mix(in oklab, var(--del) 15%, var(--panel)); color: var(--del); } .wg.running { background: color-mix(in oklab, var(--accent) 15%, var(--panel)); color: var(--accent); }
 @media (max-width: 760px) {

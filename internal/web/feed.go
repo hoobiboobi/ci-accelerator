@@ -136,11 +136,8 @@ type BuildItem struct {
 
 func (s *Server) item(b store.BuildRow, usual map[string]usualTime, loc *time.Location) BuildItem {
 	st := rowStatus(b)
-	it := BuildItem{ID: b.ID, URL: fmt.Sprintf("/builds/%d", b.ID), Target: orDefault(b.Target), Status: st, Why: whyShort(b),
+	it := BuildItem{ID: b.ID, URL: fmt.Sprintf("/builds/%d", b.ID), Target: buildName(b.Target, b.Images), Status: st, Why: whyShort(b),
 		When: clockStamp(b.Started, inZone(s.now(), loc)), Ref: b.Ref, SHA: short(b.SHA, 8), Title: b.Title, Pipeline: b.Pipeline, Quiet: st.Key == "cached"}
-	if b.Target == "" {
-		it.Target = "default target"
-	}
 	if b.Pipeline != 0 {
 		it.PipeURL, it.PipeLabel = "/pipelines/"+store.PipelineKey(b.Instance, b.Pipeline), "#"+strconv.FormatUint(b.Pipeline, 10)
 	}
@@ -207,7 +204,7 @@ type BuildsView struct {
 	Shell
 	F        Filters
 	Branches []string
-	Targets  []string
+	Targets  []Option
 	Outcomes []Option
 	Items    []BuildItem
 	Groups   []PipeGroup // when grouped by pipeline
@@ -236,6 +233,8 @@ type Filters struct {
 type Option struct {
 	Value, Label string
 	On           bool
+	// Title is the label in full, when the label shortens it.
+	Title string
 }
 
 // PipeGroup is a pipeline's builds on a page of the list.
@@ -321,7 +320,7 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 		if anchor == nil {
 			f.A = 0
 		} else {
-			f.Image = anchor.Page.Build.Target
+			f.Image = imageKey(anchor.Page.Build.Target)
 			pinProject(&sh, anchor.Page.Build.Attribution.Instance, projectOf(anchor.Page))
 		}
 	}
@@ -334,11 +333,17 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if v.Targets, err = s.data.Targets(ctx, sh.Project.ProjectKey, month); err != nil {
+	targets, err := s.data.Targets(ctx, sh.Project.ProjectKey, month)
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	q := store.BuildQuery{Project: sh.Project.ProjectKey, Ref: f.Branch, Target: f.Image, Outcome: f.Outcome, Limit: pageSize + 1}
+	names := s.imageNames(ctx, sh.Project.ProjectKey, month)
+	for _, t := range targets {
+		v.Targets = append(v.Targets, Option{Value: imageKey(t), Label: imageName(t, names[t]), Title: imageTitle(t, names[t]), On: f.Image == imageKey(t)})
+	}
+	target, none := targetOf(f.Image)
+	q := store.BuildQuery{Project: sh.Project.ProjectKey, Ref: f.Branch, Target: target, NoTarget: none, Outcome: f.Outcome, Limit: pageSize + 1}
 	if f.Before > 0 {
 		q.Before = time.UnixMilli(f.Before)
 	}
@@ -358,11 +363,46 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if len(rows) > pageSize {
+	// cut: where the next page starts (the started time of the last build
+	// this page covers); zero when no build is older.
+	var cut time.Time
+	if anchor != nil && anchor.Page.Build.Target == "" {
+		// The first build picked has no target: only builds of its
+		// repository are of its image. Read on until a page of them is
+		// full or the builds run out (at most maxReads reads), so that a
+		// busy other Dockerfile does not leave the page empty.
+		const maxReads = 20
+		var kept []store.BuildRow
+		last := rows
+		for reads := 1; ; reads++ {
+			for _, b := range last {
+				if sameImage(b.Target, b.Images, anchor.Page.Build.Target, anchor.Page.Build.Images) {
+					kept = append(kept, b)
+				}
+			}
+			if len(kept) > pageSize || len(last) <= pageSize || reads == maxReads {
+				break
+			}
+			q.Before = last[len(last)-1].Started
+			if last, err = s.data.Builds(ctx, q); err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
+		switch {
+		case len(kept) > pageSize:
+			cut, kept = kept[pageSize-1].Started, kept[:pageSize]
+		case len(last) > pageSize:
+			cut = last[len(last)-1].Started
+		}
+		rows = kept
+	} else if len(rows) > pageSize {
+		cut, rows = rows[pageSize-1].Started, rows[:pageSize]
+	}
+	if !cut.IsZero() {
 		older := f.Query()
-		older.Set("before", strconv.FormatInt(rows[pageSize-1].Started.UnixMilli(), 10))
+		older.Set("before", strconv.FormatInt(cut.UnixMilli(), 10))
 		v.Older = "/builds?" + older.Encode()
-		rows = rows[:pageSize]
 	}
 	if f.Before > 0 {
 		v.Newest = f.URL()
@@ -425,7 +465,7 @@ func (s *Server) picking(v *BuildsView, anchor *built, loc *time.Location) {
 	v.Again = again.URL()
 	if anchor != nil {
 		b := anchor.Page.Build
-		it := BuildItem{ID: anchor.Page.ID, URL: fmt.Sprintf("/builds/%d", anchor.Page.ID), Target: orDefault(b.Target),
+		it := BuildItem{ID: anchor.Page.ID, URL: fmt.Sprintf("/builds/%d", anchor.Page.ID), Target: buildName(b.Target, b.Images),
 			Status: statusOf(anchor.Page.Reason.Kind, b.Error, anchor.Built, b.Completed.IsZero()), When: clockStamp(b.Started, inZone(s.now(), loc))}
 		if p := anchor.Page.Pipeline; p != nil {
 			it.PipeLabel = "#" + strconv.FormatUint(p.ID, 10)
@@ -544,11 +584,22 @@ func reasonText(b store.BuildRow, st Status) string {
 	return string(b.Reason)
 }
 
+// reasonImage tells a reason's images apart: the image key, and for
+// builds without a target the repository they pushed first (two
+// Dockerfiles without targets are two images).
+func reasonImage(b store.BuildRow) string {
+	k := imageKey(b.Target)
+	if rs := history.Repositories(b.Images); b.Target == "" && len(rs) > 0 {
+		k += "\x00" + rs[0]
+	}
+	return k
+}
+
 // reasons groups the rebuilt builds of bs, the most time first.
 func (s *Server) reasons(bs []store.BuildRow, limit int, loc *time.Location) []Reason {
 	at := map[string]int{}
 	var out []Reason
-	images := map[string]map[string]bool{}
+	images := map[string]map[string]string{} // image (key, repository) -> name
 	last := map[string]time.Time{}
 	for _, b := range bs {
 		st := rowStatus(b)
@@ -562,23 +613,27 @@ func (s *Server) reasons(bs []store.BuildRow, limit int, loc *time.Location) []R
 			at[fp] = i
 			q := url.Values{"outcome": {st.Key}}
 			out = append(out, Reason{Status: st, Text: reasonText(b, st), URL: "/builds?" + q.Encode()})
-			images[fp] = map[string]bool{}
+			images[fp] = map[string]string{}
 		}
 		out[i].N++
 		out[i].Lost += b.BuiltTime
-		images[fp][orDefault(b.Target)] = true
+		images[fp][reasonImage(b)] = buildName(b.Target, b.Images)
 		if b.Started.After(last[fp]) {
 			last[fp] = b.Started
 		}
 	}
 	for fp, i := range at {
-		names := sortedKeys(images[fp])
+		var names []string
+		for _, k := range sortedKeys(images[fp]) {
+			names = append(names, images[fp][k])
+		}
 		if len(names) > 5 {
 			out[i].More, names = len(names)-5, names[:5]
 		}
 		out[i].Images, out[i].Last = names, clock(last[fp], inZone(s.now(), loc))
 		if len(images[fp]) == 1 {
-			q := url.Values{"outcome": {out[i].Status.Key}, "image": {names[0]}}
+			key, _, _ := strings.Cut(sortedKeys(images[fp])[0], "\x00")
+			q := url.Values{"outcome": {out[i].Status.Key}, "image": {key}}
 			out[i].URL = "/builds?" + q.Encode()
 		}
 	}
@@ -599,6 +654,7 @@ func (s *Server) reasons(bs []store.BuildRow, limit int, loc *time.Location) []R
 // ImageRow is one target over a window.
 type ImageRow struct {
 	Name, URL  string
+	Title      string // every repository, when Name counts them
 	Strip      []StripCell
 	Usual, P95 string // of the rebuilds; P95 only from minForP95 of them
 	Rebuilds   int
@@ -624,10 +680,12 @@ func (s *Server) imageRows(bs []store.BuildRow, since time.Time, loc *time.Locat
 	var out []ImageRow
 	for _, t := range sortedKeys(by) {
 		list := by[t] // newest first
-		row := ImageRow{Name: orDefault(t), URL: "/images/" + url.PathEscape(imageKey(t)), Builds: len(list)}
-		if t == "" {
-			row.Name = "default target"
+		var repos []string
+		for _, b := range list {
+			repos = append(repos, b.Images...)
 		}
+		rs := history.Repositories(repos)
+		row := ImageRow{Name: imageName(t, rs), Title: imageTitle(t, rs), URL: "/images/" + url.PathEscape(imageKey(t)), Builds: len(list)}
 		var ds []time.Duration
 		cached := 0
 		var lost time.Duration
@@ -662,7 +720,7 @@ func (s *Server) imageRows(bs []store.BuildRow, since time.Time, loc *time.Locat
 	return out
 }
 
-// imageKey is a target in an address: the default target has no name.
+// imageKey is a target in an address: builds without a target are "-".
 func imageKey(t string) string {
 	if t == "" {
 		return "-"
@@ -788,6 +846,7 @@ func (s *Server) images(w http.ResponseWriter, r *http.Request) {
 type ImageView struct {
 	Shell
 	Name, Key           string
+	Title               string // every repository, when Name counts them
 	Window, WindowLabel string
 	Others              []Option
 	Builds              int
@@ -853,20 +912,15 @@ type Dot struct {
 func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	key := r.PathValue("target")
-	target := key
-	if key == "-" {
-		target = ""
-	}
+	target, none := targetOf(key)
 	sh, err := s.projectPage(r, "images")
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.settleLater(r, sh.Project.ProjectKey)
-	v := &ImageView{Name: orDefault(target), Key: key}
-	if target == "" {
-		v.Name = "default target"
-	}
+	names := s.imageNames(ctx, sh.Project.ProjectKey, s.now().Add(-30*24*time.Hour))
+	v := &ImageView{Name: imageName(target, names[target]), Title: imageTitle(target, names[target]), Key: key}
 	sh.Title = v.Name
 	var span time.Duration
 	v.Window, span, v.WindowLabel = windowOf(r)
@@ -885,7 +939,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	if year {
 		days, err = s.data.ImageDays(ctx, sh.Project.ProjectKey, target, since)
 	} else {
-		bs, err = s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, Since: since, Light: true})
+		bs, err = s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, NoTarget: none, Since: since, Light: true})
 	}
 	if err != nil {
 		s.fail(w, err)
@@ -930,7 +984,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, t := range targets {
-		v.Others = append(v.Others, Option{Value: "/images/" + url.PathEscape(imageKey(t)), Label: orDefault(t), On: t == target})
+		v.Others = append(v.Others, Option{Value: "/images/" + url.PathEscape(imageKey(t)), Label: imageName(t, names[t]), Title: imageTitle(t, names[t]), On: t == target})
 	}
 	v.Builds = len(bs)
 	if year {
@@ -940,8 +994,8 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		v.Year = s.year(days, since)
 	}
 	if len(bs) == 0 {
-		v.ListURL = Filters{Image: target}.URL()
-		v.PickURL = Filters{Image: target, Pick: true}.URL()
+		v.ListURL = Filters{Image: key}.URL()
+		v.PickURL = Filters{Image: key, Pick: true}.URL()
 		v.Shell = sh
 		s.render(w, "image", http.StatusOK, v)
 		return
@@ -989,7 +1043,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		v.Steps = append(v.Steps, StepRowView{Name: c.Name, Ran: c.Ran, Of: v.Builds, Time: duration(c.RanTime), W: c.Ran * 100 / most})
 	}
 	v.Reasons = s.reasons(bs, 5, zone(r))
-	latest, err := s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, Limit: 10})
+	latest, err := s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, NoTarget: none, Limit: 10})
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -998,8 +1052,8 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	for _, b := range latest {
 		v.Recent = append(v.Recent, s.item(b, st, zone(r)))
 	}
-	v.ListURL = Filters{Image: target}.URL()
-	v.PickURL = Filters{Image: target, Pick: true}.URL()
+	v.ListURL = Filters{Image: key}.URL()
+	v.PickURL = Filters{Image: key, Pick: true}.URL()
 	v.Shell = sh
 	s.render(w, "image", http.StatusOK, v)
 }
@@ -1114,7 +1168,7 @@ func (s *Server) chart(bs []store.BuildRow, since time.Time, usual time.Duration
 			mid := median(ds)
 			st := rowStatus(g[0])
 			start := from.Add(time.Duration(float64(span) * float64(k.slice) / chartSlices))
-			pts = append(pts, point{start.Add(span / chartSlices / 2), mid, st, Filters{Image: g[0].Target, Outcome: st.Key}.URL(),
+			pts = append(pts, point{start.Add(span / chartSlices / 2), mid, st, Filters{Image: imageKey(g[0].Target), Outcome: st.Key}.URL(),
 				fmt.Sprintf("%s · %d build%s from %s · median %s", st.Label, len(g), plural(len(g)), clock(start, to), duration(mid))})
 		}
 		sort.Slice(pts, func(i, j int) bool { return pts[i].at.Before(pts[j].at) })

@@ -777,6 +777,9 @@
     try {
       const res = await fetch(location.pathname + location.search, { cache: "no-store" });
       if (!res.ok) return;
+      // The page became another (a running job's page, once its build is
+      // stored, is the build's): go there.
+      if (res.redirected) { location.replace(res.url); return; }
       const doc = new DOMParser().parseFromString(await res.text(), "text/html");
       const next = doc.getElementById("main");
       if (!next) return;
@@ -786,9 +789,15 @@
       const typing = active && main.contains(active) && active.matches("[data-wf-q]") ? [active.selectionStart, active.selectionEnd] : null;
       const folds = new Map($$(".grpbtn[data-blk]", main).map(b => [b.dataset.blk, b.getAttribute("aria-expanded")]));
       const unfolded = $$("details[id][open]", main).map(d => d.id);
+      // A job log the reader opened stays as read (a running job's page
+      // asks for itself again; its log box holds what was read so far).
+      const log = $(".logbox", main), asked = log && $('[data-act="showlog"]', log);
+      const keep = asked && (asked.hidden || asked.disabled) ? log : null;
       hidePop();
       main.replaceChildren(...next.childNodes);
       setup();
+      const fresh = keep && $(".logbox", main);
+      if (fresh) fresh.replaceWith(keep);
       $$(".grpbtn[data-blk]", main).forEach(b => { if (folds.has(b.dataset.blk)) fold(b, folds.get(b.dataset.blk) === "true"); });
       unfolded.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
       if (focused !== undefined) {
@@ -803,7 +812,17 @@
       if (status) status.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
     } finally {
       busy = false;
+      tick();
     }
+  }
+  // A page on something still running (a pipeline's jobs) asks for itself
+  // again now and then, so its bars grow while nothing is stored.
+  let ticker = null;
+  function tick() {
+    clearTimeout(ticker);
+    const el = $("[data-refresh-every]", main);
+    if (!el || document.hidden) return;
+    ticker = setTimeout(() => { if (!document.hidden && !timer) timer = setTimeout(refresh, 0); }, Math.max(5, +el.dataset.refreshEvery || 15) * 1000);
   }
   // A browser opens at most six connections to a host over HTTP/1.1, and
   // every stream holds one. A hidden tab, or a page kept in the
@@ -848,5 +867,6 @@
   document.addEventListener("visibilitychange", () => { if (document.hidden) disconnect(); else resume(); });
   window.addEventListener("pagehide", disconnect);
   window.addEventListener("pageshow", ev => { if (ev.persisted && !document.hidden) resume(); });
-  if (!document.hidden) connect();
+  if (!document.hidden) { connect(); tick(); }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
 })();

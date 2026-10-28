@@ -78,7 +78,7 @@ func whyShort(b store.BuildRow) string {
 	}
 	switch b.Reason {
 	case history.FirstBuild:
-		return "first build of " + orDefault(b.Target) + " on record"
+		return "first build of " + buildName(b.Target, b.Images) + " on record"
 	case history.FilesChanged:
 		if viaVerified(b.Via) && len(b.Paths) > 0 {
 			return "files changed: " + strings.Join(clipList(b.Paths, 2), ", ")

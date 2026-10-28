@@ -547,8 +547,21 @@ func TestConfig(t *testing.T) {
 	if k, err := ParseKey([]byte("  " + base64.StdEncoding.EncodeToString(make([]byte, 32)) + "\n")); err != nil || len(k) != 32 {
 		t.Errorf("key: %v", err)
 	}
-	if _, err := ParseKey([]byte("c2hvcnQ=")); err == nil {
-		t.Error("short key accepted")
+	if _, err := ParseKey([]byte("c2hvcnQ=")); err == nil || !strings.Contains(err.Error(), "decodes to 5 bytes") {
+		t.Errorf("short key: %v", err)
+	}
+	// What External Secrets' Password generator makes (docs/gitops.md):
+	// 32 printable characters, base64-encoded, are a key; its default of 24
+	// characters is refused, and so is the raw text.
+	eso := `a1B2"c3\D4e~5F6g7H8i9J0k!L1m2N3o4P`[:32]
+	if k, err := ParseKey([]byte(base64.StdEncoding.EncodeToString([]byte(eso)))); err != nil || string(k) != eso {
+		t.Errorf("the generator's key, length 32 and base64: %q, %v", k, err)
+	}
+	if _, err := ParseKey([]byte(base64.StdEncoding.EncodeToString([]byte(eso[:24])))); err == nil || !strings.Contains(err.Error(), "decodes to 24 bytes") {
+		t.Errorf("the generator's default length: %v", err)
+	}
+	if _, err := ParseKey([]byte(eso)); err == nil || !strings.Contains(err.Error(), "not base64") {
+		t.Errorf("the generator's raw text: %v", err)
 	}
 }
 

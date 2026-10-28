@@ -58,10 +58,14 @@ type Step struct {
 // Dockerfile returns the Dockerfile the build used and its file name, as
 // recorded in the provenance; empty when the build has none.
 func (b *Build) Dockerfile() (name, text string) {
-	if b.prov == nil {
-		return "", ""
+	if b.prov != nil {
+		return b.prov.DockerfileName, b.prov.Dockerfile
 	}
-	return b.prov.DockerfileName, b.prov.Dockerfile
+
+	if b.errSrc != nil {
+		return b.errSrc.Name, b.errSrc.Text
+	}
+	return "", ""
 }
 
 // Duration is how long the step took in this build; for a received step,
@@ -95,6 +99,9 @@ type Build struct {
 	Vertices map[string]bool
 
 	prov *Provenance
+	// errSrc is the Dockerfile and failed step of a failed build (which has
+	// no provenance), from its error.
+	errSrc *ErrorSource
 	// When each of this build's own vertices started, as the daemon
 	// reported it: the same vertex with the same start in two builds is one
 	// execution.
@@ -127,7 +134,11 @@ type Config struct {
 // NewBuild assembles a build from its record and blobs. provenance and trace
 // may be empty: a failed build has no provenance, and a trace is attached a
 // few seconds after a build or never.
-func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus, provenance, trace []byte, cfg Config) (*Build, error) {
+//
+// errBlob is the record's ExternalError blob (empty for a build that did
+// not fail); what it says about the Dockerfile is used only when there is
+// no provenance, and a blob that does not parse is ignored.
+func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus, provenance, trace, errBlob []byte, cfg Config) (*Build, error) {
 	b := &Build{
 		Ref:       rec.Ref,
 		Target:    rec.FrontendAttrs["target"],
@@ -163,6 +174,11 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 		b.prov = p
 		for d := range p.DigestMapping {
 			b.Vertices[d] = true
+		}
+	}
+	if b.prov == nil && rec.Error != nil {
+		if es, err := ParseErrorSource(errBlob); err == nil {
+			b.errSrc = es
 		}
 	}
 	att, err := AttributeBlob(trace, cfg.Instances)
@@ -281,6 +297,10 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 			}
 			s.Line = b.prov.Lines[s.StepID]
 			s.Lines = b.prov.Ranges[s.StepID]
+		}
+		if b.prov == nil && b.errSrc != nil && b.errSrc.Vertex == d && len(b.errSrc.Ranges) > 0 {
+			s.Lines = b.errSrc.Ranges
+			s.Line = s.Lines[0].Start
 		}
 		if v.err != "" {
 			s.Error = mask(v.err, b.BuildArgs)

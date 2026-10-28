@@ -26,7 +26,7 @@ func TestBuildCheckWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := NewBuild(rec, progress, nil, nil, Config{})
+	b, err := NewBuild(rec, progress, nil, nil, nil, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

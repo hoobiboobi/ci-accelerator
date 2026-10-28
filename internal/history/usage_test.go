@@ -29,7 +29,7 @@ func TestStepUsage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := NewBuild(rec, progress, read("provenance.json"), read("trace.json"), Config{})
+		b, err := NewBuild(rec, progress, read("provenance.json"), read("trace.json"), nil, Config{})
 		if err != nil {
 			t.Fatal(err)
 		}

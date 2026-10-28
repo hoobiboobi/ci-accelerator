@@ -23,7 +23,7 @@
 
 <section class="box" aria-labelledby="chgT"><div class="boxh"><h2 class="h" id="chgT">What changed since the previous build</h2>{{if .PrevURL}}<a class="link" href="{{.PrevURL}}">{{.PrevLabel}}</a> · <a class="link" href="/builds/{{.ID}}/compare">compare side by side</a>{{end}}</div>
   {{if .PrevURL}}{{if .Changes}}<dl class="chg">{{range .Changes}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}</dl>{{else}}<p class="muted pad">Nothing BuildKit records differs.</p>{{end}}
-  {{else}}<p class="muted pad">No earlier build of {{if .Target}}{{.Target}}{{else}}this target{{end}} on record.</p>{{end}}
+  {{else}}<p class="muted pad">No earlier build of {{if .Target}}{{.Target}}{{else}}this image{{end}} on record.</p>{{end}}
 </section>
 
 {{with .Warnings}}<section class="box" aria-labelledby="wcT"><div class="boxh"><h2 class="h" id="wcT">Dockerfile checks</h2><span class="muted">{{len .}} of BuildKit's build checks failed{{if $.DfName}} in {{$.DfName}}{{end}}</span></div>
@@ -37,7 +37,8 @@
   <div class="boxh"><h2 class="h" id="stT">Steps</h2>
     {{if .Blocks}}<nav class="seg" role="tablist" aria-label="Steps as"><a role="tab" href="#steps" data-tab="steps" aria-selected="true">List</a>{{if .Gantt}}<a role="tab" href="#timeline" data-tab="timeline" aria-selected="false">Timeline</a>{{end}}{{if .Lines}}<a role="tab" href="#dockerfile" data-tab="dockerfile" aria-selected="false">Dockerfile</a>{{end}}</nav>
     <button class="btn ml" type="button" data-act="toggleall">{{icon "chevD" 13}}<span>Expand all</span></button>{{end}}</div>
-  {{if not .Blocks}}<p class="muted pad">{{if .Failed}}No step ran: the build failed before its first step.{{else}}This build ran no steps.{{end}}</p>
+  {{if not .Blocks}}<p class="muted pad">{{if .Failed}}No step ran: {{with .Unparsed}}BuildKit could not parse line {{.}} of the Dockerfile.{{else}}the build failed before its first step.{{end}}{{else}}This build ran no steps.{{end}}</p>
+  {{if .Lines}}<div class="dfwrap">{{template "dockerfile" .}}</div>{{else}}{{with .NoDockerfile}}<p class="muted pad">{{.}}</p>{{end}}{{end}}
   {{else}}
   <div class="tabpane" id="steps" data-pane="steps" role="tabpanel" aria-label="Steps">
   <div class="tbox tone-{{.Tone}}"><table><thead><tr><th class="num">Line</th><th>Step</th><th>Result</th><th class="num">Time</th></tr></thead><tbody>
@@ -57,6 +58,7 @@
     {{end}}
   {{end}}
   </tbody></table></div>
+  {{with .NoDockerfile}}<p class="muted sm pad">{{.}}</p>{{end}}
   </div>
   {{if .Gantt}}
   <div class="tabpane" id="timeline" data-pane="timeline" role="tabpanel" aria-label="Timeline" hidden>
@@ -72,7 +74,7 @@
   <div class="tabpane" id="dockerfile" data-pane="dockerfile" role="tabpanel" aria-label="Dockerfile" hidden>
     <div class="dfwrap">
       {{template "dockerfile" .}}
-      <div class="dfbar"><span class="legend"><span><i class="si built">{{icon "s_built" 11}}</i>built</span><span><i class="si cached">{{icon "s_cached" 11}}</i>from cache</span><span><i class="si received">{{icon "s_received" 11}}</i>from another job</span><span><i class="si image">{{icon "s_image" 11}}</i>base image</span><span>dimmed: not part of this target</span></span></div>
+      <div class="dfbar"><span class="legend"><span><i class="si built">{{icon "s_built" 11}}</i>built</span><span><i class="si cached">{{icon "s_cached" 11}}</i>from cache</span><span><i class="si received">{{icon "s_received" 11}}</i>from another job</span><span><i class="si image">{{icon "s_image" 11}}</i>base image</span>{{if .Failed}}<span><i class="si failed">{{icon "warn" 11}}</i>failed</span>{{else}}<span>dimmed: not part of this {{if .Target}}target{{else}}build{{end}}</span>{{end}}</span>{{if .Failed}}<span class="muted">A failed build has only its failed step's lines on record.</span>{{end}}</div>
     </div>
   </div>
   {{end}}

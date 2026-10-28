@@ -345,6 +345,11 @@ func (c *Client) Targets(ctx context.Context, p store.ProjectKey, since time.Tim
 	return
 }
 
+func (c *Client) TargetImages(ctx context.Context, p store.ProjectKey, since time.Time) (out map[string][]string, err error) {
+	err = c.call(ctx, "TargetImages", []any{p, since}, &out)
+	return
+}
+
 func (c *Client) StepCounts(ctx context.Context, p store.ProjectKey, target string, since time.Time, limit int) (out []store.StepCount, err error) {
 	err = c.call(ctx, "StepCounts", []any{p, target, since, limit}, &out)
 	return

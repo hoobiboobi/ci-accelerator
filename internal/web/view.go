@@ -61,6 +61,9 @@ type Line struct {
 	Showed string // duration text on the step's first line
 	// Warnings are the build checks that failed on this line.
 	Warnings []history.Warning
+	// Unparsed: BuildKit could not parse this line (the build stopped
+	// before its first step).
+	Unparsed bool
 }
 
 func isFrom(s history.Step) bool { return strings.HasPrefix(s.Name, "FROM ") }
@@ -195,6 +198,12 @@ func dockerfile(text string, stepViews []StepView, b *history.Build) []Line {
 			}
 		}
 	}
+	// A failed build has no provenance: only its failed step's lines are
+	// on record, and the stages it did not reach left no step, so they
+	// cannot be told from stages the target does not use. Nothing is
+	// dimmed then.
+	failed := b.Error != ""
+	unparsed := history.ParseErrorLine(b.Error)
 	used := map[string]bool{}
 	named := false
 	for _, s := range stepViews {
@@ -237,7 +246,8 @@ func dockerfile(text string, stepViews []StepView, b *history.Build) []Line {
 		} else if m := instr.FindStringSubmatch(raw); m != nil && !cont && metaInst[strings.ToUpper(m[2])] {
 			l.Meta = true
 		}
-		l.Dim = named && stage != "" && !used[stage] && l.Step < 0
+		l.Dim = !failed && named && stage != "" && !used[stage] && l.Step < 0
+		l.Unparsed = n == unparsed && l.Step < 0
 		l.Meta = l.Meta && !l.Dim
 		cont = strings.HasSuffix(strings.TrimSpace(raw), "\\")
 		out[i] = l

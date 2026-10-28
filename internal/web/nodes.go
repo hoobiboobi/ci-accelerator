@@ -517,7 +517,7 @@ func (s *Server) node(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, a := range d.Active {
 		age := s.now().Sub(a.Started)
-		v.Active = append(v.Active, ActiveRow{Target: a.Target, For: duration(age.Truncate(time.Second)), Stuck: age > stuckAfter})
+		v.Active = append(v.Active, ActiveRow{Target: buildName(a.Target, nil), For: duration(age.Truncate(time.Second)), Stuck: age > stuckAfter})
 	}
 	keep := mountKeep(d.Inspection.GC)
 	for i, m := range d.Inspection.Usage.MountList {

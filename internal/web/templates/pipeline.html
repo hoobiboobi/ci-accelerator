@@ -5,11 +5,13 @@
     <div class="titlerow"><h1 class="t" tabindex="-1">{{.Title}}</h1>{{with .Card.State.Key}}<span class="pstate ps-{{.}}">{{icon $.Card.State.Icon 12}}{{$.Card.State.Label}}</span>{{end}}
       {{if .GitLabURL}}<div class="tools"><a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab pipeline</span></a></div>{{end}}</div>
     <div class="sub">{{with .Ref}}<span>{{.}}</span>{{end}}{{with .SHA}}<span class="mono">{{.}}</span>{{end}}{{if .Started.Text}}<span title="{{.Started.UTC}}">{{.Started}}</span>{{end}}</div></header>
+  {{if .InProgress}}<span hidden data-refresh-every="15"></span>{{end}}
   {{if .NoBuilds}}
-  <div class="empty"><b>No job of this pipeline built an image on the box.</b><p>Its jobs are GitLab's to show{{if .GitLabURL}}: <a class="link" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">the pipeline in GitLab</a>{{end}}.</p></div>
+  <div class="empty"><b>{{if .StatusUnknown}}No job of this pipeline has built an image on the box so far.{{else}}No job of this pipeline built an image on the box.{{end}}</b><p>Its jobs are GitLab's to show{{if .GitLabURL}}: <a class="link" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">the pipeline in GitLab</a>{{end}}.</p></div>
   {{else}}
-  <p class="lead">{{.Sentence}}</p>
-  {{with .Card}}<div class="pc-facts"><span><b>{{.Jobs}}</b> job{{if ne .Jobs 1}}s{{end}}{{with .Dur}} in <b>{{.}}</b>{{end}}{{if .NotRun}} · {{.NotRun}} did not run{{end}}</span>{{if .Waited}}<span>waiting for a runner: usually <b>{{.Waited}}</b>, longest <b>{{.Longest}}</b> <span class="muted">({{.LongJ}})</span>{{if .WaitedLong}} · <b>{{.WaitedLong}}</b> job{{if ne .WaitedLong 1}}s{{end}} over 10 s{{end}}</span>{{end}}</div>{{end}}
+  {{if .Sentence}}<p class="lead">{{.Sentence}}</p>{{else}}<p class="lead">The pipeline is running; no image build of it has finished yet. A build shows up here when BuildKit completes it.</p>{{end}}
+  {{if or .RunningJobs .WaitingJobs}}<p class="muted">{{with .RunningJobs}}{{.}} job{{if ne . 1}}s{{end}} running{{end}}{{if and .RunningJobs .WaitingJobs}}, {{end}}{{with .WaitingJobs}}{{.}} waiting to start{{end}}.</p>{{end}}
+  {{with .Card}}<div class="pc-facts"><span><b>{{.Jobs}}</b> job{{if ne .Jobs 1}}s{{end}}{{if .Dur}}{{if .Running}}, running for{{else}} in{{end}} <b>{{.Dur}}</b>{{end}}{{if .Manual}} · {{.Manual}} manual{{end}}{{if .NotRun}} · {{.NotRun}} did not run{{end}}</span>{{if .Waited}}<span>waiting for a runner: usually <b>{{.Waited}}</b>, longest <b>{{.Longest}}</b> <span class="muted">({{.LongJ}})</span>{{if .WaitedLong}} · <b>{{.WaitedLong}}</b> job{{if ne .WaitedLong 1}}s{{end}} over 10 s{{end}}</span>{{end}}</div>{{end}}
   {{with .WF}}<section class="box wfsec" aria-labelledby="tlT"><div class="boxh"><h2 class="h" id="tlT">Timeline</h2><span class="muted">every job of the pipeline{{with $.SetBy}} · <b>{{.}}</b> ended last{{end}}{{if $.CritJobs}} · <span title="{{$.CritNames}}">critical path: <b>{{$.CritJobs}}</b> jobs, waited <b>{{$.CritWait}}</b>, ran <b>{{$.CritRun}}</b></span>{{end}}</span></div>
     <div class="pad">{{template "waterfall" .}}</div></section>{{end}}
   {{if .Rebuilt}}
@@ -17,10 +19,10 @@
     <div class="blist">{{range .Rebuilt}}{{template "brow" .}}{{end}}</div>
     {{if .Cached}}<details class="fold" id="cachedFold"><summary>{{icon "chev" 13 "chev"}}{{len .Cached}} image{{if ne (len .Cached) 1}}s{{end}} fully from the cache</summary><div class="blist">{{range .Cached}}{{template "brow" .}}{{end}}</div></details>{{end}}
   </section>
-  {{else}}
+  {{else if .Cached}}
   <section class="box"><div class="blist">{{range .Cached}}{{template "brow" .}}{{end}}</div></section>
   {{end}}
   {{end}}
-  {{if .OtherJobs}}<p class="muted">{{.OtherJobs}} other job{{if ne .OtherJobs 1}}s{{end}} of this pipeline built no image here{{if .OtherDrawn}}; {{if eq .OtherDrawn .OtherJobs}}they are{{else}}{{.OtherDrawn}} of them are{{end}} grey bars on the timeline{{end}}{{if .GitLabURL}}. Their logs are in <a class="link" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">GitLab</a>{{end}}.</p>{{end}}
+  {{if .OtherJobs}}<p class="muted">{{.OtherJobs}} other job{{if ne .OtherJobs 1}}s{{end}} of this pipeline built no image here{{if .OtherDrawn}}; {{if eq .OtherDrawn .OtherJobs}}{{if eq .OtherJobs 1}}it is a grey bar{{else}}they are grey bars{{end}}{{else}}{{.OtherDrawn}} of them {{if eq .OtherDrawn 1}}is a grey bar{{else}}are grey bars{{end}}{{end}} on the timeline{{end}}{{if .GitLabURL}}. {{if eq .OtherJobs 1}}Its log is{{else}}Their logs are{{end}} in <a class="link" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">GitLab</a>{{end}}.</p>{{end}}
 </div>
 {{end}}

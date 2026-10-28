@@ -89,7 +89,7 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := history.NewBuild(rec, progress, read(d, "provenance.json"), read(d, "trace.json"), cfg)
+		b, err := history.NewBuild(rec, progress, read(d, "provenance.json"), read(d, "trace.json"), read(d, "error.bin"), cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1240,7 +1240,7 @@ func TestFailedBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := history.NewBuild(rec, progress, nil, nil, history.Config{SecretKey: st.SecretKey()})
+	b, err := history.NewBuild(rec, progress, nil, nil, nil, history.Config{SecretKey: st.SecretKey()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2002,5 +2002,107 @@ func TestNodesProjects(t *testing.T) {
 	if !regexp.MustCompile(`<tr class="cur" aria-current="true"><td><a href="/projects/[0-9a-f]+/42\?to=/builds">example/[^<]*</a> <span class="chip plain">this project</span></td><td class="num">` +
 		strconv.Itoa(pb.Builds) + `</td>`).MatchString(page.body) {
 		t.Errorf("the node's page does not name the project with its %d builds", pb.Builds)
+	}
+}
+
+// A failed build's Dockerfile comes from its error (BuildKit records no
+// provenance for it): the build page has the Dockerfile tab with the
+// failed step's lines marked, the step panel shows its source; a build
+// whose Dockerfile did not parse shows the Dockerfile under "No step ran".
+func TestFailedBuildDockerfileTab(t *testing.T) {
+	ts, st, _ := console(t)
+	d := "../history/testdata/failed-run"
+	read := func(n string) []byte { b, _ := os.ReadFile(filepath.Join(d, n)); return b }
+	rec, err := history.ParseRecord(read("record.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress, err := history.DecodeProgress(bytes.NewReader(read("logs.bin")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := history.NewBuild(rec, progress, nil, nil, read("error.bin"), history.Config{SecretKey: st.SecretKey()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Daemon = "daemon-a"
+	id, err := st.SaveBuild(ctx, store.Build{Build: b, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := -1
+	for i, s := range b.Steps {
+		if s.Error != "" {
+			failed = i
+		}
+	}
+	p := get(t, ts, fmt.Sprintf("/builds/%d", id))
+	p.safe(t)
+	if !strings.Contains(p.body, `data-tab="dockerfile"`) {
+		t.Fatal("failed build: no Dockerfile tab")
+	}
+	marked := regexp.MustCompile(`<div class="dl step st-failed[^"]*" role="listitem" data-step="`+strconv.Itoa(failed)+`"`).FindAllString(p.body, -1)
+	if len(marked) != 2 { // lines 7 and 8: one RUN over two lines
+		t.Errorf("failed step's Dockerfile lines: %d marked", len(marked))
+	}
+	if n := strings.Count(p.body, `class="dl step `); n != 2 {
+		t.Errorf("%d lines marked with a step, want only the failed one's 2", n)
+	}
+	panel := get(t, ts, fmt.Sprintf("/builds/%d/steps/%d?part=panel", id, failed))
+	if !strings.Contains(panel.body, "Dockerfile view") || !strings.Contains(panel.body, "Dockerfile, line 7–8") {
+		t.Errorf("failed step panel: %.2000s", panel.body)
+	}
+
+	parse := *b
+	parse.Ref, parse.Steps, parse.Error = "parseref", nil, "dockerfile parse error on line 3: unknown instruction: FOOBAR"
+	pid, err := st.SaveBuild(ctx, store.Build{Build: &parse, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := get(t, ts, fmt.Sprintf("/builds/%d", pid))
+	e.safe(t)
+	if !strings.Contains(e.body, "No step ran") || !strings.Contains(e.body, `class="dfbox"`) {
+		t.Error("a failed build without steps: no Dockerfile")
+	}
+}
+
+// A build of a Dockerfile's last stage (no --opt target, as the CI
+// component builds by default) is named by the repository it pushed, its
+// image page and the builds filter hold only such builds, and nothing says
+// "default target" (0.3.1 did, and its image page listed every build).
+func TestImageWithoutTarget(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	bs := byPipe[keys[0]]
+	pg, err := st.BuildPage(ctx, bs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := *pg.Build
+	b.Ref, b.Target, b.Images = "notarget", "", []string{"registry.example.com/group/app/svc:abc123"}
+	id, err := st.SaveBuild(ctx, store.Build{Build: &b, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/images", "/images/-", fmt.Sprintf("/builds/%d", id), "/builds?image=-", "/"} {
+		p := get(t, ts, path)
+		p.safe(t)
+		if strings.Contains(p.body, "default target") || strings.Contains(p.body, "<code></code>") {
+			t.Errorf("%s: still says default target or shows an empty name", path)
+		}
+		if path != "/" && !strings.Contains(p.body, "registry.example.com/group/app/svc") {
+			t.Errorf("%s: does not name the build by its repository", path)
+		}
+	}
+	img := get(t, ts, "/images/-")
+	if !strings.Contains(img.body, fmt.Sprintf("/builds/%d", id)) || strings.Contains(img.body, fmt.Sprintf("/builds/%d\"", bs[1].ID)) {
+		t.Error("the image page of builds without a target lists other images' builds")
+	}
+	list := get(t, ts, "/builds?image=-")
+	if !strings.Contains(list.body, fmt.Sprintf("/builds/%d", id)) || !strings.Contains(list.body, `<option value="-" selected`) {
+		t.Error("the builds filter for builds without a target does not list them or does not select them")
+	}
+	if strings.Contains(list.body, fmt.Sprintf("/builds/%d\"", bs[1].ID)) {
+		t.Error("the builds filter for builds without a target lists a build of another target")
 	}
 }
