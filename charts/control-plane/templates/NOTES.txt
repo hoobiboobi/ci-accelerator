@@ -49,3 +49,12 @@ serves its API on the Service {{ $ctrl }} (HTTPS) to the web, {{ int .Values.web
 (deploy/{{ $web }}: the console's pages). The store is on the
 PersistentVolumeClaim {{ include "control-plane.pvcName" . }}
 {{- if not .Values.controller.persistence.existingClaim }}, which is kept when the release is removed{{ end }}.
+{{- if include "control-plane.router" . }}
+{{- $r := include "control-plane.routerName" . }}
+
+The build router (ds/{{ $r }}) runs on the build nodes: CI jobs reach the
+daemons at tcp://{{ $r }}.{{ .Release.Namespace }}.svc:1234 (the runner's
+BUILDKIT_REMOTE_ADDR), and the daemons' certificate must name that Service
+(the buildkit chart adds it with global.router.enabled and
+global.router.service, or scripts/buildkit-certs.sh --router).
+{{- end }}
