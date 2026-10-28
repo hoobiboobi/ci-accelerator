@@ -93,7 +93,17 @@ workflow copies them into the GitHub release.
   commits, at most 25 requests a minute per project), so the Overview
   and the lists are right without anyone opening a page first.
 - The Nodes page counts the build router's decisions of the last 24 hours
-  per daemon (to the project's cache, by hash, another zone, job unknown).
+  per daemon (to the project's cache, by hash, another zone, job unknown)
+  and names the projects each daemon built for.
+- The time from a job's start to its build is split by the job pod's own
+  timestamps: the runner preparing the pod, the pod starting (scheduled,
+  images pulled), the runner attaching, checkout and script. On the
+  timeline and the build page.
+- A rebuild on the same node under a replaced daemon says so (and whether
+  its cache persisted), instead of "another node".
+- A build argument that reaches a step through ENV (the step's text
+  carries its value) is reported as that argument's change, not as a
+  Dockerfile change.
 
 ### Changed
 
@@ -112,7 +122,14 @@ workflow copies them into the GitHub release.
 - Every median and p95 the console shows is a nearest-rank percentile (one
   of the measured times); the build page's "usual" time took the upper
   middle value of an even count before, the daily figures the lower one.
-  "Usual" says how many builds it is the median of.
+  "Usual" says how many builds it is the median of, and needs five
+  builds of its kind; a p95 needs twenty rebuilds (a dash otherwise). The
+  images table compares rebuilds with rebuilds.
+- The Overview gives the build farm's share of rebuild time and, apart,
+  the unclear share (it counted failed and unclear rebuilds as "not caused
+  by the code").
+- "Time the cache saved, about" became the measured fact: how long the
+  steps not run took when they last ran.
 - Byte sizes use binary units with their names (KiB, MiB, GiB).
 - The pipeline timeline draws a build's parts where its steps ran (the
   union of their intervals), not the sum of parallel steps' times.
@@ -126,6 +143,11 @@ workflow copies them into the GitHub release.
 - A live page stopped hearing of a project for good after one failed
   permission check at GitLab.
 - With sign-in, `/livez` answered with a redirect to the sign-in page.
+- A settled "files or node" went back to unclear whenever the controller
+  restarted (it reads the daemons' history again).
+- A pipeline's duration differed between its card and its timeline.
+- "Wrote 0 B" for steps that wrote files (a cgroup counts block I/O only);
+  1.5 MiB was shown as 2 MiB.
 
 ## 0.2.5 - 2026-10-26
 
