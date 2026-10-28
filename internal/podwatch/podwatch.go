@@ -124,8 +124,26 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 			fn(ctx, j)
 		}
 	}
-	gone := func(pod *corev1.Pod) {
+	// A pod's end is told once: when its deletion is asked for, or when it
+	// disappears without that having been seen. The informer calls its
+	// handlers one at a time, so the set needs no lock; a pod leaves it
+	// when it is deleted.
+	ended := map[string]bool{}
+	gone := func(pod *corev1.Pod, final bool) {
 		if h.Gone == nil {
+			return
+		}
+		key := string(pod.UID)
+		if key == "" {
+			key = pod.Namespace + "/" + pod.Name
+		}
+		told := ended[key]
+		if final {
+			delete(ended, key)
+		} else {
+			ended[key] = true
+		}
+		if told {
 			return
 		}
 		at, ok := endedAt(pod)
@@ -143,7 +161,7 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 				// Seen for the first time while being deleted (the
 				// console restarted): its job is over.
 				if p.DeletionTimestamp != nil {
-					gone(p)
+					gone(p, false)
 				}
 			}
 		},
@@ -155,7 +173,7 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 			}
 			switch {
 			case c.DeletionTimestamp != nil && o.DeletionTimestamp == nil:
-				gone(c)
+				gone(c, false)
 			case o.Spec.NodeName != c.Spec.NodeName, buildStarted(o).IsZero() && !buildStarted(c).IsZero():
 				call(h.Job, c)
 			}
@@ -165,7 +183,7 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 				obj = d.Obj
 			}
 			if p, ok := obj.(*corev1.Pod); ok {
-				gone(p)
+				gone(p, true)
 			}
 		},
 	})

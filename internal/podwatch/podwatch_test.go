@@ -160,17 +160,24 @@ func TestWatchSeesJobPods(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitGone(1)
+	// Its disappearance afterwards is not a second end.
 	if err := client.CoreV1().Pods("jobs").Delete(ctx, p.Name, metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	waitGone(2)
+	time.Sleep(200 * time.Millisecond)
+	mu.Lock()
+	twice := len(gone) != 1
+	mu.Unlock()
+	if twice {
+		t.Errorf("a pod's end told %d times", len(gone))
+	}
 	// The console restarts while a pod is being deleted: seen and gone.
 	q := pod("runner-def", "node-1", jobAnnotations())
 	q.DeletionTimestamp, q.DeletionGracePeriodSeconds = &metav1.Time{Time: asked.Add(30 * time.Second)}, &grace
 	if _, err := client.CoreV1().Pods("jobs").Create(ctx, q, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	waitGone(3)
+	waitGone(2)
 	cancel()
 	<-done
 	mu.Lock()
@@ -178,7 +185,7 @@ func TestWatchSeesJobPods(t *testing.T) {
 	if len(seen) != 4 || seen[0].Node != "" || seen[1].Node != "node-2" || seen[1].JobID != 17298723831 {
 		t.Errorf("jobs seen: %+v", seen)
 	}
-	if len(gone) != 3 || gone[0].JobID != 17298723831 || !goneAt[0].Equal(asked) || !goneAt[2].Equal(asked) {
+	if len(gone) != 2 || gone[0].JobID != 17298723831 || !goneAt[0].Equal(asked) || !goneAt[1].Equal(asked) {
 		t.Errorf("jobs gone: %+v at %v, want the deletion asked at %v", gone, goneAt, asked)
 	}
 }
