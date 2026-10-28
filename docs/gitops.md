@@ -54,7 +54,7 @@ metadata: { name: ci-accelerator, namespace: flux-system }
 spec:
   interval: 1h
   url: oci://ghcr.io/hoobiboobi/charts/ci-accelerator
-  ref: { tag: 0.3.0 }
+  ref: { tag: 0.3.1 }
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -95,7 +95,7 @@ spec:
       config:
         gc: { maxUsedSpace: "2TB", reservedSpace: "100GB", minFreeSpace: "400GB" }
     control-plane:
-      image: { digest: "sha256:..." }        # ci-accelerator:v0.3.0, from the release notes
+      image: { digest: "sha256:..." }        # ci-accelerator:v0.3.1, from the release notes
       gitlab:
         token: { existingSecret: gitlab-api-token }
 ```
@@ -153,7 +153,7 @@ spec:
   source:
     repoURL: ghcr.io/hoobiboobi/charts       # no oci:// here
     chart: ci-accelerator
-    targetRevision: 0.3.0
+    targetRevision: 0.3.1
     helm:
       releaseName: ci-accelerator
       valuesObject:
@@ -294,7 +294,7 @@ daemons directly: leave out `--router` and admit the jobs namespace in
      the web's port under `control-plane.web`; a runner cache's
      `consoleSecretName` is now `controllerSecretName`) and point your
      Ingress at the Service `<release>-web` (it was `<release>-console`).
-  4. Create the release again at 0.3.0.
+  4. Create the release again at 0.3.1.
 
   The box refuses values under `console:` even when rendered offline; the
   check for a running 0.2.x console needs the live cluster, so Argo CD

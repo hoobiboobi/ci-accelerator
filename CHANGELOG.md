@@ -11,6 +11,15 @@ workflow copies them into the GitHub release.
 
 None.
 
+## 0.3.1 - 2026-10-28
+
+### Upgrade notes
+
+- From 0.3.0, `helm upgrade` in place. The control plane's image moves to
+  v0.3.1 (the same program), so the controller, web and router pods
+  restart once; the daemons and their disk probe stay as they are.
+- From 0.2.x, install again as the 0.3.0 notes below describe.
+
 ### Changed
 
 - The documentation describes 0.3.0 throughout: the build router and the
