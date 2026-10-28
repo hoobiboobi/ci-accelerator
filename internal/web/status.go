@@ -15,19 +15,16 @@ type Status struct {
 	Label string // short: in chips and lists
 	Long  string // in full: on a build's own page
 	Icon  string
-	// Code: the build's own change explains it (as far as the console can
-	// tell); farm and unclear rebuilds are not the change's doing.
-	Code bool
 }
 
 var statuses = map[string]Status{
-	"cached":   {"cached", "From cache", "From cache", "st_cached", false},
-	"change":   {"change", "Your change", "Rebuilt · your change", "st_change", true},
-	"farm":     {"farm", "Build farm", "Rebuilt · build farm", "st_farm", false},
-	"unclear":  {"unclear", "Unclear", "Rebuilt · node or files, unclear", "st_unclear", false},
-	"failed":   {"failed", "Failed", "Failed", "st_failed", false},
-	"canceled": {"failed", "Canceled", "Canceled", "st_failed", false},
-	"running":  {"running", "Running", "Running", "clock", false},
+	"cached":   {"cached", "From cache", "From cache", "st_cached"},
+	"change":   {"change", "Your change", "Rebuilt · your change", "st_change"},
+	"farm":     {"farm", "Build farm", "Rebuilt · build farm", "st_farm"},
+	"unclear":  {"unclear", "Unclear", "Rebuilt · node or files, unclear", "st_unclear"},
+	"failed":   {"failed", "Failed", "Failed", "st_failed"},
+	"canceled": {"failed", "Canceled", "Canceled", "st_failed"},
+	"running":  {"running", "Running", "Running", "clock"},
 }
 
 // statusKeys are the statuses in the order the pages list them.
