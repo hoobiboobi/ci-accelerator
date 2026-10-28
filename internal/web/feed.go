@@ -528,7 +528,7 @@ func (s *Server) imageRows(bs []store.BuildRow, since time.Time, loc *time.Locat
 		}
 		row.Cached = cached * 100 / max(1, len(list))
 		row.Rebuilds = len(ds)
-		if len(ds) > 0 {
+		if len(ds) >= minForUsual {
 			row.Usual = duration(median(ds))
 		}
 		if len(ds) >= minForP95 {
@@ -841,10 +841,10 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Cached = cached * 100 / max(1, len(bs))
 	ut := usualTimes(bs)[target]
-	if ut.Cached > 0 {
+	if ut.CachedN >= minForUsual {
 		v.UsualCached = duration(ut.Cached)
 	}
-	if ut.Rebuilt > 0 {
+	if ut.RebuiltN >= minForUsual {
 		v.UsualRebuilt = duration(ut.Rebuilt)
 	}
 	if len(rebuilt) >= minForP95 {
@@ -854,7 +854,11 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	if first.After(since) {
 		since = first
 	}
-	v.Chart = s.chart(bs, since, ut.Rebuilt, zone(r))
+	usualLine := time.Duration(0) // the chart's dashed line, only from enough rebuilds
+	if ut.RebuiltN >= minForUsual {
+		usualLine = ut.Rebuilt
+	}
+	v.Chart = s.chart(bs, since, usualLine, zone(r))
 	counts, err := s.data.StepCounts(ctx, sh.Project.ProjectKey, target, since, 8)
 	if err != nil {
 		s.fail(w, err)
