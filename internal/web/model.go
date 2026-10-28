@@ -155,14 +155,6 @@ func pctOf(part, whole time.Duration) float64 {
 // when is a moment with its day, in the reader's zone.
 func when(t time.Time, loc *time.Location) Stamp { return stampOf(t, loc, "2 Jan 15:04:05") }
 
-func shortID(id uint64) string {
-	s := strconv.FormatUint(id, 10)
-	if len(s) > 6 {
-		return s[len(s)-6:]
-	}
-	return s
-}
-
 // shortDaemon is the last part of a daemon pod's name ("glab-buildkit-4hxsv"
 // -> "4hxsv"): the part that tells daemons of one release apart.
 func shortDaemon(name string) string {

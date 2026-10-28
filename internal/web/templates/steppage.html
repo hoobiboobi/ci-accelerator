@@ -1,7 +1,7 @@
 {{define "steppage"}}{{template "layout" .}}{{end}}
 {{define "content"}}
 <div class="page">
-  <div class="crumbs"><a href="/">Pipelines</a><span class="sepr">/</span><a href="/builds/{{.BuildID}}">Build {{.BuildID}}</a><span class="sepr">/</span><span>Step {{.Step.Key}}</span></div>
+  <div class="crumbs"><a href="/builds">Builds</a><span class="sepr">/</span><a href="/builds/{{.BuildID}}">Build {{.BuildID}}</a><span class="sepr">/</span><span>Step {{.Step.Key}}</span></div>
   <div class="steppage">{{template "step" .}}</div>
 </div>
 {{end}}
