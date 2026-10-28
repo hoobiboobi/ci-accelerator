@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"regexp"
 	"strings"
 	"time"
 
@@ -84,6 +85,7 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 		case history.NewStep:
 			v.Title = template.HTML(fmt.Sprintf("The build failed at %s, a step new in this build.", code(r.Step.Name)))
 		}
+		v.Hint = signalHint(b.Error)
 		return v
 	}
 	at := ""
@@ -251,6 +253,25 @@ func withVia(v Verdict, r history.Reason, via string) Verdict {
 		}
 	}
 	return v
+}
+
+var exitCode = regexp.MustCompile(`exit code: (\d+)\b`)
+
+// signalHint reads a step's exit code above 128: the process ended on a
+// signal (128 + its number). What sent it is not recorded; the hint says
+// what usually does.
+func signalHint(err string) template.HTML {
+	m := exitCode.FindStringSubmatch(err)
+	if m == nil {
+		return ""
+	}
+	switch m[1] {
+	case "137":
+		return "<b>Exit code 137:</b> the step's process was killed (SIGKILL). In a build that is usually the kernel's out-of-memory killer: the step needed more memory than the daemon's container may use (its memory limit, or the node's free memory)."
+	case "143":
+		return "<b>Exit code 143:</b> the step's process was asked to stop (SIGTERM), usually because the build was stopped from outside: the job was canceled or timed out, or the daemon was shutting down."
+	}
+	return ""
 }
 
 // nodeHint says why a build ran away from its image's cache, from how the

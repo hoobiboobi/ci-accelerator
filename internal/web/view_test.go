@@ -341,3 +341,32 @@ func TestSegmentsAreWallTime(t *testing.T) {
 		}
 	}
 }
+
+func TestParallelText(t *testing.T) {
+	t0 := time.Date(2026, 10, 28, 1, 0, 0, 0, time.UTC)
+	at := func(s float64) time.Time { return t0.Add(time.Duration(s * float64(time.Second))) }
+	st := func(name string, from, to float64) history.Step {
+		return history.Step{Name: name, State: history.Built, Started: at(from), Completed: at(to)}
+	}
+	b := &history.Build{Steps: []history.Step{st("FROM x", 0, 3), st("RUN a", 1, 5), st("RUN b", 2, 6), st("RUN c", 7, 8)}}
+	if got := parallelText(b); got != "9.0\u00a0s of step time in 6.0\u00a0s: 1.5 steps at a time on average" {
+		t.Errorf("%q", got)
+	}
+	if got := parallelText(&history.Build{Steps: []history.Step{st("RUN a", 1, 5), st("RUN c", 7, 8)}}); got != "" {
+		t.Errorf("one after another: %q", got)
+	}
+}
+
+func TestSignalHint(t *testing.T) {
+	b := &history.Build{Error: `process "/bin/sh -c make" did not complete successfully: exit code: 137`}
+	if v := verdictFor(b, history.Reason{}, "", 0, 0, nil); !strings.Contains(string(v.Hint), "SIGKILL") {
+		t.Errorf("137: %q", v.Hint)
+	}
+	b.Error = `process "/bin/sh -c make" did not complete successfully: exit code: 1`
+	if v := verdictFor(b, history.Reason{}, "", 0, 0, nil); v.Hint != "" {
+		t.Errorf("exit code 1 has a hint: %q", v.Hint)
+	}
+	if signalHint("exit code: 143") == "" || signalHint("exit code: 1370") != "" {
+		t.Error("143 not read, or 1370 read as 137")
+	}
+}

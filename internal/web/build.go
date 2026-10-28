@@ -341,6 +341,9 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if p.Saved > 0 {
 		v.Details = append(v.Details, KV{"Time the cache saved, about", duration(p.Saved)})
 	}
+	if t := parallelText(b); t != "" {
+		v.Details = append(v.Details, KV{"Executed steps", t})
+	}
 	started := when(b.Started, zone(r))
 	if !strings.HasSuffix(started.Text, " UTC") {
 		started.Text += " · " + started.UTC
@@ -745,4 +748,25 @@ func usageFacts(u history.Usage, d time.Duration) []KV {
 		out = append(out, KV{"Disk", "read " + bytesText(u.ReadBytes) + ", wrote " + bytesText(u.WriteBytes)})
 	}
 	return out
+}
+
+// parallelText says how much step time the build's executed steps took
+// and in how much time that passed: several steps running at once make
+// the first larger ("14.2 s of step time in 5.0 s: 2.8 steps at a time on
+// average"). Empty when fewer than two steps ran or none overlapped.
+func parallelText(b *history.Build) string {
+	var spans []Span
+	var sum time.Duration
+	for _, s := range b.Steps {
+		if s.State != history.Built || isFrom(s) || s.Started.IsZero() || !s.Completed.After(s.Started) {
+			continue
+		}
+		spans = append(spans, Span{s.Started, s.Completed})
+		sum += s.Completed.Sub(s.Started)
+	}
+	_, wall := union(spans)
+	if len(spans) < 2 || wall <= 0 || sum-wall < 50*time.Millisecond {
+		return ""
+	}
+	return fmt.Sprintf("%s of step time in %s: %.1f steps at a time on average", duration(sum), duration(wall), sum.Seconds()/wall.Seconds())
 }
