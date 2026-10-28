@@ -1,11 +1,14 @@
 # Checks that need no cluster: the charts on Helm 3 and Helm 4, the Go
 # code, and the console's pages in a browser. The same `make` targets run
-# locally.
+# locally. Each job runs when the change touches what it checks
+# (changes.yml); a skipped job counts as passed. Not on pushes to main: a
+# pull request must be up to date with main before it merges, so the
+# merged tree is the one its checks ran on.
 name: checks
 
 on:
   push:
-    branches: [main, "wip/**"]
+    branches: ["wip/**"]
   pull_request:
   workflow_dispatch:
 
@@ -17,8 +20,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+
   checks:
     name: lint, unittest, validate (Helm ${{ matrix.helm }})
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -48,6 +56,8 @@ jobs:
 
   go:
     name: go test
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -77,6 +87,8 @@ jobs:
   # builds it (without pushing), so a release cannot fail there first.
   image:
     name: ci-accelerator image (amd64, arm64)
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -93,6 +105,8 @@ jobs:
 
   component:
     name: GitLab CI component
+    needs: changes
+    if: needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -107,6 +121,8 @@ jobs:
 
   ui:
     name: browser checks
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -129,3 +145,21 @@ jobs:
       # The runner image's Chrome: the checks print its version.
       - name: Browser checks of the console's pages
         run: make ui-test
+
+  # One result for branch protection, whatever ran: red when a job failed
+  # or when it could not be told what to run.
+  passed:
+    name: checks passed
+    needs: [changes, checks, go, image, component, ui]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Nothing failed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "changes: $CHANGES; jobs: $RESULTS"
+          test "$CHANGES" = success
+          case " $RESULTS " in *" failure "* | *" cancelled "*) exit 1 ;; esac

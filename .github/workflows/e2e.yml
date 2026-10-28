@@ -1,7 +1,9 @@
 # End-to-end checks on kind clusters: the scenarios in four groups of
 # about six minutes, each group on its own runner and cluster (setup runs
 # in every group). On pull requests to main, on pushes of work-in-progress
-# branches (wip/*), and on demand.
+# branches (wip/*), and on demand. The groups a change needs come from
+# changes.yml (scripts/ci-changes.sh): a Go change runs the two that run
+# the control plane, a chart change all four, documentation none.
 name: e2e
 
 on:
@@ -19,24 +21,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: ./.github/workflows/changes.yml
+
   groups:
     name: e2e on kind (${{ matrix.group }})
+    needs: changes
+    if: needs.changes.outputs.e2e_matrix != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Scenario times from a full local run: upgrade 401 s, box 350 s,
-          # existing 181 s, runner 101 s, the rest about 360 s together.
-          - group: upgrade
-            scenarios: upgrade
-          - group: box
-            scenarios: box
-          - group: tls-runner
-            scenarios: preflight tls certmanager existing runner
-          - group: daemons
-            scenarios: netpol otel cache dedup routing local bump graceful persist sigkill badconfig gc debug probes
+        include: ${{ fromJSON(needs.changes.outputs.e2e_matrix) }}
     env:
       CI_HELM_VERSION: v4.3.1
       # A step's own env is not visible in its `if`.
@@ -97,17 +94,20 @@ jobs:
           retention-days: 7
 
   # One result under the name branch protection requires, whatever the
-  # groups are.
+  # groups are: red when a group failed or when it could not be told
+  # which to run; green when none was needed.
   e2e:
     name: e2e on kind
-    needs: groups
+    needs: [changes, groups]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every group passed
         env:
+          CHANGES: ${{ needs.changes.result }}
           RESULT: ${{ needs.groups.result }}
         run: |
-          echo "groups: $RESULT"
-          test "$RESULT" = success
+          echo "changes: $CHANGES; groups: $RESULT"
+          test "$CHANGES" = success
+          test "$RESULT" = success -o "$RESULT" = skipped

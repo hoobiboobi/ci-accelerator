@@ -1,0 +1,49 @@
+# What a change touches, for the other workflows: a pull request's merge
+# commit against its base, a push against the commit before it; without
+# a base (a new branch, a run on demand) everything runs. The rules are in
+# scripts/ci-changes.sh (test/ci-changes.sh checks them).
+name: changes
+
+on:
+  workflow_call:
+    outputs:
+      charts:
+        description: "true when the charts' jobs run (lint, unit tests, schema validation, the CI component, the quickstart, every e2e group)"
+        value: ${{ jobs.changes.outputs.charts }}
+      go:
+        description: "true when the Go jobs run (go test, the image, the browser checks, the control plane's e2e groups)"
+        value: ${{ jobs.changes.outputs.go }}
+      e2e_matrix:
+        description: "the e2e groups to run, as the JSON of the e2e matrix ([] for none)"
+        value: ${{ jobs.changes.outputs.e2e_matrix }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: what changed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      charts: ${{ steps.what.outputs.charts }}
+      go: ${{ steps.what.outputs.go }}
+      e2e_matrix: ${{ steps.what.outputs.e2e_matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The paths changed since the base
+        id: what
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE" ] && git fetch --quiet --depth=1 origin "$BASE" 2>/dev/null; then
+            git diff --name-only "$BASE" HEAD >changed.txt
+            echo "changed since ${BASE}:"; sed 's/^/  /' changed.txt
+          else
+            echo "no base to compare with: everything runs"
+            : >changed.txt
+          fi
+          scripts/ci-changes.sh <changed.txt | tee -a "$GITHUB_OUTPUT"
