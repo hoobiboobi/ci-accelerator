@@ -72,7 +72,7 @@ func recorded(t *testing.T) *fake {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for desc, file := range map[*controlapi.Descriptor]string{rec.Logs: "logs.bin", provenance(rec): "provenance.json", rec.Trace: "trace.json"} {
+		for desc, file := range map[*controlapi.Descriptor]string{rec.Logs: "logs.bin", provenance(rec): "provenance.json", rec.Trace: "trace.json", rec.ExternalError: "error.bin"} {
 			if desc != nil {
 				f.blobs[desc.Digest] = read(file)
 			}
@@ -99,7 +99,7 @@ func jobs(t *testing.T, f *fake) []store.Job {
 	seen := map[uint64]bool{}
 	var out []store.Job
 	for _, r := range f.recs {
-		b, err := history.NewBuild(r, nil, nil, f.blobs[r.Trace.GetDigest()], history.Config{Instances: instances})
+		b, err := history.NewBuild(r, nil, nil, f.blobs[r.Trace.GetDigest()], nil, history.Config{Instances: instances})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -421,5 +421,55 @@ func TestBuildAttributedLater(t *testing.T) {
 	if !strings.Contains(out, `msg="build stored"`) || !strings.Contains(out, "attribution=unattributed") ||
 		!strings.Contains(out, `msg="build attributed"`) || !strings.Contains(out, " job=") {
 		t.Errorf("log:\n%s", out)
+	}
+}
+
+// A daemon pod that replaced another on the same hostPath sends the old
+// pod's records again (its history is on that disk): they stay the builds
+// they were, under the pod that ran them, with the same reasons; 0.3.0 and
+// 0.3.1 stored each again under the new pod. A record new to the store is
+// the new pod's.
+func TestReplacedDaemonReplaysHistory(t *testing.T) {
+	f := recorded(t)
+	c, s := newCollector(t)
+	for _, j := range jobs(t, f) {
+		if err := s.SaveJob(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := len(f.recs)
+	old := &fake{name: f.name, recs: f.recs[:n-1], blobs: f.blobs}
+	if err := c.Run(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	before := dump(t, s)
+	replaced := &fake{name: "daemon-a-replaced", recs: f.recs, blobs: f.blobs}
+	if err := c.Run(ctx, replaced); err != nil {
+		t.Fatal(err)
+	}
+	builds, err := s.Recent(ctx, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(builds) != n {
+		t.Fatalf("%d builds stored after the replay, want %d", len(builds), n)
+	}
+	last := f.recs[n-1].Ref
+	for _, b := range builds {
+		want := f.name
+		if b.Build.Ref == last {
+			want = replaced.name
+		}
+		if b.Build.Daemon != want {
+			t.Errorf("%s stored under %s, want %s", b.Build.Ref, b.Build.Daemon, want)
+		}
+	}
+	// The old pod's builds are what they were before the replay.
+	after := dump(t, s)
+	for _, line := range strings.Split(strings.TrimSpace(before), "\n") {
+		if !strings.Contains(after, line+"\n") {
+			t.Errorf("after the replay the store no longer has\n  %s\nall:\n%s", line, after)
+			break
+		}
 	}
 }

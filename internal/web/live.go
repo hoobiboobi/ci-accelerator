@@ -40,8 +40,9 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	names := s.imageNames(ctx, sh.Project.ProjectKey, s.now().Add(-30*24*time.Hour))
 	for _, t := range targets {
-		items = append(items, indexItem{Kind: "Image", Label: orDefault(t), URL: "/images/" + url.PathEscape(imageKey(t)), Icon: "images"})
+		items = append(items, indexItem{Kind: "Image", Label: imageName(t, names[t]), URL: "/images/" + url.PathEscape(imageKey(t)), Icon: "images"})
 	}
 	rows, err := s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Limit: 500})
 	if err != nil {

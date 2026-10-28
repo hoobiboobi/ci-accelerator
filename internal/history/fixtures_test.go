@@ -49,7 +49,7 @@ func loadRecords(t *testing.T) []*Build {
 		if err != nil {
 			t.Fatalf("%s: %v", d, err)
 		}
-		b, err := NewBuild(rec, progress, readOpt(t, filepath.Join(d, "provenance.json")), readOpt(t, filepath.Join(d, "trace.json")), Config{Instances: testInstances, SecretKey: []byte("test")})
+		b, err := NewBuild(rec, progress, readOpt(t, filepath.Join(d, "provenance.json")), readOpt(t, filepath.Join(d, "trace.json")), readOpt(t, filepath.Join(d, "error.bin")), Config{Instances: testInstances, SecretKey: []byte("test")})
 		if err != nil {
 			t.Fatalf("%s: %v", d, err)
 		}

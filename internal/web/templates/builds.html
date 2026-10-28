@@ -9,7 +9,7 @@
   <form class="filters" method="get" action="/builds" data-autosubmit>
     <label><span>Branch</span><select name="branch" id="fBranch"><option value="">All branches</option>{{$b := .F.Branch}}{{range .Branches}}<option value="{{.}}" {{if eq . $b}}selected{{end}}>{{.}}</option>{{end}}</select></label>
     <label><span>Outcome</span><select name="outcome" id="fOutcome">{{range .Outcomes}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
-    <label><span>Image</span><select name="image" id="fImage"{{if .Anchor}} disabled title="set by the build picked first"{{end}}><option value="">All images</option>{{$i := .F.Image}}{{range .Targets}}<option value="{{.}}" {{if eq . $i}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+    <label><span>Image</span><select name="image" id="fImage"{{if .Anchor}} disabled title="set by the build picked first"{{end}}><option value="">All images</option>{{range .Targets}}<option value="{{.Value}}" {{if .On}}selected{{end}}{{with .Title}} title="{{.}}"{{end}}>{{.Label}}</option>{{end}}</select></label>
     {{if .Mine}}<label class="chk"><input type="checkbox" name="mine" value="1" id="fMine" {{if .F.Mine}}checked{{end}}><span>Mine</span></label>{{end}}
     <label class="chk"><input type="checkbox" name="group" value="pipeline" id="fGroup" {{if .F.Group}}checked{{end}}><span>Group by pipeline</span></label>
     {{if .F.Pick}}<input type="hidden" name="pick" value="1">{{with .F.A}}<input type="hidden" name="a" value="{{.}}">{{end}}{{end}}

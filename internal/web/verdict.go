@@ -65,6 +65,15 @@ func receivedLine(rec []Received) string {
 	return strings.Join(parts, " ")
 }
 
+// thisImage is how a verdict names the build's image: its target, when
+// it has one ("this target"), or the image a Dockerfile's last stage made.
+func thisImage(b *history.Build) string {
+	if b.Target != "" {
+		return "this target"
+	}
+	return "this image"
+}
+
 // verdictFor explains a build. by is the job that settled a reason
 // ("" when none); built counts the steps it executed other than resolving
 // images.
@@ -97,7 +106,7 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 		if built > 0 {
 			// Its project is not known yet, or nothing to compare with.
 			return Verdict{Tone: "first", Kicker: "Not compared", Title: template.HTML(fmt.Sprintf("%d steps were built.", built)),
-				Detail: template.HTML(strings.TrimSpace("No earlier build of this target is on record to compare with. " + recLine))}
+				Detail: template.HTML(strings.TrimSpace("No earlier build of " + thisImage(b) + " is on record to compare with. " + recLine))}
 		}
 		cached, received := 0, 0
 		for _, s := range b.Steps {
@@ -131,7 +140,7 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 			d = "Its steps are in this node's cache now: a build with the same inputs on this node can take them from there, while the cache keeps them."
 		}
 		return Verdict{Tone: "first", Kicker: "First build on record",
-			Title:  template.HTML(fmt.Sprintf("First build of target <code>%s</code> on record — nothing to compare with yet.", e(b.Target))),
+			Title:  template.HTML(fmt.Sprintf("First build of %s<code>%s</code> on record — nothing to compare with yet.", map[bool]string{true: "target ", false: ""}[b.Target != ""], e(buildName(b.Target, b.Images)))),
 			Detail: template.HTML(d)}
 	case history.StepChanged, history.NewStep:
 		what := "this step changed"
@@ -187,21 +196,21 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 		if by == "" {
 			return Verdict{Tone: "node", Kicker: "Not your change",
 				Title: "Rebuilt because this job ran on another build node.",
-				Detail: template.HTML(fmt.Sprintf("%s%s reads no files and did not change: its cache is on node <b>%s</b>, where this target was built last time, and this job ran on <b>%s</b>.",
-					code(r.Step.Name), at, e(shortDaemon(r.Old)), e(shortDaemon(r.New)))),
+				Detail: template.HTML(fmt.Sprintf("%s%s reads no files and did not change: its cache is on node <b>%s</b>, where %s was built last time, and this job ran on <b>%s</b>.",
+					code(r.Step.Name), at, e(shortDaemon(r.Old)), thisImage(b), e(shortDaemon(r.New)))),
 				Hint: nodeHint(nil)}
 		}
 		return Verdict{Tone: "node", Kicker: "Not your change",
 			Title: "Rebuilt because this job ran on another build node.",
-			Detail: template.HTML(fmt.Sprintf("%s%s was cached on node <b>%s</b>, where this target was built last time; this job ran on <b>%s</b>. <b>%s</b> in this pipeline got the same step from cache on its node, so the files did not change.",
-				code(r.Step.Name), at, e(shortDaemon(r.Old)), e(shortDaemon(r.New)), e(by))),
+			Detail: template.HTML(fmt.Sprintf("%s%s was cached on node <b>%s</b>, where %s was built last time; this job ran on <b>%s</b>. <b>%s</b> in this pipeline got the same step from cache on its node, so the files did not change.",
+				code(r.Step.Name), at, e(shortDaemon(r.Old)), thisImage(b), e(shortDaemon(r.New)), e(by))),
 			Hint: nodeHint(nil)}
 	case history.CacheElsewhere:
 		detail := fmt.Sprintf("Either %s changed, or this node's cache no longer had the step. No other job in this pipeline settles which.",
 			orContext(r.Paths))
 		if r.Old != "" {
-			detail = fmt.Sprintf("Either %s changed, or the cache is on node <b>%s</b>, where this target was built last time (this job ran on <b>%s</b>). No other job in this pipeline settles which.",
-				orContext(r.Paths), e(shortDaemon(r.Old)), e(shortDaemon(r.New)))
+			detail = fmt.Sprintf("Either %s changed, or the cache is on node <b>%s</b>, where %s was built last time (this job ran on <b>%s</b>). No other job in this pipeline settles which.",
+				orContext(r.Paths), e(shortDaemon(r.Old)), thisImage(b), e(shortDaemon(r.New)))
 		}
 		return Verdict{Tone: "unknown", Kicker: "Files or node",
 			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s.", code(r.Step.Name), at)),

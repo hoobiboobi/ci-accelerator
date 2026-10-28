@@ -36,8 +36,9 @@ const buildColumns = `b.id, b.generation, d.name, b.ref, b.attribution, b.instan
 	b.reason_kind, b.reason_step, b.reason_old, b.reason_new, b.reason_arg, b.reason_paths,
 	(SELECT ref FROM builds x WHERE x.id = b.reason_by), b.saved_ms, b.reason_via, b.warnings`
 
-// Previous returns the latest build of the same project and target that
-// started before b, restored for FirstRebuild; nil when there is none.
+// Previous returns the latest build of the same project and image (target,
+// or pushed repository without one: imageKey) that started before b,
+// restored for FirstRebuild; nil when there is none.
 // Builds of b's own pipeline do not count: they build the same commit at
 // the same time (parallel jobs, retries), and comparing with one makes the
 // commit's own work look like "nothing changed". known is false while b's
@@ -59,16 +60,54 @@ func (s *Store) Previous(ctx context.Context, b *history.Build) (prev *Stored, k
 	rows, err := s.db.QueryContext(ctx, `SELECT `+buildColumns+` FROM builds b JOIN daemons d ON d.id = b.daemon_id
 		WHERE b.instance = ? AND b.project_id = ? AND b.target = ? AND b.started_at < ? AND b.ref <> ?
 			AND b.pipeline_id IS NOT ?
-		ORDER BY b.started_at DESC LIMIT 1`, instance, project, b.Target, b.Started.UnixMilli(), b.Ref,
-		nullUint(b.Attribution.Pipeline))
+		ORDER BY b.started_at DESC LIMIT ?`, instance, project, b.Target, b.Started.UnixMilli(), b.Ref,
+		nullUint(b.Attribution.Pipeline), candidates(b))
 	if err != nil {
 		return nil, true, err
 	}
 	found, err := s.scanBuilds(ctx, rows)
-	if err != nil || len(found) == 0 {
+	if err != nil {
 		return nil, true, err
 	}
-	return found[0], true, s.restore(ctx, found[0])
+	if p := sameImage(b, found); p != nil {
+		return p, true, s.restore(ctx, p)
+	}
+	return nil, true, nil
+}
+
+// imageKey tells a project's images apart: the target, or for a build of a
+// Dockerfile's last stage (no target) the repository it pushed to first, so
+// that two Dockerfiles without targets (services/api, services/worker) are
+// not compared with each other; "" for a build that pushed nothing.
+func imageKey(b *history.Build) string {
+	if b.Target != "" {
+		return b.Target
+	}
+	if rs := history.Repositories(b.Images); len(rs) > 0 {
+		return rs[0]
+	}
+	return ""
+}
+
+// candidates is how many builds of the same target Previous and Next look
+// at: one for a target; for builds without one, enough to find the same
+// repository among the project's other images.
+func candidates(b *history.Build) int {
+	if b.Target != "" {
+		return 1
+	}
+	return 500
+}
+
+// sameImage is the first of found (in order) of b's image.
+func sameImage(b *history.Build, found []*Stored) *Stored {
+	key := imageKey(b)
+	for _, f := range found {
+		if imageKey(f.Build) == key {
+			return f
+		}
+	}
+	return nil
 }
 
 // Next returns the first build of the same project and target that
@@ -82,16 +121,19 @@ func (s *Store) Next(ctx context.Context, b *history.Build) (*Stored, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+buildColumns+` FROM builds b JOIN daemons d ON d.id = b.daemon_id
 		WHERE b.instance = ? AND b.project_id = (SELECT project_id FROM jobs WHERE instance = ? AND job_id = ?)
 			AND b.target = ? AND b.started_at > ? AND b.ref <> ? AND b.pipeline_id IS NOT ?
-		ORDER BY b.started_at LIMIT 1`, instance, instance, job, b.Target, b.Started.UnixMilli(), b.Ref,
-		nullUint(b.Attribution.Pipeline))
+		ORDER BY b.started_at LIMIT ?`, instance, instance, job, b.Target, b.Started.UnixMilli(), b.Ref,
+		nullUint(b.Attribution.Pipeline), candidates(b))
 	if err != nil {
 		return nil, err
 	}
 	found, err := s.scanBuilds(ctx, rows)
-	if err != nil || len(found) == 0 {
+	if err != nil {
 		return nil, err
 	}
-	return found[0], s.restore(ctx, found[0])
+	if n := sameImage(b, found); n != nil {
+		return n, s.restore(ctx, n)
+	}
+	return nil, nil
 }
 
 // JobBuilds returns the ids of a job's builds.

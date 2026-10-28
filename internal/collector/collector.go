@@ -119,7 +119,17 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 	if err != nil {
 		return err
 	}
+	// A record stored already belongs to the daemon pod that sent it
+	// first: a pod that replaced another on the same hostPath sends the old
+	// pod's records again, and reasons compare the daemons builds ran on.
+	under, err := c.store.StoredUnder(ctx, b.Ref)
+	if err != nil {
+		return err
+	}
 	b.Daemon = src.Name()
+	if under != "" {
+		b.Daemon = under
+	}
 
 	before := map[string]string{}
 	for ref, x := range w.builds {
@@ -161,10 +171,7 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 
 	// A record read again (the stream starts over after a restart) is
 	// logged quietly: only a build new to the store is news.
-	known, err := c.store.Stored(ctx, b.Daemon, b.Ref)
-	if err != nil {
-		return err
-	}
+	known := under != ""
 	// Save in start order, so that a build that executed a step is stored
 	// before the builds that received it.
 	type pipelineKey struct {
@@ -407,7 +414,13 @@ func (c *Collector) read(ctx context.Context, src Source, rec *controlapi.BuildH
 	if err != nil {
 		return nil, fmt.Errorf("trace: %w", err)
 	}
-	return history.NewBuild(rec, progress, prov, trace, c.cfg)
+	var errBlob []byte
+	if rec.Error != nil {
+		// What failed and where in the Dockerfile; a build is stored
+		// without it rather than not at all.
+		errBlob, _ = blob(rec.ExternalError)
+	}
+	return history.NewBuild(rec, progress, prov, trace, errBlob, c.cfg)
 }
 
 // provenance picks the record's SLSA provenance attestation. A build for

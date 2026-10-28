@@ -57,9 +57,25 @@ func TestUI(t *testing.T) {
 }
 
 // browse runs the browser checks against base while the pipeline key keeps
-// changing; extra are more arguments for ui.mjs.
+// changing; extra are more arguments for ui.mjs. Another pipeline runs
+// (seedRunning): ui.mjs stores its running job's build through a hook
+// when it checks that the job's page turns into the build's.
 func browse(t *testing.T, node string, st *store.Store, base, key string, extra ...string) {
 	t.Helper()
+	running := seedRunning(t, st)
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if err := running.Save(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprint(w, "saved")
+	}))
+	defer hook.Close()
+	extra = append(extra, "--running", running.Pipeline, "--running-job", running.Job, "--hook", hook.URL)
 	stop, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
@@ -174,6 +190,7 @@ func TestDevServer(t *testing.T) {
 	}, start)
 	f.Store = st
 	seedJob(t, st)
+	seedRunning(t, st)
 	t.Logf("the console with the fixtures: http://%s/ (pages read from internal/web; Ctrl-C stops)", addr)
 	select {}
 }

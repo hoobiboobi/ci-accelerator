@@ -26,6 +26,7 @@ type Backend interface {
 	Builds(ctx context.Context, q store.BuildQuery) ([]store.BuildRow, error)
 	Branches(ctx context.Context, p store.ProjectKey, since time.Time) ([]string, error)
 	Targets(ctx context.Context, p store.ProjectKey, since time.Time) ([]string, error)
+	TargetImages(ctx context.Context, p store.ProjectKey, since time.Time) (map[string][]string, error)
 	StepCounts(ctx context.Context, p store.ProjectKey, target string, since time.Time, limit int) ([]store.StepCount, error)
 	ImageDays(ctx context.Context, p store.ProjectKey, target string, since time.Time) ([]store.ImageDay, error)
 	PipelineList(ctx context.Context, q store.PipeQuery) ([]store.PipeRow, error)

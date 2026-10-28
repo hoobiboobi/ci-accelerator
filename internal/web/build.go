@@ -62,7 +62,7 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 		if info.JobName != "" {
 			return info.JobName
 		}
-		return "build of " + info.Target
+		return "build of " + buildName(info.Target, nil)
 	}
 	outputs := map[int]bool{}
 	if p.OutputKept {
@@ -168,6 +168,11 @@ type BuildView struct {
 	// ViaLog: the reader came from the link in the job's log.
 	ViaLog  bool
 	LogLine string
+	// Unparsed is the Dockerfile line BuildKit could not parse; 0 when
+	// the build did not stop on one.
+	Unparsed int
+	// NoDockerfile says why a failed build shows no Dockerfile.
+	NoDockerfile string
 }
 
 // Change is one difference from the previous build of the target.
@@ -254,7 +259,10 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	}
 	v := &BuildView{ID: id, Target: b.Target, Status: statusOf(p.Reason.Kind, b.Error, d.Built, running), Verdict: d.Verdict,
 		Ran: ran, Steps: len(b.Steps), Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b), DfName: p.DockerfileName, Warnings: b.Warnings,
-		StepViews: d.Views, Node: shortDaemon(b.Daemon), Failed: b.Error != ""}
+		StepViews: d.Views, Node: shortDaemon(b.Daemon), Failed: b.Error != "", Unparsed: history.ParseErrorLine(b.Error)}
+	if v.Failed && len(v.Lines) == 0 {
+		v.NoDockerfile = noDockerfile(b.Error)
+	}
 	if !running {
 		v.Dur = duration(b.Completed.Sub(b.Started))
 	}
@@ -268,7 +276,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		v.Name, v.GitLabURL = job.Name, webURL(job.URL)
 	}
 	if v.Name == "" {
-		v.Name = orDefault(b.Target)
+		v.Name = buildName(b.Target, b.Images)
 	}
 	sh.Title = v.Name
 	if pl := p.Pipeline; pl != nil {
@@ -295,7 +303,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		// says nothing: none below minForUsual.
 		if n >= minForUsual {
 			usual, _ = u.of(d.Built > 0)
-			v.UsualOf = fmt.Sprintf("The median of %d %s of %s in the last 7 days.", n, kind, orDefault(b.Target))
+			v.UsualOf = fmt.Sprintf("The median of %d %s of %s in the last 7 days.", n, kind, buildName(b.Target, b.Images))
 		}
 	}
 	if usual > 0 && !running && b.Error == "" {
@@ -393,8 +401,8 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		started.Text += " · " + started.UTC
 	}
 	v.Details = append(v.Details, KV{"Started", started.Text})
-	if len(b.Images) > 0 {
-		v.Details = append(v.Details, KV{"Pushed", strings.Join(b.Images, ", ")})
+	if names := history.ImageNames(b.Images); len(names) > 0 {
+		v.Details = append(v.Details, KV{"Pushed", strings.Join(names, ", ")})
 	}
 	if b.Error != "" {
 		v.Details = append(v.Details, KV{"Error", b.Error})
@@ -419,12 +427,22 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			ob := o.Page.Build
-			v.Others = append(v.Others, OtherBuild{URL: fmt.Sprintf("/builds/%d", oid), Target: orDefault(ob.Target),
+			v.Others = append(v.Others, OtherBuild{URL: fmt.Sprintf("/builds/%d", oid), Target: buildName(ob.Target, ob.Images),
 				Dur: duration(ob.Completed.Sub(ob.Started)), Status: statusOf(o.Page.Reason.Kind, ob.Error, o.Built, ob.Completed.IsZero())})
 		}
 	}
 	v.Shell = sh
 	s.render(w, "build", http.StatusOK, v)
+}
+
+// noDockerfile says why a build has no Dockerfile on record: BuildKit
+// keeps none for a canceled build (no provenance, and its error names no
+// source), and a failed build has one only when its error names it.
+func noDockerfile(buildErr string) string {
+	if canceled(buildErr) {
+		return "BuildKit records no Dockerfile for a canceled build."
+	}
+	return "BuildKit recorded no Dockerfile for this build."
 }
 
 // changes says what differs from the previous build of the target, as far
@@ -508,7 +526,7 @@ type StepData struct {
 	JobName  string
 	Hint     template.HTML
 	Err      string // what BuildKit said when the step failed
-	// HasDockerfile: the build page has a Dockerfile tab (a failed build
+	// HasDockerfile: the build page has a Dockerfile tab (a canceled build
 	// has none).
 	HasDockerfile bool
 	Output        string
@@ -694,10 +712,7 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 		sd.Hist = append(sd.Hist, col)
 	}
 	if len(runs) > 0 {
-		target := b.Target
-		if target == "" {
-			target = "this target"
-		}
+		target := buildName(b.Target, b.Images)
 		sd.HistTitle = fmt.Sprintf("History · %s · %d build%s", target, len(runs), plural(len(runs)))
 		sd.HistNote = fmt.Sprintf("Rebuilt in %d of %d builds that had this step", len(rebuilt), len(runs))
 		if len(rebuilt) > 0 {
@@ -733,13 +748,6 @@ func webURL(u string) string {
 		return u
 	}
 	return ""
-}
-
-func orDefault(target string) string {
-	if target == "" {
-		return "the default target"
-	}
-	return target
 }
 
 // ago is a past moment with its day, in the reader's zone.

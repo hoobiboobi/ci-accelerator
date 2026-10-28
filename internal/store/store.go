@@ -129,7 +129,15 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, repairs); err != nil {
+		return fmt.Errorf("store: repairs: %w", err)
+	}
+	return tx.Commit()
 }
 
 // secretKey returns the installation's key for hashing secret values,

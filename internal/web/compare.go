@@ -24,6 +24,7 @@ type CompareView struct {
 	Args         []CmpFact
 	Dockerfile   []DiffLine // the Dockerfiles' differing lines with context; nil when equal
 	DfKnown      bool       // both builds have a Dockerfile on record
+	DfMissing    []string   // otherwise, why each build without one has none
 	Steps        []CmpStep
 	GitLabDiff   string // GitLab's comparison of the two commits
 	Picks        []CmpPick
@@ -110,17 +111,24 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pinProject(&sh, sb.Attribution.Instance, project)
-	v := &CompareView{Name: orDefault(sb.Target), Target: sb.Target, Self: id,
-		PickURL: Filters{Image: sb.Target, Pick: true, A: id}.URL()}
+	v := &CompareView{Name: buildName(sb.Target, sb.Images), Target: sb.Target, Self: id,
+		PickURL: Filters{Image: imageKey(sb.Target), Pick: true, A: id}.URL()}
 	sh.Title = "Compare builds of " + v.Name
 	v.Shell = sh
 	loc := zone(r)
 
-	// The other builds of the image, newest first, to pick from.
+	// The other builds of the image, newest first, to pick from (30 of
+	// them; builds without a target are read further back, as they are
+	// of every Dockerfile without one).
+	const picks = 30
 	var rows []store.BuildRow
 	if project != 0 {
+		limit := picks
+		if sb.Target == "" {
+			limit = 10 * picks
+		}
 		rows, err = s.data.Builds(ctx, store.BuildQuery{Project: store.ProjectKey{Instance: sb.Attribution.Instance, ID: project},
-			Target: sb.Target, Limit: 30})
+			Target: sb.Target, NoTarget: sb.Target == "", Limit: limit})
 		if err != nil {
 			s.fail(w, err)
 			return
@@ -137,8 +145,11 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, b := range rows {
-		if b.ID == id {
+		if b.ID == id || !sameImage(b.Target, b.Images, sb.Target, sb.Images) {
 			continue
+		}
+		if len(v.Picks) == picks {
+			break
 		}
 		v.Picks = append(v.Picks, CmpPick{URL: fmt.Sprintf("/builds/%d/compare?with=%d", id, b.ID),
 			Label: pipeLabel(b.Pipeline) + clockStamp(b.Started, inZone(s.now(), loc)).Text, Status: rowStatus(b), Current: b.ID == with,
@@ -158,7 +169,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ob := other.Page.Build
-	if ob.Target != sb.Target || projectOf(other.Page) != project || ob.Attribution.Instance != sb.Attribution.Instance {
+	if !sameImage(ob.Target, ob.Images, sb.Target, sb.Images) || projectOf(other.Page) != project || ob.Attribution.Instance != sb.Attribution.Instance {
 		v.Message = "Build " + strconv.FormatInt(with, 10) + " is not a build of " + v.Name + " in this project: only two builds of one image are compared."
 		for i := range v.Picks {
 			v.Picks[i].Current = false
@@ -189,6 +200,14 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 	if a.Page.Dockerfile != "" && b.Page.Dockerfile != "" {
 		v.DfKnown = true
 		v.Dockerfile = lineDiff(a.Page.Dockerfile, b.Page.Dockerfile, 2)
+	}
+	for _, d := range []struct {
+		page *built
+		side CmpSide
+	}{{a, v.A}, {b, v.B}} {
+		if d.page.Page.Dockerfile == "" {
+			v.DfMissing = append(v.DfMissing, d.side.Label+": "+noDockerfile(d.page.Page.Build.Error))
+		}
 	}
 	v.Steps = compareSteps(a.Views, b.Views)
 	if pa, pb := a.Page.Pipeline, b.Page.Pipeline; pa != nil && pb != nil && pa.SHA != "" && pb.SHA != "" && pa.SHA != pb.SHA && b.Page.Job != nil {

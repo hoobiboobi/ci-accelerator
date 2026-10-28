@@ -23,7 +23,7 @@
 </section>
 
 <section class="box" aria-labelledby="cdT"><div class="boxh"><h2 class="h" id="cdT">Dockerfile</h2></div>
-  {{if not .DfKnown}}<p class="muted pad">One of the builds has no Dockerfile on record (a failed build records none).</p>
+  {{if not .DfKnown}}{{range .DfMissing}}<p class="muted pad">{{.}}</p>{{end}}
   {{else if .Dockerfile}}<div class="diff cmpdiff" role="group" aria-label="Dockerfile lines that differ">{{range .Dockerfile}}{{if .Gap}}<div class="gap">…</div>{{end}}<div class="{{if eq .Op "-"}}del{{else if eq .Op "+"}}add{{end}}">{{.Op}} {{.Text}}</div>{{end}}</div>
   {{else}}<p class="muted pad">The same Dockerfile.</p>{{end}}
 </section>

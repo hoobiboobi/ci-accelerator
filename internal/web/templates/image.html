@@ -2,9 +2,9 @@
 {{define "content"}}
 <div class="page">
   <header class="phead"><div class="crumbs"><a href="/images">Images</a></div>
-    <div class="titlerow"><h1 class="t" tabindex="-1">{{.Name}}</h1>
+    <div class="titlerow"><h1 class="t" tabindex="-1"{{with .Title}} title="{{.}}"{{end}}>{{.Name}}</h1>
       <nav class="seg" aria-label="Window"><a href="?window=24h" {{if eq .Window "24h"}}aria-current="true"{{end}}>24 hours</a><a href="?window=7d" {{if eq .Window "7d"}}aria-current="true"{{end}}>7 days</a><a href="?window=30d" {{if eq .Window "30d"}}aria-current="true"{{end}}>30 days</a><a href="?window=1y" {{if eq .Window "1y"}}aria-current="true"{{end}}>1 year</a></nav></div>
-    {{if gt (len .Others) 1}}<nav class="others" aria-label="Other images">{{range .Others}}{{if .On}}<b>{{.Label}}</b>{{else}}<a href="{{.Value}}">{{.Label}}</a>{{end}}{{end}}</nav>{{end}}</header>
+    {{if gt (len .Others) 1}}<nav class="others" aria-label="Other images">{{range .Others}}{{if .On}}<b{{with .Title}} title="{{.}}"{{end}}>{{.Label}}</b>{{else}}<a href="{{.Value}}"{{with .Title}} title="{{.}}"{{end}}>{{.Label}}</a>{{end}}{{end}}</nav>{{end}}</header>
   {{if not .Builds}}<div class="empty"><b>No build of {{.Name}} in {{.WindowLabel}}.</b><p>{{if .Year}}The year is summed up day by day (days in UTC), up to yesterday.{{else}}Try a longer window, or <a class="link" href="{{.ListURL}}">every build of {{.Name}}</a>.{{end}}</p></div>{{else if .Year}}{{with .Year}}
   <p class="lead"><b>{{.Cached}}%</b> of {{$.Builds}} build{{if ne $.Builds 1}}s{{end}} in the last year came fully from the cache.{{with .UsualRebuilt}} On a typical day the median rebuild took <b title="the median of the days' median rebuild times">{{.}}</b>.{{end}}</p>
   <section class="box" aria-labelledby="wkT"><div class="boxh"><h2 class="h" id="wkT">Builds per week</h2><span class="muted">height: builds · colour: outcome · days in UTC, up to yesterday</span></div>

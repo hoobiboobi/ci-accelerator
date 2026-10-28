@@ -59,7 +59,7 @@ func fixtures(t *testing.T, key []byte) []*history.Build {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := history.NewBuild(rec, progress, read(d, "provenance.json"), read(d, "trace.json"), cfg)
+		b, err := history.NewBuild(rec, progress, read(d, "provenance.json"), read(d, "trace.json"), read(d, "error.bin"), cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

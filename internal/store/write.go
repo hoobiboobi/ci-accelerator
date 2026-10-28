@@ -30,13 +30,18 @@ var states = map[history.StepState]int{history.Cached: 0, history.Built: 1, hist
 
 var attributions = map[history.AttributionState]int{history.Unattributed: 0, history.Attributed: 1, history.Ambiguous: 2}
 
-// Stored says whether a daemon's record is stored already: a stream read
-// again after a restart replays records the store has.
-func (s *Store) Stored(ctx context.Context, daemon, ref string) (bool, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM builds b JOIN daemons d ON d.id = b.daemon_id WHERE d.name = ? AND b.ref = ?`,
-		daemon, ref).Scan(&n)
-	return n > 0, err
+// StoredUnder returns the daemon a record is stored under, "" when it is
+// not stored. A record is stored once, under the daemon pod that sent it
+// first: a stream read again after a restart replays records the store
+// has, and a daemon pod that replaced another on the same hostPath sends
+// the old pod's records too (its history is on that disk).
+func (s *Store) StoredUnder(ctx context.Context, ref string) (string, error) {
+	var name string
+	err := s.db.QueryRowContext(ctx, `SELECT d.name FROM builds b JOIN daemons d ON d.id = b.daemon_id WHERE b.ref = ?`, ref).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return name, err
 }
 
 // SaveBuild stores a build, its steps, its reason and its graph, and then
@@ -160,7 +165,7 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			reason_kind, reason_step, reason_old, reason_new, reason_arg, reason_paths, reason_by, saved_ms, output_day, built, built_ms,
 			warnings)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (ref, daemon_id) DO UPDATE SET generation = excluded.generation,
+		ON CONFLICT (ref) DO UPDATE SET generation = excluded.generation,
 			attribution = excluded.attribution, instance = excluded.instance, pipeline_id = excluded.pipeline_id,
 			job_id = excluded.job_id, project_id = COALESCE(excluded.project_id, builds.project_id),
 			target = excluded.target, dockerfile_id = excluded.dockerfile_id, build_args = excluded.build_args,
@@ -180,7 +185,7 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A newer generation is stored already.
-		err = tx.QueryRowContext(ctx, "SELECT id FROM builds WHERE ref = ? AND daemon_id = ?", b.Ref, daemon).Scan(&id)
+		err = tx.QueryRowContext(ctx, "SELECT id FROM builds WHERE ref = ?", b.Ref).Scan(&id)
 		if err != nil {
 			return 0, err
 		}
@@ -207,7 +212,7 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		}
 		var from sql.NullInt64
 		if st.ReceivedFrom != "" {
-			err := tx.QueryRowContext(ctx, "SELECT id FROM builds WHERE ref = ? AND daemon_id = ?", st.ReceivedFrom, daemon).Scan(&from)
+			err := tx.QueryRowContext(ctx, "SELECT id FROM builds WHERE ref = ?", st.ReceivedFrom).Scan(&from)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return 0, err
 			}

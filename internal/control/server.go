@@ -105,7 +105,7 @@ func (s *Server) Stop() {
 // none of the store's writes but SettleElsewhere (a settled reason the
 // pages work out with GitLab).
 var (
-	backendMethods = []string{"Projects", "Builds", "Branches", "Targets", "StepCounts", "ImageDays", "PipelineList",
+	backendMethods = []string{"Projects", "Builds", "Branches", "Targets", "TargetImages", "StepCounts", "ImageDays", "PipelineList",
 		"JobsOf", "BuildsOf", "PipelineInfo", "PipelineProject", "PipelineJobs", "Job", "JobBuilds", "BuildPage", "Refs",
 		"Previous", "StepHistory", "Output", "DaemonCounts", "ProjectCache", "Elsewhere", "SettleElsewhere", "Compared", "SaveCompare",
 		"Recent", "Ping", "Daemons"}

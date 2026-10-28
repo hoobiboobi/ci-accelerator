@@ -41,17 +41,21 @@ type PipelinesView struct {
 
 // PipeCard is one pipeline of the list.
 type PipeCard struct {
-	URL, GitLabURL         string
-	Title, Ref, SHA, Who   string
-	When                   Stamp
-	State                  PipeState
-	Dur                    string
-	Jobs, NotRun           int
-	Waited, Longest, LongJ string // how long jobs waited for a runner: the median, the longest and its job
-	WaitedLong             int    // jobs that waited longer than longWait
-	Images                 string
-	Lanes                  []Lane
-	Ticks                  []Tick
+	URL, GitLabURL       string
+	Title, Ref, SHA, Who string
+	When                 Stamp
+	State                PipeState
+	Dur                  string
+	// While the pipeline is in progress (Running; Dur is so far), jobs
+	// that have not started wait (Waiting), or wait for a person
+	// (Manual): they are not jobs that did not run.
+	Jobs, NotRun, Waiting, Manual int
+	Running                       bool
+	Waited, Longest, LongJ        string // how long jobs waited for a runner: the median, the longest and its job
+	WaitedLong                    int    // jobs that waited longer than longWait
+	Images                        string
+	Lanes                         []Lane
+	Ticks                         []Tick
 }
 
 // PipeState is how a pipeline stands, in GitLab's words.
@@ -282,6 +286,14 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 	for _, b := range builds {
 		byJob[b.Job] = append(byJob[b.Job], b)
 	}
+	now := s.now()
+	built := map[uint64]bool{}
+	for id := range byJob {
+		built[id] = true
+	}
+	js := jobStates(p.Status, jobs, built, now)
+	c.Running = js.inProgress
+	unknownEnd := 0
 	// Images: how they came out.
 	n := map[string]int{}
 	for _, b := range builds {
@@ -320,17 +332,30 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 				}
 			}
 		}
+		if js.waiting[j.ID] {
+			c.Waiting++
+			continue
+		}
 		if j.Started.IsZero() {
-			c.NotRun++
+			if c.Running && j.Status == "manual" {
+				c.Manual++
+			} else {
+				c.NotRun++
+			}
 			continue
 		}
 		e := j.Finished
 		if e.IsZero() {
-			if store.Finished(j.Status) {
+			switch {
+			case store.Finished(j.Status):
 				c.NotRun++
 				continue
+			case !js.running[j.ID] && !runningBuild(byJob[j.ID]):
+				// It started; its end is not known (its pod went unseen).
+				unknownEnd++
+				continue
 			}
-			e = s.now()
+			e = now
 		}
 		q := j.Started
 		if j.Waited > 0 {
@@ -371,7 +396,11 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 		}
 		all = append(all, pl)
 	}
-	c.Jobs = len(all) + c.NotRun
+	c.Jobs = len(all) + c.NotRun + c.Waiting + c.Manual + unknownEnd
+	// While it runs the pipeline's time goes on, whether or not a job runs.
+	if c.Running && len(all) > 0 && now.After(end) {
+		end = now
+	}
 	if !p.Created.IsZero() && (origin.IsZero() || p.Created.Before(origin)) && origin.Sub(p.Created) < time.Hour {
 		origin = p.Created
 	}
@@ -457,4 +486,14 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 		c.Lanes = append(c.Lanes, lane)
 	}
 	return c
+}
+
+// runningBuild: one of a job's stored builds has not completed.
+func runningBuild(bs []store.BuildRow) bool {
+	for _, b := range bs {
+		if b.Completed.IsZero() {
+			return true
+		}
+	}
+	return false
 }

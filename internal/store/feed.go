@@ -40,6 +40,8 @@ type BuildRow struct {
 	// names (Old), and whether that one's cache persists; "" when not known.
 	Node, OldNode string
 	OldPersists   bool
+	// Images are the image names the build pushed or exported.
+	Images []string
 }
 
 // Duration is the build's time in BuildKit; 0 while it runs.
@@ -52,9 +54,11 @@ func (b BuildRow) Duration() time.Duration {
 
 // BuildQuery selects builds of a project; zero fields select everything.
 type BuildQuery struct {
-	Project  ProjectKey
-	Ref      string
-	Target   string
+	Project ProjectKey
+	Ref     string
+	Target  string
+	// NoTarget narrows to builds without a target (Target "").
+	NoTarget bool
 	Author   string
 	Pipeline uint64
 	// Outcome narrows to one status: cached, change, farm, unclear,
@@ -104,7 +108,8 @@ const feedCols = `b.id, b.instance, b.pipeline_id, b.job_id, b.target, d.name, b
 		LEFT JOIN step_defs sd ON sd.identity = s.identity WHERE s.build_id = b.id AND s.idx = b.reason_step), '') END,
 	b.reason_via, d.node,
 	CASE WHEN b.reason_old = '' THEN '' ELSE COALESCE((SELECT od.node FROM daemons od WHERE od.name = b.reason_old), '') END,
-	CASE WHEN b.reason_old = '' THEN 0 ELSE COALESCE((SELECT od.persists FROM daemons od WHERE od.name = b.reason_old), 0) END`
+	CASE WHEN b.reason_old = '' THEN 0 ELSE COALESCE((SELECT od.persists FROM daemons od WHERE od.name = b.reason_old), 0) END,
+	b.images`
 
 // Builds returns a project's builds, newest first.
 func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
@@ -113,7 +118,7 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 	if q.Ref != "" {
 		where, args = append(where, "p.ref = ?"), append(args, q.Ref)
 	}
-	if q.Target != "" {
+	if q.Target != "" || q.NoTarget {
 		where, args = append(where, "b.target = ?"), append(args, q.Target)
 	}
 	if q.Author != "" {
@@ -159,12 +164,12 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 			pipeline, job      sql.NullInt64
 			started            int64
 			completed, created sql.NullInt64
-			kind, paths        string
+			kind, paths, imgs  string
 			builtMs            int64
 		)
 		if err := rows.Scan(&r.ID, &instance, &pipeline, &job, &r.Target, &r.Daemon, &started, &completed, &r.Error,
 			&kind, &paths, &r.Old, &r.New, &r.Arg, &r.Built, &builtMs, &r.Ref, &r.SHA, &r.Title, &r.Author,
-			&r.JobName, &created, &r.ReasonStep, &r.Via, &r.Node, &r.OldNode, &r.OldPersists); err != nil {
+			&r.JobName, &created, &r.ReasonStep, &r.Via, &r.Node, &r.OldNode, &r.OldPersists, &imgs); err != nil {
 			return nil, err
 		}
 		if instance.Valid {
@@ -174,7 +179,37 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 		r.Started, r.Completed, r.PipelineCreatedAt = time.UnixMilli(started).UTC(), msTime(completed), msTime(created)
 		r.Reason, r.BuiltTime = history.ReasonKind(kind), time.Duration(builtMs)*time.Millisecond
 		_ = json.Unmarshal([]byte(paths), &r.Paths)
+		_ = json.Unmarshal([]byte(imgs), &r.Images)
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// TargetImages returns, per target a project built since t, the image
+// repositories its builds pushed, the most recent first.
+func (s *Store) TargetImages(ctx context.Context, p ProjectKey, since time.Time) (map[string][]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT target, images FROM builds
+		WHERE instance = ? AND project_id = ? AND started_at >= ? AND images <> '[]' ORDER BY started_at DESC`,
+		nullInstance(p.Instance), nullUint(p.ID), since.UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	seen := map[string]bool{}
+	for rows.Next() {
+		var t, imgs string
+		if err := rows.Scan(&t, &imgs); err != nil {
+			return nil, err
+		}
+		var names []string
+		_ = json.Unmarshal([]byte(imgs), &names)
+		for _, r := range history.Repositories(names) {
+			if !seen[t+"\x00"+r] {
+				seen[t+"\x00"+r] = true
+				out[t] = append(out[t], r)
+			}
+		}
 	}
 	return out, rows.Err()
 }

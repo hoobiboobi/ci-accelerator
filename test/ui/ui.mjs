@@ -2,6 +2,7 @@
 //
 //   node test/ui/ui.mjs --base http://localhost:8080 [--chrome PATH]
 //        [--live /pipelines/<instance>/<id>] [--cookie NAME=VALUE] [--job /jobs/<instance>/<id>]
+//        [--running /pipelines/<instance>/<id> --running-job /jobs/<instance>/<id> [--hook URL]]
 //
 // It starts a headless Chrome of its own and talks to it over the DevTools
 // protocol (Node >= 22: WebSocket is built in; no packages). It visits every
@@ -10,6 +11,11 @@
 // reports, failed requests, broken text and pages wider than the screen.
 // --live names a pipeline page whose pipeline changes while the checks run
 // (the Go test announces it): what the reader unfolded must survive it.
+// --running names a pipeline that runs (not the --live one, nothing
+// announces it): its page shows the running job and asks for itself again
+// by its own clock. --running-job is that job's page, the link a job's log
+// prints; a POST to --hook stores the job's build, and the open page must
+// then turn into the build's.
 // --cookie is a session cookie of a console with sign-in: the pages are
 // checked as that person, then the sign-in page, then signing out.
 // --shots DIR saves a full-page screenshot of the first two pages of each
@@ -304,9 +310,13 @@ async function buildPage(s, pages) {
   check(`${b} no errors`, s.take().length === 0);
 }
 
+// Pipelines that run refresh themselves now and then: the long checks of
+// one page use pipelines that do not.
+const settled = pages => pages.filter(x => /^\/pipelines\/[^/]+\/\d+$/.test(x) && x !== args.running);
+
 async function pipelinePage(s, pages) {
   let p = null;
-  for (const x of pages.filter(x => /^\/pipelines\/[^/]+\/\d+$/.test(x))) {
+  for (const x of settled(pages)) {
     await s.go(x);
     if (await s.eval(`!!document.querySelector("[data-wf] .row.k-job")`)) { p = x; if (await s.eval(`!!document.querySelector("#cachedFold")`)) break; }
   }
@@ -361,7 +371,7 @@ async function pipelinePage(s, pages) {
 // reaches the page once the box is at its end.
 async function timelineColumn(s, pages) {
   let p = null;
-  for (const x of pages.filter(x => /^\/pipelines\/[^/]+\/\d+$/.test(x))) {
+  for (const x of settled(pages)) {
     await s.go(x);
     if (await s.eval(`!!document.querySelector("[data-wf] .wgrip")`)) { p = x; break; }
   }
@@ -559,6 +569,20 @@ async function jobPage(s, pages) {
   }
   await s.click('[data-act="lognew"]', 600);
   check(`${p} reading new lines when there are none says so`, /No new lines/.test(await s.eval(`document.querySelector("[data-log-note]").textContent`)));
+  // A job page is live on its pipeline: an update keeps the log as read
+  // (the --live pipeline changes every second).
+  const on = await s.eval(`document.getElementById("main").dataset.live || ""`);
+  if (on && args.live && args.live.endsWith("/" + on)) {
+    const read = await s.eval(`document.querySelector("[data-log]").textContent.length`);
+    await s.eval(`document.getElementById("live").textContent = "waiting"`);
+    let status = "";
+    for (let i = 0; i < 80 && !/^Updated/.test(status); i++) {
+      await sleep(250);
+      status = await s.eval(`document.getElementById("live").textContent`);
+    }
+    const after = await s.eval(`({ len: document.querySelector("[data-log]").textContent.length, shown: !document.querySelector("[data-log]").hidden })`);
+    check(`${p} a live update keeps the log as read`, /^Updated/.test(status) && after.len === read && read > 0 && after.shown, `${status}: ${read} -> ${JSON.stringify(after)}`);
+  }
   check(`${p} no errors`, s.take().length === 0);
 }
 
@@ -630,6 +654,43 @@ async function notFound(s) {
   s.take();
 }
 
+// A running pipeline's page shows its running job and, with no event from
+// the server, asks for itself again (every 15 s); its running job's page
+// is live on the pipeline and becomes the build's page once the build is
+// stored.
+async function running(s) {
+  await s.size(1400, 900);
+  await s.go(args.running);
+  const first = await s.eval(`({ bar: document.querySelectorAll("[data-wf] .bar.c-job-running").length, every: (document.querySelector("[data-refresh-every]") || { dataset: {} }).dataset.refreshEvery,
+    live: document.getElementById("live").textContent, said: /1 job running, 1 waiting to start\./.test(document.querySelector("#main").innerText) })`);
+  check(`${args.running} a running job on the timeline, the page asks for itself every 15 s`, first.bar === 1 && first.every === "15" && first.said, JSON.stringify(first));
+  let status = "";
+  for (let i = 0; i < 100 && !/^Updated/.test(status); i++) {
+    await sleep(250);
+    status = await s.eval(`(document.getElementById("live") || {}).textContent || ""`);
+  }
+  check(`${args.running} updates itself while it runs`, /^Updated/.test(status), JSON.stringify(status));
+  check(`${args.running} still the running job after the update`, (await s.eval(`document.querySelectorAll("[data-wf] .bar.c-job-running").length`)) === 1);
+  if (!args["running-job"]) return;
+  await s.go(args["running-job"]);
+  const job = await s.eval(`({ path: location.pathname, live: document.getElementById("main").dataset.live || "", every: !!document.querySelector("[data-refresh-every]"),
+    text: document.getElementById("main").innerText })`);
+  check(`${args["running-job"]} a running job's page is live on its pipeline and asks for itself`,
+    job.path === args["running-job"] && args.running.endsWith("/" + job.live) && job.every && /This job is running/.test(job.text), JSON.stringify({ ...job, text: job.text.slice(0, 120) }));
+  if (args.hook) {
+    const res = await fetch(args.hook, { method: "POST" });
+    check("the running job's build is stored", res.ok, `${res.status} ${await res.text()}`);
+    let at = "";
+    for (let i = 0; i < 40 && !/^\/builds\/\d+$/.test(at); i++) {
+      await sleep(250);
+      at = await s.eval("location.pathname");
+    }
+    const via = await s.eval("location.search");
+    check(`${args["running-job"]} turns into the build's page once the build is stored`, /^\/builds\/\d+$/.test(at) && via === "?via=log", at + via);
+  }
+  check("running: no errors", s.take().length === 0);
+}
+
 // The page's pipeline changes while the reader has unfolded part of it:
 // the update keeps it unfolded.
 async function liveUpdate(s, p) {
@@ -693,6 +754,7 @@ try {
   await readersZone(s, pages);
   await keys(s, pages);
   await notFound(s);
+  if (args.running) await running(s);
   if (args.live) await liveUpdate(s, args.live);
   if (args.cookie) await signedIn(s);
   await s.close();
