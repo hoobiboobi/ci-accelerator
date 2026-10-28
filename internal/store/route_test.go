@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/route"
 )
 
@@ -177,5 +178,50 @@ func TestJobPodTimes(t *testing.T) {
 	got, err := s.Job(ctx, "abcdef", 5)
 	if err != nil || got == nil || !got.PodCreated.Equal(created) || !got.PodRunning.Equal(created.Add(13*time.Second)) {
 		t.Fatalf("pod times %+v, %v", got, err)
+	}
+}
+
+// A build read again after a restart asks the same open question; what
+// GitLab's comparison settled stays. A different question resets it.
+func TestResaveKeepsWhatGitLabSettled(t *testing.T) {
+	c := &clock{time.Now()}
+	s := open(t, t.TempDir(), c)
+	bs := fixtures(t, s.SecretKey())
+	saveJobs(t, s, bs)
+	b := bs[len(bs)-1]
+	var step history.Step
+	for _, st := range b.Steps {
+		if st.State == history.Built && st.StepID != "" {
+			step = st
+		}
+	}
+	open := history.Reason{Kind: history.CacheElsewhere, Step: step, Old: "daemon-x", New: b.Daemon, Paths: []string{"api"}}
+	id, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SettleElsewhere(ctx, []Settled{{ID: id, Kind: history.OtherNode, Via: "same commit abcdef12"}}); err != nil {
+		t.Fatal(err)
+	}
+	reason := func() (history.ReasonKind, string) {
+		p, err := s.BuildPage(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.Reason.Kind, p.Via
+	}
+	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: open}); err != nil {
+		t.Fatal(err)
+	}
+	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
+		t.Errorf("after reading it again: %s %q", k, via)
+	}
+	other := open
+	other.Old = "daemon-y"
+	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: other}); err != nil {
+		t.Fatal(err)
+	}
+	if k, via := reason(); k != history.CacheElsewhere || via != "" {
+		t.Errorf("another question kept the old answer: %s %q", k, via)
 	}
 }

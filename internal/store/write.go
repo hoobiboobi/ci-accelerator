@@ -157,9 +157,16 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			target = excluded.target, dockerfile_id = excluded.dockerfile_id, build_args = excluded.build_args,
 			started_at = excluded.started_at, completed_at = excluded.completed_at, error = excluded.error,
 			context_bytes = excluded.context_bytes, images = excluded.images,
-			reason_kind = excluded.reason_kind, reason_step = excluded.reason_step, reason_old = excluded.reason_old,
-			reason_new = excluded.reason_new, reason_arg = excluded.reason_arg, reason_paths = excluded.reason_paths,
-			reason_by = excluded.reason_by, reason_via = '', saved_ms = excluded.saved_ms,
+			-- A build read again (the controller restarted and replayed the
+			-- daemons' history) keeps what GitLab's comparison decided, when
+			-- it is the same open question again: the same step, the same
+			-- previous daemon.
+			reason_kind = CASE WHEN `+keepSettled+` THEN builds.reason_kind ELSE excluded.reason_kind END,
+			reason_step = excluded.reason_step, reason_old = excluded.reason_old,
+			reason_new = excluded.reason_new, reason_arg = excluded.reason_arg,
+			reason_paths = CASE WHEN `+keepSettled+` THEN builds.reason_paths ELSE excluded.reason_paths END,
+			reason_by = excluded.reason_by,
+			reason_via = CASE WHEN `+keepSettled+` THEN builds.reason_via ELSE '' END, saved_ms = excluded.saved_ms,
 			output_day = COALESCE(excluded.output_day, builds.output_day),
 			built = excluded.built, built_ms = excluded.built_ms, warnings = excluded.warnings
 		WHERE excluded.generation >= builds.generation
@@ -374,6 +381,11 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 	}
 	return nil
 }
+
+// keepSettled is the upsert's test that a stored reason GitLab settled is
+// the same question the new reason asks.
+const keepSettled = `(builds.reason_via != '' AND excluded.reason_kind = 'cache-elsewhere'
+	AND excluded.reason_step IS builds.reason_step AND excluded.reason_old = builds.reason_old)`
 
 // identity converts a step identity (16 hex characters) to its column value.
 func identity(h string) (int64, error) {
