@@ -276,9 +276,9 @@ func signalHint(err string) template.HTML {
 	}
 	switch m[1] {
 	case "137":
-		return "<b>Exit code 137:</b> the step's process was killed (SIGKILL). In a build that is usually the kernel's out-of-memory killer: the step needed more memory than the daemon's container may use (its memory limit, or the node's free memory)."
+		return "<b>Exit code 137</b> is what a process killed by SIGKILL returns (128 + 9); a script can also exit with it. In a build a SIGKILL usually comes from the kernel's out-of-memory killer: the step needed more memory than the daemon's container may use (its memory limit, or the node's free memory)."
 	case "143":
-		return "<b>Exit code 143:</b> the step's process was asked to stop (SIGTERM), usually because the build was stopped from outside: the job was canceled or timed out, or the daemon was shutting down."
+		return "<b>Exit code 143</b> is what a process stopped by SIGTERM returns (128 + 15); a script can also exit with it. Usually the build was stopped from outside: the job was canceled or timed out, or the daemon was shutting down."
 	}
 	return ""
 }
