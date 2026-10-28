@@ -96,8 +96,6 @@
       t.tabIndex = t.dataset.tab === name ? 0 : -1;
     });
     $$("[data-pane]", main).forEach(p => { p.hidden = p.dataset.pane !== name; });
-    const dg = $(".dgrid", main);
-    if (dg) dg.classList.toggle("wide", name !== "steps");
     refitWaterfalls();
   }
   function setupTabs() {
@@ -602,13 +600,13 @@
     const items = (index || []).concat(commands);
     results = [];
     items.forEach(it => {
-      if (!q) { if (it.kind !== "Job" || results.length < 10) results.push({ it, idx: [], score: 0 }); return; }
+      if (!q) { results.push({ it, idx: [], score: 0 }); return; }
       const m = fuzzy(q, it.label);
       if (m) { results.push({ it, idx: m.idx, score: m.score }); return; }
       if (it.sub && fuzzy(q, it.sub)) results.push({ it, idx: [], score: 100 });
     });
     if (q) results.sort((a, b) => b.score - a.score);
-    const order = ["Job", "Pipeline", "Node", "Page", "Command", "Search"];
+    const order = ["Image", "Pipeline", "Node", "Page", "Command", "Search"];
     results = results.slice(0, 40).sort((a, b) => order.indexOf(a.it.kind) - order.indexOf(b.it.kind));
     // The index holds recent pipelines only: the pipelines page searches
     // them all.
@@ -793,7 +791,7 @@
         const q = $("[data-wf-q]", main);
         if (q) { q.focus({ preventScroll: true }); q.setSelectionRange(typing[0], typing[1]); }
       }
-      // In UTC, like every time the console shows.
+      // The browser's own clock and zone: when this page last changed.
       if (status) status.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
     } finally {
       busy = false;

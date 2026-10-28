@@ -13,29 +13,19 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
-// Cat is what a job's build comes down to, as the list and the chips say
-// it: never by colour alone, always with an icon and words.
-type Cat struct {
-	Key   string // cached, first, step, files, node, unknown, failed, canceled, running
-	Label string
-	Short string
-	Tone  string // the verdict tone: cached, first, built, node, unknown, failed
-	Icon  string
-}
+// Cat is a build's verdict tone (cached, first, built, node, unknown,
+// failed) and its icon, by its reason, error and executed steps.
+type Cat struct{ Tone, Icon string }
 
 var cats = map[string]Cat{
-	"cached":   {"cached", "All from cache", "cached", "cached", "v_cached"},
-	"first":    {"first", "First build", "first", "first", "v_first"},
-	"compare":  {"first", "Not compared yet", "not compared", "first", "v_first"},
-	"step":     {"step", "Dockerfile changed", "dockerfile", "built", "v_step"},
-	"arg":      {"step", "Build argument changed", "build arg", "built", "v_step"},
-	"base":     {"step", "Base image changed", "base image", "built", "v_step"},
-	"files":    {"files", "Files changed", "files", "built", "v_files"},
-	"node":     {"node", "Other node — not your change", "other node", "node", "v_node"},
-	"unknown":  {"unknown", "Files or node — unclear", "unclear", "unknown", "v_unknown"},
-	"evicted":  {"node", "Not in the cache", "evicted", "node", "v_node"},
-	"failed":   {"failed", "Failed", "failed", "failed", "warn"},
-	"canceled": {"canceled", "Canceled", "canceled", "first", "x"},
+	"cached":   {"cached", "v_cached"},
+	"first":    {"first", "v_first"},
+	"step":     {"built", "v_step"},
+	"files":    {"built", "v_files"},
+	"node":     {"node", "v_node"},
+	"unknown":  {"unknown", "v_unknown"},
+	"failed":   {"failed", "warn"},
+	"canceled": {"first", "x"},
 }
 
 // canceled says whether a build or step error is a cancellation (the job
@@ -55,10 +45,8 @@ func catOf(kind history.ReasonKind, buildErr string, built int) Cat {
 		return cats["first"]
 	case history.StepChanged, history.NewStep:
 		return cats["step"]
-	case history.ArgChanged:
-		return cats["arg"]
-	case history.BaseImageChanged:
-		return cats["base"]
+	case history.ArgChanged, history.BaseImageChanged:
+		return cats["step"]
 	case history.FilesChanged:
 		return cats["files"]
 	case history.OtherNode:
@@ -66,10 +54,10 @@ func catOf(kind history.ReasonKind, buildErr string, built int) Cat {
 	case history.CacheElsewhere:
 		return cats["unknown"]
 	case history.NotInCache:
-		return cats["evicted"]
+		return cats["node"]
 	}
 	if built > 0 {
-		return cats["compare"]
+		return cats["first"]
 	}
 	return cats["cached"]
 }
