@@ -416,3 +416,18 @@ func TestFirstRebuildAfterATopCacheHit(t *testing.T) {
 	}
 	t.Logf("%d rebuilds compared", compared)
 }
+
+// Executed time counts parallel steps once and leaves base images out.
+func TestExecutedTime(t *testing.T) {
+	t0 := time.Date(2026, 10, 28, 2, 0, 0, 0, time.UTC)
+	st := func(name string, state StepState, from, to int) Step {
+		return Step{Name: name, State: state, Started: t0.Add(time.Duration(from) * time.Second), Completed: t0.Add(time.Duration(to) * time.Second)}
+	}
+	b := &Build{Steps: []Step{st("FROM x", Built, 0, 10), st("RUN a", Built, 1, 5), st("RUN b", Built, 2, 6), st("RUN c", Cached, 6, 9), st("RUN d", Built, 8, 9)}}
+	if got := b.ExecutedTime(); got != 6*time.Second {
+		t.Errorf("executed time %v, want 6s", got)
+	}
+	if got := (&Build{}).ExecutedTime(); got != 0 {
+		t.Errorf("no steps: %v", got)
+	}
+}

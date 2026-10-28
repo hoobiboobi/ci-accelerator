@@ -364,3 +364,36 @@ func lessStep(a, b Step) bool {
 func Canceled(err string) bool {
 	return strings.HasSuffix(err, "context canceled") || strings.Contains(err, "code = Canceled")
 }
+
+// ExecutedTime is the wall time during which the build executed steps
+// (resolving base images aside): the union of their intervals, so steps
+// of parallel stages count once.
+func (b *Build) ExecutedTime() time.Duration {
+	type span struct{ from, to time.Time }
+	var ss []span
+	for _, s := range b.Steps {
+		if s.State == Built && !strings.HasPrefix(s.Name, "FROM ") && !s.Started.IsZero() && s.Completed.After(s.Started) {
+			ss = append(ss, span{s.Started, s.Completed})
+		}
+	}
+	sort.Slice(ss, func(i, j int) bool { return ss[i].from.Before(ss[j].from) })
+	var total time.Duration
+	var cur span
+	for i, s := range ss {
+		switch {
+		case i == 0:
+			cur = s
+		case !s.from.After(cur.to):
+			if s.to.After(cur.to) {
+				cur.to = s.to
+			}
+		default:
+			total += cur.to.Sub(cur.from)
+			cur = s
+		}
+	}
+	if len(ss) > 0 {
+		total += cur.to.Sub(cur.from)
+	}
+	return total
+}
