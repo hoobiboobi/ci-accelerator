@@ -304,3 +304,40 @@ func TestRoutedText(t *testing.T) {
 		t.Errorf("no decisions: %d %q", n, text)
 	}
 }
+
+// A build's parts on the time axis are the time that passed, not the sum
+// of its steps: two steps running side by side for 4 s each took 5 s.
+func TestSegmentsAreWallTime(t *testing.T) {
+	t0 := time.Date(2026, 10, 28, 1, 0, 0, 0, time.UTC)
+	at := func(s float64) time.Time { return t0.Add(time.Duration(s * float64(time.Second))) }
+	step := func(name string, st history.StepState, from, to float64) history.Step {
+		return history.Step{Name: name, State: st, Started: at(from), Completed: at(to)}
+	}
+	b := &history.Build{Started: at(0), Completed: at(9), Steps: []history.Step{
+		step("FROM docker.io/library/busybox:1.37", history.Built, 0.5, 1),
+		step("RUN a", history.Built, 1, 5), step("RUN b", history.Built, 2, 6), // side by side
+		step("RUN c", history.Built, 7, 8), // after a gap
+		step("RUN d", history.Received, 1, 3),
+		step("RUN e", history.Cached, 3, 3)}}
+	got := map[string]Segment{}
+	for _, s := range segments(b) {
+		got[s.Class] = s
+	}
+	want := map[string]time.Duration{"xfer": 500 * time.Millisecond, "image": 500 * time.Millisecond, "received": 2 * time.Second,
+		"built": 6 * time.Second, "push": time.Second}
+	for class, d := range want {
+		if got[class].D != d {
+			t.Errorf("%s: %v, want %v", class, got[class].D, d)
+		}
+	}
+	if s := got["built"].Spans; len(s) != 2 || !s[0].From.Equal(at(1)) || !s[0].To.Equal(at(6)) || !s[1].From.Equal(at(7)) {
+		t.Errorf("built spans: %+v", s)
+	}
+	for _, s := range got {
+		for _, sp := range s.Spans {
+			if sp.From.Before(b.Started) || sp.To.After(b.Completed) {
+				t.Errorf("%s outside the build: %+v", s.Class, sp)
+			}
+		}
+	}
+}

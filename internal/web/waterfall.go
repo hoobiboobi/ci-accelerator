@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -201,7 +202,7 @@ func niceStep(span time.Duration) time.Duration {
 
 // waterfall lays jobs out: pipeline > job > segment / stage > step.
 // start is the axis origin.
-func waterfall(pipeName string, jobs []wfJob, start time.Time, onlyOne bool) *Waterfall {
+func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 	var end time.Time
 	for _, j := range jobs {
 		if j.Times.End.After(end) {
@@ -222,31 +223,20 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time, onlyOne bool) *Wa
 		return template.HTML(e(text)), strconv.FormatFloat(pctOf(t.Sub(start), span)+0.6, 'f', 2, 64)
 	}
 	w := &Waterfall{Ticks: ticksFor(span), Span: span, Jobs: len(jobs)}
-	if !onlyOne {
-		var pipeEnd time.Time
-		for _, j := range jobs {
-			if j.Times.End.After(pipeEnd) {
-				pipeEnd = j.Times.End
-			}
-		}
-		lab, ll := labelAfter(pipeEnd, fmt.Sprintf("%s · %d jobs", duration(pipeEnd.Sub(start)), len(jobs)))
-		w.Rows = append(w.Rows, WFRow{ID: "p", Kind: "pipe", Glyph: "pipes", Icon: "pipes", Name: pipeName, Open: true, Kids: len(jobs) > 0,
-			Bars: []WFBar{{Class: "pipe", L: "0", W: width(pipeEnd.Sub(start))}}, Label: lab, LabelL: ll, Text: strings.ToLower(pipeName)})
-	}
+	// The pipeline ends with its last job (end above).
+	lab, ll := labelAfter(end, fmt.Sprintf("%s · %d jobs", duration(end.Sub(start)), len(jobs)))
+	w.Rows = append(w.Rows, WFRow{ID: "p", Kind: "pipe", Glyph: "pipes", Icon: "pipes", Name: pipeName, Open: true, Kids: len(jobs) > 0,
+		Bars: []WFBar{{Class: "pipe", L: "0", W: width(end.Sub(start))}}, Label: lab, LabelL: ll, Text: strings.ToLower(pipeName)})
 	for ji, j := range jobs {
 		b := j.Build
 		jid := fmt.Sprintf("j%d", ji)
-		parent := "p"
-		depth := 1
-		if onlyOne {
-			parent, depth = "", 0
-		}
+		parent, depth := "p", 1
 		glyph, ic := "job", "job"
 		if j.Status != nil {
 			glyph, ic = j.Status.Key, j.Status.Icon
 		}
 		row := WFRow{ID: jid, Parent: parent, Depth: depth, Kind: "job", Glyph: glyph, Icon: ic, Name: j.Name, Chip: j.Status, Note: j.Note,
-			Crit: j.Crit, Open: onlyOne || len(jobs) == 1, Kids: b != nil, Link: j.Link, Text: strings.ToLower(j.Name)}
+			Crit: j.Crit, Open: len(jobs) == 1, Kids: b != nil, Link: j.Link, Text: strings.ToLower(j.Name)}
 		// Waiting for a runner, when GitLab said when it queued the job.
 		if q := j.Times.Queued; !q.IsZero() && !q.Before(start) && j.Times.Known && q.Before(j.Times.Start) {
 			row.Bars = append(row.Bars, WFBar{Class: "queue", L: at(q), W: width(j.Times.Start.Sub(q)), Title: "Waiting for a runner: " + duration(j.Times.Start.Sub(q))})
@@ -255,18 +245,9 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time, onlyOne bool) *Wa
 			if j.Times.Known && b.Started.After(j.Times.Start) {
 				row.Bars = append(row.Bars, WFBar{Class: "runner", L: at(j.Times.Start), W: width(b.Started.Sub(j.Times.Start)), Title: "Runner & checkout"})
 			}
-			segs, _ := segments(b)
-			x := b.Started
-			for _, s := range segs {
-				if s.Class == "other" {
-					continue
-				}
-				if s.Class == "push" {
-					x = b.Completed.Add(-s.D)
-				}
-				row.Bars = append(row.Bars, WFBar{Class: s.Class, L: at(x), W: width(s.D), Title: s.Label + ": " + duration(s.D)})
-				if s.Class == "xfer" {
-					x = x.Add(s.D)
+			for _, s := range segments(b) {
+				for _, sp := range s.Spans {
+					row.Bars = append(row.Bars, WFBar{Class: s.Class, L: at(sp.From), W: width(sp.To.Sub(sp.From)), Title: s.Label + ": " + duration(s.D)})
 				}
 			}
 			if j.Times.Known && j.Times.End.Sub(b.Completed) >= 50*time.Millisecond {
@@ -299,14 +280,13 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time, onlyOne bool) *Wa
 		if j.Times.Known && b.Started.After(j.Times.Start) {
 			seg(".r", "runner", "clock", "runner & checkout", j.Times.Start, b.Started, "runner", duration(b.Started.Sub(j.Times.Start)))
 		}
-		segs, _ := segments(b)
-		for _, s := range segs {
+		for _, s := range segments(b) {
 			if s.Class == "xfer" {
 				label := duration(s.D)
 				if b.ContextBytes > 0 {
 					label += " · " + bytesText(b.ContextBytes)
 				}
-				seg(".x", "xfer", "up", "send context", b.Started, b.Started.Add(s.D), "xfer", label)
+				seg(".x", "xfer", "up", "send context", s.Spans[0].From, s.Spans[0].To, "xfer", label)
 			}
 		}
 		for gi, g := range stagesOf(j.Views) {
@@ -365,9 +345,9 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time, onlyOne bool) *Wa
 				w.Rows = append(w.Rows, r)
 			}
 		}
-		for _, s := range segs {
+		for _, s := range segments(b) {
 			if s.Class == "push" {
-				seg(".e", "push", "up", "export & push", b.Completed.Add(-s.D), b.Completed, "push", duration(s.D))
+				seg(".e", "push", "up", "export & push", s.Spans[0].From, s.Spans[0].To, "push", duration(s.D))
 			}
 		}
 	}
@@ -429,59 +409,82 @@ func barSpan(r WFRow) (float64, float64) {
 	return lo, hi
 }
 
-// more than the build took; the bar is relative to the parts.
-func segments(b *history.Build) ([]Segment, time.Duration) {
+// segments is where a build's time went, on its own time axis: sending
+// the build context (from the build's start to its first step), base
+// images, steps another job was running, executed steps, and export and
+// push (from its last step to its end). Each is the union of its steps'
+// intervals: parallel steps overlap, and a sum of their durations would
+// claim more time than passed. Parts under 50 ms are left out.
+func segments(b *history.Build) []Segment {
 	if b.Started.IsZero() || b.Completed.IsZero() || len(b.Steps) == 0 {
-		return nil, 0
+		return nil
 	}
-	total := b.Completed.Sub(b.Started)
 	first, last := b.Completed, b.Started
-	var pull, recv, built time.Duration
+	var pull, recv, built []Span
 	for _, s := range b.Steps {
-		if !s.Started.IsZero() && s.Started.Before(first) {
+		if s.Started.IsZero() || s.Completed.Before(s.Started) {
+			continue
+		}
+		if s.Started.Before(first) {
 			first = s.Started
 		}
 		if s.Completed.After(last) {
 			last = s.Completed
 		}
+		sp := Span{s.Started, s.Completed}
 		switch {
 		case isFrom(s):
-			pull += s.Duration()
+			pull = append(pull, sp)
 		case s.State == history.Received:
-			recv += s.Duration()
+			recv = append(recv, sp)
 		case s.State == history.Built:
-			built += s.Duration()
+			built = append(built, sp)
 		}
 	}
-	segs := []Segment{
-		{Class: "xfer", Label: "Send context", D: clamp(first.Sub(b.Started))},
-		{Class: "image", Label: "Base image", D: pull},
-		{Class: "received", Label: "Waiting for another job", D: recv},
-		{Class: "built", Label: "Build steps", D: built},
-		{Class: "push", Label: "Export & push", D: clamp(b.Completed.Sub(last))},
-	}
-	var all time.Duration
-	for _, s := range segs {
-		all += s.D
-	}
-	if rest := total - all; rest > 0 {
-		segs = append(segs, Segment{Class: "other", Label: "Other (cache checks, scheduling)", D: rest})
-	}
-	var sum time.Duration
-	var kept []Segment
-	for _, s := range segs {
-		if s.D >= 50*time.Millisecond {
-			kept = append(kept, s)
-			sum += s.D
+	var out []Segment
+	for _, sg := range []struct {
+		class, label string
+		spans        []Span
+	}{
+		{"xfer", "Send context", []Span{{b.Started, first}}},
+		{"image", "Base image", pull},
+		{"received", "Waiting for another job", recv},
+		{"built", "Build steps", built},
+		{"push", "Export & push", []Span{{last, b.Completed}}},
+	} {
+		spans, d := union(sg.spans)
+		if d >= 50*time.Millisecond {
+			out = append(out, Segment{Class: sg.class, Label: sg.label, D: d, Spans: spans})
 		}
 	}
-	x := 0.0
-	for i := range kept {
-		kept[i].X = x
-		kept[i].W = 1000 * float64(kept[i].D) / float64(sum)
-		x += kept[i].W
+	return out
+}
+
+// union merges overlapping spans and returns them in order with the time
+// they cover.
+func union(in []Span) ([]Span, time.Duration) {
+	var ss []Span
+	for _, s := range in {
+		if s.To.After(s.From) {
+			ss = append(ss, s)
+		}
 	}
-	return kept, total
+	sort.Slice(ss, func(i, j int) bool { return ss[i].From.Before(ss[j].From) })
+	var out []Span
+	var d time.Duration
+	for _, s := range ss {
+		if n := len(out); n > 0 && !s.From.After(out[n-1].To) {
+			if s.To.After(out[n-1].To) {
+				out[n-1].To = s.To
+			}
+			continue
+		}
+		out = append(out, s)
+	}
+	for _, s := range out {
+		d += s.To.Sub(s.From)
+	}
+	return out, d
 }
 
 func clamp(d time.Duration) time.Duration {

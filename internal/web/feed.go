@@ -423,7 +423,7 @@ func reasonText(b store.BuildRow, st Status) string {
 }
 
 // reasons groups the rebuilt builds of bs, the most time first.
-func (s *Server) reasons(bs []store.BuildRow, window string, limit int, loc *time.Location) []Reason {
+func (s *Server) reasons(bs []store.BuildRow, limit int, loc *time.Location) []Reason {
 	at := map[string]int{}
 	var out []Reason
 	images := map[string]map[string]bool{}
@@ -613,7 +613,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	if lost > 0 {
 		v.NotCode = int(100 * notCode / lost)
 	}
-	all := s.reasons(in, v.Window, 0, zone(r))
+	all := s.reasons(in, 0, zone(r))
 	v.Reasons = all
 	if len(all) > 6 {
 		v.Reasons, v.MoreReasons = all[:6], fmt.Sprintf("%d more reasons", len(all)-6)
@@ -848,7 +848,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	for _, c := range counts {
 		v.Steps = append(v.Steps, StepRowView{Name: c.Name, Ran: c.Ran, Of: v.Builds, Time: duration(c.RanTime), W: c.Ran * 100 / most})
 	}
-	v.Reasons = s.reasons(bs, v.Window, 5, zone(r))
+	v.Reasons = s.reasons(bs, 5, zone(r))
 	latest, err := s.data.Builds(ctx, store.BuildQuery{Project: sh.Project.ProjectKey, Target: target, Limit: 10})
 	if err != nil {
 		s.fail(w, err)
