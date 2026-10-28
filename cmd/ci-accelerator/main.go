@@ -535,7 +535,7 @@ func settleRebuilds(ctx context.Context, st *store.Store, gl web.Changer, log *s
 		for _, p := range ps {
 			n, err := web.SettleProject(ctx, st, gl, p, time.Now(), 0, 25)
 			if n > 0 {
-				log.Info("settled rebuilds with GitLab", "project", p.String(), "builds", n)
+				log.Info("settled rebuilds with GitLab's comparisons", "project", p.String(), "builds", n)
 			}
 			var rl *gitlab.RateLimited
 			if errors.As(err, &rl) {
