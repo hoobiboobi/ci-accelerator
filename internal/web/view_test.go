@@ -448,3 +448,14 @@ func TestReadsAny(t *testing.T) {
 		t.Errorf("a reader after the step: %+v", r)
 	}
 }
+
+// A rebuild on the same node under a replaced daemon says so, not that
+// the job ran on another node.
+func TestReplacedDaemonVerdict(t *testing.T) {
+	r := history.Reason{Kind: history.OtherNode, Step: history.Step{Name: "COPY services/auth/ /src/auth/", Line: 20}, Old: "glab-buildkit-nqspg", New: "glab-buildkit-qbjt5"}
+	v := replacedDaemon(Verdict{Title: "Rebuilt because this job ran on another build node."}, r, "same commit 0f0da36d", func(s string) string { return s }, "buildkit-worker", "glab-buildkit-qbjt5")
+	if strings.Contains(string(v.Title), "another build node") || !strings.Contains(string(v.Title), "daemon on this node was replaced") ||
+		!strings.Contains(string(v.Detail), "same commit") || !strings.Contains(string(v.Detail), "<b>buildkit-worker</b>") || !strings.Contains(string(v.Hint), "hostPath") {
+		t.Errorf("%+v", v)
+	}
+}
