@@ -461,3 +461,18 @@ func TestArgInText(t *testing.T) {
 		t.Error("no argument changed")
 	}
 }
+
+// An argument's change is only that when the command line is the same: a
+// literal edit of the line that happens to match the values is a
+// Dockerfile change.
+func TestSameCommand(t *testing.T) {
+	op := func(args string) ProvStep {
+		return ProvStep{Op: []byte(`{"Op":{"exec":{"meta":{"args":` + args + `}}}}`)}
+	}
+	a := &Provenance{Steps: map[string]ProvStep{"s": op(`["/bin/sh","-c","echo \"$VERSION\""]`)}}
+	b := &Provenance{Steps: map[string]ProvStep{"s": op(`["/bin/sh","-c","echo \"$VERSION\""]`)}}
+	c := &Provenance{Steps: map[string]ProvStep{"s": op(`["/bin/sh","-c","nvm install 22"]`)}}
+	if !sameCommand(a, b, "s", "s") || sameCommand(a, c, "s", "s") || sameCommand(nil, b, "s", "s") {
+		t.Error("sameCommand")
+	}
+}

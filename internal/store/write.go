@@ -292,7 +292,7 @@ func (s *Store) SetReason(ctx context.Context, ref, daemon string, r history.Rea
 		WHERE ref = ? AND daemon_id = (SELECT id FROM daemons WHERE name = ?)
 			-- GitLab's comparison settled this question: keep its answer when
 			-- the new reason asks it again or comes to the same conclusion.
-			AND NOT (reason_via != '' AND (? = 'cache-elsewhere' OR ? = reason_kind) AND reason_old = ?
+			AND NOT (reason_via != '' AND reason_kind != 'cache-elsewhere' AND (? = 'cache-elsewhere' OR ? = reason_kind) AND reason_old = ?
 				AND reason_step IS (SELECT idx FROM steps WHERE build_id = builds.id AND key = ? ORDER BY idx LIMIT 1))
 		RETURNING instance, pipeline_id`,
 		string(r.Kind), r.Old, r.New, r.Arg, string(paths), r.Step.Key, nullString(r.By), ref, daemon,
@@ -387,9 +387,12 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 	return nil
 }
 
-// keepSettled is the upsert's test that a stored reason GitLab settled is
-// the same question the new reason asks.
-const keepSettled = `(builds.reason_via != '' AND excluded.reason_kind = 'cache-elsewhere'
+// keepSettled is the upsert's test that a stored answer of GitLab's
+// comparison (not an "unresolved" non-answer, which a later read may
+// settle) is still the answer: the new reason asks the same question
+// again or reaches the same conclusion.
+const keepSettled = `(builds.reason_via != '' AND builds.reason_kind != 'cache-elsewhere'
+	AND (excluded.reason_kind = 'cache-elsewhere' OR excluded.reason_kind = builds.reason_kind)
 	AND excluded.reason_step IS builds.reason_step AND excluded.reason_old = builds.reason_old)`
 
 // identity converts a step identity (16 hex characters) to its column value.

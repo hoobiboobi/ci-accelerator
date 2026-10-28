@@ -225,6 +225,15 @@ func TestResaveKeepsWhatGitLabSettled(t *testing.T) {
 	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
 		t.Errorf("after reading it again: %s %q", k, via)
 	}
+	// Read again with a witness's conclusion: the proof stays too.
+	same := open
+	same.Kind = history.OtherNode
+	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: same}); err != nil {
+		t.Fatal(err)
+	}
+	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
+		t.Errorf("after reading it again with a witness: %s %q", k, via)
+	}
 	// The collector's pipeline pass comes to the same conclusion from a
 	// witness, then asks it again: GitLab's answer stays.
 	witness := open
@@ -245,5 +254,35 @@ func TestResaveKeepsWhatGitLabSettled(t *testing.T) {
 	}
 	if k, via := reason(); k != history.CacheElsewhere || via != "" {
 		t.Errorf("another question kept the old answer: %s %q", k, via)
+	}
+}
+
+// An "unresolved" non-answer is not kept: reading the build again opens
+// the question, to be asked again.
+func TestResaveReopensUnresolved(t *testing.T) {
+	c := &clock{time.Now()}
+	s := open(t, t.TempDir(), c)
+	bs := fixtures(t, s.SecretKey())
+	saveJobs(t, s, bs)
+	b := bs[len(bs)-1]
+	var step history.Step
+	for _, st := range b.Steps {
+		if st.State == history.Built && st.StepID != "" {
+			step = st
+		}
+	}
+	open := history.Reason{Kind: history.CacheElsewhere, Step: step, Old: "daemon-x", New: b.Daemon}
+	id, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: open})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SettleElsewhere(ctx, []Settled{{ID: id, Kind: history.CacheElsewhere, Via: "unresolved: 403 Forbidden"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: open}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.BuildPage(ctx, id); p.Via != "" {
+		t.Errorf("unresolved kept: %q", p.Via)
 	}
 }
