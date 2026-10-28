@@ -225,6 +225,17 @@ func TestResaveKeepsWhatGitLabSettled(t *testing.T) {
 	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
 		t.Errorf("after reading it again: %s %q", k, via)
 	}
+	// Read again before its previous build is known (no reason yet): the
+	// answer and its step stay.
+	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
+		t.Errorf("after reading it again without a reason: %s %q", k, via)
+	}
+	if p, _ := s.BuildPage(ctx, id); p.Reason.Step.Key != step.Key || p.Reason.Old != "daemon-x" {
+		t.Errorf("the answer lost its step or daemon: %+v", p.Reason)
+	}
 	// Read again with a witness's conclusion: the proof stays too.
 	same := open
 	same.Kind = history.OtherNode
