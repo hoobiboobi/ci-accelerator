@@ -393,3 +393,28 @@ func TestP95FromTwentyRebuilds(t *testing.T) {
 		t.Errorf("20 rebuilds: %+v", u)
 	}
 }
+
+// The time before a job's build, split by its pod's times, adds up to it
+// and stays inside it although Kubernetes counts whole seconds.
+func TestStartParts(t *testing.T) {
+	start := time.Date(2026, 10, 28, 1, 3, 35, 400_000_000, time.UTC)
+	build := start.Add(20 * time.Second)
+	jt := jobTimes{Start: start, PodCreated: start.Truncate(time.Second), PodRunning: start.Truncate(time.Second).Add(14 * time.Second)}
+	ps := startParts(jt, build)
+	if len(ps) != 2 || ps[0].Class != "podwait" || !ps[0].From.Equal(start) || ps[len(ps)-1].To != build {
+		t.Fatalf("parts %+v", ps)
+	}
+	var sum time.Duration
+	for _, p := range ps {
+		sum += p.To.Sub(p.From)
+	}
+	if sum != 20*time.Second {
+		t.Errorf("parts add up to %v", sum)
+	}
+	if ps := startParts(jobTimes{Start: start}, build); len(ps) != 1 || ps[0].Label != "Runner & checkout" {
+		t.Errorf("without pod times: %+v", ps)
+	}
+	if ps := startParts(jobTimes{Start: start}, start); ps != nil {
+		t.Errorf("no time before the build: %+v", ps)
+	}
+}

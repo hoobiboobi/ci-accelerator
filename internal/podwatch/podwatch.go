@@ -60,11 +60,31 @@ func Job(pod *corev1.Pod, gitlabURLs []string) (store.Job, bool) {
 		CommitTitle:       a["ci-accelerator.io/commit-title"],
 		CommitAuthor:      a["ci-accelerator.io/commit-author"],
 		MergeRequestIID:   number(a["ci-accelerator.io/merge-request-iid"]),
+		PodCreated:        pod.CreationTimestamp.Time,
+		PodRunning:        buildStarted(pod),
 	}, true
 }
 
-// Handlers are called for job pods: Job when a pod is first seen and again
-// when it is scheduled (its node becomes known); Gone when the runner
+// buildStarted is when the pod's build container started (the
+// Kubernetes executor names it "build"); zero until it has.
+func buildStarted(pod *corev1.Pod) time.Time {
+	for _, c := range pod.Status.ContainerStatuses {
+		if c.Name != "build" {
+			continue
+		}
+		switch {
+		case c.State.Running != nil:
+			return c.State.Running.StartedAt.Time
+		case c.State.Terminated != nil:
+			return c.State.Terminated.StartedAt.Time
+		}
+	}
+	return time.Time{}
+}
+
+// Handlers are called for job pods: Job when a pod is first seen, again
+// when it is scheduled (its node becomes known) and when its build
+// container starts; Gone when the runner
 // starts deleting it, which is about when its job ended (at), and again
 // when it is gone. A pod never says how its job ended: GitLab does.
 type Handlers struct {
@@ -136,7 +156,7 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 			switch {
 			case c.DeletionTimestamp != nil && o.DeletionTimestamp == nil:
 				gone(c)
-			case o.Spec.NodeName != c.Spec.NodeName:
+			case o.Spec.NodeName != c.Spec.NodeName, buildStarted(o).IsZero() && !buildStarted(c).IsZero():
 				call(h.Job, c)
 			}
 		},

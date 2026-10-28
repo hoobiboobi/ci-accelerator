@@ -156,3 +156,26 @@ func TestPercentileIsANearestRank(t *testing.T) {
 		t.Error("the caller's slice was sorted")
 	}
 }
+
+// A job's pod times arrive in two updates (created, then running) and
+// neither erases the other.
+func TestJobPodTimes(t *testing.T) {
+	s := open(t, t.TempDir(), &clock{time.Now()})
+	created := time.Date(2026, 10, 28, 1, 3, 36, 0, time.UTC)
+	j := Job{Instance: "abcdef", JobID: 5, PipelineID: 7, ProjectID: 42, Name: "build", PodCreated: created}
+	if err := s.SaveJob(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	j.PodRunning = created.Add(13 * time.Second)
+	if err := s.SaveJob(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	j.PodCreated, j.PodRunning = time.Time{}, time.Time{}
+	if err := s.SaveJob(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Job(ctx, "abcdef", 5)
+	if err != nil || got == nil || !got.PodCreated.Equal(created) || !got.PodRunning.Equal(created.Add(13*time.Second)) {
+		t.Fatalf("pod times %+v, %v", got, err)
+	}
+}

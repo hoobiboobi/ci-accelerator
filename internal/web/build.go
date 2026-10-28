@@ -328,6 +328,13 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if job.ID != 0 {
 		jt := timesOf(job, b.Started, b.Completed)
 		v.Details = append(v.Details, KV{"GitLab job", fmt.Sprintf("%s · %d · %s in all, %s of it building", job.Name, job.ID, duration(jt.Total), v.Dur)})
+		if parts := startParts(jt, b.Started); len(parts) > 1 {
+			var ps []string
+			for _, p := range parts {
+				ps = append(ps, strings.ToLower(p.Label[:1])+p.Label[1:]+" "+duration(p.To.Sub(p.From)))
+			}
+			v.Details = append(v.Details, KV{"Before the build", strings.Join(ps, " · ") + " (the pod's times are whole seconds, as Kubernetes records them)"})
+		}
 		if job.Waited > 0 {
 			v.Details = append(v.Details, KV{"Waited for a runner", duration(job.Waited)})
 		}

@@ -305,6 +305,9 @@ type Job struct {
 	PipelineCreatedAt             time.Time
 	CommitTitle, CommitAuthor     string
 	MergeRequestIID               uint64
+	// From the pod: when Kubernetes created it and when its build
+	// container started (zero until it has).
+	PodCreated, PodRunning time.Time
 }
 
 // SaveJob stores a job, its pipeline and project, and attaches the project
@@ -339,12 +342,16 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs (instance, job_id, pipeline_id, project_id, name, stage, url, started_at, node, seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs (instance, job_id, pipeline_id, project_id, name, stage, url, started_at, node, seen_at,
+			pod_created_at, pod_running_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (instance, job_id) DO UPDATE SET pipeline_id = COALESCE(excluded.pipeline_id, jobs.pipeline_id),
 			project_id = COALESCE(excluded.project_id, jobs.project_id), name = excluded.name, stage = excluded.stage,
-			url = excluded.url, started_at = COALESCE(excluded.started_at, jobs.started_at), node = excluded.node`,
-		instance, j.JobID, pipeline, project, j.Name, j.Stage, j.URL, nullTime(j.StartedAt), j.Node, s.opts.Now().UnixMilli()); err != nil {
+			url = excluded.url, started_at = COALESCE(excluded.started_at, jobs.started_at), node = excluded.node,
+			pod_created_at = COALESCE(excluded.pod_created_at, jobs.pod_created_at),
+			pod_running_at = COALESCE(excluded.pod_running_at, jobs.pod_running_at)`,
+		instance, j.JobID, pipeline, project, j.Name, j.Stage, j.URL, nullTime(j.StartedAt), j.Node, s.opts.Now().UnixMilli(),
+		nullTime(j.PodCreated), nullTime(j.PodRunning)); err != nil {
 		return err
 	}
 	if project.Valid {

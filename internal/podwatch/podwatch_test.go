@@ -118,6 +118,20 @@ func TestWatchSeesJobPods(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait(2)
+	// Its build container starts: the job is read again with the time.
+	started := time.Date(2026, 10, 28, 1, 3, 37, 0, time.UTC)
+	p.Status.ContainerStatuses = []corev1.ContainerStatus{
+		{Name: "helper", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.Time{Time: started.Add(time.Second)}}}},
+		{Name: "build", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.Time{Time: started}}}}}
+	if _, err := client.CoreV1().Pods("jobs").UpdateStatus(ctx, p, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	wait(3)
+	mu.Lock()
+	if !seen[2].PodRunning.Equal(started) || !seen[0].PodRunning.IsZero() {
+		t.Errorf("build container start: %v, before it: %v", seen[2].PodRunning, seen[0].PodRunning)
+	}
+	mu.Unlock()
 	p.Status.Phase = corev1.PodSucceeded
 	if _, err := client.CoreV1().Pods("jobs").UpdateStatus(ctx, p, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
@@ -161,7 +175,7 @@ func TestWatchSeesJobPods(t *testing.T) {
 	<-done
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 3 || seen[0].Node != "" || seen[1].Node != "node-2" || seen[1].JobID != 17298723831 {
+	if len(seen) != 4 || seen[0].Node != "" || seen[1].Node != "node-2" || seen[1].JobID != 17298723831 {
 		t.Errorf("jobs seen: %+v", seen)
 	}
 	if len(gone) != 3 || gone[0].JobID != 17298723831 || !goneAt[0].Equal(asked) || !goneAt[2].Equal(asked) {
