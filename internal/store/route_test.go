@@ -236,6 +236,15 @@ func TestResaveKeepsWhatGitLabSettled(t *testing.T) {
 	if p, _ := s.BuildPage(ctx, id); p.Reason.Step.Key != step.Key || p.Reason.Old != "daemon-x" {
 		t.Errorf("the answer lost its step or daemon: %+v", p.Reason)
 	}
+	// Read again before its received steps are linked: another first
+	// rebuilt step for a moment, the answer stays.
+	early := same0(open)
+	if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1, Reason: early}); err != nil {
+		t.Fatal(err)
+	}
+	if k, via := reason(); k != history.OtherNode || via != "same commit abcdef12" {
+		t.Errorf("after an early read at another step: %s %q", k, via)
+	}
 	// Read again with a witness's conclusion: the proof stays too.
 	same := open
 	same.Kind = history.OtherNode
@@ -296,4 +305,11 @@ func TestResaveReopensUnresolved(t *testing.T) {
 	if p, _ := s.BuildPage(ctx, id); p.Via != "" {
 		t.Errorf("unresolved kept: %q", p.Via)
 	}
+}
+
+// same0 is r as a record read before its received steps are linked gives
+// it: the same conclusion at an earlier step.
+func same0(r history.Reason) history.Reason {
+	r.Kind, r.Step = history.OtherNode, history.Step{Key: "[base 2/2]", Name: "RUN mkdir -p /app"}
+	return r
 }
