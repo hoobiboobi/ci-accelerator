@@ -11,6 +11,12 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Fixed
+
+- A pipeline that built one image said "All 1 image were rebuilt"; it says
+  "The image was rebuilt because of the change" (or came from the cache,
+  or failed).
+
 ## 0.3.2 - 2026-10-29
 
 ### Upgrade notes

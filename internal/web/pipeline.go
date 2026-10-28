@@ -413,11 +413,33 @@ func jobsWithBuilds(rows []store.BuildRow) map[uint64]bool {
 	return out
 }
 
+// oneImageSentence is pipelineSentence for a pipeline that built one image
+// ("All 1 image were rebuilt" said 0.3.1).
+func oneImageSentence(v *PipelineView) string {
+	if len(v.Rebuilt) == 0 {
+		return fmt.Sprintf("The image came from the cache. It was ready %s after its build started.", v.Ready)
+	}
+	switch v.Rebuilt[0].Status.Key {
+	case "change":
+		return fmt.Sprintf("The image was rebuilt because of the change. It was ready %s after its build started.", v.Ready)
+	case "farm":
+		return fmt.Sprintf("The image was rebuilt because of the build farm. It was ready %s after its build started.", v.Ready)
+	case "unclear":
+		return fmt.Sprintf("The image was rebuilt; files or cache, unclear. It was ready %s after its build started.", v.Ready)
+	case "failed":
+		return "The image's build failed."
+	}
+	return fmt.Sprintf("The image was rebuilt. It was ready %s after its build started.", v.Ready)
+}
+
 // pipelineSentence says what a pipeline's builds came down to.
 func pipelineSentence(v *PipelineView) string {
 	n := len(v.Rebuilt) + len(v.Cached)
 	if len(v.Rebuilt) == 0 && v.InProgress {
 		return fmt.Sprintf("%d image%s so far, all from the cache. The pipeline is still running; builds show up here as BuildKit completes them.", n, plural(n))
+	}
+	if n == 1 && !v.InProgress {
+		return oneImageSentence(v)
 	}
 	if len(v.Rebuilt) == 0 {
 		return fmt.Sprintf("All %d image%s came from the cache. They were ready %s after the first build started.", n, plural(n), v.Ready)
