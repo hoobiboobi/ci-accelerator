@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hoobiboobi/ci-accelerator/internal/history"
 )
 
 // APIJob is a job as GitLab's API describes it.
@@ -166,33 +165,6 @@ func (s *Store) PipelineJobs(ctx context.Context, instance string, pipeline uint
 	// never started (skipped, canceled while waiting, manual) come last.
 	return s.jobs(ctx, "WHERE instance = ? AND pipeline_id = ? ORDER BY started_at IS NULL, started_at, queued_at, job_id",
 		nullInstance(instance), nullUint(pipeline))
-}
-
-// Usual is the median time BuildKit took for the last builds of the same
-// project and target before b (successful ones); 0 without any.
-func (s *Store) Usual(ctx context.Context, b *history.Build, project uint64) (time.Duration, error) {
-	if project == 0 || b.Target == "" {
-		return 0, nil
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT completed_at - started_at FROM builds
-		WHERE instance = ? AND project_id = ? AND target = ? AND started_at < ? AND completed_at IS NOT NULL AND error = ''
-		ORDER BY started_at DESC LIMIT 10`, nullInstance(b.Attribution.Instance), project, b.Target, b.Started.UnixMilli())
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	var ds []time.Duration
-	for rows.Next() {
-		var d int64
-		if err := rows.Scan(&d); err != nil {
-			return 0, err
-		}
-		ds = append(ds, time.Duration(d)*time.Millisecond)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	return Percentile(ds, 50), nil
 }
 
 // DaemonCount is what the store knows about one daemon's builds.

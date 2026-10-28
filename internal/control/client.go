@@ -410,11 +410,6 @@ func (c *Client) Previous(ctx context.Context, b *history.Build) (prev *store.St
 	return
 }
 
-func (c *Client) Usual(ctx context.Context, b *history.Build, project uint64) (out time.Duration, err error) {
-	err = c.call(ctx, "Usual", []any{b, project}, &out)
-	return
-}
-
 func (c *Client) StepHistory(ctx context.Context, buildID int64, step int, limit int) (out []store.StepRun, err error) {
 	err = c.call(ctx, "StepHistory", []any{buildID, step, limit}, &out)
 	return

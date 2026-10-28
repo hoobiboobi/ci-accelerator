@@ -1737,3 +1737,25 @@ func TestPipelineDurationIsOneNumber(t *testing.T) {
 		t.Fatal("no pipeline with a card and a timeline")
 	}
 }
+
+// A build page compares a build with its image's usual time only when
+// that is the median of at least five builds of its kind.
+func TestNoUsualFromAFewBuilds(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	n := map[string]int{}
+	for _, k := range keys {
+		for _, b := range byPipe[k] {
+			n[b.Target]++
+		}
+	}
+	for _, k := range keys {
+		for _, b := range byPipe[k] {
+			if n[b.Target] < minForUsual {
+				if p := get(t, ts, fmt.Sprintf("/builds/%d", b.ID)); strings.Contains(p.body, "vs usual") || strings.Contains(p.body, ">usual ") {
+					t.Errorf("build %d of %s (%d builds): a usual time", b.ID, b.Target, n[b.Target])
+				}
+			}
+		}
+	}
+}

@@ -265,19 +265,16 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u := st.usual[b.Target]
-		usual, _ = u.of(d.Built > 0)
 		kind, n := "builds from the cache", u.CachedN
 		if d.Built > 0 {
 			kind, n = "builds that ran steps", u.RebuiltN
 		}
-		v.UsualOf = fmt.Sprintf("The median of %d %s of %s in the last 7 days.", n, kind, orDefault(b.Target))
-	}
-	if usual == 0 {
-		if usual, err = s.data.Usual(ctx, b, project); err != nil {
-			s.fail(w, err)
-			return
+		// A usual time from a handful of builds (this one among them)
+		// says nothing: none below minForUsual.
+		if n >= minForUsual {
+			usual, _ = u.of(d.Built > 0)
+			v.UsualOf = fmt.Sprintf("The median of %d %s of %s in the last 7 days.", n, kind, orDefault(b.Target))
 		}
-		v.UsualOf = fmt.Sprintf("The median of up to 10 earlier builds of %s.", orDefault(b.Target))
 	}
 	if usual > 0 && !running && b.Error == "" {
 		v.Usual = duration(usual)
