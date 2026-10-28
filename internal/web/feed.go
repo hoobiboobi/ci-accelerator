@@ -72,6 +72,9 @@ func (s *Server) recent(ctx context.Context, p store.ProjectKey) (*cachedStats, 
 	return c, nil
 }
 
+// minForUsual is how many builds of a kind a "usual" time needs.
+const minForUsual = 5
+
 // minForP95 is how many rebuilds a p95 needs: with fewer, the slowest 5%
 // is less than one build and the nearest-rank p95 is just the slowest.
 const minForP95 = 20

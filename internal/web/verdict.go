@@ -128,7 +128,7 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 	case history.FirstBuild:
 		d := recLine
 		if d == "" {
-			d = "The next build with the same inputs will come from cache on this node."
+			d = "Its steps are in this node's cache now: a build with the same inputs on this node can take them from there, while the cache keeps them."
 		}
 		return Verdict{Tone: "first", Kicker: "First build on record",
 			Title:  template.HTML(fmt.Sprintf("First build of target <code>%s</code> on record — nothing to compare with yet.", e(b.Target))),

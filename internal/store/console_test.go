@@ -1,7 +1,6 @@
 package store
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -199,19 +198,6 @@ func TestConsoleQueries(t *testing.T) {
 		t.Errorf("pipeline %+v %v", pl, err)
 	}
 
-	// The usual time is the median of earlier successful builds.
-	last := bs[len(bs)-1]
-	usual, err := s.Usual(ctx, last, 42)
-	if err != nil || usual <= 0 {
-		t.Errorf("usual %v %v", usual, err)
-	}
-	if u, _ := s.Usual(ctx, bs[0], 42); u != 0 {
-		t.Errorf("first build has a usual time: %v", u)
-	}
-	if u, _ := s.Usual(ctx, last, 0); u != 0 {
-		t.Errorf("unknown project has a usual time: %v", u)
-	}
-
 	counts, err := s.DaemonCounts(ctx, time.Time{})
 	if err != nil || counts["daemon-a"].Builds != len(bs) || counts["daemon-a"].Last.IsZero() {
 		t.Errorf("daemon counts %+v %v", counts, err)
@@ -233,36 +219,6 @@ func TestFinished(t *testing.T) {
 		if Finished(st) != want {
 			t.Errorf("%q: %v", st, !want)
 		}
-	}
-}
-
-// The usual time is the median of the last ten earlier builds of the
-// target, not of the first ten.
-func TestUsualIsRecent(t *testing.T) {
-	c := &clock{time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
-	s := open(t, t.TempDir(), c)
-	bs := savedFixtures(t, s)
-	var base *history.Build
-	for _, b := range bs {
-		if b.Attribution.State == history.Attributed && b.Error == "" {
-			base = b
-		}
-	}
-	start := base.Started.Add(24 * time.Hour)
-	var last *history.Build
-	for i := 0; i <= 12; i++ {
-		x := *base
-		x.Ref = fmt.Sprintf("usual-%d", i)
-		x.Started = start.Add(time.Duration(i) * time.Hour)
-		x.Completed = x.Started.Add(time.Duration(i+1) * time.Second)
-		if _, err := s.SaveBuild(ctx, Build{Build: &x, Generation: 1}); err != nil {
-			t.Fatal(err)
-		}
-		last = &x
-	}
-	// Builds 2..11 before the last: 3..12 s, median (nearest rank) 7 s.
-	if u, err := s.Usual(ctx, last, 42); err != nil || u != 7*time.Second {
-		t.Errorf("usual %v %v, want 7s", u, err)
 	}
 }
 

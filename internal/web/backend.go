@@ -39,7 +39,6 @@ type Backend interface {
 	BuildPage(ctx context.Context, id int64) (*store.BuildPage, error)
 	Refs(ctx context.Context, refs []string) (map[string]store.RefInfo, error)
 	Previous(ctx context.Context, b *history.Build) (*store.Stored, bool, error)
-	Usual(ctx context.Context, b *history.Build, project uint64) (time.Duration, error)
 	StepHistory(ctx context.Context, buildID int64, step int, limit int) ([]store.StepRun, error)
 	Output(ctx context.Context, buildID int64, step int) (string, error)
 	DaemonCounts(ctx context.Context, since time.Time) (map[string]store.DaemonCount, error)
