@@ -36,6 +36,10 @@ type BuildRow struct {
 	Title, Author     string
 	JobName           string
 	PipelineCreatedAt time.Time
+	// The build nodes of the build's daemon and of the daemon its reason
+	// names (Old), and whether that one's cache persists; "" when not known.
+	Node, OldNode string
+	OldPersists   bool
 }
 
 // Duration is the build's time in BuildKit; 0 while it runs.
@@ -98,7 +102,9 @@ const feedCols = `b.id, b.instance, b.pipeline_id, b.job_id, b.target, d.name, b
 	COALESCE(j.name, ''), p.created_at,
 	CASE WHEN b.reason_step IS NULL THEN '' ELSE COALESCE((SELECT COALESCE(s.name, sd.name, '') FROM steps s
 		LEFT JOIN step_defs sd ON sd.identity = s.identity WHERE s.build_id = b.id AND s.idx = b.reason_step), '') END,
-	b.reason_via`
+	b.reason_via, d.node,
+	CASE WHEN b.reason_old = '' THEN '' ELSE COALESCE((SELECT od.node FROM daemons od WHERE od.name = b.reason_old), '') END,
+	CASE WHEN b.reason_old = '' THEN 0 ELSE COALESCE((SELECT od.persists FROM daemons od WHERE od.name = b.reason_old), 0) END`
 
 // Builds returns a project's builds, newest first.
 func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
@@ -158,7 +164,7 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 		)
 		if err := rows.Scan(&r.ID, &instance, &pipeline, &job, &r.Target, &r.Daemon, &started, &completed, &r.Error,
 			&kind, &paths, &r.Old, &r.New, &r.Arg, &r.Built, &builtMs, &r.Ref, &r.SHA, &r.Title, &r.Author,
-			&r.JobName, &created, &r.ReasonStep, &r.Via); err != nil {
+			&r.JobName, &created, &r.ReasonStep, &r.Via, &r.Node, &r.OldNode, &r.OldPersists); err != nil {
 			return nil, err
 		}
 		if instance.Valid {

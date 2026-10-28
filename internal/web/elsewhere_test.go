@@ -180,3 +180,27 @@ func TestSettleKeepsOpenOnATransientError(t *testing.T) {
 		t.Errorf("a 404 did not settle them as unresolved: %+v", f.settled)
 	}
 }
+
+// A farm rebuild under a replaced daemon on the same node is said as
+// such in lists and groups, never "another node".
+func TestReplacedDaemonTexts(t *testing.T) {
+	b := store.BuildRow{Reason: history.OtherNode, Built: 3, Completed: time.Now(), Daemon: "bk-new", Old: "bk-old", Node: "n1", OldNode: "n1"}
+	st := rowStatus(b)
+	for name, text := range map[string]string{"whyShort": whyShort(b), "reasonText": reasonText(b, st)} {
+		if strings.Contains(text, "another node") || !strings.Contains(text, "replaced") {
+			t.Errorf("%s: %q", name, text)
+		}
+	}
+	if fingerprint(b, st) == fingerprint(store.BuildRow{Reason: history.OtherNode, Built: 3, Completed: time.Now(), Daemon: "bk-a", Old: "bk-b", Node: "n1", OldNode: "n2"}, st) {
+		t.Error("a replaced daemon grouped with another node")
+	}
+	b.OldPersists = true
+	if text := whyShort(b); text != "no longer in this node's cache" {
+		t.Errorf("persistent cache: %q", text)
+	}
+	moved := b
+	moved.OldNode = "n2"
+	if text := whyShort(moved); !strings.Contains(text, "another node") {
+		t.Errorf("another node: %q", text)
+	}
+}
