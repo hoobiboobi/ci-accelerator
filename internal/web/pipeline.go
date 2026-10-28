@@ -142,7 +142,11 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 		v.Sentence = pipelineSentence(v)
 	}
 	var cp CritPath
-	if v.WF, v.SetBy, cp, v.OtherDrawn, err = s.pipelineWaterfall(ctx, v.Title, rows, jobs); err != nil {
+	var created time.Time
+	if info != nil {
+		created = info.Created
+	}
+	if v.WF, v.SetBy, cp, v.OtherDrawn, err = s.pipelineWaterfall(ctx, v.Title, created, rows, jobs); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -158,7 +162,7 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 // pipelineWaterfall lays every job of a pipeline out on one time axis,
 // in the order they started: a job with an image build opens into its
 // stages and steps; any other job is one bar, as GitLab (or its pod) says.
-func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []store.BuildRow, jobs []store.JobInfo) (*Waterfall, string, CritPath, int, error) {
+func (s *Server) pipelineWaterfall(ctx context.Context, title string, created time.Time, rows []store.BuildRow, jobs []store.JobInfo) (*Waterfall, string, CritPath, int, error) {
 	byID := map[uint64]store.JobInfo{}
 	perJob := map[uint64]int{}
 	for _, j := range jobs {
@@ -234,6 +238,10 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, rows []sto
 		if q := j.Times.Queued; !q.IsZero() && q.Before(start) {
 			start = q
 		}
+	}
+	// From when GitLab created the pipeline, as its card counts.
+	if !created.IsZero() && created.Before(start) && start.Sub(created) < time.Hour {
+		start = created
 	}
 	for i, j := range wjobs {
 		if j.Times.End.After(wjobs[crit].Times.End) {
