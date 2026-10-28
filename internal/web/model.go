@@ -379,11 +379,19 @@ func bytesText(n int64) string {
 	case n >= 1<<30:
 		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
 	case n >= 1<<20:
-		return fmt.Sprintf("%.0f MiB", float64(n)/(1<<20))
+		return unitText(float64(n)/(1<<20), "MiB")
 	case n >= 1<<10:
-		return fmt.Sprintf("%.0f KiB", float64(n)/(1<<10))
+		return unitText(float64(n)/(1<<10), "KiB")
 	}
 	return fmt.Sprintf("%d B", n)
+}
+
+// unitText keeps two significant digits below 10 (1.5 MiB, not 2 MiB).
+func unitText(v float64, unit string) string {
+	if v < 9.95 {
+		return fmt.Sprintf("%.1f %s", v, unit)
+	}
+	return fmt.Sprintf("%.0f %s", v, unit)
 }
 
 // median of a list of durations (nearest rank, as everywhere); 0 for none.

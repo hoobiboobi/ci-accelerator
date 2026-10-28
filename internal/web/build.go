@@ -744,8 +744,14 @@ func usageFacts(u history.Usage, d time.Duration) []KV {
 	if u.Throttled > 0 {
 		out = append(out, KV{"Held back by a CPU limit", duration(u.Throttled)})
 	}
-	if u.ReadBytes > 0 || u.WriteBytes > 0 {
-		out = append(out, KV{"Disk", "read " + bytesText(u.ReadBytes) + ", wrote " + bytesText(u.WriteBytes)})
+	// The cgroup counts block I/O: reads served from the page cache and
+	// writes still waiting to be flushed when the step ended are not in it,
+	// so a zero says nothing and is left out.
+	if u.ReadBytes > 0 {
+		out = append(out, KV{"Read from disk while it ran", bytesText(u.ReadBytes)})
+	}
+	if u.WriteBytes > 0 {
+		out = append(out, KV{"Written to disk while it ran", bytesText(u.WriteBytes)})
 	}
 	return out
 }
