@@ -483,3 +483,13 @@ func TestReplacedDaemonWithAPersistentCache(t *testing.T) {
 		t.Errorf("%+v", v)
 	}
 }
+
+func TestFailureText(t *testing.T) {
+	got := failureText(`process "/bin/sh -c sleep 4 && cat /src/web/* > /app/web.bin && exit 137" did not complete successfully: exit code: 137`)
+	if got != "RUN sleep 4 && cat /src/web/* > /app/web.bin && exit 137: exit code 137" {
+		t.Errorf("%q", got)
+	}
+	if got := failureText("failed to solve: base image not found\nmore"); got != "failed to solve: base image not found" {
+		t.Errorf("%q", got)
+	}
+}
