@@ -72,6 +72,10 @@ func (s *Server) recent(ctx context.Context, p store.ProjectKey) (*cachedStats, 
 	return c, nil
 }
 
+// minForP95 is how many rebuilds a p95 needs: with fewer, the slowest 5%
+// is less than one build and the nearest-rank p95 is just the slowest.
+const minForP95 = 20
+
 // usualTimes is each target's median times over builds that finished,
 // apart for builds from the cache and builds that rebuilt steps.
 func usualTimes(bs []store.BuildRow) map[string]usualTime {
@@ -95,7 +99,7 @@ func usualTimes(bs []store.BuildRow) map[string]usualTime {
 	for t, ds := range rebuilt {
 		u := out[t]
 		u.Rebuilt, u.RebuiltN = median(ds), len(ds)
-		if len(ds) >= 10 {
+		if len(ds) >= minForP95 {
 			u.RebuiltP95 = percentile(ds, 95)
 		}
 		out[t] = u
@@ -478,7 +482,8 @@ func (s *Server) reasons(bs []store.BuildRow, limit int, loc *time.Location) []R
 type ImageRow struct {
 	Name, URL  string
 	Strip      []StripCell
-	Usual, P95 string
+	Usual, P95 string // of the rebuilds; P95 only from minForP95 of them
+	Rebuilds   int
 	Builds     int
 	Cached     int // percent fully from the cache
 	Lost       string
@@ -514,13 +519,17 @@ func (s *Server) imageRows(bs []store.BuildRow, since time.Time, loc *time.Locat
 				cached++
 			}
 			lost += b.BuiltTime
-			if !b.Completed.IsZero() && b.Error == "" {
+			if !b.Completed.IsZero() && b.Error == "" && b.Built > 0 {
 				ds = append(ds, b.Duration())
 			}
 		}
 		row.Cached = cached * 100 / max(1, len(list))
+		row.Rebuilds = len(ds)
 		if len(ds) > 0 {
-			row.Usual, row.P95 = duration(median(ds)), duration(percentile(ds, 95))
+			row.Usual = duration(median(ds))
+		}
+		if len(ds) >= minForP95 {
+			row.P95 = duration(percentile(ds, 95))
 		}
 		row.Lost = duration(lost)
 		n := min(30, len(list))
@@ -829,7 +838,10 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		v.UsualCached = duration(ut.Cached)
 	}
 	if ut.Rebuilt > 0 {
-		v.UsualRebuilt, v.P95 = duration(ut.Rebuilt), duration(percentile(rebuilt, 95))
+		v.UsualRebuilt = duration(ut.Rebuilt)
+	}
+	if len(rebuilt) >= minForP95 {
+		v.P95 = duration(percentile(rebuilt, 95))
 	}
 	first := bs[len(bs)-1].Started
 	if first.After(since) {

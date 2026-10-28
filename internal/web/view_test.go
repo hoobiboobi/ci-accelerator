@@ -379,3 +379,17 @@ func TestBytesText(t *testing.T) {
 		}
 	}
 }
+
+func TestP95FromTwentyRebuilds(t *testing.T) {
+	at := time.Date(2026, 10, 28, 3, 0, 0, 0, time.UTC)
+	var bs []store.BuildRow
+	for i := 1; i <= 20; i++ {
+		bs = append(bs, store.BuildRow{Target: "api", Built: 1, Started: at, Completed: at.Add(time.Duration(i) * time.Second)})
+	}
+	if u := usualTimes(bs[:19])["api"]; u.RebuiltP95 != 0 {
+		t.Errorf("p95 from 19 rebuilds: %v", u.RebuiltP95)
+	}
+	if u := usualTimes(bs)["api"]; u.RebuiltP95 != 19*time.Second || u.Rebuilt != 10*time.Second {
+		t.Errorf("20 rebuilds: %+v", u)
+	}
+}
