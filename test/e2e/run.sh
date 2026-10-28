@@ -59,6 +59,13 @@ OTEL_REL=$REL-otel
 # Not "box": a manual install of that name may share the cluster, and
 # cleanup deletes CA Secrets by release label.
 BOX_REL=e2e-box
+# The component scenario: a real GitLab (a container on kind's Docker
+# network, reached by name from the pods) and a box whose runner it feeds.
+COMP_NS=$NS-component
+COMP_JOBS_NS=$NS-component-jobs
+COMP_REL=e2e-comp
+COMP_GL=e2e-gitlab
+COMP_GL_DIR=""
 SVC_HOST=$REL-buildkit.$NS.svc
 ADDR=tcp://$SVC_HOST:1234
 CLIENT_SECRET=$REL-buildkit-client
@@ -107,7 +114,7 @@ E2E_LABEL=ci-accelerator.io/e2e
 KEEP=${KEEP:-0}
 SCENARIOS=${SCENARIOS:-all}
 MODE=${1:-run}
-ALL_SCENARIOS="preflight tls certmanager existing netpol otel runner box upgrade cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
+ALL_SCENARIOS="preflight tls certmanager existing netpol otel runner box component upgrade cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"
 
 refuse() { echo "refusing to run e2e: $*" >&2; exit 2; }
 
@@ -303,6 +310,9 @@ remove_release() {
   if hc status "$BOX_REL" -n "$BOX_NS" >/dev/null 2>&1; then
     hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || true
   fi
+  if hc status "$COMP_REL" -n "$COMP_NS" >/dev/null 2>&1; then
+    hc uninstall "$COMP_REL" -n "$COMP_NS" --wait --timeout 5m >/dev/null 2>&1 || true
+  fi
   for r in "$UPG_REL" "$UPG_BK_REL"; do
     if hc status "$r" -n "$UPG_NS" >/dev/null 2>&1; then
       hc uninstall "$r" -n "$UPG_NS" --wait --timeout 5m >/dev/null 2>&1 || true
@@ -315,12 +325,17 @@ remove_release() {
   if [ "$(kc get namespace "$UPG_JOBS_NS" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/instance}' 2>/dev/null)" = "$UPG_REL" ]; then
     kc delete namespace "$UPG_JOBS_NS" --wait=true --timeout=180s >/dev/null 2>&1 || true
   fi
+  if [ "$(kc get namespace "$COMP_JOBS_NS" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/instance}' 2>/dev/null)" = "$COMP_REL" ]; then
+    kc delete namespace "$COMP_JOBS_NS" --wait=true --timeout=180s >/dev/null 2>&1 || true
+  fi
   for r in "$UPG_REL" "$UPG_BK_REL"; do
     kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$r,ci-accelerator.io/component=buildkit" \
       --ignore-not-found >/dev/null 2>&1 || true
   done
-  kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" \
-    --ignore-not-found >/dev/null 2>&1 || true
+  for r in "$BOX_REL" "$COMP_REL"; do
+    kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$r,ci-accelerator.io/component=buildkit" \
+      --ignore-not-found >/dev/null 2>&1 || true
+  done
   for r in "$REL" "$OTEL_REL"; do
     if hc status "$r" -n "$NS" >/dev/null 2>&1; then
       hc uninstall "$r" -n "$NS" --wait --timeout 5m >/dev/null 2>&1 || true
@@ -378,14 +393,16 @@ cleanup() {
     echo "logs and diagnostics: $LOGS (rerun with KEEP=1 to keep the cluster state)"
   fi
   if [ "$KEEP" = "1" ]; then
-    echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS, $OTHER_NS, $OBS_NS, $PSA_NS, $BOX_NS, $BOX_JOBS_NS, $UPG_NS, $UPG_JOBS_NS (those that exist) and $STATE_DIR on the nodes (make e2e-clean removes them)"
+    echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS, $OTHER_NS, $OBS_NS, $PSA_NS, $BOX_NS, $BOX_JOBS_NS, $COMP_NS, $COMP_JOBS_NS, $UPG_NS, $UPG_JOBS_NS (those that exist), the container $COMP_GL and $STATE_DIR on the nodes (make e2e-clean removes them)"
     return
   fi
+  docker rm -f "$COMP_GL" >/dev/null 2>&1 || true
+  [ -z "$COMP_GL_DIR" ] || rm -rf "$COMP_GL_DIR"
   echo; echo "== [$(elapsed)] cleanup"
   remove_release
   echo "   release removed at $(elapsed)"
   local ns
-  for ns in "$NS" "$JOBS_NS" "$PSA_NS" "$OTHER_NS" "$OBS_NS" "$BOX_NS" "$UPG_NS"; do
+  for ns in "$NS" "$JOBS_NS" "$PSA_NS" "$OTHER_NS" "$OBS_NS" "$BOX_NS" "$COMP_NS" "$UPG_NS"; do
     if [ "$(kc get namespace "$ns" -o jsonpath="{.metadata.labels.ci-accelerator\.io/e2e}" 2>/dev/null)" = true ]; then
       kc delete namespace "$ns" --wait=true --timeout=180s >/dev/null 2>&1 || true
     fi
@@ -1157,6 +1174,230 @@ PY
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
 }
 
+# gl <method> <path> [json body]: the component scenario's GitLab API as its
+# admin (the token stays in its file).
+gl() {
+  python3 -I - "$COMP_GL_DIR" "$@" <<'PY'
+import sys, urllib.error, urllib.request
+d, method, path = sys.argv[1:4]
+body = sys.argv[4].encode() if len(sys.argv) > 4 else None
+req = urllib.request.Request("http://127.0.0.1:%s/api/v4%s" % (open(d + "/port").read().strip(), path), data=body, method=method,
+                             headers={"PRIVATE-TOKEN": open(d + "/token").read().strip(), "Content-Type": "application/json"})
+try:
+    with urllib.request.urlopen(req, timeout=120) as r:
+        sys.stdout.write(r.read().decode())
+except urllib.error.HTTPError as e:
+    sys.stderr.write("%s %s: %s %s\n" % (method, path, e.code, e.read()[:300])); sys.exit(1)
+PY
+}
+# jv <python expression on v>: a value of the JSON on stdin.
+jv() { python3 -c "import json,sys; v = json.load(sys.stdin); print($1)"; }
+
+# gl_commit <project id> <branch> <start branch> <dir>: every file under dir
+# (paths relative to it) committed as it is.
+gl_commit() {
+  gl POST "/projects/$1/repository/commits" "$(python3 - "$2" "$3" "$4" <<'PY'
+import base64, json, os, sys
+branch, start, root = sys.argv[1:4]
+actions = []
+for d, _, files in os.walk(root):
+    for f in files:
+        p = os.path.join(d, f)
+        actions.append({"action": "create", "file_path": os.path.relpath(p, root), "encoding": "base64",
+                        "content": base64.b64encode(open(p, "rb").read()).decode()})
+body = {"branch": branch, "commit_message": "e2e", "actions": actions}
+if start != branch:
+    body["start_branch"] = start
+print(json.dumps(body))
+PY
+)"
+}
+
+# gl_pipeline <project id> <ref> <after id>: waits for the ref's first pipeline
+# newer than <after id> to finish; prints "<id> <status>".
+gl_pipeline() {
+  local i out=""
+  for i in $(seq 1 120); do
+    out=$(gl GET "/projects/$1/pipelines?ref=$2&order_by=id&sort=desc" 2>/dev/null \
+      | python3 -c 'import json,sys; p = [x for x in json.load(sys.stdin) if x["id"] > int(sys.argv[1])]
+print("%s %s" % (p[0]["id"], p[0]["status"]) if p else "")' "$3")
+    case "$out" in *" success" | *" failed" | *" canceled" | *" skipped") break ;; esac
+    sleep 5
+  done
+  echo "$out"
+}
+
+# gl_trace <project id> <pipeline id> <job name> <file>: the job's id; its log
+# as plain lines (no colours, runner prefixes or section markers) in <file>.
+gl_trace() {
+  local job
+  job=$(gl GET "/projects/$1/pipelines/$2/jobs?include_retried=false" | jv "[j['id'] for j in v if j['name'] == '$3'][0]") || return 1
+  gl GET "/projects/$1/jobs/$job/trace" | python3 -c 'import re,sys
+t = re.sub(r"\x1b\[[0-9;]*[A-Za-z]|\r", "", sys.stdin.read())
+t = re.sub(r"section_(start|end):[0-9]+:[A-Za-z0-9_.-]+(\[[^]]*\])?", "", t)
+print("\n".join(re.sub(r"^\d{4}-\d\d-\d\dT[0-9:.]+Z [0-9]+[OE]\+? ?", "", l) for l in t.split("\n")))' >"$4"
+  echo "$job"
+}
+
+# The component as users include it, in a real GitLab (CE, the runner's
+# minor): the box's runner takes the jobs GitLab gives it, checks the
+# project out, the job builds through the router on the farm and pushes to
+# GitLab's own registry with the job token, a later job gets the digest
+# (dotenv), the second pipeline is served from the cache, a failing build
+# fails its job, and the console ties the builds to GitLab's jobs.
+s_component() {
+  step "component: a real GitLab's pipelines include the CI component and build on the box"
+  local arch comp_id app_id rid rtoken p1 p2 p3 s1 s2 s3 j1 j2 j3 sha digest uses comp_inst
+  ensure_ns "$COMP_NS" privileged
+  COMP_GL_DIR=$(mktemp -d)
+  if ! "$ROOT/ci/gitlab/test/gitlab.sh" up "$COMP_GL" current "$COMP_GL_DIR" --network kind --registry >"$LOGS/component-gitlab.log" 2>&1; then
+    fail "boot GitLab CE (see $LOGS/component-gitlab.log)"; return
+  fi
+  pass "GitLab CE $(gl GET /version | jv 'v["version"]') runs in kind's Docker network ($(grep -o 'ready after [0-9]*s' "$LOGS/component-gitlab.log"))"
+  rtoken=$COMP_GL_DIR/runner-token
+  # shellcheck disable=SC2034 # read by the eval'd check below
+  rid=$(gl POST /user/runners '{"runner_type":"instance_type","tag_list":"e2e-component","run_untagged":false,"description":"e2e box"}' \
+    | python3 -c 'import json,os,sys; r = json.load(sys.stdin); fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT, 0o600); os.write(fd, r["token"].encode()); print(r["id"])' "$rtoken") \
+    || { fail "create a runner in GitLab"; return; }
+  kc -n "$COMP_NS" delete secret gitlab-runner-token --ignore-not-found >/dev/null
+  kc -n "$COMP_NS" create secret generic gitlab-runner-token --from-file=runner-token="$rtoken" \
+    --from-literal=runner-registration-token= >/dev/null || { fail "the runner token Secret"; return; }
+  make -C "$ROOT" deps >"$LOGS/component-deps.log" 2>&1 || { fail "make deps (see $LOGS/component-deps.log)"; return; }
+  e2e_image component || return
+  arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
+  # GitLab's registry speaks plain HTTP here: the daemons are told so.
+  printf 'buildkit:\n  config:\n    extraConfig: |\n      [registry."%s:5050"]\n        http = true\n' "$COMP_GL" >"$LOGS/component-values.yaml"
+  hc upgrade --install "$COMP_REL" "$ROOT/charts/ci-accelerator" -n "$COMP_NS" -f "$ROOT/test/e2e/box-values.yaml" \
+    -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" -f "$LOGS/component-values.yaml" \
+    --set "gitlab-runner.gitlabUrl=http://$COMP_GL/" --set gitlab-runner.runners.secret=gitlab-runner-token \
+    --set "global.jobs.namespace=$COMP_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$COMP_JOBS_NS" \
+    --set "global.jobs.architecture=$arch" --set global.console.url=https://console.e2e.example \
+    --wait --timeout 8m >"$LOGS/component-install.log" 2>&1 || { fail "install the box (see $LOGS/component-install.log)"; return; }
+  check "the box's runner registers with GitLab" \
+    eventually 120 eval '[ "$(gl GET /runners/$rid | jv "v[\"status\"]")" = online ]'
+
+  # The component served by GitLab itself, and a project that includes it as
+  # the README shows, with a later job that uses the image by its digest.
+  mkdir -p "$LOGS/component-files/component" "$LOGS/component-files/app/src"
+  cp "$ROOT/ci/gitlab/build.yml" "$LOGS/component-files/component/"
+  comp_id=$(gl POST /projects '{"name":"component","visibility":"public","initialize_with_readme":true}' | jv 'v["id"]') \
+    && gl_commit "$comp_id" main main "$LOGS/component-files/component" >/dev/null || { fail "the component's project"; return; }
+  # The first step sleeps, so the first pipeline runs long enough to be
+  # looked at while it runs; the second one takes it from the cache.
+  printf 'FROM alpine:3.22\nRUN --mount=type=cache,target=/var/cache/e2e sleep 25 && echo deps > /deps\nCOPY src/ /src/\nRUN cat /src/app.txt > /app\n' \
+    >"$LOGS/component-files/app/Dockerfile"
+  echo hello >"$LOGS/component-files/app/src/app.txt"
+  printf '.git\n' >"$LOGS/component-files/app/.dockerignore"
+  cat >"$LOGS/component-files/app/.gitlab-ci.yml" <<EOF_CI
+include:
+  - remote: http://$COMP_GL/root/component/-/raw/main/build.yml
+    integrity: sha256-$(openssl dgst -sha256 -binary "$ROOT/ci/gitlab/build.yml" | base64 | tr -d '\n')
+    inputs:
+      runner-tags: [e2e-component]
+
+use-image:
+  stage: test
+  tags: [e2e-component]
+  image: alpine:3.22
+  needs: [build-image]
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - echo "USES \$IMAGE_REF"
+EOF_CI
+  app_id=$(gl POST /projects '{"name":"app","initialize_with_readme":true}' | jv 'v["id"]') || { fail "the app's project"; return; }
+  gl_commit "$app_id" main main "$LOGS/component-files/app" >/dev/null || { fail "commit the app"; return; }
+
+  # While the first pipeline runs, its page in the console shows the job on
+  # the timeline as running (from its pod; no build has finished yet) and
+  # asks for itself again; the job's page, which its log links to, is live.
+  comp_inst=$(printf '%s' "http://$COMP_GL/" | sha256 | cut -c1-6)
+  comp_running() {
+    local pid job
+    pid=$(gl GET "/projects/$app_id/pipelines?ref=main" | jv 'v[0]["id"] if v else ""') && [ -n "$pid" ] || return 1
+    job=$(gl GET "/projects/$app_id/pipelines/$pid/jobs" | jv '[j["id"] for j in v if j["name"] == "build-image"][0]') || return 1
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080/pipelines/$comp_inst/$pid" \
+      2>/dev/null >"$LOGS/component-running.html" || return 1
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080/jobs/$comp_inst/$job" \
+      2>/dev/null >"$LOGS/component-running-job.html" || return 1
+    grep -q 'c-job-running' "$LOGS/component-running.html" && grep -q 'data-refresh-every' "$LOGS/component-running.html" &&
+      ! grep -q 'No job of this pipeline built an image' "$LOGS/component-running.html" &&
+      grep -q 'data-live' "$LOGS/component-running-job.html"
+  }
+  check "while the pipeline runs, its console page shows the running job and refreshes itself; the job's page is live" \
+    eventually 60 comp_running
+
+  read -r p1 s1 <<<"$(gl_pipeline "$app_id" main 0)"
+  check "the pipeline that includes the component succeeds (${s1:-none})" test "$s1" = success
+  j1=$(gl_trace "$app_id" "$p1" build-image "$LOGS/component-build-1.trace")
+  gl_trace "$app_id" "$p1" use-image "$LOGS/component-use-1.trace" >/dev/null
+  sha=$(gl GET "/projects/$app_id/repository/commits/main" | jv 'v["short_id"]')
+  check "the build job pushes the commit's image to GitLab's registry" \
+    grep -qx "pushing $COMP_GL:5050/root/app:$sha" "$LOGS/component-build-1.trace"
+  check "the first build runs the Dockerfile's steps" grep -qE '^Dockerfile steps: 0 from cache, [1-9][0-9]* run; context sent: [0-9.]+[kMG]?B$' "$LOGS/component-build-1.trace"
+  check "the job links to its page in the console" grep -qE "^ci-accelerator: .*https://console\.e2e\.example/jobs/[0-9a-f]{6}/$j1\$" "$LOGS/component-build-1.trace"
+  digest=$(sed -n 's/^digest \(sha256:[0-9a-f]\{64\}\)$/\1/p' "$LOGS/component-build-1.trace")
+  uses=$(sed -n 's/^USES //p' "$LOGS/component-use-1.trace")
+  check "a later job gets the pushed digest (${uses:-none})" test -n "$digest" -a "$uses" = "$COMP_GL:5050/root/app@$digest"
+  check "GitLab's registry has the tag" eval '[ "$(gl GET "/projects/$app_id/registry/repositories?tags=true" | jv "\" \".join(t[\"name\"] for r in v for t in r[\"tags\"])")" = "$sha" ]'
+
+  gl POST "/projects/$app_id/pipeline" '{"ref":"main"}' >/dev/null || fail "start a second pipeline"
+  read -r p2 s2 <<<"$(gl_pipeline "$app_id" main "$p1")"
+  check "the second pipeline succeeds (${s2:-none})" test "$s2" = success
+  j2=$(gl_trace "$app_id" "$p2" build-image "$LOGS/component-build-2.trace")
+  check "the second build comes from the cache" grep -qE '^Dockerfile steps: [1-9][0-9]* from cache, 0 run; ' "$LOGS/component-build-2.trace"
+
+  # A build that fails fails its job, with the reason in the log.
+  gl POST "/projects/$app_id/repository/commits" "{\"branch\":\"broken\",\"start_branch\":\"main\",\"commit_message\":\"e2e: a failing build\",\"actions\":[{\"action\":\"update\",\"file_path\":\"Dockerfile\",\"content\":\"FROM alpine:3.22\\nRUN exit 3\\n\"}]}" >/dev/null \
+    || fail "commit the failing build"
+  read -r p3 s3 <<<"$(gl_pipeline "$app_id" broken 0)"
+  j3=$(gl_trace "$app_id" "$p3" build-image "$LOGS/component-build-broken.trace")
+  check "a failing build fails the pipeline (${s3:-none}) and says why" \
+    eval '[ "$s3" = failed ] && grep -qx "the build failed (buildctl exit status 1)" "$LOGS/component-build-broken.trace"'
+
+  # The console ties both builds to GitLab's jobs: the first one built, the
+  # second one cached.
+  comp_console() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080/api/v1/builds?limit=50" 2>/dev/null \
+      | python3 -c 'import json,sys
+b = {x.get("job"): x for x in json.load(sys.stdin)["builds"]}
+one, two = b.get(int(sys.argv[1])), b.get(int(sys.argv[2]))
+sys.exit(0 if one and two and one["steps"].get("built") and not two["steps"].get("built") and two["steps"].get("cached") else 1)' "$j1" "$j2"
+  }
+  check "the console stores both builds under GitLab's job ids (built, then cached)" eventually 90 comp_console
+  # The page each job's log links to, through the web: the first build
+  # explained as a first build with its steps, the second as from cache.
+  comp_page() {
+    local path
+    path=$(sed -n "s|^ci-accelerator: .*https://console\.e2e\.example\(/jobs/[0-9a-f]*/$2\)\$|\1|p" "$1")
+    [ -n "$path" ] && kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080$path" 2>/dev/null >"$1.html" &&
+      grep -q "$3" "$1.html"
+  }
+  check "the console's page for the first job explains its build" \
+    comp_page "$LOGS/component-build-1.trace" "$j1" 'First build of target <code>'
+  check "the console's page for the second job says it came from cache" \
+    comp_page "$LOGS/component-build-2.trace" "$j2" 'Nothing was rebuilt'
+  # A failed build has no provenance; its Dockerfile comes from BuildKit's
+  # stored error, with the failed step's line marked.
+  comp_failed_page() {
+    local id
+    id=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080/api/v1/builds?limit=50" 2>/dev/null \
+      | python3 -c 'import json,sys; print([b["id"] for b in json.load(sys.stdin)["builds"] if b.get("job") == int(sys.argv[1])][0])' "$j3") || return 1
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080/builds/$id" 2>/dev/null >"$LOGS/component-failed.html" &&
+      grep -q 'data-tab="dockerfile"' "$LOGS/component-failed.html" && grep -q 'st-failed' "$LOGS/component-failed.html" &&
+      grep -q 'RUN exit 3' "$LOGS/component-failed.html"
+  }
+  check "the console's page for the failed build shows its Dockerfile with the failed line" eventually 60 comp_failed_page
+
+  hc uninstall "$COMP_REL" -n "$COMP_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the component box"
+  kc -n "$COMP_NS" delete pvc "$COMP_REL-controller-data" --ignore-not-found >/dev/null 2>&1
+  kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$COMP_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+  if [ "$KEEP" != 1 ]; then
+    "$ROOT/ci/gitlab/test/gitlab.sh" down "$COMP_GL"
+    rm -rf "$COMP_GL_DIR"; COMP_GL_DIR=""
+  fi
+}
+
 # route_job <name> <node> <project> <pipeline> <job> [seconds]: a CI job's
 # pod on <node>, annotated as the runner annotates its pods, that asks which
 # daemon it reaches through the router (ROUTED_TO <pod>) and builds a step
@@ -1772,6 +2013,27 @@ s_upgrade() {
     --set buildkit.storage.type=hostPath --set "buildkit.storage.hostPath.path=$state")
   local old_values=(-f "$ROOT/test/e2e/box-values.yaml")
   for c in $UPGRADE_FROM_VALUES; do old_values+=(-f "$c"); done
+  # A published 0.3.x on is pinned by digest as the README tells production
+  # installs to: the control plane's image of that release and the disk
+  # probe's (the tag its chart runs), both from the released images the
+  # charts list. A packaged tree (UPGRADE_FROM_DIR) has no published images.
+  UPG_PINNED=0
+  case "$UPGRADE_FROM" in
+    0.2.*) ;;
+    *)
+      if [ -z "$UPGRADE_FROM_DIR" ]; then
+        local probe_tag probe_digest cp_digest
+        probe_tag=$(hc template pin "$old_chart" -n "$UPG_NS" "${old_values[@]}" "${UPG_ARGS[@]}" --api-versions cert-manager.io/v1 2>/dev/null \
+          | sed -n 's|.*image: "ghcr.io/hoobiboobi/ci-accelerator:\(v[^"@]*\)"$|\1|p' | sort | uniq -c | sort -n | awk 'NR == 1 {print $2}')
+        probe_digest=$(sed -n "s/^$probe_tag: //p" "$ROOT/charts/buildkit/templates/_helpers.tpl")
+        cp_digest=$(sed -n "s/^v$UPGRADE_FROM: //p" "$ROOT/charts/buildkit/templates/_helpers.tpl")
+        [ -n "$probe_digest" ] && [ -n "$cp_digest" ] \
+          || { fail "no released digests for $UPGRADE_FROM (control plane v$UPGRADE_FROM, disk probe ${probe_tag:-not found})"; return; }
+        old_values+=(--set "control-plane.image.digest=$cp_digest" --set "buildkit.diskProbe.image.digest=$probe_digest")
+        UPG_PINNED=1
+      fi
+      ;;
+  esac
   if ! hc install "$UPG_REL" "$old_chart" -n "$UPG_NS" "${old_values[@]}" "${UPG_ARGS[@]}" --wait --timeout 8m >"$LOGS/upgrade-install.log" 2>&1; then
     fail "install $UPGRADE_FROM (see $LOGS/upgrade-install.log)"; return
   fi
@@ -1823,6 +2085,16 @@ s_upgrade() {
 upg_builds_has_job() {
   kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$1.$UPG_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
     | python3 -c 'import json,sys; b=json.load(sys.stdin)["builds"]; sys.exit(0 if any(x.get("job") == int(sys.argv[1]) for x in b) else 1)' "$2"
+}
+
+# upg_one_build <service> <job id> <daemon>: the console lists exactly one
+# build of the job, and under that daemon.
+upg_one_build() {
+  kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$1.$UPG_NS.svc:8080/api/v1/builds?limit=1000" 2>/dev/null \
+    | python3 -c 'import json,sys
+b = [x for x in json.load(sys.stdin)["builds"] if x.get("job") == int(sys.argv[1])]
+print("        builds of job %s: %s" % (sys.argv[1], [x["daemon"] for x in b]))
+sys.exit(0 if len(b) == 1 and b[0]["daemon"] == sys.argv[2] else 1)' "$2" "$3"
 }
 
 # upgrade_refused: a 0.2.x release with its console. Helm must refuse the
@@ -1885,8 +2157,26 @@ upgrade_refused() {
 # image` loads into kind stands in. The disk probe keeps the old release's
 # image: changing it would itself roll the daemons.
 upgrade_in_place() {
-  local gen1 gen2 uids1 cp_img=(--set control-plane.image.repository=ci-accelerator --set control-plane.image.tag=e2e --set control-plane.image.pullPolicy=Never)
+  local gen1 gen2 uids1 tree_app daemon0 cp_img=(--set control-plane.image.repository=ci-accelerator --set control-plane.image.tag=e2e
+    --set control-plane.image.digest= --set control-plane.image.pullPolicy=Never)
   check "the $UPGRADE_FROM console stores the job's build" eventually 90 upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-before)"
+  if [ "$UPG_PINNED" = 1 ]; then
+    check "$UPGRADE_FROM runs its control plane and disk probe pinned by digest" \
+      eval '[ "$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL" -o jsonpath="{range .items[*]}{range .spec.containers[*]}{.image}{\"\n\"}{end}{end}" | grep -c "ci-accelerator:v[^@]*@sha256:")" -ge 4 ]'
+    # The README's upgrade command keeps the pinned digest. Under a chart of
+    # another version it would run the old release under the new tag: the
+    # chart refuses it and names the version it runs.
+    tree_app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/control-plane/Chart.yaml")
+    hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values --dry-run=server \
+      >"$LOGS/upgrade-pinned.log" 2>&1
+    if [ "$tree_app" != "$UPGRADE_FROM" ]; then
+      check "the README's upgrade with the old digest pinned is refused, naming v$tree_app" \
+        grep -qF "is the digest of the v$UPGRADE_FROM image, but this chart runs v$tree_app: set the digest of v$tree_app" "$LOGS/upgrade-pinned.log"
+    else
+      check "the README's upgrade with the digest pinned renders (this tree is still v$tree_app)" \
+        eval '! grep -q "^Error" "$LOGS/upgrade-pinned.log"'
+    fi
+  fi
   if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reuse-values "${cp_img[@]}" \
       --wait --timeout 8m >"$LOGS/upgrade-reuse.log" 2>&1; then
     pass "helm upgrade --reuse-values from $UPGRADE_FROM"
@@ -1909,10 +2199,21 @@ upgrade_in_place() {
   hc get manifest "$UPG_REL" -n "$UPG_NS" --revision 1 >"$LOGS/upgrade-manifest-old.yaml" 2>/dev/null
   hc get manifest "$UPG_REL" -n "$UPG_NS" >"$LOGS/upgrade-manifest-new.yaml" 2>/dev/null
   info "manifest diff $UPGRADE_FROM -> this tree: $(diff "$LOGS/upgrade-manifest-old.yaml" "$LOGS/upgrade-manifest-new.yaml" | grep -c '^[<>]') lines ($LOGS/upgrade-manifest-*.yaml)"
+  # The daemon pod is replaced, as a node drain or eviction does: the new
+  # pod finds the old one's history on the hostPath and sends it again.
+  # The console keeps each build once, under the pod that ran it (0.3.0 and
+  # 0.3.1 stored every record a second time). The job after it builds on the
+  # new pod, so its history has been read by then.
+  daemon0=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[0].metadata.name}')
+  kc -n "$UPG_NS" delete pod "$daemon0" --wait --timeout 120s >/dev/null 2>&1 || fail "delete the daemon pod $daemon0"
+  kc -n "$UPG_NS" rollout status ds/"$UPG_REL"-buildkit --timeout=180s >/dev/null 2>&1 || fail "the replaced daemon got ready"
   run_job upgrade-after "$UPG_JOBS_NS"
   check "a CI job after the upgrade succeeds" test "$(cat "$LOGS/job-upgrade-after.state")" = success
   check "the job after the upgrade finds the cache from before it" \
     eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-upgrade-after.trace" | grep -q "^#[0-9]* CACHED$"'
+  check "the console stores the job's build from the replaced daemon" eventually 90 upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-after)"
+  check "the replaced daemon's history is not stored twice: the job before has one build, under $daemon0" \
+    upg_one_build "$UPG_REL-web" "$(job_id upgrade-before)" "$daemon0"
 
   # The recommended way: this tree's defaults plus the user's values.
   if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values "${cp_img[@]}" \
