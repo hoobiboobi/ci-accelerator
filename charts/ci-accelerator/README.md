@@ -1,6 +1,6 @@
 # ci-accelerator
 
-![Version: 0.2.5](https://img.shields.io/badge/Version-0.2.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.5](https://img.shields.io/badge/AppVersion-0.2.5-informational?style=flat-square)
+![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.3.0](https://img.shields.io/badge/AppVersion-0.3.0-informational?style=flat-square)
 
 A self-hosted fast CI runner for GitLab: persistent BuildKit daemons with a shared cache on dedicated build nodes, and a gitlab-runner that sends CI jobs to them.
 
@@ -22,8 +22,8 @@ Kubernetes: `>=1.34.0-0`
 
 | Repository | Name | Version |
 |------------|------|---------|
-| file://../buildkit | buildkit | 0.2.5 |
-| file://../control-plane | control-plane | 0.2.5 |
+| file://../buildkit | buildkit | 0.3.0 |
+| file://../control-plane | control-plane | 0.3.0 |
 | https://charts.gitlab.io | gitlab-runner | 0.93.0 |
 
 ## Values

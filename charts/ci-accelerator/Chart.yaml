@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.2.5
+version: 0.3.0
 # The box's own version (its control plane's image); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.2.5"
+appVersion: "0.3.0"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -26,7 +26,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.33.1
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.2.5
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.0
       platforms:
         - linux/amd64
         - linux/arm64
@@ -46,15 +46,27 @@ annotations:
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
     - kind: changed
-      description: The console shows every time in the reader's time zone, with the moment in UTC on hover; the pipelines filter's dates are the reader's days
-    - kind: added
-      description: A job's log reads in parts from GitLab - the last 500 lines, then 500 earlier lines as often as needed, and new lines below
-    - kind: added
-      description: The pipeline timeline's names column can be widened (drag, double-click to fit, keys) and is remembered
-    - kind: fixed
-      description: Opening a pipeline no longer flashes every step open; the wheel over the timeline reaches the page; labels at the right edge are no longer cut off
+      description: The console is served by the control plane - a controller (one pod - the store, the sessions, every GitLab token) and a web (two pods by default) that serves the pages and keeps nothing
     - kind: changed
-      description: The architecture document shows the components and namespaces as a diagram
+      description: New names - chart control-plane (was console), image ghcr.io/hoobiboobi/ci-accelerator (was ci-accelerator-console), Deployments and Services <release>-controller and <release>-web; 0.2.x installs again instead of upgrading in place (see the upgrade notes)
+    - kind: security
+      description: The web reads the controller's API over HTTPS with a server-auth-only certificate from the daemons' CA and proves itself with a projected ServiceAccount token checked by TokenReview; the controller's NetworkPolicy admits the web's pods only
+    - kind: changed
+      description: A page whose controller does not answer says so (502) instead of showing an empty console; the web rolls without a pause
+    - kind: added
+      description: The build router - each CI job's build goes to the node where its project built before (else the project's node by a hash every router agrees on, so a pipeline's parallel jobs share one daemon's steps); it passes the jobs' TLS through and holds no key
+    - kind: changed
+      description: The Nodes page is one table of the daemons, those needing attention first, and each daemon has its own page (its disk, cache, router decisions and the projects it built for)
+    - kind: added
+      description: Compare any two builds of an image - a button on the build page (key x), picking two in the builds list, this build marked
+    - kind: added
+      description: The build page shows BuildKit's failed Dockerfile checks, each step's CPU and disk use, the time before the build split by the job pod's own timestamps, and whether a failed step is new or changed
+    - kind: changed
+      description: Every median and p95 is a measured time (nearest rank), from enough builds; "files or node" is settled in the background from GitLab's stored commit comparisons
+    - kind: added
+      description: Every role logs one JSON line per event (start, ready, stored build, job start and end, routed connection, sign-in) at -log-level, with no token, cookie, query or build argument in it
+    - kind: added
+      description: scripts/buildkit-certs.sh --controller and --router make the controller API's certificate and the router's names for installs without cert-manager
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -62,10 +74,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.2.5
+    version: 0.3.0
     repository: file://../buildkit
   - name: control-plane
-    version: 0.2.5
+    version: 0.3.0
     repository: file://../control-plane
     condition: control-plane.enabled
   - name: gitlab-runner
