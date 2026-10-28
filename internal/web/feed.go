@@ -567,7 +567,8 @@ type OverviewView struct {
 	Builds      int
 	Cached      int // percent
 	Lost        string
-	NotCode     int // percent of the lost time not caused by the change
+	Farm        int // percent of the rebuild time the build farm caused (history.FarmKinds)
+	Unclear     int // percent of it where files or node is unclear
 	Reasons     []Reason
 	MoreReasons string
 	Running     int
@@ -601,7 +602,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	since := s.now().Add(-span)
 	var in []store.BuildRow
 	cached := 0
-	var lost, notCode time.Duration
+	var lost, farm, unclear time.Duration
 	for _, b := range st.builds {
 		if b.Started.Before(since) {
 			continue
@@ -615,15 +616,18 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 			cached++
 		}
 		lost += b.BuiltTime
-		if !stt.Code && stt.Key != "cached" {
-			notCode += b.BuiltTime
+		switch stt.Key {
+		case "farm":
+			farm += b.BuiltTime
+		case "unclear":
+			unclear += b.BuiltTime
 		}
 	}
 	v.Builds, v.Empty = len(in), len(in) == 0
 	v.Cached = cached * 100 / max(1, len(in))
 	v.Lost = duration(lost)
 	if lost > 0 {
-		v.NotCode = int(100 * notCode / lost)
+		v.Farm, v.Unclear = int(100*farm/lost), int(100*unclear/lost)
 	}
 	all := s.reasons(in, 0, zone(r))
 	v.Reasons = all

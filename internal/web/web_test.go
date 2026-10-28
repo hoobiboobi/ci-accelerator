@@ -365,6 +365,29 @@ func TestOverview(t *testing.T) {
 	}
 	p := get(t, ts, "/")
 	p.safe(t)
+	// The farm's share is the farm's alone: failed and unclear builds
+	// are not "not the code".
+	var lostAll, farm, unclear time.Duration
+	for _, bs := range byPipe {
+		for _, b := range bs {
+			lostAll += b.BuiltTime
+			switch rowStatus(b).Key {
+			case "farm":
+				farm += b.BuiltTime
+			case "unclear":
+				unclear += b.BuiltTime
+			}
+		}
+	}
+	if f := int(100 * farm / lostAll); f > 0 && !strings.Contains(p.body, fmt.Sprintf("<b>%d%%</b> of it because of the build farm", f)) {
+		t.Errorf("farm share %d%% not said", f)
+	}
+	if u := int(100 * unclear / lostAll); u > 0 && !strings.Contains(p.body, fmt.Sprintf("for <b>%d%%</b> it is unclear", u)) {
+		t.Errorf("unclear share %d%% not said", u)
+	}
+	if farm == 0 && unclear == 0 {
+		t.Log("fixtures: no farm or unclear rebuild in the window")
+	}
 	want := fmt.Sprintf("<b>%d</b> image builds in the last 24 hours, <b>%d%%</b> fully from the cache.", n, cached*100/n)
 	if !strings.Contains(p.body, want) {
 		t.Errorf("overview sentence: want %q in %s", want, p.body)
