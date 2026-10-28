@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -98,6 +99,26 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 	d.Verdict = withVia(verdictFor(b, p.Reason, by, d.Built, p.Saved, rec), p.Reason, p.Via)
 	if p.Reason.Kind == history.OtherNode && p.Route != nil {
 		d.Verdict.Hint = nodeHint(p.Route)
+	}
+	if r := p.Reason; r.Kind == history.FilesChanged && viaVerified(p.Via) && !readsAny(r.Step.Name, r.Paths) {
+		// The first rebuilt step does not copy the changed files: a step
+		// before it does, and this one ran again on its new result.
+		if rd := firstReader(b.Steps, r.Step.Key, r.Paths); rd != nil {
+			at := ""
+			if r.Step.Line > 0 {
+				at = fmt.Sprintf(" (Dockerfile line %d)", r.Step.Line)
+			}
+			d.Verdict.Title = template.HTML(fmt.Sprintf("Rebuilt from %s%s: %s changed, which a step before it copies.", code(r.Step.Name), at, paths(r.Paths)))
+			where := "from the cache"
+			switch {
+			case rd.State == history.Received && rd.ReceivedFrom != "":
+				where = "from " + e(name(rd.ReceivedFrom)) + " in this pipeline, which ran it"
+			case rd.State == history.Built:
+				where = "by running it here"
+			}
+			d.Verdict.Detail = template.HTML(fmt.Sprintf("%s copies it; this build got that step's new result %s, and every step after it ran again on it. %s",
+				code(rd.Name), where, strings.TrimPrefix(string(d.Verdict.Detail), "Steps after it were rebuilt because their input changed. ")))
+		}
 	}
 	d.Cat = catOf(p.Reason.Kind, b.Error, d.Built)
 	d.Verdict.Icon = d.Cat.Icon
@@ -779,4 +800,60 @@ func parallelText(b *history.Build) string {
 		return ""
 	}
 	return fmt.Sprintf("%s of step time in %s: %.1f steps at a time on average", duration(sum), duration(wall), sum.Seconds()/wall.Seconds())
+}
+
+// copySources are the sources a COPY or ADD step names (flags and the
+// destination left out); none for any other step.
+func copySources(step string) []string {
+	f := strings.Fields(step)
+	if len(f) < 3 || (f[0] != "COPY" && f[0] != "ADD") {
+		return nil
+	}
+	var args []string
+	for _, a := range f[1:] {
+		if strings.HasPrefix(a, "--") {
+			if strings.HasPrefix(a, "--from=") {
+				return nil // from another stage or image, not the context
+			}
+			continue
+		}
+		args = append(args, a)
+	}
+	if len(args) < 2 {
+		return nil
+	}
+	return args[:len(args)-1]
+}
+
+// readsAny says whether a COPY or ADD step copies any of the paths (a
+// source naming the path, a folder above it, the whole context or a glob
+// matching it). A step of another kind reads none.
+func readsAny(step string, ps []string) bool {
+	for _, src := range copySources(step) {
+		src = strings.TrimSuffix(strings.TrimPrefix(src, "./"), "/")
+		for _, p := range ps {
+			p = strings.TrimSuffix(p, "/")
+			if src == "." || src == "" || p == src || strings.HasPrefix(p, src+"/") || strings.HasPrefix(src, p+"/") {
+				return true
+			}
+			if ok, _ := path.Match(src, p); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// firstReader is the first step before the one keyed before that copies
+// any of the paths.
+func firstReader(steps []history.Step, before string, ps []string) *history.Step {
+	for i := range steps {
+		if steps[i].Key == before {
+			return nil
+		}
+		if readsAny(steps[i].Name, ps) {
+			return &steps[i]
+		}
+	}
+	return nil
 }

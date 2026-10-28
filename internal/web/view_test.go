@@ -418,3 +418,33 @@ func TestStartParts(t *testing.T) {
 		t.Errorf("no time before the build: %+v", ps)
 	}
 }
+
+func TestReadsAny(t *testing.T) {
+	for _, c := range []struct {
+		step string
+		ps   []string
+		want bool
+	}{
+		{"COPY services/api/ /src/api/", []string{"services/api/main.txt"}, true},
+		{"COPY services/auth/ /src/auth/", []string{"deps.lock"}, false},
+		{"COPY deps.lock /src/deps.lock", []string{"deps.lock"}, true},
+		{"COPY . .", []string{"anything/at/all"}, true},
+		{"COPY ./requirements.txt .", []string{"requirements.txt"}, true},
+		{"COPY --chown=app:app api/ ./api", []string{"api/app.py"}, true},
+		{"COPY --from=deps /a /a", []string{"a"}, false},
+		{"ADD *.lock /src/", []string{"b.lock"}, true},
+		{"RUN make", []string{"Makefile"}, false},
+		{"COPY a.txt b.txt /dst/", []string{"b.txt"}, true},
+	} {
+		if got := readsAny(c.step, c.ps); got != c.want {
+			t.Errorf("%q reads %v: %v", c.step, c.ps, got)
+		}
+	}
+	steps := []history.Step{{Key: "[deps 1/2]", Name: "COPY deps.lock /src/deps.lock"}, {Key: "[deps 2/2]", Name: "RUN cp"}, {Key: "[auth 1/3]", Name: "COPY services/auth/ /src/auth/"}}
+	if r := firstReader(steps, "[auth 1/3]", []string{"deps.lock"}); r == nil || r.Key != "[deps 1/2]" {
+		t.Errorf("first reader %+v", r)
+	}
+	if r := firstReader(steps, "[deps 1/2]", []string{"deps.lock"}); r != nil {
+		t.Errorf("a reader after the step: %+v", r)
+	}
+}
