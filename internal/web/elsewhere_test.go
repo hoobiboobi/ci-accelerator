@@ -204,3 +204,26 @@ func TestReplacedDaemonTexts(t *testing.T) {
 		t.Errorf("another node: %q", text)
 	}
 }
+
+// Unclear rebuilds are grouped by what their text says.
+func TestUnclearGroupsByText(t *testing.T) {
+	now := time.Now()
+	rows := []store.BuildRow{
+		{Reason: history.CacheElsewhere, Built: 2, Completed: now, Daemon: "bk-new", Old: "bk-old", Node: "n1", OldNode: "n1"},
+		{Reason: history.CacheElsewhere, Built: 2, Completed: now, Daemon: "bk-a", Old: "bk-b", Node: "n1", OldNode: "n2"},
+		{Reason: history.CacheElsewhere, Built: 2, Completed: now, Daemon: "bk-a"},
+		{Built: 2, Completed: now, Daemon: "bk-a"},
+	}
+	seen := map[string]string{}
+	for _, b := range rows {
+		st := rowStatus(b)
+		fp, text := fingerprint(b, st), reasonText(b, st)
+		if other, ok := seen[fp]; ok && other != text {
+			t.Errorf("group %s holds %q and %q", fp, other, text)
+		}
+		seen[fp] = text
+	}
+	if len(seen) != 4 {
+		t.Errorf("groups %v", seen)
+	}
+}

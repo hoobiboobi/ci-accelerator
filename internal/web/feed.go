@@ -373,7 +373,17 @@ type Reason struct {
 func fingerprint(b store.BuildRow, st Status) string {
 	switch st.Key {
 	case "unclear":
-		return "unclear"
+		// One group per text reasonText gives: never one build's words for
+		// the others.
+		switch {
+		case b.Reason != history.CacheElsewhere:
+			return "unclear:nothing to compare"
+		case b.Old == "":
+			return "unclear:here"
+		case replacedHere(b):
+			return "unclear:replaced"
+		}
+		return "unclear:elsewhere"
 	case "failed":
 		return "failed:" + firstLine(b.Error)
 	case "farm":

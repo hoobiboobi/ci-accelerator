@@ -173,21 +173,29 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	daemons := s.data.Daemons()
+	// The projects the daemons built for that the reader may see (GitLab
+	// asked about several at a time), with their paths.
 	paths := map[store.ProjectKey]string{}
+	seen := map[store.ProjectKey]bool{}
+	var built []store.Project
+	for _, c := range counts {
+		for _, pb := range c.Projects {
+			if !seen[pb.ProjectKey] {
+				seen[pb.ProjectKey] = true
+				built = append(built, store.Project{ProjectKey: pb.ProjectKey})
+			}
+		}
+	}
 	if ps, err := s.data.Projects(ctx); err == nil {
 		for _, p := range ps {
 			paths[p.ProjectKey] = p.Path
 		}
 	}
-	mayCache := map[store.ProjectKey]bool{}
-	mayP := func(k store.ProjectKey) bool {
-		ok, seen := mayCache[k]
-		if !seen {
-			ok = s.may(r, k.Instance, k.ID)
-			mayCache[k] = ok
-		}
-		return ok
+	readable := map[store.ProjectKey]bool{}
+	for _, p := range s.readable(r, built) {
+		readable[p.ProjectKey] = true
 	}
+	mayP := func(k store.ProjectKey) bool { return readable[k] }
 	images := map[string][]int64{}
 	var gc []collector.GCRule
 	shown := map[string]bool{}

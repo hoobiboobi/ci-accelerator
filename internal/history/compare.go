@@ -2,6 +2,7 @@ package history
 
 import (
 	"bytes"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -155,7 +156,7 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				}
 				return Reason{Kind: ArgChanged, Step: s, Arg: args[0], Old: o, New: n}, true
 			}
-			if k, o, n, ok := argInText(prev, cur, p.Name, s.Name); ok {
+			if k, o, n, ok := argInText(prev, cur, p.Name, s.Name); ok && sameCommand(prev.prov, cur.prov, p.StepID, s.StepID) {
 				if SecretArg(k) {
 					o, n = Masked, Masked
 				}
@@ -190,6 +191,17 @@ func argInText(prev, cur *Build, old, new string) (name, from, to string, ok boo
 		}
 	}
 	return "", "", "", false
+}
+
+// sameCommand says whether two steps run the same command line: BuildKit
+// keeps a RUN's variables unexpanded there (only its displayed text has
+// the values), so equal arguments mean the Dockerfile line did not change.
+func sameCommand(a, b *Provenance, aID, bID string) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	ea, eb := viewOf(a.Steps[aID].Op).Op.Exec, viewOf(b.Steps[bID].Op).Op.Exec
+	return ea != nil && eb != nil && slices.Equal(ea.Meta.Args, eb.Meta.Args)
 }
 
 // FailedStep explains a failed build by the step that failed. BuildKit
