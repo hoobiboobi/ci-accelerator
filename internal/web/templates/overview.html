@@ -9,7 +9,7 @@
   {{else if .Empty}}
   <div class="empty"><b>No image builds in {{.WindowLabel}}.</b><p>A job that runs <code>buildctl</code> against the box's daemons shows up here when its build ends. Its log carries a link to its page.</p></div>
   {{else}}
-  <p class="lead"><b>{{.Builds}}</b> image build{{if ne .Builds 1}}s{{end}} in {{.WindowLabel}}, <b>{{.Cached}}%</b> fully from the cache.{{if ne .Cached 100}} Rebuilds took <b>{{.Lost}}</b> of build time{{if .NotCode}}; <b>{{.NotCode}}%</b> of it was not caused by the code{{end}}.{{end}}{{if .Running}} {{.Running}} running now.{{end}}</p>
+  <p class="lead"><b>{{.Builds}}</b> image build{{if ne .Builds 1}}s{{end}} in {{.WindowLabel}}, <b>{{.Cached}}%</b> fully from the cache.{{if ne .Cached 100}} Rebuilds took <b>{{.Lost}}</b> of build time{{if .Farm}}; <b>{{.Farm}}%</b> of it because of the build farm, not the code{{end}}{{if .Unclear}}; for <b>{{.Unclear}}%</b> it is unclear whether files changed or the cache was elsewhere{{end}}.{{end}}{{if .Running}} {{.Running}} running now.{{end}}</p>
   {{if .Reasons}}
   <section class="box" aria-labelledby="naT"><div class="boxh"><h2 class="h" id="naT">Why images were rebuilt</h2><span class="muted">most build time first</span></div>
     <div class="rlist">{{range .Reasons}}<a class="rrow" href="{{.URL}}"><span class="rs">{{template "status" .Status}}</span><span class="rt">{{.Text}}</span><span class="ri muted">{{join .Images ", "}}{{if .More}} +{{.More}}{{end}} · last at {{.Last}}</span><span class="rn">{{.N}} build{{if ne .N 1}}s{{end}}</span><span class="rl">{{dur .Lost}}</span></a>{{end}}</div>
