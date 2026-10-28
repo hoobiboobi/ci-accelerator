@@ -776,6 +776,14 @@ func (f *Fetcher) Status() (until time.Time, err error) {
 // file's diff along with its path.
 const MaxCompare = 32 << 20
 
+// StatusError is GitLab answering a request with an error status.
+type StatusError struct {
+	URL, Status string
+	Code        int
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("gitlab: %s: %s", e.URL, e.Status) }
+
 // Changed returns the files that differ between two commits of a project
 // (GitLab's direct comparison, from..to), and whether the list is
 // complete: GitLab cuts it when the comparison is too large or too slow,
@@ -796,7 +804,7 @@ func (c *Client) Changed(ctx context.Context, cred Credential, instance string, 
 	}
 	if res.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, io.LimitReader(res.Body, 1<<16))
-		return nil, false, fmt.Errorf("gitlab: %s: %s", redact(u), res.Status)
+		return nil, false, &StatusError{URL: redact(u), Status: res.Status, Code: res.StatusCode}
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, MaxCompare+1))
 	if err != nil {

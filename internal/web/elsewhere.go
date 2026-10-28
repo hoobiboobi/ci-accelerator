@@ -123,7 +123,14 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 			calls--
 			files, complete, err := api.Changed(ctx, p.Instance, p.ID, k.from, k.to)
 			var rl *gitlab.RateLimited
-			if errors.As(err, &rl) || ctx.Err() != nil {
+			var se *gitlab.StatusError
+			switch {
+			case errors.As(err, &rl) || ctx.Err() != nil:
+				stop = err
+				continue
+			case err != nil && !(errors.As(err, &se) && se.Code >= 400 && se.Code < 500):
+				// GitLab or the network failed for now (5xx, a timeout): asked
+				// again on a later pass, never stored as unresolved.
 				stop = err
 				continue
 			}

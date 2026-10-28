@@ -103,7 +103,7 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 	if r := p.Reason; r.Kind == history.FilesChanged && viaVerified(p.Via) && !readsAny(r.Step.Name, r.Paths) {
 		// The first rebuilt step does not copy the changed files: a step
 		// before it does, and this one ran again on its new result.
-		if rd := firstReader(b.Steps, r.Step.Key, r.Paths); rd != nil {
+		if rd := firstReader(b.Steps, r.Step.Key, r.Paths, stageParents(p.Dockerfile)); rd != nil {
 			at := ""
 			if r.Step.Line > 0 {
 				at = fmt.Sprintf(" (Dockerfile line %d)", r.Step.Line)
@@ -348,7 +348,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		// The same node, another daemon: the node's daemon was replaced and
 		// its cache went with it; the job did not move.
 		if node := p.Nodes[r.Old]; node != "" && node == p.Nodes[b.Daemon] {
-			v.Verdict = replacedDaemon(v.Verdict, r, p.Via, d.Name, node, b.Daemon)
+			v.Verdict = replacedDaemon(v.Verdict, r, p.Via, d.Name, node, b.Daemon, p.Persists[r.Old])
 		}
 	}
 	if a.State == history.Attributed {
@@ -859,24 +859,64 @@ func readsAny(step string, ps []string) bool {
 	return false
 }
 
-// firstReader is the first step before the one keyed before that copies
-// any of the paths.
-func firstReader(steps []history.Step, before string, ps []string) *history.Step {
+// firstReader is the first step that copies any of the paths and that the
+// step keyed before builds on: an earlier step of its own stage or a step
+// of a stage it is built FROM (parents: stage -> the stage it starts from,
+// from the Dockerfile). Without parents, none: nothing is claimed.
+func firstReader(steps []history.Step, before string, ps []string, parents map[string]string) *history.Step {
+	if len(parents) == 0 {
+		return nil
+	}
+	own := strings.ToLower(stageOf(before))
+	below := map[string]bool{}
+	for st, seen := parents[own], map[string]bool{own: true}; st != "" && !seen[st]; st = parents[st] {
+		below[st], seen[st] = true, true
+	}
 	for i := range steps {
-		if steps[i].Key == before {
+		s := &steps[i]
+		if s.Key == before {
 			return nil
 		}
-		if readsAny(steps[i].Name, ps) {
-			return &steps[i]
+		if st := strings.ToLower(stageOf(s.Key)); (st == own || below[st]) && readsAny(s.Name, ps) {
+			return s
 		}
 	}
 	return nil
 }
 
+var fromLine = regexp.MustCompile(`(?i)^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?`)
+
+// stageParents maps each stage of a Dockerfile to the stage it starts
+// FROM, when that is a stage of the file (lowercase; unnamed stages are
+// stage-N as BuildKit names them).
+func stageParents(dockerfile string) map[string]string {
+	out := map[string]string{}
+	stages := map[string]bool{}
+	n := 0
+	for _, line := range strings.Split(dockerfile, "\n") {
+		m := fromLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		name := strings.ToLower(m[2])
+		if name == "" {
+			name = fmt.Sprintf("stage-%d", n)
+		}
+		n++
+		if from := strings.ToLower(m[1]); stages[from] {
+			out[name] = from
+		} else {
+			out[name] = ""
+		}
+		stages[name] = true
+	}
+	return out
+}
+
 // replacedDaemon says why a build ran again when its image's previous
 // build ran on the same node, under a daemon replaced since: the step did
 // not change, and the cache went with the old daemon.
-func replacedDaemon(v Verdict, r history.Reason, via string, name func(string) string, node, daemon string) Verdict {
+func replacedDaemon(v Verdict, r history.Reason, via string, name func(string) string, node, daemon string, persists bool) Verdict {
 	proof := ""
 	switch {
 	case strings.HasPrefix(via, "same commit"):
@@ -889,6 +929,15 @@ func replacedDaemon(v Verdict, r history.Reason, via string, name func(string) s
 	at := ""
 	if r.Step.Line > 0 {
 		at = fmt.Sprintf(" (Dockerfile line %d)", r.Step.Line)
+	}
+	if persists {
+		// The cache stayed on the node's disk with the new daemon: the
+		// step was no longer in it.
+		v.Title = "Rebuilt on the same node: its cache no longer had this step."
+		v.Detail = template.HTML(fmt.Sprintf("%s%s did not change%s. The image's previous build ran on daemon <b>%s</b> on node <b>%s</b>, whose cache is on the node's disk; <b>%s</b>, which replaced it there and builds this job, uses the same cache, and it no longer held the step (its garbage collection removes what was not used for a while, or the cache directory was emptied).",
+			code(r.Step.Name), at, proof, e(shortDaemon(r.Old)), e(node), e(shortDaemon(daemon))))
+		v.Hint = ""
+		return v
 	}
 	v.Title = "Rebuilt because the build daemon on this node was replaced, and its cache with it."
 	v.Detail = template.HTML(fmt.Sprintf("%s%s did not change%s. The image's previous build ran on daemon <b>%s</b> on node <b>%s</b>; that daemon was replaced there by <b>%s</b>, which builds this job (a rollout, an eviction or a deleted pod), and a daemon whose cache is not on a persistent volume starts empty.",

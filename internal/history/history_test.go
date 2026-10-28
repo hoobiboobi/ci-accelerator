@@ -366,6 +366,19 @@ func TestFailedStep(t *testing.T) {
 			t.Errorf("%s: old %q new %q", c.name, r.Old, r.New)
 		}
 	}
+	// A previous build that failed, or reported only the steps above a
+	// cache hit, cannot prove a step new.
+	newOne := failed(step("[web 3/4]", "RUN make test", "built", "exit code: 1"))
+	broken := *prev
+	broken.Error = "exit code: 2"
+	if _, ok := FailedStep(&broken, newOne); ok {
+		t.Error("new, after a failed previous build")
+	}
+	top := &Build{Steps: []Step{{Key: "[web 3/3]", Name: "RUN echo built", State: Cached, StepID: "step2"}},
+		prov: &Provenance{Lines: map[string]int{"step0": 1, "step1": 2, "step2": 3}}}
+	if _, ok := FailedStep(top, newOne); ok {
+		t.Error("new, after a previous build that reported one step of three")
+	}
 	if _, ok := FailedStep(nil, failed(step("[web 2/3]", "RUN make", "built", "exit code: 1"))); ok {
 		t.Error("explained without a previous build")
 	}

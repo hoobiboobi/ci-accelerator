@@ -441,11 +441,24 @@ func TestReadsAny(t *testing.T) {
 		}
 	}
 	steps := []history.Step{{Key: "[deps 1/2]", Name: "COPY deps.lock /src/deps.lock"}, {Key: "[deps 2/2]", Name: "RUN cp"}, {Key: "[auth 1/3]", Name: "COPY services/auth/ /src/auth/"}}
-	if r := firstReader(steps, "[auth 1/3]", []string{"deps.lock"}); r == nil || r.Key != "[deps 1/2]" {
+	df := "FROM busybox AS base\nFROM base AS deps\nCOPY deps.lock /src/deps.lock\nFROM deps AS auth\nCOPY services/auth/ /src/auth/\nFROM base AS other\nCOPY . .\n"
+	parents := stageParents(df)
+	if parents["auth"] != "deps" || parents["deps"] != "base" || parents["base"] != "" {
+		t.Fatalf("stages %v", parents)
+	}
+	if r := firstReader(steps, "[auth 1/3]", []string{"deps.lock"}, parents); r == nil || r.Key != "[deps 1/2]" {
 		t.Errorf("first reader %+v", r)
 	}
-	if r := firstReader(steps, "[deps 1/2]", []string{"deps.lock"}); r != nil {
+	if r := firstReader(steps, "[deps 1/2]", []string{"deps.lock"}, parents); r != nil {
 		t.Errorf("a reader after the step: %+v", r)
+	}
+	// A stage the step does not build on copies it too: not named.
+	unrelated := append([]history.Step{{Key: "[other 1/1]", Name: "COPY . ."}}, steps[2])
+	if r := firstReader(unrelated, "[auth 1/3]", []string{"deps.lock"}, parents); r != nil {
+		t.Errorf("a step of an unrelated stage named: %+v", r)
+	}
+	if r := firstReader(steps, "[auth 1/3]", []string{"deps.lock"}, nil); r != nil {
+		t.Errorf("named without the Dockerfile: %+v", r)
 	}
 }
 
@@ -453,9 +466,20 @@ func TestReadsAny(t *testing.T) {
 // the job ran on another node.
 func TestReplacedDaemonVerdict(t *testing.T) {
 	r := history.Reason{Kind: history.OtherNode, Step: history.Step{Name: "COPY services/auth/ /src/auth/", Line: 20}, Old: "glab-buildkit-nqspg", New: "glab-buildkit-qbjt5"}
-	v := replacedDaemon(Verdict{Title: "Rebuilt because this job ran on another build node."}, r, "same commit 0f0da36d", func(s string) string { return s }, "buildkit-worker", "glab-buildkit-qbjt5")
+	v := replacedDaemon(Verdict{Title: "Rebuilt because this job ran on another build node."}, r, "same commit 0f0da36d", func(s string) string { return s }, "buildkit-worker", "glab-buildkit-qbjt5", false)
 	if strings.Contains(string(v.Title), "another build node") || !strings.Contains(string(v.Title), "daemon on this node was replaced") ||
 		!strings.Contains(string(v.Detail), "same commit") || !strings.Contains(string(v.Detail), "<b>buildkit-worker</b>") || !strings.Contains(string(v.Hint), "hostPath") {
+		t.Errorf("%+v", v)
+	}
+}
+
+// With the cache on the node's disk the new daemon has the old one's
+// cache: the page must not say it went with the pod.
+func TestReplacedDaemonWithAPersistentCache(t *testing.T) {
+	r := history.Reason{Kind: history.OtherNode, Step: history.Step{Name: "RUN make"}, Old: "bk-a", New: "bk-b"}
+	v := replacedDaemon(Verdict{}, r, "same commit 0f0da36d", func(s string) string { return s }, "node-1", "bk-b", true)
+	if strings.Contains(string(v.Title), "cache with it") || strings.Contains(string(v.Detail), "starts empty") || strings.Contains(string(v.Hint), "hostPath") ||
+		!strings.Contains(string(v.Detail), "same cache") {
 		t.Errorf("%+v", v)
 	}
 }
