@@ -1,9 +1,11 @@
-# End-to-end checks on kind clusters: the scenarios in four groups of
-# about six minutes, each group on its own runner and cluster (setup runs
-# in every group). On pull requests to main, on pushes of work-in-progress
-# branches (wip/*), and on demand. The groups a change needs come from
-# changes.yml (scripts/ci-changes.sh): a Go change runs the two that run
-# the control plane, a chart change all four, documentation none.
+# End-to-end checks on kind clusters: the scenarios in groups of about six
+# minutes, each group on its own runner and cluster (setup runs in every
+# group). On pull requests to main, on pushes of work-in-progress branches
+# (wip/*), and on demand. The groups a change needs come from changes.yml
+# (scripts/ci-changes.sh): a Go change runs the two that run the control
+# plane, a chart change four, a change of the GitLab CI component also the
+# fifth (component: a real GitLab boots first, about ten minutes in all),
+# documentation none.
 name: e2e
 
 on:

@@ -13,6 +13,9 @@ on:
       go:
         description: "true when the Go jobs run (go test, the image, the browser checks, the control plane's e2e groups)"
         value: ${{ jobs.changes.outputs.go }}
+      component:
+        description: "true when the GitLab CI component runs in a real GitLab (its own files changed)"
+        value: ${{ jobs.changes.outputs.component }}
       e2e_matrix:
         description: "the e2e groups to run, as the JSON of the e2e matrix ([] for none)"
         value: ${{ jobs.changes.outputs.e2e_matrix }}
@@ -28,6 +31,7 @@ jobs:
     outputs:
       charts: ${{ steps.what.outputs.charts }}
       go: ${{ steps.what.outputs.go }}
+      component: ${{ steps.what.outputs.component }}
       e2e_matrix: ${{ steps.what.outputs.e2e_matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

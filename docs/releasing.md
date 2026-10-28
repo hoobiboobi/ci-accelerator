@@ -50,7 +50,7 @@ git push origin v<v>
 ```
 
 Tags `v*` cannot be moved or deleted once pushed. The workflow:
-- runs the checks again;
+- runs the checks again, checks that the GitLab CI component at the tag on GitHub is the file whose integrity the notes print and, when it changed since the previous release, has a real GitLab (CE at the oldest version the component claims and at the runner's minor) read it from there (`make component-gitlab-test` with `COMPONENT_URL`); a GitLab that refuses it stops the release;
 - packages the three charts (ci-accelerator, buildkit, control-plane) reproducibly (Helm 4, `SOURCE_DATE_EPOCH` = the commit's time);
 - builds the ci-accelerator image (every role: controller, web, router, disk probe) for amd64 and arm64 (`scripts/build-image.sh`, the same build the checks run on pull requests that touch the Go code or the image's recipe) and pushes it as `ghcr.io/hoobiboobi/ci-accelerator:v<v>`;
 - pushes the charts to `oci://ghcr.io/hoobiboobi/charts` and signs all four artifacts with cosign right after;
@@ -88,6 +88,7 @@ A package pushed for the first time is private: make it public under the reposit
 Open a pull request that moves the upgrade test to the new release. In `test/e2e/run.sh`, set:
 - `UPGRADE_FROM=<v>`;
 - `UPGRADE_FROM_SHA256` and `UPGRADE_FROM_BUILDKIT_SHA256` to the ci-accelerator and buildkit lines of the release's `SHA256SUMS`;
+- add the line `v<v>: <the ci-accelerator image's digest from the release notes>` to the released images in both `charts/buildkit/templates/_helpers.tpl` and `charts/control-plane/templates/_helpers.tpl` (a digest pinned for one release is refused under another's tag; `make lint` checks both lists agree and hold `UPGRADE_FROM`, and the upgrade scenario installs the release pinned to it);
 - `UPGRADE_ROLLOUT_EXPECTED` back to `0`, unless `main` already holds a change that restarts the daemons on purpose;
 - `test/e2e/box-values-old.yaml` to what the new release needs on kind (tolerations for what runs on the control-plane node, small volumes). From 0.2.x the scenario checks the refusal and the reinstall; from 0.3.0 on it upgrades in place and rolls back. `UPGRADE_FROM_DIR` and `UPGRADE_FROM_VALUES` rehearse the in-place path against a packaged tree before a release.
 

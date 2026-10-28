@@ -115,9 +115,33 @@ jobs:
           persist-credentials: false
 
       # The job's script in its own image against a fake buildctl, and the
-      # README and the daemons' pin kept in step with the component.
+      # README, the box's notes and the daemons' pin kept in step with it.
       - name: Component tests
         run: make component-test
+
+  # GitLab itself reads the component: CI lint and pipeline simulation of
+  # includes with every kind of input, and inputs it must refuse. A GitLab
+  # boots for minutes, so only when the component's own files changed.
+  component-gitlab:
+    name: GitLab CI component in GitLab ${{ matrix.gitlab }}
+    needs: changes
+    if: needs.changes.outputs.component == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest GitLab the component claims (17.9) and the runner's minor.
+        gitlab: [min, current]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The component in a real GitLab
+        env:
+          GITLAB: ${{ matrix.gitlab }}
+        run: make component-gitlab-test
 
   ui:
     name: browser checks
@@ -150,7 +174,7 @@ jobs:
   # or when it could not be told what to run.
   passed:
     name: checks passed
-    needs: [changes, checks, go, image, component, ui]
+    needs: [changes, checks, go, image, component, component-gitlab, ui]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
