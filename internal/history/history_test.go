@@ -444,3 +444,20 @@ func TestExecutedTime(t *testing.T) {
 		t.Errorf("no steps: %v", got)
 	}
 }
+
+// A step whose text changed only by a build argument's value (the
+// argument reached it through an ENV) is the argument's change.
+func TestArgInText(t *testing.T) {
+	prev := &Build{BuildArgs: map[string]string{"CI_COMMIT_SHORT_SHA": "aa405e4c", "MODE": "x"}}
+	cur := &Build{BuildArgs: map[string]string{"CI_COMMIT_SHORT_SHA": "a4f61319", "MODE": "x"}}
+	k, o, n, ok := argInText(prev, cur, `RUN echo "aa405e4c" > /app/version`, `RUN echo "a4f61319" > /app/version`)
+	if !ok || k != "CI_COMMIT_SHORT_SHA" || o != "aa405e4c" || n != "a4f61319" {
+		t.Errorf("%v %q %q %q", ok, k, o, n)
+	}
+	if _, _, _, ok := argInText(prev, cur, `RUN echo "aa405e4c" > /app/version`, `RUN echo "a4f61319" > /app/other`); ok {
+		t.Error("a text that changed more than the argument")
+	}
+	if _, _, _, ok := argInText(prev, prev, `RUN a`, `RUN b`); ok {
+		t.Error("no argument changed")
+	}
+}

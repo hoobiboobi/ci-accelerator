@@ -155,6 +155,12 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				}
 				return Reason{Kind: ArgChanged, Step: s, Arg: args[0], Old: o, New: n}, true
 			}
+			if k, o, n, ok := argInText(prev, cur, p.Name, s.Name); ok {
+				if SecretArg(k) {
+					o, n = Masked, Masked
+				}
+				return Reason{Kind: ArgChanged, Step: s, Arg: k, Old: o, New: n}, true
+			}
 			return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: s.Name}, true
 		}
 		// Same operation, different inputs: an earlier step changed but was
@@ -162,6 +168,28 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: s.Name}, true
 	}
 	return Reason{}, false
+}
+
+// argInText finds a build argument whose change alone turns one step text
+// into the other: BuildKit writes a step's text with the variables it uses
+// already replaced (an ENV set from an ARG, "RUN echo $VERSION"), so the
+// Dockerfile line is the same while the text carries the new value.
+func argInText(prev, cur *Build, old, new string) (name, from, to string, ok bool) {
+	names := make([]string, 0, len(cur.BuildArgs))
+	for k := range cur.BuildArgs {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		a, b := prev.BuildArgs[k], cur.BuildArgs[k]
+		if a == "" || b == "" || a == b || !strings.Contains(old, a) {
+			continue
+		}
+		if strings.ReplaceAll(old, a, b) == new {
+			return k, a, b, true
+		}
+	}
+	return "", "", "", false
 }
 
 // FailedStep explains a failed build by the step that failed. BuildKit
