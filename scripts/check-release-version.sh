@@ -69,8 +69,8 @@ done
 qs_helm=$(awk -F= '/^HELM_VERSION=/ {print $2; exit}' "$ROOT/scripts/quickstart.sh")
 grep -qF -- "/helm-$qs_helm/helm upgrade" "$ROOT/README.md" \
   || { echo "README.md: the quickstart upgrade command does not use helm-$qs_helm (scripts/quickstart.sh HELM_VERSION)" >&2; fail=1; }
-# The GitOps examples install this release (Flux version, Argo CD targetRevision).
-for pat in "      version: $version" "targetRevision: $version\`"; do
+# The GitOps examples install this release (Flux OCIRepository tag, Argo CD targetRevision).
+for pat in "ref: { tag: $version }" "    targetRevision: $version"; do
   grep -qF -- "$pat" "$ROOT/docs/gitops.md" || { echo "docs/gitops.md does not mention '$pat'" >&2; fail=1; }
 done
 # Artifact Hub shows the umbrella's change list on the version page; it is

@@ -1,10 +1,19 @@
 # GitLab CI component: build an image on the build farm
 
 `ci/gitlab/build.yml` is a GitLab CI/CD component: one job that sends the
-build context to the BuildKit daemon on its build node, which builds with
-the shared cache and pushes the image. The job itself only waits; it needs
-a runner set up by the box (or by `integrations/gitlab-runner`), which
-gives job pods `BUILDKIT_REMOTE_ADDR` and a client certificate.
+build context to a BuildKit daemon of the build farm, which builds with the
+shared cache and pushes the image. The job itself only waits; it needs a
+runner set up by the box (or by
+[integrations/gitlab-runner](../../integrations/gitlab-runner/README.md)),
+which gives job pods `BUILDKIT_REMOTE_ADDR` and a client certificate.
+
+In the box, `BUILDKIT_REMOTE_ADDR` is the build router
+(`tcp://<release>-router.<namespace>.svc:1234`): it sends the job to the
+node where its project built before, else to the project's node by a hash
+every router agrees on, so the jobs of a pipeline share one daemon's cache
+and steps. The job's mutual TLS with the daemon passes through it. The
+console's build page says which node built and why. Without the router,
+the job reaches the daemon on its own node.
 
 What the job does for you:
 
@@ -12,8 +21,9 @@ What the job does for you:
   `DOCKER_AUTH_CONFIG`, which would otherwise override that token for the
   same registry and break the push;
 - passes secrets by the name of a CI/CD variable, never as build arguments;
-- stops the build after `timeout-minutes` (buildctl has no keepalive: a build
-  node that disappears silently would hold the job until its own timeout);
+- stops the build after `timeout-minutes` (buildctl has no keepalive of
+  its own: a build node that disappears without closing the connection
+  could hold the job until GitLab's job timeout);
 - prints how much context it sent and how many Dockerfile steps came from
   the cache;
 - hands the image digest to later jobs (`IMAGE`, `IMAGE_DIGEST`,
@@ -23,7 +33,8 @@ What the job does for you:
 
 From GitHub, pinned to a release and checked by its hash (GitLab 17.9 or
 newer; without `integrity`, 17.0). Every release's notes print this block
-with the hash filled in:
+with the hash filled in; use the release that matches your box, so the
+job's BuildKit client matches the daemons:
 
 ```yaml
 include:
@@ -123,15 +134,18 @@ value outside `options` stops the pipeline before it starts.
 | `provenance` | `false` | Attach a SLSA provenance attestation |
 | `timeout-minutes` | `60` | Stop the build after this |
 | `buildctl-args` | | More `buildctl build` arguments, one per line |
-| `buildkit-image` | the daemons' release | Image with buildctl for the job |
+| `buildkit-image` | `moby/buildkit:v0.34.1` by digest | Image with buildctl for the job; keep it at the daemons' BuildKit release |
 
 Values may use CI/CD variables (`$CI_COMMIT_REF_SLUG`); write `$$` for a
 literal `$`.
 
 ## Limits
 
-- The cache is per daemon: a project's first build on each build node is
-  cold.
+- The cache is per daemon. Through the build router a project's builds go
+  to the node where it built before, so only its first build (with zones
+  on, its first in each zone) is cold; when that node's daemon is not
+  ready, the build goes to another one. Without the router a project's
+  first build on each build node is cold.
 - Secrets reach RUN steps through BuildKit's secret mounts; build
   arguments do not, and they end up in the image history and in traces.
 - Only Dockerfile builds (`dockerfile.v0`); other frontends through

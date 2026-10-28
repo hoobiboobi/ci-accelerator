@@ -11,6 +11,28 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Changed
+
+- The documentation describes 0.3.0 throughout: the build router and the
+  control plane (controller and web) in the README, the architecture
+  (with a new components diagram), troubleshooting (the router, the
+  logs, reinstalling over 0.2.x), GitOps, the runner cache, the values
+  fragment for an existing runner, the CI component, the charts' READMEs
+  and SECURITY.md.
+- The CI component's description and the comments on the gitlab-runner
+  image tag name what 0.3.0 does (the router; runner 19.4.2).
+
+### Removed
+
+- docs/design/cache-per-project.md: it described the per-project cache
+  accounting that 0.3.0 dropped.
+
+### Fixed
+
+- The release notes said `--set control-plane.enabled=false` leaves the
+  console out; the router is part of it, so `global.router.enabled=false`
+  is needed too, or the install fails.
+
 ## 0.3.0 - 2026-10-28
 
 ### Upgrade notes

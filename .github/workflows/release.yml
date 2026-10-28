@@ -145,7 +145,7 @@ jobs:
             echo "helm install ci-accelerator oci://$CHARTS_REPO/ci-accelerator --version $VERSION ..."
             echo '```'
             echo
-            echo "The control plane (the console's controller and web) is on by default and needs a default StorageClass (or \`control-plane.controller.persistence.storageClass\`); \`--set control-plane.enabled=false\` leaves it out."
+            echo "The control plane (the console's controller and web) is on by default and needs a default StorageClass (or \`control-plane.controller.persistence.storageClass\`); \`--set control-plane.enabled=false --set global.router.enabled=false\` leaves it out (the build router is part of it)."
             echo
             echo "To try it on one clean Linux machine (k3s, cert-manager and the box with its console):"
             echo

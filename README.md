@@ -4,11 +4,12 @@ A self-hosted fast CI runner for GitLab, on your own Kubernetes cluster.
 
 You give it a GitLab URL and a runner token. You get a runner whose jobs
 build container images on persistent BuildKit daemons with a warm, shared
-cache, and a build console that tells why a build was slow or missed the
-cache. The daemons can also push their metrics and traces over OTLP to a
-backend you already run. Hosted services such as Depot, Namespace or Docker
-Build Cloud do this for you; this project does it on hardware you already
-run.
+cache, a build router that sends each project's builds to the node where
+its cache is, and a build console that tells why a build was slow or
+missed the cache. The daemons can also push their metrics and traces over
+OTLP to a backend you already run. Hosted services such as Depot,
+Namespace or Docker Build Cloud do this for you; this project does it on
+hardware you already run.
 
 > **Status:** v0.3.0 is released: signed charts and the ci-accelerator image on
 > ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
@@ -26,7 +27,8 @@ did. ci-accelerator keeps the build engine running between jobs instead:
   waits. The daemon builds and pushes the image.
 - **Each project builds where its cache is.** A router sends every job to
   the build node where its project built before, so a project's cache
-  warms up once, not once per node.
+  warms up once, not once per node. A new project's parallel jobs meet on
+  one daemon.
 - **Identical work runs once.** BuildKit deduplicates identical steps
   across concurrent builds. Ten parallel jobs of one pipeline that share a
   `yarn install` step run it once.
@@ -47,31 +49,49 @@ Numbers from the production setup this project is derived from:
  GitLab ──────► gitlab-runner ─────────► CI job pod (jobs namespace, on a build node)
                                               │  buildctl, mutual TLS (passed through)
                                               ▼
-                     build router on the job's node ── picks the node where the project is warm
+                     build router (every build node) ◄── where each project built (controller)
+                                              │  picks the node where the project is warm
                                               ▼
                      buildkit daemon ── local cache
                                               │
-                                              ├── build history ──► console (optional)
+                                              ├── build history ──► controller ──► web: the console
                                               └── OTLP ───────────► your backend: metrics, traces (optional)
 ```
 
 - **BuildKit daemons:** a DaemonSet on the nodes labelled
-  `ci-accelerator.io/node-role=build` (`charts/buildkit`).
-- **The build router:** on every build node (part of the control plane).
-  Jobs connect to it, and it sends each job to the daemon whose cache
-  holds the project's layers; a new project goes to its daemon by a hash
-  every router agrees on, so the parallel jobs of a pipeline share one
-  daemon's steps. It passes the jobs' TLS through and holds no key.
+  `ci-accelerator.io/node-role=build` (`charts/buildkit`, BuildKit
+  v0.34.1, pinned by digest), each with a small disk probe next to it
+  that reports the cache disk's size and free space for the console.
+- **The control plane** (`charts/control-plane`): one image,
+  `ghcr.io/hoobiboobi/ci-accelerator`, in three roles:
+  - the **build router**, a DaemonSet on every build node behind the
+    Service `<release>-router`. Jobs connect to it, and it sends each job
+    to the daemon on the node where its project built in the last week;
+    a project that has not built in the job's zone yet goes to its daemon
+    by a hash every router agrees on, so the parallel jobs of a pipeline
+    share one daemon's steps. It passes the jobs' TLS through and holds no
+    key ([ADR-0045](docs/adr/0045-build-router.md));
+  - the **controller**, one pod (Deployment `<release>-controller`): it
+    reads every daemon's build history and the CI job pods into its own
+    store (SQLite on a volume), holds the sign-in sessions and every
+    GitLab token, and tells the routers where each project built;
+  - the **web**, any number of pods (Deployment and Service
+    `<release>-web`, two pods by default): the console's pages. It keeps
+    nothing and reads the controller's API over HTTPS
+    ([ADR-0044](docs/adr/0044-control-plane.md)).
 - **The official gitlab-runner chart,** configured so that job pods:
   - run on the build nodes, in their own namespace;
-  - get `BUILDKIT_REMOTE_ADDR` and a client certificate (`BUILDKIT_TLS_DIR`);
+  - get `BUILDKIT_REMOTE_ADDR` (the router's Service) and a client
+    certificate (`BUILDKIT_TLS_DIR`);
   - use a small resource tier: the work happens in the daemon.
 - **Mutual TLS** between jobs and daemons, issued by cert-manager with a CA
   dedicated to this installation. Without it, any build could drive its own
   daemon.
-- **NetworkPolicies:** daemons accept connections only from the routers
-  and the controller, the routers only from the jobs namespace, and builds
-  cannot reach cloud instance metadata.
+- **NetworkPolicies:** the daemons accept connections only from the
+  routers and the controller, the routers only from the jobs namespace,
+  the controller only from the web and the routers, and the web from
+  neither the jobs namespace nor the daemons. Builds cannot reach cloud
+  instance metadata.
 - **Metrics and traces over OTLP (optional):** the daemons push them to
   your own backend (`buildkit.otel.*`). The box stores none of it; build
   times and cache answers are in the console.
@@ -79,45 +99,85 @@ Numbers from the production setup this project is derived from:
   bucket, and more runners (tiers) with their own tags, job size,
   placement and cache, each its own pod
   ([docs/runner-cache.md](docs/runner-cache.md)).
-- **The console (on by default; `control-plane.enabled=false` leaves it out):** why
-  an image build was slow or not cached, and whether your change or the
-  build farm caused it. Five sections:
-  - Overview: rebuild reasons, ranked by the build time they cost;
-  - Pipelines: each pipeline's jobs by stage on a time axis, with how long
-    each waited for a runner and ran, searchable by pipeline number, commit,
-    title, branch, author or job name within a period (24 hours, 7 or 30
-    days, or dates). A pipeline opens into a waterfall of every job, and its
-    image builds into stages and steps;
-  - Builds: every image build, filtered by branch, outcome, image or your
-    own, and grouped by pipeline if you like;
-  - Images: cache rate and build time per image over 24 hours or 7 days;
-    one image's page goes back 24 hours, 7 days, 30 days or a year;
-  - Nodes: each daemon's builds and running builds, how the build router
-    chose it (to the project's cache, by hash), its cache by kind and its
-    GC policies, its disk (cache, other files, free space, inodes) with a
-    warning near the GC's keep-free floor or the kubelet's eviction
-    thresholds, and the runners' S3 cache per project, with a warning when
-    the bucket has no lifecycle rule.
-
-  Every build gets one of five outcomes: from cache, your change, build
-  farm, unclear or failed. A build's page starts with one sentence, then
-  what changed since the previous build of the image (or any other build
-  of it, side by side), then its steps with what each one's processes
-  used, BuildKit's Dockerfile build checks that failed, and where the
-  job's time went before the build (the runner, its pod starting, the
-  checkout). Every figure is measured, not estimated; medians and p95
-  are always one of the measured times.
-  Every job's log can link to its page (`global.console.url`). Jobs that
-  build no image stay in GitLab. With sign-in through GitLab
-  (`control-plane.signIn`), each person sees the projects whose jobs GitLab lets
-  them read; without it, keep it inside the cluster (`kubectl
-  port-forward`).
 
 Each part is usable on its own:
 
-- **Only the daemons:** `charts/buildkit`.
+- **Only the daemons:** `charts/buildkit`
+  (`oci://ghcr.io/hoobiboobi/charts/buildkit`).
+- **The control plane for daemons installed with `charts/buildkit`:**
+  `charts/control-plane` (`oci://ghcr.io/hoobiboobi/charts/control-plane`).
 - **An existing gitlab-runner:** the values fragment in
   [integrations/gitlab-runner](integrations/gitlab-runner/README.md).
+
+### The console
+
+The console is on by default. It tells why an image build was slow or not
+cached, and whether your change or the build farm caused it. Leaving it
+out takes the router with it: set `control-plane.enabled=false` and
+`global.router.enabled=false`, and the jobs connect to the daemons'
+Service (their own node's daemon). Five sections:
+
+- **Overview:** why images were rebuilt, the reasons ranked by the build
+  time they cost, with the build farm's share of the rebuild time and,
+  apart, the unclear share.
+- **Pipelines:** each pipeline's jobs by stage on a time axis, with how
+  long each waited for a runner and ran, searchable by pipeline number,
+  commit, title, branch, author or job name within a period (24 hours, 7
+  or 30 days, or dates). A pipeline opens into a waterfall of every job,
+  and its image builds into stages and steps.
+- **Builds:** every image build, filtered by branch, outcome, image or
+  your own, and grouped by pipeline if you like.
+- **Images:** cache rate and build time per image over 24 hours or 7
+  days; one image's page goes back 24 hours, 7 days, 30 days or a year.
+- **Nodes:** one table of the daemons, the ones that need attention first
+  (not reachable, a disk warning, a cache that could not be read; a filter
+  shows only those), with disk, cache, builds, rebuilds for want of cache,
+  running builds, projects and the build router's decisions; one note per
+  problem, naming its nodes; where the project you are looking at built in
+  the last 24 hours; base images held by more than one node; and the
+  runners' S3 cache per project, with a warning when the bucket has no
+  lifecycle rule. Each daemon has its own page: its builds, running
+  builds, cache by kind and largest cache mounts, its disk (cache, other
+  files, free space) with a warning near the GC's keep-free floor or the
+  kubelet's eviction thresholds, why the router sent builds there, its
+  garbage collection and the projects it built for.
+
+Every build gets one of five outcomes: from cache, your change, build
+farm, unclear or failed. A build's page starts with one sentence, then:
+
+- what changed since the previous build of the image: commit, node,
+  Dockerfile lines, build arguments, base image, the files a rebuilt step
+  copies (a build argument that reaches a step through `ENV` counts as
+  that argument's change);
+- its steps, with what each one's processes used (CPU time, time held
+  back by a CPU limit, disk read and written, from BuildKit's cgroup
+  totals) and how much step time ran in parallel;
+- BuildKit's Dockerfile build checks that failed (rule, line, link);
+- for a failed build, whether the step that failed is new or changed;
+  exit codes 137 and 143 are read as the signals they are;
+- where the job's time went before the build, from the job pod's own
+  timestamps: the runner preparing the pod, the pod starting, the runner
+  attaching, checkout and script;
+- why the build router chose its node. A rebuild on the same node under a
+  replaced daemon says so, and whether its cache survived.
+
+**Compare** any two builds of an image side by side
+(`/builds/<id>/compare`): time, commit, node, build arguments, the
+Dockerfiles' differing lines and every step's state and time. The Compare
+button on a build's page (key `x`), "Compare two builds" on the builds
+list, "compare two" on an image's page and Ctrl+K lead there.
+
+Every figure is measured, not estimated. Medians and p95 are nearest-rank
+percentiles, so always one of the measured times; "usual" needs five
+builds of its kind and a p95 twenty rebuilds (a dash until then). The
+time a cached build saved is how long the steps it did not run took when
+they last ran, and sizes are in binary units (KiB, MiB, GiB). Every
+job's log can link to its page in the console (`global.console.url`). Jobs that
+build no image stay in GitLab. With sign-in through GitLab
+(`control-plane.signIn`), each person sees the projects whose jobs GitLab
+lets them read; without it, keep the console inside the cluster (`kubectl
+port-forward`). [Setting up the console](#setting-up-the-console) has the
+three levels.
 
 ## Quickstart
 
@@ -139,28 +199,36 @@ sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
 `quickstart.sh` installs the following; k3s, Helm, cert-manager and the
 chart are pinned and checked against their sha256 (the box's images come
 by tag, the daemons' by digest):
-- k3s, with the machine as its only node and build node;
-- Helm and cert-manager;
-- the box, with the build console. The daemon's resources are sized from
+- k3s v1.36.5+k3s1, with the machine as its only node and build node;
+- Helm v4.3.1 and cert-manager v1.21.3;
+- the box, with the build router and the console. The daemon keeps its
+  cache in `/var/lib/ci-accelerator/buildkit` (a hostPath, so it survives
+  restarts; `--build-dir` puts it elsewhere). Its resources are sized from
   the machine on the first install (half its CPUs and a quarter of its
   memory requested, three quarters of the memory at most) and kept in
-  `/var/lib/ci-accelerator/values.yaml`.
+  `/var/lib/ci-accelerator/values.yaml`, which later runs leave alone.
 
-It prints the job to add to `.gitlab-ci.yml` and the SSH tunnel to the
+It prints a job to add to `.gitlab-ci.yml` and the SSH tunnel to the
 console. The console starts in its first level (builds only, no GitLab
-access; see [The console](#the-console)): `--gitlab-token-file` adds job
-results and runner waits, and sign-in through GitLab works on this box
-too. `sudo bash quickstart.sh --uninstall` removes everything again. It
-is not meant for production: one node, no high availability.
+access; see [Setting up the console](#setting-up-the-console)):
+`--gitlab-token-file` adds job results and runner waits, and sign-in
+through GitLab works on this box too. A machine that runs 0.2.x is not
+upgraded in place: the script stops and says what to do (see
+[Upgrading](#upgrading)). `sudo bash quickstart.sh --uninstall` removes
+everything again. It is not meant for production: one node, no high
+availability.
 
 ### Requirements
 
 - **Kubernetes 1.34 or newer.** Same-node routing (`PreferSameNode`) needs
   kube-proxy 1.34+ or a proxy that implements it.
-- **Build nodes:** one or more, labelled and tainted. Daemons and job pods
-  run only there. The runner manager (and the console, if enabled) run on
-  the other nodes: keep at least one node without the taint (or see
+- **Build nodes:** one or more, labelled and tainted. The daemons, the
+  build routers and the job pods run only there. The runner manager and
+  the console's controller and web run on the other nodes: keep at least
+  one node without the taint (or see
   [troubleshooting](docs/troubleshooting.md#the-runner) for tolerations).
+  Nodes in several zones (`topology.kubernetes.io/zone`) keep each job's
+  builds in its zone; see [Limitations](#limitations).
 
   ```sh
   kubectl label node <node> ci-accelerator.io/node-role=build
@@ -177,7 +245,8 @@ is not meant for production: one node, no high availability.
 - **A default StorageClass,** for the controller's volume (or set
   `control-plane.controller.persistence.storageClass` or
   `control-plane.controller.persistence.existingClaim`, or leave the
-  console out with `control-plane.enabled=false`).
+  control plane out with `control-plane.enabled=false` and
+  `global.router.enabled=false`).
 - **A CNI that enforces NetworkPolicy** (Calico, Cilium, kindnet, ...).
   Without one, the daemons accept connections from any namespace and builds
   can reach cloud instance metadata; mutual TLS still applies.
@@ -186,8 +255,8 @@ is not meant for production: one node, no high availability.
   Without that permission set `buildkit.priorityClass.create=false`, or name
   an existing class in `buildkit.priorityClassName`.
 - **Permission to create a ClusterRole and its binding** for the control
-  plane: the controller checks the tokens of the web's pods with a
-  TokenReview, its only cluster-wide right.
+  plane: the controller checks the ServiceAccount tokens of the web and
+  the routers with a TokenReview, its only cluster-wide right.
 - **Daemon resources:** the defaults (500m CPU, 512Mi requested) only keep
   the daemons out of BestEffort; size `buildkit.resources` to your build
   nodes (the chart's values list sizes).
@@ -226,7 +295,7 @@ helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --ver
 
 The package contains its subcharts. From a clone instead: `make deps`, then
 `helm install ci-accelerator charts/ci-accelerator ...` with the same
-values. The daemons alone: `oci://ghcr.io/hoobiboobi/charts/buildkit`.
+values.
 
 - **Defaults:** amd64 build nodes, jobs in namespace `ci-accelerator-jobs`
   (created by the release), the build cache in an `emptyDir` (see below).
@@ -234,6 +303,12 @@ values. The daemons alone: `oci://ghcr.io/hoobiboobi/charts/buildkit`.
 - **Production:** pin the control plane's image by digest with
   `--set control-plane.image.digest=sha256:...` (the release notes list
   it); the daemons' image is pinned by digest already.
+- **Without cert-manager:** `buildkit.tls.source=existingSecret` with four
+  certificates from one CA that `scripts/buildkit-certs.sh` makes (the
+  daemons' with the router's names, the jobs' client, the controller's
+  client and the controller API's server certificate); the jobs namespace
+  is then yours to create, with the jobs' client Secret in it
+  ([docs/gitops.md](docs/gitops.md#certificates-without-cert-manager)).
 - **GitOps:** [docs/gitops.md](docs/gitops.md) shows the same install as
   a Flux `HelmRelease` and an Argo CD `Application`.
 
@@ -311,21 +386,22 @@ Without the component, call buildctl yourself: `buildctl --addr
 buildctl reads that variable too, and a read-only entry in it overrides the
 job's credentials.
 
-### The console
+### Setting up the console
 
 The console is on by default. The control plane serves it: a controller
 (Deployment `<release>-controller`, one pod: the store, the sessions,
 every GitLab token) and a web (Deployment and Service `<release>-web`, two
-pods serving the pages), which reads the controller's API; see
-[the architecture](docs/architecture.md#the-console). It works in three
-levels; each adds to the previous one, and the install notes say which is
-on.
+pods serving the pages), which reads the controller's API over HTTPS and
+proves who it is with a ServiceAccount token; see
+[the architecture](docs/architecture.md#the-control-plane-and-the-console).
+It works in three levels; each adds to the previous one, and the install
+notes say which is on.
 
 | | by itself (default) | with a GitLab token | with sign-in |
 |---|---|---|---|
 | image builds, steps, cache verdicts, what changed, pipeline timeline | yes | yes | yes |
 | job results, how long jobs waited for a runner, "N other jobs" | no | yes | yes |
-| "files or node" settled by comparing the two commits, end of a job's log | no | yes | yes |
+| "files or node" settled by comparing the two commits, end of a job's log | no | yes, in the background too | yes, while pages are open |
 | why the build router chose a build's node | yes | yes | yes |
 | who sees what | everyone who reaches it | everyone who reaches it | each person: the projects GitLab lets them read |
 | the console reads GitLab with | nothing | one shared token | each person's own token |
@@ -341,7 +417,12 @@ everything: keep it inside the cluster and reach it with
 one-machine install prints its SSH tunnel).
 
 **2. With a GitLab token.** One token with `read_api` for all viewers.
-Put it into a Secret and name it in the values:
+The controller reads with it each pipeline's jobs while pages show it,
+asks GitLab to compare the commits of a rebuild whose cache was on
+another node (in the background, at most 25 requests a minute per
+project; GitLab's answers are stored, so they settle the build again
+after a restart) and reads the end of a job's log on request. Put it
+into a Secret and name it in the values:
 
 ```sh
 kubectl -n ci-accelerator create secret generic gitlab-api-token --from-literal=token=glpat-...
@@ -418,6 +499,29 @@ reaches over https.
 
 Every key is in [charts/control-plane/values.yaml](charts/control-plane/values.yaml).
 
+### Logs
+
+Every role of the control plane (controller, web, router, disk probe)
+writes one JSON object per line with its `role`: when it starts (with the
+settings it runs with), is ready, stops and has stopped, and a line per
+stored build, job start and end, change of the daemons, sign-in and
+sign-out and routed connection. To see where the router sent jobs:
+
+```sh
+kubectl -n ci-accelerator logs ds/ci-accelerator-router | grep routed
+```
+
+`control-plane.log.level=debug` (or one role's
+`control-plane.<controller|web|router>.logLevel`) adds every request,
+GitLab call, controller API call and closed router connection;
+`control-plane.log.format=text` is easier to read by eye. BuildKit's own
+log is `buildkit.config.log.level`/`format` and the disk probe's
+`buildkit.diskProbe.logLevel`; both are empty by default, and setting
+them restarts every daemon once. No log carries a token, a cookie, a query
+string, a build argument or step output, and anything shaped like a
+GitLab token is masked. Which command reads which pod:
+[troubleshooting](docs/troubleshooting.md#reading-the-logs).
+
 ### Sending metrics and traces to your backend
 
 The box keeps no metrics or traces. To keep them, point the daemons at your
@@ -459,21 +563,46 @@ helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --ver
 
 `--reset-then-reuse-values` keeps your values and takes the new version's
 defaults for everything else. The end-to-end tests upgrade the previous
-release this way before every change is merged
+release this way before every change to the charts or the code is merged
 ([ADR-0027](docs/adr/0027-upgrades-and-branches.md)).
 
 **From 0.2.x to 0.3.0: install again.** 0.3.0 split the console into the
-control plane (chart `control-plane`, image `ci-accelerator`, a controller
-and a web) and gave every object and value of it a new name, so Helm
-refuses to upgrade a 0.2.x release in place and says how to move: remove
-the release (`helm uninstall ci-accelerator -n ci-accelerator --wait`),
-wait until its pods are gone, move the values under `console:` to
-`control-plane:` (the controller's pod settings and volume under
-`control-plane.controller`, the web's under `control-plane.web`), and
-install 0.3.0. The daemons' cache on a hostPath stays, and so does the old
-console's volume (`<release>-console-data`) until you delete it; the new
-console starts with an empty history. The one-machine install stops with
-the same steps.
+control plane (chart `control-plane`, image
+`ghcr.io/hoobiboobi/ci-accelerator`, a controller, a web and the build
+router) and gave every object and value of it a new name, so Helm refuses
+to upgrade a 0.2.x release in place and says how to move:
+
+1. Remove the release and wait until its pods are gone (the jobs
+   namespace goes with it), then delete the daemons' certificate Secret:
+   it outlives the release, and 0.3.0's must name the build router.
+
+   ```sh
+   helm uninstall ci-accelerator -n ci-accelerator --wait
+   kubectl -n ci-accelerator wait --for=delete pod -l app.kubernetes.io/instance=ci-accelerator --timeout=10m
+   kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls
+   ```
+
+   Without cert-manager, make it again from the same CA with
+   `scripts/buildkit-certs.sh --router <release>` (the runbook below has
+   the whole command).
+2. Move your values from `console:` to `control-plane:`: the controller's
+   pod settings and volume under `control-plane.controller`, the web's
+   under `control-plane.web`; a runner cache's `consoleSecretName` is now
+   `controllerSecretName`. A runner of your own (the values fragment) sets
+   `BUILDKIT_REMOTE_ADDR` to the router,
+   `tcp://<release>-router.<namespace>.svc:1234`.
+3. Install 0.3.0 (without cert-manager, also the controller API's
+   certificate: `control-plane.controller.api.tls.existingSecret`).
+4. Point port-forwards, Ingresses and `global.console.url` at the Service
+   `<release>-web` (it was `<release>-console`).
+
+The daemons' cache on a hostPath stays. The new console starts with an
+empty history; the old one stays on the volume `<release>-console-data`
+until you delete it. The one-machine install stops with the same steps;
+GitOps tools delete the release and create it again with the new values.
+`charts/buildkit` installed on its own upgrades in place; its daemons
+restart once. Step by step:
+[troubleshooting](docs/troubleshooting.md#upgrading-from-02x-to-030).
 
 **From 0.1.0:** the box no longer installs VictoriaMetrics and
 VictoriaTraces. Helm removes them on upgrade, but their volumes stay until
@@ -506,8 +635,8 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   its pods, so list the control-plane node addresses too.
 - **The disk probe's numbers are readable by builds.** The box runs a small
   container next to each daemon that reports the cache disk's size and free
-  space on port 9180 for the console; builds share the pod's network and can
-  read those numbers too.
+  space on port 9180 for the controller; builds share the pod's network and
+  can read those numbers too.
 - **Trace data is untrusted.** Any build (a RUN step) can write spans
   through BuildKit, so traces in your backend are input from builds. The
   buildctl command line, build-arg values included, is recorded in traces:
@@ -516,23 +645,43 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   accepted. By default cert-manager lets namespace editors request
   certificates from any ClusterIssuer; on a shared cluster restrict that,
   e.g. with cert-manager approver-policy.
+- **The router places builds; it does not authorize them.** It passes the
+  bytes through and never reads a build, so the daemons' mutual TLS is
+  still what lets a job in, and any job may build anything on the daemon
+  it is sent to. Per-project cache mount namespaces or authorization
+  would need the router to read the build requests
+  ([ADR-0046](docs/adr/0046-cache-reuse.md)).
 - **Job pods need Pod Security `baseline`.** The runner's job pods do not
   meet `restricted`.
 
 **Cache and routing.**
-- **The cache is per daemon.** The router keeps a project on the node that
-  built it last; when that daemon is not ready, the job goes to another
-  node: it succeeds, with a cold cache there. The router knows a job by its
-  pod's address: with a CNI that hides it (SNAT inside the cluster) every
-  job goes to its own node's daemon, as without the router, after the
-  router waited up to 3 s for a pod with that address to appear (a job's
-  pod can connect before the router has seen it).
+- **The cache is per daemon.** The router sends a project's jobs to the
+  node where it built in the last `control-plane.router.warmDays` (7) days,
+  so each project warms one node. When that daemon is not ready, the job
+  goes to another one: it succeeds, with a cold cache there. A project
+  that has not built in the zone yet goes to a node by hash. The job's
+  build context travels to the chosen node, which may not be its own.
+- **Zones:** with `control-plane.router.zones` (the default) a job stays
+  in its zone (`topology.kubernetes.io/zone` of the daemons' nodes), so a
+  project warms up once per zone; when its zone has no ready daemon,
+  `crossZone` (on by default) sends it to another zone, or refuses it.
+  Clusters that put one zone label on every node, or zones close enough
+  that crossing them costs nothing, set `zones=false`.
+- **The router knows a job by its pod's address.** With a CNI that hides
+  it (SNAT inside the cluster) every job goes to its own node's daemon, as
+  without the router, after the router waited up to 3 s for a pod with
+  that address to appear (a job's pod can connect before the router has
+  seen it). While the controller is away, the routers keep routing on what
+  it last told them.
 - **emptyDir mode:** the cache lives only as long as the pod, so every
-  rollout empties it. Use `hostPath` on a dedicated disk in production.
+  rollout empties it, and the router no longer counts builds of a replaced
+  daemon as warmth. Use `hostPath` on a dedicated disk in production.
 - **What uninstall leaves behind:**
   - with hostPath: the cache on the nodes;
   - the controller's volume `<release>-controller-data` (the console's history), kept on purpose;
-  - the CA key in cert-manager's namespace.
+  - the certificate Secrets: the CA key in cert-manager's namespace, and
+    the daemons' and the controller's certificates in the box namespace
+    (`<release>-buildkit-tls` among them).
 
 **Operations.**
 - **Certificate renewal needs a restart.** buildkitd reads its certificate
@@ -552,18 +701,18 @@ vulnerability: [SECURITY.md](SECURITY.md).)
 
 **The console.**
 - **Without sign-in it is open.** Every page, `/search-index`, `/events`
-  and `/api/v1` answer whoever reaches the Service. The Service is ClusterIP
-  only: use `kubectl port-forward`, or an Ingress with its own
+  and `/api/v1` answer whoever reaches the Service `<release>-web`. The
+  Service is ClusterIP only: use `kubectl port-forward`, or an Ingress with its own
   authentication. "Inside the cluster" is not a trust boundary here: the
   box's own CI jobs and builds run untrusted code in it. The box therefore
   ships a NetworkPolicy (`control-plane.networkPolicy`, on by default)
   that keeps the jobs namespace and the daemons (whose network every RUN
-  step shares) away from the console; other namespaces, an
-  Ingress controller among them, still reach it. It needs a CNI that
-  enforces NetworkPolicy.
+  step shares) away from the web, and admits only the web and the routers
+  to the controller; other namespaces, an Ingress controller among them,
+  still reach the web. It needs a CNI that enforces NetworkPolicy.
 - **A configured token is shared.** Without sign-in, anyone who reaches
-  the console can read the last 100 lines of a job's log through the
-  installation's GitLab token.
+  the console can read the logs of the jobs it shows (masked, a part at a
+  time) through the installation's GitLab token.
 - **It stores build data.** Step output is kept 7 days, masked on a best
   effort basis: known token formats, passwords in URLs, bearer tokens and
   the values of build arguments with secret-like names. Dockerfiles are
@@ -573,8 +722,10 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   and the console stores them.
 - **One controller.** SQLite on a ReadWriteOnce volume (never NFS), with
   the `Recreate` strategy: while the controller restarts (an upgrade that
-  changes it), the pages say it is not reachable. There is no built-in
-  backup.
+  changes it), the pages answer that it is not reachable (502) and the
+  routers route on what they last knew. There is no built-in backup.
+- **No in-place upgrade from 0.2.x.** 0.3.0 is installed again, and its
+  console starts with an empty history ([Upgrading](#upgrading)).
 - **Without sign-in and without a token** the console shows no runner wait
   times and cannot compare commits, so "files or node" stays "unclear".
 
@@ -589,6 +740,7 @@ vulnerability: [SECURITY.md](SECURITY.md).)
 Every check is a `make` target. The same targets are meant for CI.
 
 ```sh
+make quick                    # before every push: lint, unittest and go-test
 make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kubeconform (k8s 1.34 and 1.37)
 make go-test ui-test          # Go tests; the console's pages in headless Chrome
 make kind-up                  # local kind cluster (examples/kind)
@@ -597,17 +749,23 @@ make e2e                      # end-to-end on kind
 
 - **The e2e** installs releases of its own and covers:
   - cache hits and step deduplication;
-  - routing;
+  - routing: the Service's same-node routing, and the build router (every
+    build node has one, a job's build page says why its node was chosen,
+    a job cannot reach a daemon around the router, a router rollout lets
+    a running build finish);
   - graceful shutdown and crash recovery;
   - GC limits;
   - mutual TLS, including a RUN step that tries to drive its own daemon;
   - the NetworkPolicy;
   - OTLP export;
   - the whole box, with the console;
-  - an in-place upgrade from the last published release.
+  - an in-place upgrade from the last published release, and a rollback.
 
-  On GitHub it runs in four parallel groups, each on its own kind cluster,
-  in about 11-12 minutes.
+  On GitHub it runs in four parallel groups, each on its own kind cluster.
+  A pull request runs only what its change touches: documentation alone
+  runs nothing, Go code the Go checks and the two groups that run the
+  control plane, a chart every group
+  ([ADR-0049](docs/adr/0049-ci-runs-what-a-change-touches.md)).
 - **The console's pages** are checked in headless Chrome: on test data by
   `make ui-test`, and against the real console in the e2e's box scenario.
 - **The quickstart** is checked on a clean Ubuntu machine:
@@ -632,8 +790,8 @@ make e2e                      # end-to-end on kind
 | `charts/buildkit` | The daemons, usable on their own |
 | `integrations/gitlab-runner` | Values fragment for an existing gitlab-runner |
 | `ci/gitlab` | GitLab CI component: a job that builds and pushes on the build farm |
-| `charts/control-plane` | The control plane (controller and web, the console), usable and published on its own (`oci://ghcr.io/hoobiboobi/charts/control-plane`) |
-| `cmd/ci-accelerator`, `internal/` | Go: the control plane's binary and image (build history to builds and reasons, store, collector, pages, disk probe) |
+| `charts/control-plane` | The control plane (controller, web and build router; the console), usable and published on its own (`oci://ghcr.io/hoobiboobi/charts/control-plane`) |
+| `cmd/ci-accelerator`, `internal/` | Go: the binary and image `ghcr.io/hoobiboobi/ci-accelerator`, with the roles `controller`, `web`, `router`, `disk-probe` and `all` (build history to builds and reasons, store, collector, pages, routing) |
 | `scripts/quickstart.sh` | One clean Linux machine: k3s, cert-manager and the box (attached to every release) |
 | `scripts/buildkit-certs.sh` | CA and certificates for `charts/buildkit` without cert-manager (`tls.source=existingSecret`) |
 | `docs/architecture.md` | How the parts fit together: build path, cache, certificates, telemetry, rollouts |
@@ -644,7 +802,7 @@ make e2e                      # end-to-end on kind
 | `docs/design/console.md` | The console's first design draft (historical) |
 | `docs/adr` | Architecture decision records: why the charts are the way they are |
 | `examples/kind` | Local cluster for development |
-| `artifacthub/` | Artifact Hub metadata of the three chart repositories |
+| `artifacthub/` | Artifact Hub metadata of the buildkit and ci-accelerator charts |
 | `test/` | End-to-end checks and helpers |
 
 ## License

@@ -100,7 +100,8 @@ buildkit:
 gitlab-runner:
   enabled: true
   # 19.4.0 (the chart's default) lists pod events on every poll and
-  # overloaded API servers; 19.4.1 fixes that.
+  # overloaded API servers; 19.4.1 fixes that, and 19.4.2 is the same
+  # runner rebuilt on Go 1.26.10.
   image:
     tag: alpine-v19.4.2
   # -- Required: your GitLab, e.g. https://gitlab.example.com/
