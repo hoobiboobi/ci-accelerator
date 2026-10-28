@@ -14,7 +14,7 @@
     </div></section>
   <p class="muted">Steps, reasons and single builds are kept for 30 days: <a class="link" href="?window=30d">the last 30 days</a>.</p>
   {{end}}{{else}}
-  <p class="lead"><b>{{.Cached}}%</b> of {{.Builds}} build{{if ne .Builds 1}}s{{end}} in {{.WindowLabel}} came fully from the cache{{with .UsualCached}}, usually in <b>{{.}}</b>{{end}}.{{with .UsualRebuilt}} A rebuild usually takes <b>{{.}}</b>{{with $.P95}}, the slowest 5% over <b>{{.}}</b>{{end}}.{{end}}</p>
+  <p class="lead"><b>{{.Cached}}%</b> of {{.Builds}} build{{if ne .Builds 1}}s{{end}} in {{.WindowLabel}} came fully from the cache{{with .UsualCached}}, usually in <b>{{.}}</b>{{end}}.{{with .UsualRebuilt}} A rebuild usually takes <b>{{.}}</b>{{with $.P95}}; 95% of rebuilds took at most <b>{{.}}</b>{{end}}.{{end}}</p>
   {{with .Chart}}
   <section class="box" aria-labelledby="chT"><div class="boxh"><h2 class="h" id="chT">Build time</h2><span class="muted">{{if .Grouped}}builds grouped by time: one dot per outcome, at the median{{else}}one dot per build{{end}}{{if .UsualLabel}} · the dashed line is the usual rebuild{{end}}</span></div>
     <div class="chart" role="img" aria-label="Build times of the image over {{$.WindowLabel}}">

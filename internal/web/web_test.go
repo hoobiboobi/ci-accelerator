@@ -1686,3 +1686,18 @@ func TestLineDiff(t *testing.T) {
 		t.Errorf("two changes far apart: %+v", d)
 	}
 }
+
+// A p95 needs 20 rebuilds: with fewer, the nearest-rank p95 is the slowest
+// build and "the slowest 5%" is less than one build.
+func TestNoP95FromFewRebuilds(t *testing.T) {
+	ts, _, _ := console(t)
+	imgs := get(t, ts, "/images?window=7d")
+	if !strings.Contains(imgs.body, "95% of rebuilds within") || !strings.Contains(imgs.body, "a p95 needs 20") {
+		t.Errorf("the images table shows a p95 from fewer than 20 rebuilds")
+	}
+	for _, h := range regexp.MustCompile(`href="(/images/[^"?]+)"`).FindAllStringSubmatch(imgs.body, -1) {
+		if p := get(t, ts, h[1]+"?window=7d"); strings.Contains(p.body, "95% of rebuilds took at most") {
+			t.Errorf("%s: a p95 from the fixtures' few rebuilds", h[1])
+		}
+	}
+}
