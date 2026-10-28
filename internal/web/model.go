@@ -185,6 +185,51 @@ type jobTimes struct {
 	// pipeline at once, so a job's creation also counts the earlier
 	// stages: not a runner's fault.)
 	Queued time.Time
+	// From the job's pod (whole seconds): when Kubernetes created it and
+	// started its build container. Zero when not known.
+	PodCreated, PodRunning time.Time
+}
+
+// startPart is a stretch of a job between its start and its first build.
+type startPart struct {
+	Class, Label string
+	From, To     time.Time
+}
+
+// startParts splits the time from a job's start to its build: the runner
+// preparing the job's pod, the pod starting (scheduled, images pulled),
+// then the checkout and the job's script up to buildctl. Without the pod's
+// times, one part. Kubernetes records whole seconds, so its times are
+// kept within the job's own.
+func startParts(t jobTimes, build time.Time) []startPart {
+	if !build.After(t.Start) {
+		return nil
+	}
+	if t.PodCreated.IsZero() || t.PodRunning.IsZero() {
+		return []startPart{{"runner", "Runner & checkout", t.Start, build}}
+	}
+	clampT := func(x, lo, hi time.Time) time.Time {
+		if x.Before(lo) {
+			return lo
+		}
+		if x.After(hi) {
+			return hi
+		}
+		return x
+	}
+	c := clampT(t.PodCreated, t.Start, build)
+	r := clampT(t.PodRunning, c, build)
+	var out []startPart
+	for _, p := range []startPart{
+		{"runner", "The runner preparing the job's pod", t.Start, c},
+		{"podwait", "The job's pod starting: scheduled, images pulled", c, r},
+		{"runner", "Checkout and the job's script up to the build", r, build},
+	} {
+		if p.To.Sub(p.From) >= 50*time.Millisecond {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // queuedAt is when a job began waiting for a runner, zero when GitLab has
@@ -211,6 +256,7 @@ func timesOf(j store.JobInfo, buildStart, buildEnd time.Time) jobTimes {
 	}
 	if t.Known {
 		t.Queued = queuedAt(j, t.Start)
+		t.PodCreated, t.PodRunning = j.PodCreated, j.PodRunning
 	}
 	return t
 }

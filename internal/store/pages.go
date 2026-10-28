@@ -61,6 +61,9 @@ type JobInfo struct {
 	// StartedBy is who started it (GitLab username); for a manual job,
 	// who ran it.
 	StartedBy string
+	// From its pod: when Kubernetes created it and started its build
+	// container, in whole seconds.
+	PodCreated, PodRunning time.Time
 }
 
 // BuildPage is everything the build page shows about one build.
@@ -169,7 +172,7 @@ func (s *Store) PipelineInfo(ctx context.Context, instance string, id uint64) (*
 
 func (s *Store) jobs(ctx context.Context, where string, args ...any) ([]JobInfo, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT instance, job_id, pipeline_id, project_id, name, stage, url, node, started_at,
-		status, queued_at, finished_at, duration_ms, queued_ms, runner, allow_failure, started_by FROM jobs `+where, args...)
+		status, queued_at, finished_at, duration_ms, queued_ms, runner, allow_failure, started_by, pod_created_at, pod_running_at FROM jobs `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -181,14 +184,16 @@ func (s *Store) jobs(ctx context.Context, where string, args ...any) ([]JobInfo,
 			instance, pipeline, project        sql.NullInt64
 			started                            sql.NullInt64
 			queued, finished, duration, waited sql.NullInt64
+			podCreated, podRunning             sql.NullInt64
 		)
 		if err := rows.Scan(&instance, &j.ID, &pipeline, &project, &j.Name, &j.Stage, &j.URL, &j.Node, &started,
-			&j.Status, &queued, &finished, &duration, &waited, &j.Runner, &j.AllowFailure, &j.StartedBy); err != nil {
+			&j.Status, &queued, &finished, &duration, &waited, &j.Runner, &j.AllowFailure, &j.StartedBy, &podCreated, &podRunning); err != nil {
 			return nil, err
 		}
 		j.Instance = fmt.Sprintf("%06x", instance.Int64)
 		j.PipelineID, j.ProjectID, j.Started = uint64(pipeline.Int64), uint64(project.Int64), msTime(started)
 		j.Queued, j.Finished = msTime(queued), msTime(finished)
+		j.PodCreated, j.PodRunning = msTime(podCreated), msTime(podRunning)
 		j.Duration, j.Waited = time.Duration(duration.Int64)*time.Millisecond, time.Duration(waited.Int64)*time.Millisecond
 		// GitLab last said the job was not over (running, or manual or
 		// pending before it ran), and its pod has ended since: how it

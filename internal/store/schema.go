@@ -229,6 +229,11 @@ CREATE INDEX route_decisions_at ON route_decisions (at);
 CREATE INDEX builds_started ON builds (started_at);
 DROP INDEX builds_completed;
 
+-- When Kubernetes created a job's pod and started its build container
+-- (whole seconds, as Kubernetes records them).
+ALTER TABLE jobs ADD COLUMN pod_created_at INTEGER;
+ALTER TABLE jobs ADD COLUMN pod_running_at INTEGER;
+
 -- From this schema on, builds.built_ms is the wall time of the executed
 -- steps (their intervals' union: parallel stages count once), no longer
 -- the sum of their durations.

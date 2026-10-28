@@ -242,8 +242,10 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 			row.Bars = append(row.Bars, WFBar{Class: "queue", L: at(q), W: width(j.Times.Start.Sub(q)), Title: "Waiting for a runner: " + duration(j.Times.Start.Sub(q))})
 		}
 		if b != nil {
-			if j.Times.Known && b.Started.After(j.Times.Start) {
-				row.Bars = append(row.Bars, WFBar{Class: "runner", L: at(j.Times.Start), W: width(b.Started.Sub(j.Times.Start)), Title: "Runner & checkout"})
+			if j.Times.Known {
+				for _, p := range startParts(j.Times, b.Started) {
+					row.Bars = append(row.Bars, WFBar{Class: p.Class, L: at(p.From), W: width(p.To.Sub(p.From)), Title: p.Label + ": " + duration(p.To.Sub(p.From))})
+				}
 			}
 			for _, s := range segments(b) {
 				for _, sp := range s.Spans {
@@ -277,8 +279,10 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 			r.Label, r.LabelL = labelAfter(to, label)
 			w.Rows = append(w.Rows, r)
 		}
-		if j.Times.Known && b.Started.After(j.Times.Start) {
-			seg(".r", "runner", "clock", "runner & checkout", j.Times.Start, b.Started, "runner", duration(b.Started.Sub(j.Times.Start)))
+		if j.Times.Known {
+			for i, p := range startParts(j.Times, b.Started) {
+				seg(fmt.Sprintf(".r%d", i), "runner", "clock", strings.ToLower(p.Label[:1])+p.Label[1:], p.From, p.To, p.Class, duration(p.To.Sub(p.From)))
+			}
 		}
 		for _, s := range segments(b) {
 			if s.Class == "xfer" {
