@@ -28,7 +28,7 @@ secret tool (SOPS, External Secrets, Sealed Secrets, ...):
 | `gitlab-runner-token` | `runner-token` (`glrt-...`), `runner-registration-token` (empty) | always: `gitlab-runner.runners.secret` |
 | `gitlab-api-token` | `token` (a `read_api` token) | the console with one shared GitLab token: `control-plane.gitlab.token.existingSecret` |
 | `console-gitlab-oauth` | `client-id`, `client-secret` | sign-in through GitLab: `control-plane.signIn.gitlab[].existingSecret` |
-| `console-session` | `key` (`openssl rand -base64 32`) | sign-in: `control-plane.signIn.sessionKey.existingSecret`; changing it signs everyone out |
+| `console-session` | `key`: 32 random bytes in base64 ([how](#the-session-key)) | sign-in: `control-plane.signIn.sessionKey.existingSecret`; changing it signs everyone out |
 | `runner-cache` | `accesskey`, `secretkey` | the runners' S3 cache ([runner-cache.md](runner-cache.md)) |
 | `runner-<tier>` | `runner-token` | each runner tier ([runner-cache.md](runner-cache.md#runner-tiers)) |
 
@@ -38,6 +38,91 @@ certificate, the controller's client certificate and its API's server
 certificate) come from cert-manager by default and need no Secret from
 you; without cert-manager see
 [Certificates without cert-manager](#certificates-without-cert-manager).
+
+### The session key
+
+Sign-in through GitLab needs a key: 32 random bytes in base64. The
+controller decodes it and seals each person's GitLab token in its store
+with it (AES-256-GCM). It lives in a Secret on purpose, apart from the
+store's volume, so a copy of the volume alone reveals no token. The chart
+never makes it: a key made while rendering would change on every sync. A
+new key costs nothing but a sign-in: sessions sealed with the old one are
+dropped. The controller reads the key when it starts; restart it after the
+Secret changes. Until the Secret exists, the controller's pod waits
+(`FailedMount`) and starts by itself once it is there.
+
+Pick one way to make it:
+
+- **Once, by hand.** The Secret stays out of Git; every GitOps tool works
+  with it:
+
+  ```sh
+  kubectl -n ci-accelerator create secret generic console-session \
+    --from-literal=key=$(openssl rand -base64 32)
+  ```
+
+- **SOPS (Flux).** Make the Secret locally, encrypt it, commit it; the Flux
+  `Kustomization` that applies it decrypts it
+  ([Flux's SOPS guide](https://fluxcd.io/flux/guides/mozilla-sops/)):
+
+  ```sh
+  kubectl -n ci-accelerator create secret generic console-session \
+    --from-literal=key=$(openssl rand -base64 32) --dry-run=client -o yaml >console-session.yaml
+  sops --encrypt --age=<your age public key> --encrypted-regex '^(data|stringData)$' --in-place console-session.yaml
+  ```
+
+  ```yaml
+  # in the Kustomization (kustomize.toolkit.fluxcd.io/v1) that applies it
+  spec:
+    decryption:
+      provider: sops
+      secretRef: { name: sops-age }
+  ```
+
+  Argo CD reads SOPS only through a plugin; its documentation prefers the
+  two ways below.
+
+- **Sealed Secrets.** Seal it locally, commit the `SealedSecret`; it is
+  bound to this name and namespace:
+
+  ```sh
+  kubectl -n ci-accelerator create secret generic console-session \
+    --from-literal=key=$(openssl rand -base64 32) --dry-run=client -o yaml \
+    | kubeseal --format yaml >console-session.sealed.yaml
+  ```
+
+- **External Secrets Operator** (v1.2.0 or newer) generates it in the
+  cluster, once:
+
+  ```yaml
+  apiVersion: generators.external-secrets.io/v1alpha1
+  kind: Password
+  metadata: { name: console-session-key, namespace: ci-accelerator }
+  spec:
+    length: 32          # 32 characters: the 32 bytes the console decodes
+    encoding: base64    # the console reads base64
+    allowRepeat: true
+    secretKeys: [key]
+  ---
+  apiVersion: external-secrets.io/v1
+  kind: ExternalSecret
+  metadata: { name: console-session, namespace: ci-accelerator }
+  spec:
+    refreshPolicy: CreatedOnce   # every refresh would be a new key
+    target: { name: console-session }
+    dataFrom:
+      - sourceRef:
+          generatorRef:
+            apiVersion: generators.external-secrets.io/v1alpha1
+            kind: Password
+            name: console-session-key
+  ```
+
+  The generator's defaults (24 characters, not base64) are refused by the
+  console, and a `refreshInterval` (ESO's examples use 30m) would sign
+  everyone out that often. ESO makes a new key when the Secret is deleted
+  or edited, and deleting the `ExternalSecret` deletes the Secret: in
+  either case everyone signs in again.
 
 ## Flux
 
@@ -94,6 +179,8 @@ spec:
         hostPath: { path: /var/mnt/nvme/buildkit }
       config:
         gc: { maxUsedSpace: "2TB", reservedSpace: "100GB", minFreeSpace: "400GB" }
+      diskProbe:
+        image: { digest: "sha256:..." }      # the disk probe's image, from the release notes
     control-plane:
       image: { digest: "sha256:..." }        # ci-accelerator:v0.3.1, from the release notes
       gitlab:
