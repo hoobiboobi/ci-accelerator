@@ -288,7 +288,7 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 	@$(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml >/dev/null \
 		|| { $(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml; exit 1; }
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh scripts/vulncheck.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -302,7 +302,7 @@ unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-un
 LOCAL_IMAGE ?= ci-accelerator:dev
 .PHONY: image
 image: ## Build the ci-accelerator image for this machine's architecture and load it into kind
-	@docker buildx build -f cmd/ci-accelerator/Dockerfile -t $(LOCAL_IMAGE) --build-arg VERSION=dev --build-arg COMMIT=$$(git rev-parse --short=12 HEAD) --load . >/dev/null
+	@docker buildx build -f cmd/ci-accelerator/Dockerfile -t $(LOCAL_IMAGE) --build-arg VERSION=dev --build-arg COMMIT=$${COMMIT:-$$(git rev-parse --short=12 HEAD)} --load . >/dev/null
 	@kind load docker-image $(LOCAL_IMAGE) --name $(KIND_CLUSTER) >/dev/null 2>&1
 	@echo "$(LOCAL_IMAGE) loaded into kind cluster $(KIND_CLUSTER)"
 
@@ -390,11 +390,15 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 	@test/e2e-matrix.sh
 
 .PHONY: template
-template: ## Render every chart with default values (plus the required ones) to stdout
+template: deps ## Render every chart with default values (plus the required ones) to stdout
 	@for c in $(CHARTS); do \
 		echo "# ==> $$c"; \
 		$(HELM) template test $$c $(RENDER_SET) || exit 1; \
 	done
+	@echo "# ==> $(CONTROL_PLANE)"
+	@$(HELM) template test $(CONTROL_PLANE) $(CONTROL_PLANE_SET)
+	@echo "# ==> $(UMBRELLA)"
+	@$(HELM) template test $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml
 
 .PHONY: kind-up
 kind-up: ## Create the kind cluster (if missing) and taint its build nodes
@@ -416,7 +420,7 @@ e2e: ## End-to-end checks on the kind cluster (KEEP=1 keeps resources, SCENARIOS
 e2e-copy: ## The e2e on a copy of the tree taken now, so the tree can change while it runs (SCENARIOS=... selects)
 	@d=$$(mktemp -d "$${TMPDIR:-/tmp}/ci-accelerator-e2e.XXXXXX"); \
 		rsync -a --exclude .git --exclude .tools ./ "$$d/" && ln -s "$(CURDIR)/.tools" "$$d/.tools" && \
-		echo "==> e2e on a copy in $$d" && $(MAKE) -C "$$d" e2e; rc=$$?; rm -rf "$$d"; exit $$rc
+		echo "==> e2e on a copy in $$d" && COMMIT=$$(git rev-parse --short=12 HEAD) $(MAKE) -C "$$d" e2e; rc=$$?; rm -rf "$$d"; exit $$rc
 
 .PHONY: e2e-clean
 e2e-clean: ## Remove what an interrupted or KEEP=1 e2e run left behind
