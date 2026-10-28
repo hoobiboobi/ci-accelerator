@@ -377,6 +377,12 @@ func fingerprint(b store.BuildRow, st Status) string {
 	case "failed":
 		return "failed:" + firstLine(b.Error)
 	case "farm":
+		switch {
+		case b.Reason == history.OtherNode && replacedHere(b) && b.OldPersists:
+			return "farm:" + string(history.NotInCache)
+		case b.Reason == history.OtherNode && replacedHere(b):
+			return "farm:replaced"
+		}
 		return "farm:" + string(b.Reason)
 	}
 	switch b.Reason {
@@ -400,14 +406,20 @@ func reasonText(b store.BuildRow, st Status) string {
 			if b.Old == "" {
 				return "Rebuilt here although nothing seems to have changed; files or an evicted cache, unclear"
 			}
+			if replacedHere(b) {
+				return "The last build of the image ran under this node's previous daemon; whether its files changed is unclear"
+			}
 			return "The last build of the image ran on another node; whether its files changed is unclear"
 		}
 		return "Steps ran with no earlier build to compare with"
 	case "failed":
 		return "Failed: " + clip(firstLine(b.Error), 120)
 	case "farm":
-		if b.Reason == history.NotInCache {
+		switch {
+		case b.Reason == history.NotInCache, b.Reason == history.OtherNode && replacedHere(b) && b.OldPersists:
 			return "No longer in the node's cache: cleaned up, or the node was replaced"
+		case b.Reason == history.OtherNode && replacedHere(b):
+			return "The node's build daemon was replaced and its cache went with it"
 		}
 		return "Cached on another node: the job ran where the cache was not"
 	}

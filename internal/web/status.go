@@ -90,6 +90,12 @@ func whyShort(b store.BuildRow) string {
 	case history.BaseImageChanged:
 		return "the base image changed"
 	case history.OtherNode:
+		switch {
+		case replacedHere(b) && b.OldPersists:
+			return "no longer in this node's cache"
+		case replacedHere(b):
+			return "this node's daemon was replaced, its cache with it"
+		}
 		return "cached on another node, not on this one"
 	case history.NotInCache:
 		return "no longer in this node's cache"
@@ -97,9 +103,19 @@ func whyShort(b store.BuildRow) string {
 		if b.Old == "" {
 			return "files or an evicted cache, unclear"
 		}
+		if replacedHere(b) {
+			return "last built by this node's previous daemon"
+		}
 		return "last built on another node"
 	}
 	return fmt.Sprintf("%d step%s ran; nothing to compare with", b.Built, plural(b.Built))
+}
+
+// replacedHere says whether a build ran on the node where the daemon its
+// reason names (the image's previous build's) ran, under another daemon:
+// that daemon was replaced, and the job did not move.
+func replacedHere(b store.BuildRow) bool {
+	return b.Old != "" && b.Old != b.Daemon && b.OldNode != "" && b.OldNode == b.Node
 }
 
 // viaVerified says whether a reason's paths are GitLab's verified diff
