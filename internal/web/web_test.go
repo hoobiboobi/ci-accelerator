@@ -582,7 +582,11 @@ func TestPipelinePage(t *testing.T) {
 		if !strings.Contains(p.body, `data-wf`) || !strings.Contains(p.body, `class="row k-step`) {
 			t.Errorf("%s: the timeline has no steps", k)
 		}
-		if !strings.Contains(p.body, fmt.Sprintf("%d image", len(bs))) && !strings.Contains(p.body, fmt.Sprintf("All %d image", len(bs))) {
+		counted := strings.Contains(p.body, fmt.Sprintf("%d image", len(bs)))
+		if len(bs) == 1 {
+			counted = strings.Contains(p.body, "The image ") || strings.Contains(p.body, "The image&#39;s build failed")
+		}
+		if !counted {
 			t.Errorf("%s: sentence does not count %d images", k, len(bs))
 		}
 		checked++

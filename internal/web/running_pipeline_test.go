@@ -419,3 +419,21 @@ func TestStaleGitLabWordAndManual(t *testing.T) {
 		t.Error("a job of a pipeline GitLab says is over still runs or waits")
 	}
 }
+
+// One image is "the image", not "All 1 image were rebuilt" (0.3.1).
+func TestOneImageSentence(t *testing.T) {
+	item := func(key string) BuildItem { return BuildItem{Status: Status{Key: key}} }
+	for _, c := range []struct {
+		v    PipelineView
+		want string
+	}{
+		{PipelineView{Ready: "37 s", Rebuilt: []BuildItem{item("change")}}, "The image was rebuilt because of the change. It was ready 37 s after its build started."},
+		{PipelineView{Ready: "5 s", Cached: []BuildItem{item("cached")}}, "The image came from the cache. It was ready 5 s after its build started."},
+		{PipelineView{Ready: "5 s", Rebuilt: []BuildItem{item("failed")}}, "The image's build failed."},
+		{PipelineView{Ready: "9 s", Rebuilt: []BuildItem{item("change"), item("farm")}}, "All 2 images were rebuilt: 1 because of the change, 1 because of the build farm. Ready 9 s after the first build started."},
+	} {
+		if got := pipelineSentence(&c.v); got != c.want {
+			t.Errorf("got %q, want %q", got, c.want)
+		}
+	}
+}
