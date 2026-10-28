@@ -1018,9 +1018,14 @@ box_disk() {
   n=$(kc -n "$BOX_NS" get pods -l "$sel" -o name | wc -l | tr -d ' ')
   check "every daemon pod's disk probe is ready" \
     [ "$(kc -n "$BOX_NS" get pods -l "$sel" -o jsonpath='{range .items[*].status.containerStatuses[?(@.name=="disk-probe")]}{.ready}{"\n"}{end}' | grep -c '^true$')" = "$n" ]
+  # The table shows each daemon's disk; a daemon's own page its figures.
   box_nodes_disk() {
-    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/nodes" 2>/dev/null >"$LOGS/box-nodes.html"
-    [ "$(grep -o 'class="ndisk"' "$LOGS/box-nodes.html" | wc -l | tr -d ' ')" = "$n" ] && grep -q 'Available to pods' "$LOGS/box-nodes.html"
+    local web="http://$BOX_REL-web.$BOX_NS.svc:8080" node
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "$web/nodes" 2>/dev/null >"$LOGS/box-nodes.html"
+    [ "$(grep -o 'aria-label="Disk: ' "$LOGS/box-nodes.html" | wc -l | tr -d ' ')" = "$n" ] || return 1
+    node=$(grep -o 'href="/nodes/[^"?]*"' "$LOGS/box-nodes.html" | head -n 1 | cut -d'"' -f2)
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "$web$node" 2>/dev/null >"$LOGS/box-node.html"
+    grep -q 'Available to pods' "$LOGS/box-node.html" && grep -q 'class="pad ndisk"' "$LOGS/box-node.html"
   }
   # The console reads each daemon once a minute.
   check "the Nodes page shows every daemon's disk" eventually 150 box_nodes_disk

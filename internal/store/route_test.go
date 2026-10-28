@@ -117,15 +117,15 @@ func TestWarmAndDecisions(t *testing.T) {
 	}
 
 	// The Nodes page counts them per daemon and reason, within its window.
-	counts, err := s.DaemonCounts(ctx, c.t.Add(-time.Hour))
+	counts, err := s.DaemonCounts(ctx, c.t.Add(-time.Hour), ProjectsIn{All: true})
 	if err != nil || counts["bk-x"].Routed[string(route.ZoneHash)] != 1 || len(counts["bk-x"].Routed) != 1 {
 		t.Errorf("routed in the last hour: %+v, %v", counts["bk-x"], err)
 	}
-	if counts, _ := s.DaemonCounts(ctx, time.Time{}); counts["bk-x"].Routed[string(route.ZoneHash)] != 2 {
+	if counts, _ := s.DaemonCounts(ctx, time.Time{}, ProjectsIn{All: true}); counts["bk-x"].Routed[string(route.ZoneHash)] != 2 {
 		t.Errorf("routed ever: %+v", counts["bk-x"])
 	}
 	// The projects each daemon built for, counted.
-	all, _ := s.DaemonCounts(ctx, time.Time{})
+	all, _ := s.DaemonCounts(ctx, time.Time{}, ProjectsIn{All: true})
 	n := 0
 	for _, pb := range all["daemon-a"].Projects {
 		n += pb.Builds

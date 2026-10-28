@@ -97,6 +97,7 @@ var pageFiles = map[string][]string{
 	"steppage":  {"step"},
 	"notfound":  nil,
 	"nodes":     nil,
+	"node":      nil,
 	"compare":   nil,
 	"signin":    nil,
 }
@@ -165,6 +166,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /builds/{id}/steps/{step}", s.step)
 	mux.HandleFunc("GET /builds/{id}/compare", s.compare)
 	mux.HandleFunc("GET /nodes", s.nodes)
+	mux.HandleFunc("GET /nodes/{daemon}", s.node)
 	mux.HandleFunc("GET /projects/{instance}/{id}", s.chooseProject)
 	mux.HandleFunc("GET /search-index", s.index)
 	mux.HandleFunc("GET /events", s.events)
@@ -292,6 +294,9 @@ type NotFound struct {
 	// Elsewhere: the projects that have what was asked for, with links that
 	// switch to them and open it there.
 	Elsewhere []Option
+	// Hint says why it is not here; Links lead to what is.
+	Hint  string
+	Links []Option
 }
 
 func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {

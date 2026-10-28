@@ -168,6 +168,8 @@ func (s *Store) PipelineJobs(ctx context.Context, instance string, pipeline uint
 
 // DaemonCount is what the store knows about one daemon's builds.
 type DaemonCount struct {
+	// Node is the Kubernetes node the daemon ran on, when it said.
+	Node   string
 	Builds int
 	// Farm counts rebuilds for want of cache here (history.FarmKinds: it
 	// was on another node, or no longer on this one) — the same set the
@@ -175,11 +177,15 @@ type DaemonCount struct {
 	Farm    int
 	Unclear int // rebuilt here, files or node
 	Last    time.Time
+	// ProjectCount is how many projects it built for since t, whether
+	// or not Projects lists them.
+	ProjectCount int
 	// Routed counts the build routers' decisions for this daemon by their
 	// reason (route.Reason): one per connection a router sent here.
 	Routed map[string]int
-	// Projects are the projects it built for since t, the most builds
-	// first (builds of no known project are left out).
+	// Projects are the projects it built for since t that ProjectsIn
+	// asked for, the most builds first (builds of no known project are
+	// left out).
 	Projects []ProjectBuilds
 }
 
@@ -187,12 +193,27 @@ type DaemonCount struct {
 type ProjectBuilds struct {
 	ProjectKey
 	Builds int
+	// Farm and Unclear are its rebuilds for want of cache here, as in
+	// DaemonCount; Last is when its last build started.
+	Farm, Unclear int
+	Last          time.Time
 }
 
-// DaemonCounts returns, per daemon name, its builds started since t.
-func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]DaemonCount, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT d.name, count(b.id),
-			COALESCE(sum(b.reason_kind IN `+farmKinds+`), 0), COALESCE(sum(b.reason_kind = 'cache-elsewhere'), 0), max(b.started_at)
+// ProjectsIn says which projects DaemonCounts lists per daemon: none
+// (the zero value), All, or Only one.
+type ProjectsIn struct {
+	All  bool
+	Only ProjectKey
+}
+
+func (p ProjectsIn) any() bool { return p.All || p.Only.ID != 0 }
+
+// DaemonCounts returns, per daemon name, its builds started since t, with
+// the projects in asks for.
+func (s *Store) DaemonCounts(ctx context.Context, since time.Time, in ProjectsIn) (map[string]DaemonCount, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT d.name, d.node, count(b.id),
+			COALESCE(sum(b.reason_kind IN `+farmKinds+`), 0), COALESCE(sum(b.reason_kind = 'cache-elsewhere'), 0), max(b.started_at),
+			count(DISTINCT CASE WHEN b.instance IS NOT NULL AND b.project_id IS NOT NULL THEN b.instance || '/' || b.project_id END)
 		FROM daemons d LEFT JOIN builds b ON b.daemon_id = d.id AND b.started_at >= ? GROUP BY d.name`, since.UnixMilli())
 	if err != nil {
 		return nil, err
@@ -205,7 +226,7 @@ func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]D
 			c    DaemonCount
 			last sql.NullInt64
 		)
-		if err := rows.Scan(&name, &c.Builds, &c.Farm, &c.Unclear, &last); err != nil {
+		if err := rows.Scan(&name, &c.Node, &c.Builds, &c.Farm, &c.Unclear, &last, &c.ProjectCount); err != nil {
 			return nil, err
 		}
 		c.Last = msTime(last)
@@ -215,8 +236,10 @@ func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]D
 		return nil, err
 	}
 	rows.Close()
-	if err := s.projectsPerDaemon(ctx, since, out); err != nil {
-		return nil, err
+	if in.any() {
+		if err := s.projectsPerDaemon(ctx, since, in, out); err != nil {
+			return nil, err
+		}
 	}
 	routed, err := s.db.QueryContext(ctx, `SELECT daemon, reason, count(*) FROM route_decisions WHERE at >= ? GROUP BY daemon, reason`, since.UnixMilli())
 	if err != nil {
@@ -241,12 +264,21 @@ func (s *Store) DaemonCounts(ctx context.Context, since time.Time) (map[string]D
 	return out, routed.Err()
 }
 
-// projectsPerDaemon fills each daemon's projects built since t.
-func (s *Store) projectsPerDaemon(ctx context.Context, since time.Time, out map[string]DaemonCount) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT d.name, b.instance, b.project_id, count(*) FROM builds b INDEXED BY builds_started
+// projectsPerDaemon fills each daemon's projects built since t, those in
+// asks for. Ties keep one order (instance, project), so a page read again
+// does not reshuffle.
+func (s *Store) projectsPerDaemon(ctx context.Context, since time.Time, in ProjectsIn, out map[string]DaemonCount) error {
+	where, args := "", []any{since.UnixMilli()}
+	if !in.All {
+		where = " AND b.instance = ? AND b.project_id = ?"
+		args = append(args, nullInstance(in.Only.Instance), nullUint(in.Only.ID))
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT d.name, b.instance, b.project_id, count(*),
+			COALESCE(sum(b.reason_kind IN `+farmKinds+`), 0), COALESCE(sum(b.reason_kind = 'cache-elsewhere'), 0), max(b.started_at)
+		FROM builds b INDEXED BY builds_started
 		JOIN daemons d ON d.id = b.daemon_id
-		WHERE b.started_at >= ? AND b.instance IS NOT NULL AND b.project_id IS NOT NULL
-		GROUP BY d.name, b.instance, b.project_id ORDER BY count(*) DESC`, since.UnixMilli())
+		WHERE b.started_at >= ? AND b.instance IS NOT NULL AND b.project_id IS NOT NULL`+where+`
+		GROUP BY d.name, b.instance, b.project_id ORDER BY count(*) DESC, b.instance, b.project_id`, args...)
 	if err != nil {
 		return err
 	}
@@ -255,12 +287,14 @@ func (s *Store) projectsPerDaemon(ctx context.Context, since time.Time, out map[
 		var (
 			name     string
 			instance int64
+			last     sql.NullInt64
 			p        ProjectBuilds
 		)
-		if err := rows.Scan(&name, &instance, &p.ID, &p.Builds); err != nil {
+		if err := rows.Scan(&name, &instance, &p.ID, &p.Builds, &p.Farm, &p.Unclear, &last); err != nil {
 			return err
 		}
 		p.Instance = fmt.Sprintf("%06x", instance)
+		p.Last = msTime(last)
 		c := out[name]
 		c.Projects = append(c.Projects, p)
 		out[name] = c

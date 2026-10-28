@@ -10,7 +10,7 @@
   <div class="crumbs"><a href="{{if .PipeURL}}{{.PipeURL}}{{else}}/builds{{end}}" data-back aria-label="Back">{{icon "back" 12}}</a><a href="/builds">Builds</a>{{if .PipeURL}}<span class="sepr">/</span><a href="{{.PipeURL}}">{{.PipeLabel}}</a>{{end}}<span class="sepr">/</span><span>{{.Name}}</span></div>
   <div class="titlerow"><h1 class="t" tabindex="-1">{{.Name}}</h1>{{template "statuslong" .Status}}
     {{if .GitLabURL}}<div class="tools"><a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab job</span></a></div>{{end}}</div>
-  <div class="sub">{{if .Commit}}<span class="q">“{{.Commit}}”</span>{{end}}{{if .SHA}}<span><span class="mono">{{.SHA}}</span>{{with .Ref}} on {{.}}{{end}}</span>{{end}}{{if .Target}}<span>target <span class="mono">{{.Target}}</span></span>{{end}}<span>node <span class="mono">{{.Node}}</span></span></div>
+  <div class="sub">{{if .Commit}}<span class="q">“{{.Commit}}”</span>{{end}}{{if .SHA}}<span><span class="mono">{{.SHA}}</span>{{with .Ref}} on {{.}}{{end}}</span>{{end}}{{if .Target}}<span>target <span class="mono">{{.Target}}</span></span>{{end}}<span>node {{if .NodeURL}}<a class="link mono" href="{{.NodeURL}}">{{.Node}}</a>{{else}}<span class="mono">{{.Node}}</span>{{end}}</span></div>
 </header>
 
 {{template "verdict" .Verdict}}

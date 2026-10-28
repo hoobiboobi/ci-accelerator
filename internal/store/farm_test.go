@@ -52,7 +52,7 @@ func TestFarmCountersFollowFarmKinds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	counts, err := s.DaemonCounts(ctx, donor.Started)
+	counts, err := s.DaemonCounts(ctx, donor.Started, ProjectsIn{All: true})
 	if err != nil {
 		t.Fatal(err)
 	}

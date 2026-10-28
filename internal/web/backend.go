@@ -43,7 +43,7 @@ type Backend interface {
 	SaveCompare(ctx context.Context, p store.ProjectKey, from, to string, files []string, complete bool) error
 	StepHistory(ctx context.Context, buildID int64, step int, limit int) ([]store.StepRun, error)
 	Output(ctx context.Context, buildID int64, step int) (string, error)
-	DaemonCounts(ctx context.Context, since time.Time) (map[string]store.DaemonCount, error)
+	DaemonCounts(ctx context.Context, since time.Time, in store.ProjectsIn) (map[string]store.DaemonCount, error)
 	ProjectCache(ctx context.Context, p store.ProjectKey) ([]store.CacheObject, []store.CacheStore, error)
 	Elsewhere(ctx context.Context, p store.ProjectKey, since time.Time, limit int) ([]store.Elsewhere, error)
 	SettleElsewhere(ctx context.Context, settled []store.Settled) error

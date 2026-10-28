@@ -1,32 +1,44 @@
 {{define "nodes"}}{{template "layout" .}}{{end}}
 {{define "content"}}
 <div class="page">
-  <div><div class="crumbs">Nodes</div><div class="titlerow"><h1 class="t" tabindex="-1">Build nodes</h1><span class="chip plain">{{.Ready}} ready{{if ne .Ready .Total}} of {{.Total}}{{end}}</span></div>
-    <div class="sub"><span>{{.Total}} BuildKit daemon{{if ne .Total 1}}s{{end}}{{with .Release}} · release <code>{{.}}</code>{{end}}</span><span>{{if .Measured}}{{.Measured}}{{else}}Waiting for the daemons to report{{end}}</span>{{with .APIStatus}}<span>{{.}}</span>{{end}}</div>{{with .Router}}<p class="muted">{{.}}</p>{{end}}</div>
-  {{if ne .Ready .Total}}<div class="callout warn" role="note">{{icon "warn" 16}}<div><b class="k">A daemon is not reachable</b>The console cannot read its build history; its jobs' builds appear once it is back. Check the daemon pod and the NetworkPolicy.</div></div>{{end}}
-  {{with .Dups}}<div class="callout neutral">{{icon "info" 16}}<div><b class="k">Duplicate cache</b>{{range $i, $d := .}}{{if $i}}, {{end}}<code>{{$d.Name}}</code> ({{bytes $d.Size}}) is stored on {{$d.Nodes}} nodes{{end}} — {{bytes $.DupBytes}} of copies, because each node keeps its own cache. The same is true for every layer built on more than one node.</div></div>{{end}}
-  <div class="ncards">
-    {{range .Cards}}
-    <section class="box ncard" aria-label="Node {{.Short}}"><div class="hd">{{if .Ready}}<span class="okdot" aria-hidden="true"></span>{{else}}<span class="okdot bad" aria-hidden="true"></span>{{end}}<b>{{.Short}}</b>{{with .Node}}<span class="muted">on {{.}}</span>{{end}}{{if .Ready}}<span class="chip received ml">{{icon "s_cached" 11}}Ready</span>{{else}}<span class="chip failed ml">{{icon "warn" 11}}Unreachable</span>{{end}}</div>
-      <div class="nkv"><span>Builds, 24 hours</span><span>{{.Builds}}</span><span>Rebuilt for want of cache here</span><span>{{.Farm}}{{if .Unclear}} <span class="wtxt" title="whether the files changed or the cache was gone is unclear">+{{.Unclear}} unclear</span>{{end}}</span><span>Running now</span><span>{{.Running}} · {{.RunningNote}}</span>{{with .Routed}}<span>Sent here by the build router, 24 hours</span><span>{{.}}</span>{{end}}{{with .Projects}}<span>Projects built here, 24 hours</span><span>{{.}}</span>{{end}}</div>
-      {{if .Inspected}}
-      <div><div class="nkv"><span>Cache by BuildKit</span><span><b>{{bytes .Total}}</b></span></div>
-        {{if .Segs}}<div class="sstack" role="img" aria-label="{{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>
-        <div class="legend">{{range .Segs}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{.Size}}</b></span>{{end}}</div>{{end}}</div>
-      {{with .MountRows}}<div class="nkv">{{range .}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>{{end}}
-      {{with .Disk}}{{if .Err}}<p class="muted">Disk: the probe did not answer ({{.Err}}).</p>{{else}}
-      <div class="ndisk"><div class="sstack" role="img" aria-label="Disk: {{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>
-        <div class="legend">{{range .Segs}}<span><i class="sw c-{{.Class}}"></i>{{.Label}} <b>{{.Size}}</b></span>{{end}}</div>
-        <div class="nkv">{{range .Rows}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>
-        {{if .Notes}}<div class="callout {{if eq .Level "crit"}}bad{{else}}warn{{end}}" role="note">{{icon "warn" 15 "i"}}<div><b class="k">{{if eq .Level "crit"}}The disk is nearly full{{else}}Disk space{{end}}</b>{{range .Notes}}<span class="dnote">{{.}}</span>{{end}}</div></div>{{end}}</div>{{end}}{{end}}
-      {{else}}<p class="muted">{{if .Err}}Could not read its cache: {{.Err}}{{else}}Reading its cache…{{end}}</p>{{end}}
-      {{with .Since}}<p class="muted">{{.}}</p>{{end}}
-      {{with .Version}}<p class="muted sm">BuildKit {{.}}</p>{{end}}</section>
-    {{else}}
-    <section class="box"><p class="muted">No daemon reached yet. The console finds them through the daemons' headless Service.</p></section>
-    {{end}}
-  </div>
-  {{if .GoneBuilds}}<p class="muted note-up">{{.GoneBuilds}} more build{{if ne .GoneBuilds 1}}s{{end}} in the last 24 hours ran on {{.GoneDaemons}} daemon{{if ne .GoneDaemons 1}}s{{end}} replaced since (a rollout or a restart).</p>{{end}}
+  <header class="phead"><div class="crumbs">Nodes</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">Build nodes</h1>{{if eq .Ready .Total}}<span class="chip plain">{{.Ready}} ready</span>{{else}}<span class="chip failed">{{icon "warn" 11}}{{.Ready}} ready of {{.Total}}</span>{{end}}</div>
+    <div class="sub"><span>{{.Total}} BuildKit daemon{{if ne .Total 1}}s{{end}}{{with .Release}} · release <code>{{.}}</code>{{end}}</span>{{with .BuildKit}}<span>BuildKit {{.}} on every node</span>{{end}}<span>{{if .Measured}}{{.Measured}}{{else}}Waiting for the daemons to report{{end}}</span>{{with .APIStatus}}<span>{{.}}</span>{{end}}</div></header>
+  {{if .Total}}<p class="lead sm"><b>{{.Builds}}</b> image build{{if ne .Builds 1}}s{{end}} in 24 hours on <b>{{.Ready}}</b> of {{.Total}} daemon{{if ne .Total 1}}s{{end}}, <b>{{.Running}}</b> running now{{if .Attention}}; <b>{{.Attention}}</b> need{{if eq .Attention 1}}s{{end}} attention{{end}}.</p>{{end}}
+  {{range .Notes}}<div class="callout {{if eq .Level "crit"}}bad{{else}}warn{{end}}" role="note">{{icon "warn" 16}}<div><b class="k">{{.Title}}</b>{{.Text}} <span class="nnodes">On {{join .Nodes ", "}}.</span></div></div>{{end}}
+  {{with .Where}}<section class="box" aria-labelledby="wbT"><div class="boxh"><h2 class="h" id="wbT">Where {{.Project}} built</h2><span class="muted">24 hours</span></div>
+    {{if .Rows}}<div class="tbox flat"><table class="ptable"><thead><tr><th>Daemon</th><th class="num">Builds</th><th class="num">Last build</th><th class="num" title="rebuilt because the cache was not on this node">Rebuilt here</th></tr></thead><tbody>
+      {{range .Rows}}<tr><td><a class="link mono" href="{{.URL}}">{{.Short}}</a>{{with .Node}} <span class="muted">{{.}}</span>{{end}}</td><td class="num">{{.Builds}}</td><td class="num" title="{{.Last.UTC}}">{{.Last.Text}}</td><td class="num">{{.Farm}}{{if .Unclear}} <span class="wtxt" title="whether the files changed or the cache was gone is unclear">+{{.Unclear}} unclear</span>{{end}}</td></tr>{{end}}
+    </tbody></table></div>{{end}}
+    <p class="muted sm pad">{{if not .Rows}}No build of {{.Project}} in 24 hours on the daemons running now.{{else if .Others}}Not built on the other {{.Others}} daemon{{if ne .Others 1}}s{{end}} in 24 hours: a first build there starts without this project's layers.{{else}}Built on every daemon in 24 hours.{{end}}{{if .Gone}} {{.Gone}} more build{{if ne .Gone 1}}s{{end}} ran on daemons replaced since.{{end}}</p></section>{{end}}
+  {{if .Total}}
+  <section class="box" aria-labelledby="flT"><div class="boxh"><h2 class="h" id="flT">Daemons</h2><span class="muted">24 hours{{if .Attention}} · the ones needing attention first{{end}}</span>
+    <nav class="seg ml" aria-label="Show"><a href="/nodes"{{if not .Filtered}} aria-current="true"{{end}}>All {{.Total}}</a><a href="/nodes?show=attention"{{if .Filtered}} aria-current="true"{{end}}>Needs attention {{.Attention}}</a></nav></div>
+    {{if .Rows}}<div class="tbox flat"><table class="ntable"><thead><tr><th>Daemon</th>{{if .Probe}}<th>Disk <span class="muted">available</span></th>{{end}}<th class="num">Cache</th><th class="num">Builds</th><th class="num" title="rebuilt because the cache was not on this node">Rebuilt here</th><th class="num">Running</th><th class="num ophone">Projects</th>{{if .Router}}<th class="num ophone" title="connections the build routers sent here; the share sent to a node that had built the project before">Routed here</th>{{end}}{{if .Mixed}}<th class="ophone">BuildKit</th>{{end}}</tr></thead><tbody>
+    {{range .Rows}}<tr{{with .Level}} class="mark lv-{{.}}"{{end}}>
+      <td class="nd"><a href="{{.URL}}"><span class="okdot{{if not .Ready}} bad{{end}}" aria-hidden="true"></span>{{.Short}}</a><small>{{.Node}}{{if and .Node .Down}} · {{end}}{{with .Down}}<span class="tone-crit">not reachable for {{.}}</span>{{end}}</small></td>
+      {{if $.Probe}}<td class="dk">{{with .Disk}}{{if .Err}}<span class="muted" title="{{.Err}}">no answer</span>{{else}}<span class="mini" role="img" aria-label="Disk: {{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}"></i>{{end}}</span><span class="{{if eq .Level "crit"}}tone-crit{{else if eq .Level "warn"}}tone-warn{{end}}">{{.Avail}}</span>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>{{end}}
+      <td class="num m">{{if .Inspected}}{{if .Segs}}<span class="mini" role="img" aria-label="{{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}"></i>{{end}}</span>{{end}}{{bytes .Cache}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="num m">{{.Builds}}</td>
+      <td class="num m">{{.Farm}}{{if .Unclear}} <span class="wtxt" title="whether the files changed or the cache was gone is unclear">+{{.Unclear}}</span>{{end}}</td>
+      <td class="num m">{{if .Ready}}{{.Running}}{{with .Stuck}} <span class="chip warn" title="the oldest build has run for {{.}}">stuck?</span>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="num m ophone">{{.Projects}}</td>
+      {{if $.Router}}<td class="num m ophone">{{.Routed}}{{with .WarmShare}} <span class="muted">· {{.}}</span>{{end}}</td>{{end}}
+      {{if $.Mixed}}<td class="m ophone mono">{{.Version}}</td>{{end}}
+      <td class="line2">{{.Builds}} build{{if ne .Builds 1}}s{{end}}{{if .Ready}} · {{.Running}} running{{end}}{{if .Inspected}} · {{bytes .Cache}} cache{{end}}{{if .Farm}} · {{.Farm}} rebuilt for want of cache{{end}}{{with .Stuck}} · the oldest running for {{.}}{{end}}</td>
+    </tr>{{end}}
+    </tbody></table></div>
+    {{else}}<p class="muted pad">{{if .Filtered}}No daemon needs attention. <a class="link" href="/nodes">Show all {{.Total}}</a>.{{end}}</p>{{end}}
+    {{if and .Filtered .Hidden .Rows}}<p class="muted sm pad">{{.Hidden}} daemon{{if ne .Hidden 1}}s need{{else}} needs{{end}} nothing: <a class="link" href="/nodes">show all {{.Total}}</a>.</p>{{end}}
+  </section>
+  {{else}}
+  <section class="box"><p class="muted pad">No daemon reached yet. The console finds them through the daemons' headless Service.</p></section>
+  {{end}}
+  {{if or .RouterLine .GoneBuilds}}<p class="muted">{{.RouterLine}}{{if .GoneBuilds}}{{if .RouterLine}} {{end}}{{.GoneBuilds}} more build{{if ne .GoneBuilds 1}}s{{end}} in the last 24 hours ran on {{.GoneDaemons}} daemon{{if ne .GoneDaemons 1}}s{{end}} replaced since (a rollout or a restart).{{end}}</p>{{end}}
+  {{with .Dups}}<section class="box" aria-labelledby="dpT"><div class="boxh"><h2 class="h" id="dpT">Base images on more than one node</h2><span class="muted">{{add (len .) (len $.DupMore)}} image{{if ne (add (len .) (len $.DupMore)) 1}}s{{end}} · {{bytes $.DupBytes}} of copies</span></div>
+    <div class="tbox flat"><table><thead><tr><th>Image</th><th class="num">Nodes</th><th class="num">Size</th><th class="num">Copies</th></tr></thead><tbody>{{range .}}{{template "duprow" .}}{{end}}</tbody></table></div>
+    {{with $.DupMore}}<details class="foldrow" id="dups-more"><summary>{{len .}} more image{{if ne (len .) 1}}s{{end}}</summary><div class="tbox flat"><table><tbody>{{range .}}{{template "duprow" .}}{{end}}</tbody></table></div></details>{{end}}
+    <p class="muted sm pad">Each node keeps its own cache, so the same is true for every layer built on more than one node.</p></section>{{end}}
   <div class="cards2">
     <section class="box" aria-labelledby="rcT"><h2 class="h" id="rcT">Runner cache in S3 <span class="muted">GitLab's cache:, this project</span></h2>
       {{with .Cache}}<div class="nkv"><span>Stored</span><span>{{if .Keys}}<b>{{bytes .Bytes}}</b> in {{.Keys}} key{{if ne .Keys 1}}s{{end}}{{else}}nothing for this project yet{{end}}</span><span>Listed</span><span>{{.Scanned}}</span></div>
@@ -39,3 +51,4 @@
   </div>
 </div>
 {{end}}
+{{define "duprow"}}<tr><td class="mono wrapany">{{.Name}}</td><td class="num">{{.Nodes}}</td><td class="num">{{bytes .Size}}</td><td class="num">{{bytes .Copies}}</td></tr>{{end}}

@@ -62,7 +62,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 			Sub: joinSet(" · ", fmt.Sprintf("#%d", b.Pipeline), short(b.SHA, 7), b.Ref)})
 	}
 	for _, d := range s.data.Daemons() {
-		items = append(items, indexItem{Kind: "Node", Label: shortDaemon(d.Name), URL: "/nodes", Icon: "nodes", Sub: d.Name + paren(d.Inspection.Node)})
+		items = append(items, indexItem{Kind: "Node", Label: shortDaemon(d.Name), URL: nodeURL(d.Name), Icon: "nodes", Sub: d.Name + paren(d.Inspection.Node)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
