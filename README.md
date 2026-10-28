@@ -92,15 +92,21 @@ Numbers from the production setup this project is derived from:
     own, and grouped by pipeline if you like;
   - Images: cache rate and build time per image over 24 hours or 7 days;
     one image's page goes back 24 hours, 7 days, 30 days or a year;
-  - Nodes: each daemon's builds and running builds, its cache by kind and
-    its GC policies, its disk (cache, other files, free space, inodes) with
-    a warning near the GC's keep-free floor or the kubelet's eviction
+  - Nodes: each daemon's builds and running builds, how the build router
+    chose it (to the project's cache, by hash), its cache by kind and its
+    GC policies, its disk (cache, other files, free space, inodes) with a
+    warning near the GC's keep-free floor or the kubelet's eviction
     thresholds, and the runners' S3 cache per project, with a warning when
     the bucket has no lifecycle rule.
 
   Every build gets one of five outcomes: from cache, your change, build
   farm, unclear or failed. A build's page starts with one sentence, then
-  what changed since the previous build of the image, then its steps.
+  what changed since the previous build of the image (or any other build
+  of it, side by side), then its steps with what each one's processes
+  used, BuildKit's Dockerfile build checks that failed, and where the
+  job's time went before the build (the runner, its pod starting, the
+  checkout). Every figure is measured, not estimated; medians and p95
+  are always one of the measured times.
   Every job's log can link to its page (`global.console.url`). Jobs that
   build no image stay in GitLab. With sign-in through GitLab
   (`control-plane.signIn`), each person sees the projects whose jobs GitLab lets
