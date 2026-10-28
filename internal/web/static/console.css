@@ -869,7 +869,20 @@ a.boxh:hover { background: var(--hover); }
 .cmp tr.dif th { color: var(--ink); }
 .cmp .diff { margin-top: 4px; }
 .cmpdiff .gap { color: var(--ink-3); }
+.cmpdiff div { white-space: pre-wrap; overflow-wrap: anywhere; }
 .picks { list-style: none; margin: 0; padding: 8px 14px 12px; display: grid; gap: 6px; font-size: 13px; }
 .picks .cur { font-weight: 600; }
 /* A job's pod starting (scheduled, images pulled), between the runner's parts. */
 .c-podwait { background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--runner) 75%, transparent) 0 1.5px, transparent 1.5px 3.5px); }
+/* On a phone both builds stay on screen: fixed columns that wrap. */
+@media (max-width: 760px) {
+  .cmp { table-layout: fixed; font-size: 12px; }
+  .cmp th, .cmp td { padding: 6px 8px; }
+  .cmp tbody th, .cmp thead th:first-child { width: 28%; white-space: normal; }
+  .cmp.steps th:first-child, .cmp.steps td:first-child { width: 44%; }
+  .cmp.steps th.num, .cmp.steps td.num { width: 16%; }
+  .cmp .diff div { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .cmp th, .cmp td { overflow: hidden; }
+  .cmp thead th > a { display: block; }
+  .cmp .chip, .cmp .stat { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
