@@ -37,9 +37,12 @@ nothing from the box: the runner uploads them to GitLab.
    Optional: `s3.insecure: true` (plain http, e.g. MinIO in the cluster),
    `s3.pathStyle` (true or false; by default path style except on AWS),
    `controllerSecretName` (a Secret with keys that may only read, for the
-   controller's bucket listing; default: `secretName`),
-   `path` (the folder; default `<release>/<GitLab id>`), `maxArchiveBytes`
-   (default 4.5 GiB; Hetzner takes at most 5 GB per upload).
+   control plane's listing of the bucket, see
+   [In the console](#in-the-console); default: `secretName`),
+   `path` (the folder; default `<release>/<GitLab id>`, where the GitLab
+   id is the first six hex digits of the sha256 of `gitlab-runner.gitlabUrl`),
+   `maxArchiveBytes` (default 4.5 GiB; Hetzner takes at most 5 GB per
+   upload).
 
 4. `helm upgrade` with `--reset-then-reuse-values` (with `--reuse-values`
    the main runner keeps the runner configuration of the release it was
@@ -49,6 +52,10 @@ The main runner restarts once to read the new configuration. Jobs then
 print `Checking cache for …`, `Downloading cache …` with the size, and
 `Successfully extracted cache` or `Failed to extract cache` (nothing there
 yet).
+
+Under Argo CD or Flux the same values go into the Application or
+HelmRelease ([gitops.md](gitops.md)); the controller follows a changed
+list of caches and rotated keys without a restart.
 
 ### How it works
 
@@ -97,6 +104,33 @@ plan:
 GitLab's job log says when a failed job restored a cache; it says nothing
 when the job saves none.
 
+### In the console
+
+The control plane's controller (on by default in the box) lists every
+runner's cache folder when it starts and then every 10 minutes
+(`control-plane.caches.every`). The Nodes page then shows, under "Runner
+cache in S3", for the project the console shows: how much it stores and
+in how many cache keys, when the bucket was last listed, a warning when
+the bucket has no lifecycle rule that expires objects ("Old caches are
+never deleted"), and the error when the last listing failed. The
+controller's log has a `cache listed` line per folder (objects and bytes)
+or `cache not listed` with the reason.
+
+The box writes the folders of the main runner and of every tier into the
+ConfigMap `<release>-runner-caches` and gives the controller `get` on
+exactly the Secrets they name, nothing else. The listing needs
+`s3:ListBucket` (for the folder's prefix); reading the lifecycle rule needs
+`s3:GetLifecycleConfiguration` (without it the warning is not shown). A
+key with only these rights, in `controllerSecretName`, keeps the
+controller from writing to the bucket. A folder with more than 200,000
+objects is not listed in full (the page shows the error).
+
+With your own runner and `charts/control-plane` installed on its own,
+name the folders in `caches.stores` (`server`, `bucket`, `region`,
+`path` as the runner's `Path`, `gitlabUrl` exactly as the runner has it,
+`existingSecret` with `accesskey` and `secretkey`) in the control plane's
+values.
+
 ### What a cache can do
 
 Any job of a project can read and replace that project's caches: a cache
@@ -143,11 +177,14 @@ token or a full node does not stop the others.
    `terminationGracePeriodSeconds` (how long a rollout waits for running
    jobs; default 3600).
 
-Every tier's jobs get the same setup as the main runner's: the daemons'
-address and client certificate (a tier on `nodes: any` reaches a daemon on
-another node, with that node's cache), the trace context, the job data for
-the console, and the jobs namespace. A job's size is the tier's: jobs
-cannot raise it themselves.
+Every tier's jobs get the same setup as the main runner's: the build
+router's address and the client certificate, the trace context, the job
+data for the console, and the jobs namespace. The router knows a tier's
+job like any other and sends its build to the node where its project
+built before, so a tier on `nodes: any` reaches the project's cache from
+any node (with `global.router.enabled=false` it reaches the daemons'
+Service from a node without a daemon, so any daemon, with that node's
+cache). A job's size is the tier's: jobs cannot raise it themselves.
 
 On a rollout a tier's new runner pod starts before the old one stops; the
 old one finishes its running jobs first (up to the grace period).

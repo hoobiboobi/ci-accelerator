@@ -1,6 +1,6 @@
 # Values fragment for the official gitlab-runner Helm chart that sends CI jobs
 # to the buildkit daemons of this project. Tested with chart 0.93.0 and
-# runner 19.4.1 (see README.md next to this file).
+# runner 19.4.2 (see README.md next to this file).
 #
 #   helm upgrade --install gitlab-runner gitlab-runner \
 #     --repo https://charts.gitlab.io --version 0.93.0 \
@@ -12,7 +12,8 @@
 # merge it with yours, so keep every line below if you write your own.
 
 # 19.4.0 lists pod events on every poll and overloaded API servers; 19.4.1
-# fixes that. The chart 0.93.0 default would be 19.4.0.
+# fixes that, and 19.4.2 is the same runner rebuilt on Go 1.26.10. The chart
+# 0.93.0 default would be 19.4.0.
 image:
   tag: alpine-v19.4.2
 

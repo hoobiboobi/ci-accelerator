@@ -4,9 +4,26 @@
 
 The ci-accelerator control plane: a controller that collects the build history of BuildKit daemons and the CI jobs around it, and a web that serves the console, which explains every build: what came from cache, what came from another job, and why a step was rebuilt.
 
-Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator). The control plane runs as two Deployments from one image: the controller (`<release>-controller`, one pod) reads every daemon's build history and the CI job pods into SQLite on its own volume, holds the sign-in sessions and every GitLab token; the web (`<release>-web`, two pods, nothing kept) serves the console from the controller's API. The console answers one question: why an image build was slow or not cached - the change or the build farm. It works in three levels: by itself (builds, steps, cache verdicts, the pipeline timeline), with a GitLab token (job results, runner waits, "files or node" by comparing commits), or with sign-in through GitLab (each person sees the projects GitLab lets them read). The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs it on by default; on its own it needs the daemons' CA for the controller's certificates (`tls`) and their headless Service (`daemons.discover`).
+Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator). Every role runs from one image, `ghcr.io/hoobiboobi/ci-accelerator` (the binary `ci-accelerator`), with object names prefixed by the release name (or `fullnameOverride`):
 
-[The console](https://ci-accelerator.io/docs/#the-console) in the documentation explains the levels and the sign-in setup. Up to 0.2.x this chart was `console`; 0.3.0 does not upgrade a release of it in place (the upgrade notes in the changelog say how to move).
+- **The controller** (Deployment `<release>-controller`, one pod, `Recreate`): reads every daemon's build history and the CI job pods into SQLite on its own volume (`<release>-controller-data`, kept when the release is removed), holds the sign-in sessions and every GitLab token, and serves its API on the Service `<release>-controller` over HTTPS. Callers prove who they are with a projected ServiceAccount token that the controller checks with a TokenReview (the chart adds a ClusterRole that allows only that).
+- **The web** (Deployment and Service `<release>-web`, two pods, nothing kept): serves the console's pages and its JSON API from the controller's API. When the controller does not answer, a page says so (502) instead of showing an empty console.
+- **The build router** (DaemonSet and Service `<release>-router` on the build nodes, on with `router.enabled` or `global.router.enabled`): CI jobs connect to it instead of to the daemons. It knows a job by its pod's address and sends it to the daemon on the node where its project built in the last `router.warmDays`, else to the project's daemon by a hash every router agrees on, within the job's zone (`router.zones`, `router.crossZone`). It passes the bytes through: the job and the daemon keep their mutual TLS and the router holds no key, so the daemons' certificate must name the router's Service (the buildkit chart does with `global.router.service`). Its decisions are shown on the build page and the Nodes page.
+
+The console answers one question: why an image build was slow or not cached - the change or the build farm. It works in three levels: by itself (builds, steps, cache verdicts, the pipeline timeline, comparing two builds, the daemons' disks and caches), with a GitLab token (job results, runner waits, "files or node" by comparing commits), or with sign-in through GitLab (each person sees the projects GitLab lets them read). Without sign-in it shows everything to whoever reaches the web's Service: keep it ClusterIP and use `kubectl port-forward` or an Ingress with its own authentication.
+
+The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs this chart on by default, router included. On its own it needs the daemons of the [buildkit chart](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/buildkit): their headless Service (`daemons.discover`), their CA for the controller's client and API certificates (`global.tls.issuerRef` with cert-manager, or `tls.existingSecret` and `controller.api.tls.existingSecret`), the runners' GitLab URL (`gitlab.urls`) and the jobs' namespace (`jobs.namespace`). For a buildkit release `buildkit` with its own CA in the namespace `ci-accelerator`:
+
+```sh
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/control-plane --version 0.3.0 \
+  -n ci-accelerator \
+  --set 'gitlab.urls={https://gitlab.example.com/}' \
+  --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 \
+  --set global.tls.issuerRef.name=ci-accelerator-buildkit-ca \
+  --set jobs.namespace=ci-jobs
+```
+
+[The console](https://ci-accelerator.io/docs/#the-console) in the documentation explains the levels and the sign-in setup; troubleshooting has [reading the logs](https://ci-accelerator.io/docs/troubleshooting/#reading-the-logs) (one JSON line per event, `log.level` and each role's `logLevel`). Up to 0.2.x this chart was `console` with the image `ci-accelerator-console`; 0.3.0 does not upgrade a release of it in place (the upgrade notes in the [changelog](https://ci-accelerator.io/changelog/) say how to move).
 
 ## Requirements
 

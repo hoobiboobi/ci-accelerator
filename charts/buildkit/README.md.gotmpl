@@ -5,14 +5,18 @@
 
 {{ template "chart.description" . }}
 
-Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator); this chart is the daemons alone, for a cluster that already has a runner. Every CI job talks to the daemon on its own node (`routing: PreferSameNode`), so a project's cache stays warm on that node; mTLS between jobs and daemons is mandatory (cert-manager or your own certificates); the garbage-collection policies are rendered in full by the chart (see `config.gc`).
+Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator); this chart is the daemons alone, for a cluster that already has a runner. It runs BuildKit {{ template "chart.appVersion" . }} (the official `moby/buildkit` image, pinned by digest) as a privileged DaemonSet on the build nodes, with the probe, termination and garbage-collection defaults of a production setup: the garbage-collection policies are rendered in full by the chart (see `config.gc`). mTLS between jobs and daemons is mandatory: cert-manager issues the daemons' certificate and a client certificate (Secret `<fullname>-client`) into each of `tls.client.namespaces`, or you provide them (`tls.source=existingSecret`, made by `scripts/buildkit-certs.sh`).
 
 ```sh
-helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version <version> \
+helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version {{ template "chart.version" . }} \
   -n ci-accelerator --set 'tls.client.namespaces={ci-jobs}'
 ```
 
-The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs this chart with a gitlab-runner and the control plane (the console). How to use the daemons from a job, where the cache should live and what to watch: the [documentation](https://ci-accelerator.io/docs/), [architecture](https://ci-accelerator.io/docs/architecture/) and [troubleshooting](https://ci-accelerator.io/docs/troubleshooting/).
+CI jobs reach the daemons through the Service `<fullname>` on port 1234. By default each job talks to the daemon on its own node (`service.routing: PreferSameNode`), so a project's cache stays warm on the nodes its jobs run on; the headless Service `<fullname>-headless` lists every daemon for other components.
+
+The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs this chart with a gitlab-runner and the control plane ([charts/control-plane](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/control-plane)), whose build router sends each job to the node where its project built before. With `global.router.enabled` and `global.router.service` (the box sets both), the daemons' certificate names the router's Service and their NetworkPolicy admits the router's pods instead of the clients' namespaces; the jobs keep their client certificates, which the daemons check through the router. The box also turns on `diskProbe` (a sidecar reporting the cache disk's free space to the console) and `networkPolicy`.
+
+How to use the daemons from a job, where the cache should live and what to watch: the [documentation](https://ci-accelerator.io/docs/), [architecture](https://ci-accelerator.io/docs/architecture/) and [troubleshooting](https://ci-accelerator.io/docs/troubleshooting/). This chart upgrades in place from the previous release; the upgrade notes in the [changelog](https://ci-accelerator.io/changelog/) say when an upgrade restarts the daemons (an `emptyDir` cache then starts empty).
 
 {{ template "chart.requirementsSection" . }}
 
