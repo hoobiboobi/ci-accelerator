@@ -19,3 +19,18 @@ A step that copies files from the build context, rebuilt on a node other than th
 - On the test project's day, 136 builds became "build farm" (13 of them the same commit), 60 "your change"; the front page now says that most rebuild time went to jobs landing on the wrong node.
 - Without a GitLab token or sign-in, builds stay "unclear", as before.
 - Files excluded by `.dockerignore` still count as changes: a rebuild can be called the change's when it was not.
+
+## Update 2026-10-28
+
+- GitLab's comparison of two commits never changes, so it is stored
+  (`compares`, kept as long as builds). Settling works the verdict out from
+  the stored comparison and the current data whenever a build is read
+  again (a controller restart reads the daemons' history again), without
+  asking GitLab. Stored verdicts are not protected against a re-read: the
+  previous build and the first rebuilt step can change, and the verdict
+  must follow them.
+- The controller settles every project in the background once a minute:
+  with the installation's token it asks GitLab (25 requests a project a
+  pass); with sign-in, from the stored comparisons alone.
+- GitLab failing for a moment (5xx, timeouts) is no longer stored as
+  "unresolved": those builds are asked about again later. A 4xx still is.
