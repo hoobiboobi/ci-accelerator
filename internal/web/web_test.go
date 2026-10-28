@@ -1701,3 +1701,39 @@ func TestNoP95FromFewRebuilds(t *testing.T) {
 		}
 	}
 }
+
+// A pipeline's duration is one number: its card and its timeline count
+// from when GitLab created it to its last job's end.
+func TestPipelineDurationIsOneNumber(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	// GitLab created one pipeline well before its first job waited.
+	inst, id, _ := strings.Cut(keys[0], "/")
+	pid, _ := strconv.ParseUint(id, 10, 64)
+	early := byPipe[keys[0]][len(byPipe[keys[0]])-1].Started.Add(-47 * time.Second)
+	for _, b := range byPipe[keys[0]] {
+		if b.Started.Add(-47 * time.Second).Before(early) {
+			early = b.Started.Add(-47 * time.Second)
+		}
+	}
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 7001, PipelineID: pid, ProjectID: 42, Name: "late", PipelineCreatedAt: early}); err != nil {
+		t.Fatal(err)
+	}
+	card := regexp.MustCompile(`job(?:s)? in <b>([^<]+)</b>`)
+	row := regexp.MustCompile(`>([^<>]+) · \d+ jobs<`)
+	compared := 0
+	for _, k := range keys {
+		p := get(t, ts, "/pipelines/"+k)
+		c, w := card.FindStringSubmatch(p.body), row.FindStringSubmatch(p.body)
+		if c == nil || w == nil {
+			continue
+		}
+		compared++
+		if c[1] != w[1] {
+			t.Errorf("%s: the card says %q, the timeline %q", k, c[1], w[1])
+		}
+	}
+	if compared == 0 {
+		t.Fatal("no pipeline with a card and a timeline")
+	}
+}
