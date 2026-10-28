@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.3.1
+version: 0.3.2
 # The box's own version (its control plane's image); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.3.1"
+appVersion: "0.3.2"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -26,7 +26,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.34.1
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.1
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.2
       platforms:
         - linux/amd64
         - linux/arm64
@@ -45,12 +45,20 @@ annotations:
       url: https://github.com/hoobiboobi/ci-accelerator/issues
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
-    - kind: changed
-      description: The documentation describes 0.3.0 throughout - the build router, the control plane (controller and web), the Nodes page, comparing builds, the logs, reinstalling over 0.2.x - with a new components diagram
     - kind: fixed
-      description: The release notes now say that leaving the console out also needs global.router.enabled=false (the router is part of the control plane)
-    - kind: changed
-      description: The ci-accelerator image is v0.3.1 (the same program as v0.3.0); the daemons and their disk probe stay as they are, so an upgrade from 0.3.0 restarts only the control plane's pods
+      description: The GitLab CI component works again - 0.3.1's was refused by GitLab (description longer than 256 characters), and since 0.2.3 GitLab 17.9 to 18.9 refused it for having a description at all; it is now tested in real GitLab CE 17.9 and 19.4
+    - kind: fixed
+      description: The console no longer stores every build twice after a daemon pod is replaced on a hostPath; the copies 0.3.0 and 0.3.1 made are removed when 0.3.2 starts (helm rollback to 0.3.1 keeps working)
+    - kind: fixed
+      description: A running pipeline's page shows its jobs on the timeline and updates itself; the job page a job's log links to follows the job and opens its build
+    - kind: fixed
+      description: Builds without a Dockerfile target are named by the repository they push to, have their own image page and filter, and are compared with the previous build of the same repository
+    - kind: fixed
+      description: A failed build shows its Dockerfile with the failed step's lines, from BuildKit's stored error
+    - kind: fixed
+      description: A control plane or disk probe pinned by digest for another release is refused with the way forward instead of running the old image under the new tag; the release notes list both digests
+    - kind: added
+      description: docs/gitops.md shows how to make the console's session key with Flux or Argo CD (SOPS, Sealed Secrets, External Secrets)
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -58,10 +66,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.3.1
+    version: 0.3.2
     repository: file://../buildkit
   - name: control-plane
-    version: 0.3.1
+    version: 0.3.2
     repository: file://../control-plane
     condition: control-plane.enabled
   - name: gitlab-runner

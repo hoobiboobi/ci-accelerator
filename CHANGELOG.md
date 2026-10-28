@@ -9,15 +9,28 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-- From 0.3.1 or 0.3.0, `helm upgrade` in place; the daemons stay as they
-  are. A control plane pinned by digest
+None.
+
+## 0.3.2 - 2026-10-29
+
+### Upgrade notes
+
+- From 0.3.1 or 0.3.0, `helm upgrade` in place. The control plane's image
+  moves to v0.3.2, so the controller, web and router pods restart once;
+  the daemons and their disk probe stay as they are. A control plane pinned
+  by digest
   (`control-plane.image.digest`, as the README told production installs)
   needs the new release's digest from its notes: the chart now refuses the
   digest of an earlier release under its own tag, which would run that
   release under the new name.
 - On its first start the controller removes the builds 0.3.0 and 0.3.1
   stored twice after a daemon pod was replaced on a hostPath, and sums up
-  the images' daily figures again from the first such day. The schema
+  the images' daily figures again from the first such day. Failed builds
+  still in BuildKit's history get their Dockerfile then; older ones stay
+  without.
+- Pipelines that include the GitLab CI component of 0.3.1: include the
+  0.3.2 component (the release notes print its include with its
+  integrity). The schema
   version stays: `helm rollback` to 0.3.1 keeps working (that release then
   logs "record not stored" for the records a replaced pod sends again,
   instead of storing them twice).
