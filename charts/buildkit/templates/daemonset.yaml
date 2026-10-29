@@ -123,7 +123,8 @@ spec:
         {{- $probe := (.Values.diskProbe | default dict) }}
         {{- if $probe.enabled }}
         # Reports the free space of the cache's filesystem (statfs), which
-        # BuildKit's API does not; numbers only, read-only.
+        # BuildKit's API does not, and the node's and this pod's CPU and
+        # memory (from /proc and the pod's cgroup, read-only); numbers only.
         - name: disk-probe
           image: {{ include "buildkit.diskProbeImage" . | quote }}
           imagePullPolicy: {{ dig "image" "pullPolicy" "IfNotPresent" $probe }}
@@ -134,6 +135,16 @@ spec:
             {{- with dig "logLevel" "" $probe }}
             - -log-level={{ . }}
             {{- end }}
+          # Environment, not arguments: a probe image of an earlier release
+          # ignores what it does not know, where an unknown flag stops it.
+          env:
+            - name: CI_ACCELERATOR_CGROUP_ROOT
+              value: /host/cgroup
+            # Names the pod's cgroup under /host/cgroup.
+            - name: CI_ACCELERATOR_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
           ports:
             - name: disk
               containerPort: {{ int64 (default 9180 $probe.port) }}
@@ -159,11 +170,22 @@ spec:
             - name: state
               mountPath: /var/lib/buildkit
               readOnly: true
+            - name: cgroup
+              mountPath: /host/cgroup
+              readOnly: true
         {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "buildkit.fullname" . }}-config
+        {{- if $probe.enabled }}
+        # The host's cgroup filesystem: a container sees only its own
+        # cgroup, and the probe reports the whole pod's (the daemon's).
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
+        {{- end }}
         # Explicit items: a Secret without one of the keys fails the mount
         # with the key's name in the pod events, before buildkitd starts.
         - name: tls

@@ -172,6 +172,12 @@ func (d *Daemon) Inspect(ctx context.Context) (Inspection, error) {
 		} else {
 			in.Disk = &disk
 		}
+		// A probe of a release before /load answers 404: noted the same way.
+		if load, err := diskprobe.FetchLoad(ctx, probeClient, d.probe); err != nil {
+			in.LoadErr = err.Error()
+		} else {
+			in.Load = &load
+		}
 	}
 	return in, nil
 }

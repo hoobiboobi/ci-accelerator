@@ -441,12 +441,14 @@ priorityClass:
 # disk fills. It runs the ci-accelerator image (the control plane's);
 # enable it together with the control plane (the box does). Answers plain
 # HTTP on its port with numbers only (the controller reaches it like the
-# daemon; builds share the pod's network and can read the numbers too).
+# daemon; builds share the pod's network and can read the numbers too). It
+# also reports the node's and the daemon pod's CPU and memory, read from
+# /proc and the host's cgroup filesystem (mounted read-only).
 diskProbe:
   # -- Run the probe. Off here (no controller to read it); the box turns it on.
   enabled: false
-  # -- Its port (GET /disk, /healthz); the daemons tell it to the control
-  # plane as a worker label.
+  # -- Its port (GET /disk, /load, /healthz); the daemons tell it to the
+  # control plane as a worker label.
   port: 9180
   # -- Its log level (debug adds a line per reading); empty: info. Set, it
   # restarts every daemon once.
@@ -454,7 +456,7 @@ diskProbe:
   image:
     # -- The ci-accelerator image: mirror it together with the control plane's.
     repository: ghcr.io/hoobiboobi/ci-accelerator
-    # -- Default: v0.3.0, the release that last changed the probe program or
+    # -- Default: v0.3.3, the release that last changed the probe program or
     # its image; pinned, so a chart release alone does not restart every daemon.
     tag: ""
     # -- When set, the image is pulled by digest (tag is kept for readability;
@@ -462,7 +464,8 @@ diskProbe:
     # of another release is refused.
     digest: ""
     pullPolicy: IfNotPresent
-  # -- The probe's resources (it reads one number a minute).
+  # -- The probe's resources (it reads a few kernel files every 10 s and
+  # keeps an hour of readings in memory).
   resources:
     requests: {cpu: 5m, memory: 16Mi}
     limits: {memory: 32Mi}

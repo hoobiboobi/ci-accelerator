@@ -40,9 +40,13 @@ func Stat(dir string) (Disk, error) {
 		Inodes: st.Files, InodesFree: st.Ffree}, nil
 }
 
-// Handler serves GET /disk (the Disk of dir as JSON) and GET /healthz.
-func Handler(dir string, stat func(string) (Disk, error)) http.Handler {
+// Handler serves GET /disk (the Disk of dir as JSON), GET /load (from
+// load, when given) and GET /healthz.
+func Handler(dir string, stat func(string) (Disk, error), load func() (Load, error)) http.Handler {
 	mux := http.NewServeMux()
+	if load != nil {
+		loadHandler(mux, load)
+	}
 	mux.HandleFunc("GET /disk", func(w http.ResponseWriter, r *http.Request) {
 		d, err := stat(dir)
 		if err != nil {
@@ -58,12 +62,18 @@ func Handler(dir string, stat func(string) (Disk, error)) http.Handler {
 }
 
 // Serve answers on addr until ctx ends, logging to log: a statfs that
-// fails at most once a minute, each answer at the debug level.
-func Serve(ctx context.Context, addr, dir string, log *slog.Logger) error {
+// fails at most once a minute, each answer at the debug level. With a
+// sampler, it runs it and serves its readings as /load.
+func Serve(ctx context.Context, addr, dir string, sampler *Sampler, log *slog.Logger) error {
 	if _, err := Stat(dir); err != nil {
 		return fmt.Errorf("disk probe: %w", err)
 	}
 	every := &logging.Every{Period: time.Minute}
+	var load func() (Load, error)
+	if sampler != nil {
+		go sampler.Run(ctx, func(err error) { every.Warn(log, "load", "load reading failed", "err", err) })
+		load = sampler.Load
+	}
 	stat := func(d string) (Disk, error) {
 		disk, err := Stat(d)
 		if err != nil {
@@ -77,7 +87,7 @@ func Serve(ctx context.Context, addr, dir string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Handler: Handler(dir, stat), ReadHeaderTimeout: 5 * time.Second, ErrorLog: logging.ErrorLog(log),
+	srv := &http.Server{Handler: Handler(dir, stat, load), ReadHeaderTimeout: 5 * time.Second, ErrorLog: logging.ErrorLog(log),
 		ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 8 << 10}
 	go func() {
 		<-ctx.Done()

@@ -25,7 +25,7 @@ func TestServeAndFetch(t *testing.T) {
 			t.Errorf("statfs of %q", dir)
 		}
 		return want, nil
-	}))
+	}, nil))
 	defer srv.Close()
 	got, err := Fetch(context.Background(), srv.Client(), srv.URL)
 	if err != nil || got != want {
@@ -41,13 +41,13 @@ func TestServeAndFetch(t *testing.T) {
 
 func TestFetchRefusesNonsense(t *testing.T) {
 	for _, d := range []Disk{{}, {Total: 10, Free: 20}, {Total: 10, Free: 5, Available: 6}} {
-		srv := httptest.NewServer(Handler("/", func(string) (Disk, error) { return d, nil }))
+		srv := httptest.NewServer(Handler("/", func(string) (Disk, error) { return d, nil }, nil))
 		if _, err := Fetch(context.Background(), srv.Client(), srv.URL); err == nil {
 			t.Errorf("%+v accepted", d)
 		}
 		srv.Close()
 	}
-	srv := httptest.NewServer(Handler("/", func(string) (Disk, error) { return Disk{}, errors.New("eio") }))
+	srv := httptest.NewServer(Handler("/", func(string) (Disk, error) { return Disk{}, errors.New("eio") }, nil))
 	defer srv.Close()
 	if _, err := Fetch(context.Background(), srv.Client(), srv.URL); err == nil {
 		t.Error("a failing statfs accepted")

@@ -143,7 +143,11 @@ func started(log *slog.Logger, cfg ...any) {
 func diskProbe(args []string) error {
 	fs := flag.NewFlagSet("disk-probe", flag.ExitOnError)
 	dir := fs.String("dir", "/var/lib/buildkit", "directory whose filesystem is reported")
-	listen := fs.String("listen", ":9180", "address of GET /disk and /healthz")
+	listen := fs.String("listen", ":9180", "address of GET /disk, /load and /healthz")
+	// Environment, not flags, for what the chart passes since 0.3.3: a
+	// probe image of an earlier release (pinned or mirrored) ignores an
+	// unknown variable, where an unknown flag would stop it.
+	cgroup := fs.String("cgroup", os.Getenv("CI_ACCELERATOR_CGROUP_ROOT"), "the host's cgroup filesystem, mounted read-only (default $CI_ACCELERATOR_CGROUP_ROOT); with it, /load reports the node's and the pod's CPU and memory (the pod from $CI_ACCELERATOR_POD_UID's cgroup)")
 	var lf logging.Flags
 	lf.Register(fs)
 	fs.Parse(args)
@@ -153,8 +157,17 @@ func diskProbe(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	started(log, "dir", *dir, "listen", *listen, "log_level", lf.Level)
-	return diskprobe.Serve(ctx, *listen, *dir, log)
+	var sampler *diskprobe.Sampler
+	podCgroup := ""
+	if *cgroup != "" {
+		podCgroup = diskprobe.FindPodCgroup(*cgroup, os.Getenv("CI_ACCELERATOR_POD_UID"))
+		if podCgroup == "" {
+			log.Warn("the pod's cgroup v2 directory not found: /load reports the node only", "cgroup", *cgroup, "pod_uid", os.Getenv("CI_ACCELERATOR_POD_UID"))
+		}
+		sampler = diskprobe.NewSampler(diskprobe.Reader{Proc: "/proc", Cgroup: podCgroup})
+	}
+	started(log, "dir", *dir, "listen", *listen, "cgroup", *cgroup, "pod_cgroup", podCgroup, "log_level", lf.Level)
+	return diskprobe.Serve(ctx, *listen, *dir, sampler, log)
 }
 
 func controllerMain(args []string, splitRole bool) error {

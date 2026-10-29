@@ -351,7 +351,7 @@ v0.3.2: sha256:1494c38392a0dd8ee418e14de4b78851f739d4c21475a3b23fbbaf65aa1265f9
 {{- define "buildkit.diskProbeImage" -}}
 {{- $img := dig "image" dict (.Values.diskProbe | default dict) }}
 {{- $repo := default "ghcr.io/hoobiboobi/ci-accelerator" $img.repository }}
-{{- $tag := default "v0.3.0" $img.tag }}
+{{- $tag := default "v0.3.3" $img.tag }}
 {{- $digest := toString (default "" $img.digest) }}
 {{- /* A digest pinned for another release under the default tag would run
 that release as the probe's (the default tag moves when the probe changes). */}}

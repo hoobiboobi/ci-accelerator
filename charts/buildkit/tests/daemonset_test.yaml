@@ -550,3 +550,34 @@ tests:
     asserts:
       - contains: { path: "spec.template.spec.containers[0].args", content: "ci-accelerator.io/cache-persists=true" }
       - contains: { path: "spec.template.spec.containers[0].args", content: "ci-accelerator.io/disk-probe-port=9190" }
+
+  # The probe reports the node's and the pod's CPU and memory from the
+  # host's cgroup filesystem, mounted read-only, and the pod's UID names
+  # the pod's cgroup there. Both come as environment, never as arguments: a
+  # probe image of an earlier release (pinned, mirrored) exits on an
+  # unknown flag, which would keep every daemon pod from getting ready.
+  - it: gives the disk probe the host's cgroups, read-only, and the pod's UID
+    template: daemonset.yaml
+    set:
+      diskProbe.enabled: true
+    asserts:
+      - equal: { path: "spec.template.spec.containers[1].args", value: [disk-probe, -dir=/var/lib/buildkit, -listen=:9180] }
+      - contains:
+          path: "spec.template.spec.containers[1].env"
+          content: { name: CI_ACCELERATOR_CGROUP_ROOT, value: /host/cgroup }
+      - contains:
+          path: "spec.template.spec.containers[1].env"
+          content: { name: CI_ACCELERATOR_POD_UID, valueFrom: { fieldRef: { fieldPath: metadata.uid } } }
+      - contains:
+          path: "spec.template.spec.containers[1].volumeMounts"
+          content: { name: cgroup, mountPath: /host/cgroup, readOnly: true }
+      - contains:
+          path: "spec.template.spec.volumes"
+          content: { name: cgroup, hostPath: { path: /sys/fs/cgroup, type: Directory } }
+      - equal: { path: "spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem", value: true }
+  - it: mounts no cgroups without the probe
+    template: daemonset.yaml
+    asserts:
+      - notContains:
+          path: "spec.template.spec.volumes"
+          content: { name: cgroup, hostPath: { path: /sys/fs/cgroup, type: Directory } }
