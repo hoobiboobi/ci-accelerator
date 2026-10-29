@@ -1,13 +1,13 @@
 # buildkit
 
-![Version: 0.3.2](https://img.shields.io/badge/Version-0.3.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.34.1](https://img.shields.io/badge/AppVersion-v0.34.1-informational?style=flat-square)
+![Version: 0.3.3](https://img.shields.io/badge/Version-0.3.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.34.1](https://img.shields.io/badge/AppVersion-v0.34.1-informational?style=flat-square)
 
 Persistent BuildKit daemons as a shared build service for CI, with probe and garbage-collection defaults derived from a production setup.
 
 Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator); this chart is the daemons alone, for a cluster that already has a runner. It runs BuildKit v0.34.1 (the official `moby/buildkit` image, pinned by digest) as a privileged DaemonSet on the build nodes, with the probe, termination and garbage-collection defaults of a production setup: the garbage-collection policies are rendered in full by the chart (see `config.gc`). mTLS between jobs and daemons is mandatory: cert-manager issues the daemons' certificate and a client certificate (Secret `<fullname>-client`) into each of `tls.client.namespaces`, or you provide them (`tls.source=existingSecret`, made by `scripts/buildkit-certs.sh`).
 
 ```sh
-helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.3.2 \
+helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.3.3 \
   -n ci-accelerator --set 'tls.client.namespaces={ci-jobs}'
 ```
 
@@ -45,10 +45,10 @@ Kubernetes: `>=1.34.0-0`
 | diskProbe.image.digest | string | `""` | When set, the image is pulled by digest (tag is kept for readability; the release notes list the probe's). Under the default tag, the digest of another release is refused. |
 | diskProbe.image.pullPolicy | string | `"IfNotPresent"` |  |
 | diskProbe.image.repository | string | `"ghcr.io/hoobiboobi/ci-accelerator"` | The ci-accelerator image: mirror it together with the control plane's. |
-| diskProbe.image.tag | string | `""` | Default: v0.3.0, the release that last changed the probe program or its image; pinned, so a chart release alone does not restart every daemon. |
+| diskProbe.image.tag | string | `""` | Default: v0.3.3, the release that last changed the probe program or its image; pinned, so a chart release alone does not restart every daemon. |
 | diskProbe.logLevel | string | `""` | Its log level (debug adds a line per reading); empty: info. Set, it restarts every daemon once. |
-| diskProbe.port | int | `9180` | Its port (GET /disk, /healthz); the daemons tell it to the control plane as a worker label. |
-| diskProbe.resources | object | `{"limits":{"memory":"32Mi"},"requests":{"cpu":"5m","memory":"16Mi"}}` | The probe's resources (it reads one number a minute). |
+| diskProbe.port | int | `9180` | Its port (GET /disk, /load, /healthz); the daemons tell it to the control plane as a worker label. |
+| diskProbe.resources | object | `{"limits":{"memory":"32Mi"},"requests":{"cpu":"5m","memory":"16Mi"}}` | The probe's resources (it reads a few kernel files every 10 s and keeps an hour of readings in memory). |
 | extraEnv | list | `[]` | Extra environment variables for the daemon container. |
 | fullnameOverride | string | `""` | Override the full resource name (<release>-<chart> by default). Install-time only, like nameOverride. |
 | global.buildNodes.enabled | bool | `true` | false: ignore selector/tolerations below and run on any Linux node. (A switch, because Helm merges `selector: {}` with the default instead of clearing it.) |

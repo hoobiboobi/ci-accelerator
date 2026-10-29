@@ -11,7 +11,7 @@ OTLP to a backend you already run. Hosted services such as Depot,
 Namespace or Docker Build Cloud do this for you; this project does it on
 hardware you already run.
 
-> **Status:** v0.3.2 is released: signed charts and the ci-accelerator image on
+> **Status:** v0.3.3 is released: signed charts and the ci-accelerator image on
 > ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
 > the released version: [ci-accelerator.io](https://ci-accelerator.io/docs/).
 
@@ -61,7 +61,8 @@ Numbers from the production setup this project is derived from:
 - **BuildKit daemons:** a DaemonSet on the nodes labelled
   `ci-accelerator.io/node-role=build` (`charts/buildkit`, BuildKit
   v0.34.1, pinned by digest), each with a small disk probe next to it
-  that reports the cache disk's size and free space for the console.
+  that reports the cache disk's size and free space, and the node's and
+  the daemon's CPU and memory, for the console.
 - **The control plane** (`charts/control-plane`): one image,
   `ghcr.io/hoobiboobi/ci-accelerator`, in three roles:
   - the **build router**, a DaemonSet on every build node behind the
@@ -132,15 +133,23 @@ Service (their own node's daemon). Five sections:
 - **Nodes:** one table of the daemons, the ones that need attention first
   (not reachable, a disk warning, a cache that could not be read; a filter
   shows only those), with disk, cache, builds, rebuilds for want of cache,
-  running builds, projects and the build router's decisions; one note per
-  problem, naming its nodes; where the project you are looking at built in
-  the last 24 hours; base images held by more than one node; and the
-  runners' S3 cache per project, with a warning when the bucket has no
-  lifecycle rule. Each daemon has its own page: its builds, running
-  builds, cache by kind and largest cache mounts, its disk (cache, other
-  files, free space) with a warning near the GC's keep-free floor or the
+  running builds, projects and the build router's decisions, and each
+  node's CPU and memory over the last hour next to the latest reading
+  (with a "waiting for CPU" chip when the kernel says some task waited
+  for a core); one note per problem, naming its nodes; where the project
+  you are looking at built in the last 24 hours; base images held by more
+  than one node; and the runners' S3 cache per project, with a warning
+  when the bucket has no lifecycle rule. Each daemon has its own page: its
+  builds, running builds, the node's cores and memory split into the
+  daemon's pod, the rest of the node and what is free (with the last hour
+  drawn and the pressure stall information, where the kernel reports it),
+  cache by kind and largest cache mounts, its disk (cache, other files,
+  free space) with a warning near the GC's keep-free floor or the
   kubelet's eviction thresholds, why the router sent builds there, its
-  garbage collection and the projects it built for.
+  garbage collection and the projects it built for. The node's and the
+  pod's figures come from the disk probe next to each daemon, which reads
+  `/proc` and the pod's cgroup every 10 s and keeps an hour; longer
+  series belong to your monitoring (OTLP, below).
 
 Every build gets one of five outcomes: from cache, your change, build
 farm, unclear or failed. A build's page starts with one sentence, then:
@@ -150,8 +159,12 @@ farm, unclear or failed. A build's page starts with one sentence, then:
   copies (a build argument that reaches a step through `ENV` counts as
   that argument's change);
 - its steps, with what each one's processes used (CPU time, time held
-  back by a CPU limit, disk read and written, from BuildKit's cgroup
-  totals) and how much step time ran in parallel;
+  back by a CPU limit, disk read and written, the most memory its cgroup
+  held in one of BuildKit's samples, from BuildKit's cgroup readings) and
+  how much step time ran in parallel; a Resources tab lists the executed
+  steps by CPU time with the cores each used on average, and draws the
+  cores the running steps used together over the build against the
+  node's cores, saying for how long they wanted more than the node has;
 - BuildKit's Dockerfile build checks that failed (rule, line, link);
 - for a failed build, whether the step that failed is new or changed;
   exit codes 137 and 143 are read as the signals they are;
@@ -191,8 +204,8 @@ it from a file (`--runner-token-file`), so it never sits on a command line
 where other users and the shell history see it. Then run:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.3.2/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.3.2/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.3.3/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.3.3/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
 ```
 
@@ -286,7 +299,7 @@ kubectl -n ci-accelerator create secret generic gitlab-runner-token \
 ### 3. Install
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.2 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.3 \
   -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -369,7 +382,7 @@ hash:
 ```yaml
 # .gitlab-ci.yml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.2/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.3/ci/gitlab/build.yml
     integrity: sha256-<from the release notes>
     inputs:
       runner-tags: [my-runner-tag]   # if the runner only takes tagged jobs
@@ -498,7 +511,7 @@ reaches over https.
 
    ```sh
    sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
-     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.2 \
+     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.3 \
      -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait
    ```
 
@@ -648,9 +661,13 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   plane's node addresses, and a node's own address is always reachable from
   its pods, so list the control-plane node addresses too.
 - **The disk probe's numbers are readable by builds.** The box runs a small
-  container next to each daemon that reports the cache disk's size and free
-  space on port 9180 for the controller; builds share the pod's network and
-  can read those numbers too.
+  container next to each daemon that reports, on port 9180 for the
+  controller, the cache disk's size and free space and the last hour of the
+  node's CPU, memory and pressure and of the daemon pod's CPU and memory
+  (every 10 s). Builds share the pod's network and can read those numbers
+  too, so a build can see when the node was busy, including with other
+  projects' builds. The probe reads the host's cgroup filesystem through a
+  read-only mount; the daemon's own share needs cgroup v2 nodes.
 - **Trace data is untrusted.** Any build (a RUN step) can write spans
   through BuildKit, so traces in your backend are input from builds. The
   buildctl command line, build-arg values included, is recorded in traces:
