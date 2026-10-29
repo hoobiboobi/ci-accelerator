@@ -11,6 +11,61 @@ workflow copies them into the GitHub release.
 
 None.
 
+## 0.3.3 - 2026-10-29
+
+### Upgrade notes
+
+- From 0.3.2, 0.3.1 or 0.3.0, `helm upgrade` in place. **Every daemon
+  restarts once**: the disk probe next to each daemon moves to the v0.3.3
+  image (it now reports load), and its pod template gains a read-only
+  mount of the host's `/sys/fs/cgroup` and two environment variables. A
+  `hostPath` cache is kept; the default `emptyDir` cache starts empty, as
+  on every daemon restart. The rollout goes one node at a time; builds
+  running on a node finish first (up to `terminationGracePeriodSeconds`).
+- **Images pinned by digest** (as the README tells production installs):
+  set both `control-plane.image.digest` and `buildkit.diskProbe.image.digest`
+  to the v0.3.3 digest from the release notes (one image, two roles). The
+  charts refuse a kept v0.3.2 control-plane digest or a kept v0.3.0 probe
+  digest and say which version they run.
+- **Mirrors:** mirror `ghcr.io/hoobiboobi/ci-accelerator:v0.3.3`; the probe
+  no longer runs `v0.3.0`.
+- A probe kept on an earlier image on purpose (`buildkit.diskProbe.image.tag`
+  set) keeps working and keeps reporting the disk; the Nodes pages then say
+  "no answer" for load.
+- The daemon's own share of its node (CPU, memory) is measured on cgroup v2
+  nodes; on cgroup v1 the pages show the node's figures and say the
+  daemon's share is not measured.
+- The store gains a column (`steps.mem_bytes`) without a new schema
+  version: `helm rollback` to 0.3.2 keeps working on the same store (0.3.2
+  writes 0 there).
+
+### Added
+
+- A build's page has a **Resources** tab: the executed steps by CPU time
+  with the cores each used on average over its run, its run time, the
+  most memory its cgroup held in one of BuildKit's samples and the bytes
+  it wrote; a chart of the cores the running steps used together over the
+  build, against the node's cores when the probe reports them, saying for
+  how long the steps wanted more cores than the node has; and the build's
+  totals. The figures under the verdict add the cores busy on average.
+  Memory is recorded for builds from this release on; the step drawer
+  names it too.
+- The Nodes page draws each daemon's node over the last hour (CPU and
+  memory) next to the latest reading, with a "waiting for CPU" chip when
+  the node's pressure stall information says some task waited for a core
+  10 % or more of the last minute. A daemon's page has a Load section: the
+  node's cores and memory split into the daemon's pod, the rest of the
+  node and what is free, the pressure (or that the kernel reports none),
+  the builds running, and the last hour drawn with axes for cores, memory
+  and time. The node's memory is total minus available, the daemon's its
+  working set (the kubelet's measure), so the two add up.
+- The disk probe serves `GET /load` (the node's and the daemon pod's CPU
+  and memory, read from `/proc` and the pod's cgroup every 10 s, an hour
+  kept) next to `GET /disk`.
+- The Builds list's image column can be widened: drag its border,
+  double-click it to fit the longest name (and again to go back), or use
+  the arrow keys; the width is remembered.
+
 ### Fixed
 
 - A pipeline that built one image said "All 1 image were rebuilt"; it says
