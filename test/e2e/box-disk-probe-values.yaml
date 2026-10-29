@@ -1,7 +1,8 @@
 # e2e-only: the daemons' disk probe from the image `make image` loads into
 # kind. Its default is a pinned, published tag, which the release under
-# test may not have published yet. Keep it out of upgrades from a published
-# release: a probe image that differs from the old one rolls the daemons.
+# test may not have published yet. The upgrade scenario passes the same
+# image itself, and only when the tree moved the probe's tag (a probe image
+# that differs from the old one rolls the daemons).
 buildkit:
   diskProbe:
     image:

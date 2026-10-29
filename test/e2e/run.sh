@@ -98,7 +98,7 @@ UPGRADE_FROM_DIR=${UPGRADE_FROM_DIR:-}
 UPGRADE_FROM_VALUES=${UPGRADE_FROM_VALUES:-$ROOT/test/e2e/box-values-old.yaml}
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
 # then restarts every daemon; say so in the upgrade notes).
-UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
 # The stand-in GitLab API runs on this image (python stdlib only).
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # An S3 store for the runner cache (MinIO publishes no images any more):
@@ -1044,6 +1044,36 @@ box_disk() {
   }
   # The console reads each daemon once a minute.
   check "the Nodes page shows every daemon's disk" eventually 150 box_nodes_disk
+  # The same probe reports the node's and the pod's CPU and memory from
+  # /proc and the pod's cgroup (found by the pod's UID under the host's
+  # cgroup filesystem): the table draws each daemon's last hour, a
+  # daemon's page splits the node into the daemon's pod and the rest.
+  box_probe_load() {
+    local pod
+    pod=$(kc -n "$BOX_NS" get pods -l "$sel" -o jsonpath='{.items[0].metadata.name}')
+    kc -n "$BOX_NS" exec "$pod" -c buildkitd -- wget -qO- "http://127.0.0.1:9180/load" >"$LOGS/box-load.json" 2>/dev/null || return 1
+    python3 - "$LOGS/box-load.json" <<'PY'
+import json, sys
+l = json.load(open(sys.argv[1]))
+ok = l["cores"] > 0 and l["memTotalBytes"] > 1 << 28 and 0 <= l["node"]["cpuCores"] <= l["cores"] and l["node"]["memBytes"] > 0
+# The pod's cgroup was found: the daemon holds memory (its own process at least).
+ok = ok and l["pod"]["memBytes"] > 1 << 20 and len(l["series"]) >= 2
+# podMemLimitBytes is left out when the daemon has no memory limit.
+print(json.dumps({k: l.get(k) for k in ("cores", "memTotalBytes", "node", "pod", "podMemLimitBytes")}, default=str), "samples", len(l["series"]))
+sys.exit(0 if ok else 1)
+PY
+  }
+  check "the disk probe reports the node's and the daemon pod's CPU and memory" eventually 60 box_probe_load
+  box_nodes_load() {
+    local web="http://$BOX_REL-web.$BOX_NS.svc:8080" node
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "$web/nodes" 2>/dev/null >"$LOGS/box-nodes-load.html"
+    [ "$(grep -o 'class="spark"' "$LOGS/box-nodes-load.html" | wc -l | tr -d ' ')" = "$n" ] || return 1
+    node=$(grep -o 'href="/nodes/[^"?]*"' "$LOGS/box-nodes-load.html" | head -n 1 | cut -d'"' -f2)
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "$web$node" 2>/dev/null >"$LOGS/box-node-load.html"
+    grep -q 'id="ldT">Load</h2>' "$LOGS/box-node-load.html" && grep -q 'cores · daemon <b>' "$LOGS/box-node-load.html" &&
+      grep -q 'class="ch load"' "$LOGS/box-node-load.html" && grep -q 'title="BuildKit daemon: ' "$LOGS/box-node-load.html"
+  }
+  check "the Nodes page draws every daemon's last hour; a daemon's page splits the node into its pod and the rest" eventually 150 box_nodes_load
 }
 
 # e2e_image <scenario>: builds the tree's ci-accelerator:e2e image and
@@ -1156,6 +1186,14 @@ PY
       grep -q 'class="dl step st-built' "$LOGS/box-console-page.html"
   }
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
+  # The build ran steps: its Resources tab lists them by CPU with the
+  # node's cores from the probe, and the step's drawer names its memory.
+  box_resources() {
+    grep -q 'data-tab="resources"' "$LOGS/box-console-page.html" && grep -q 'Cores the running steps used together' "$LOGS/box-console-page.html" &&
+      grep -q 'the dashed line is the node' "$LOGS/box-console-page.html" && grep -q ' cores busy on average' "$LOGS/box-console-page.html" &&
+      grep -q 'CPU in all' "$LOGS/box-console-page.html" && ! grep -q 'recorded for builds since' "$LOGS/box-console-page.html"
+  }
+  check "the build's Resources tab lists its steps by CPU, with memory, against the node's cores" quiet box_resources
   box_logs
   box_disk
   box_console_policy
@@ -2043,6 +2081,9 @@ s_upgrade() {
   check "a CI job on $UPGRADE_FROM succeeds" test "$(cat "$LOGS/job-upgrade-before.state")" = success
   UPG_GEN0=$(kc -n "$UPG_NS" get ds "$UPG_REL-buildkit" -o jsonpath='{.metadata.generation}')
   UPG_UIDS0=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[*].metadata.uid}')
+  # The pod that runs the job before the upgrade: its build stays stored
+  # under it, also when the upgrade replaces the pod (a rollout on purpose).
+  UPG_DAEMON0=$(kc -n "$UPG_NS" get pods -l "app.kubernetes.io/instance=$UPG_REL,ci-accelerator.io/component=buildkit" -o jsonpath='{.items[0].metadata.name}')
 
   case "$UPGRADE_FROM" in
     0.2.*) upgrade_refused ;;
@@ -2154,11 +2195,19 @@ upgrade_refused() {
 # upgrade_in_place: a release with the control plane (0.3.0 on), upgraded
 # with the values users keep, then rolled back. The image of this tree is
 # not published yet (its tag is the release under test): the one `make
-# image` loads into kind stands in. The disk probe keeps the old release's
-# image: changing it would itself roll the daemons.
+# image` loads into kind stands in, for the control plane and, when this
+# tree moved the probe's tag (the probe program changed), for the disk
+# probe too; otherwise the probe keeps the old release's image, since
+# changing it would itself roll the daemons.
 upgrade_in_place() {
-  local gen1 gen2 uids1 tree_app daemon0 cp_img=(--set control-plane.image.repository=ci-accelerator --set control-plane.image.tag=e2e
+  local gen1 gen2 uids1 tree_app tree_probe old_probe daemon0 cp_img=(--set control-plane.image.repository=ci-accelerator --set control-plane.image.tag=e2e
     --set control-plane.image.digest= --set control-plane.image.pullPolicy=Never)
+  tree_probe=$(sed -n 's/.*default "\(v[0-9][^"]*\)" \$img\.tag.*/\1/p' "$ROOT/charts/buildkit/templates/_helpers.tpl")
+  old_probe=$(hc get manifest "$UPG_REL" -n "$UPG_NS" 2>/dev/null | sed -n 's|.*image: "ghcr.io/hoobiboobi/ci-accelerator:\(v[^"@]*\).*|\1|p' | sort | uniq -c | sort -n | awk 'NR == 1 {print $2}')
+  if [ -n "$tree_probe" ] && [ "$tree_probe" != "$old_probe" ]; then
+    cp_img+=(--set buildkit.diskProbe.image.repository=ci-accelerator --set buildkit.diskProbe.image.tag=e2e
+      --set buildkit.diskProbe.image.digest= --set buildkit.diskProbe.image.pullPolicy=Never)
+  fi
   check "the $UPGRADE_FROM console stores the job's build" eventually 90 upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-before)"
   if [ "$UPG_PINNED" = 1 ]; then
     check "$UPGRADE_FROM runs its control plane and disk probe pinned by digest" \
@@ -2167,8 +2216,16 @@ upgrade_in_place() {
     # another version it would run the old release under the new tag: the
     # chart refuses it and names the version it runs.
     tree_app=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2; exit}' "$ROOT/charts/control-plane/Chart.yaml")
+    # One refusal at a time: the probe's digest is cleared here, the
+    # control plane's below.
     hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values --dry-run=server \
-      >"$LOGS/upgrade-pinned.log" 2>&1
+      --set buildkit.diskProbe.image.digest= >"$LOGS/upgrade-pinned.log" 2>&1
+    if [ -n "$tree_probe" ] && [ "$tree_probe" != "$old_probe" ]; then
+      hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values --dry-run=server \
+        --set control-plane.image.digest= >"$LOGS/upgrade-pinned-probe.log" 2>&1
+      check "the README's upgrade with the old disk probe digest pinned is refused, naming $tree_probe" \
+        grep -qF "is the digest of the $old_probe image, but the disk probe runs $tree_probe" "$LOGS/upgrade-pinned-probe.log"
+    fi
     if [ "$tree_app" != "$UPGRADE_FROM" ]; then
       check "the README's upgrade with the old digest pinned is refused, naming v$tree_app" \
         grep -qF "is the digest of the v$UPGRADE_FROM image, but this chart runs v$tree_app: set the digest of v$tree_app" "$LOGS/upgrade-pinned.log"
@@ -2212,8 +2269,8 @@ upgrade_in_place() {
   check "the job after the upgrade finds the cache from before it" \
     eval 'grep -A1 "^#[0-9]* \[.*RUN sleep 2" "$LOGS/job-upgrade-after.trace" | grep -q "^#[0-9]* CACHED$"'
   check "the console stores the job's build from the replaced daemon" eventually 90 upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-after)"
-  check "the replaced daemon's history is not stored twice: the job before has one build, under $daemon0" \
-    upg_one_build "$UPG_REL-web" "$(job_id upgrade-before)" "$daemon0"
+  check "the replaced daemon's history is not stored twice: the job before has one build, under $UPG_DAEMON0" \
+    upg_one_build "$UPG_REL-web" "$(job_id upgrade-before)" "$UPG_DAEMON0"
 
   # The recommended way: this tree's defaults plus the user's values.
   if hc upgrade "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" --reset-then-reuse-values "${cp_img[@]}" \
