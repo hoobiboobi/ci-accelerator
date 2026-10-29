@@ -223,10 +223,10 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		}
 		u := st.Usage
 		if _, err := tx.ExecContext(ctx, `INSERT INTO steps (build_id, idx, key, name, identity, state, start_ms, dur_ms, lines,
-			received_from, error, output_len, cpu_ms, throttled_ms, read_bytes, write_bytes)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			received_from, error, output_len, cpu_ms, throttled_ms, read_bytes, write_bytes, mem_bytes)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, i, st.Key, name, ident, states[st.State], start, dur, formatLines(st.Lines), from, st.Error, len(st.Output),
-			u.CPU.Milliseconds(), u.Throttled.Milliseconds(), u.ReadBytes, u.WriteBytes); err != nil {
+			u.CPU.Milliseconds(), u.Throttled.Milliseconds(), u.ReadBytes, u.WriteBytes, u.Memory); err != nil {
 			return 0, err
 		}
 	}

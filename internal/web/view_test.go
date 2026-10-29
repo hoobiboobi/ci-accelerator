@@ -250,6 +250,11 @@ func TestUsageFacts(t *testing.T) {
 	if got := usageFacts(history.Usage{}, time.Second); len(got) != 0 {
 		t.Errorf("a step without usage: %+v", got)
 	}
+	// Memory is a sample, and said so.
+	got = usageFacts(history.Usage{CPU: time.Second, Memory: 1500 << 20}, time.Second)
+	if len(got) != 2 || got[1].K != "Memory, the highest sample" || !strings.HasPrefix(got[1].V, "1.5 GiB (") {
+		t.Errorf("%+v", got)
+	}
 }
 
 // A build away from its image's cache says why the router put it there,

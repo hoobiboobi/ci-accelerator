@@ -12,7 +12,7 @@ import (
 // a build that ran them at the same time, carry none (no double count).
 func TestStepUsage(t *testing.T) {
 	dirs, _ := filepath.Glob("testdata/records/*")
-	withCPU, cachedWithCPU := 0, 0
+	withCPU, cachedWithCPU, withMemory := 0, 0, 0
 	for _, d := range dirs {
 		read := func(n string) []byte {
 			b, err := os.ReadFile(filepath.Join(d, n))
@@ -44,9 +44,17 @@ func TestStepUsage(t *testing.T) {
 					t.Errorf("%s %s: %s of CPU in %s", b.Ref, s.Key, s.Usage.CPU, s.Duration())
 				}
 			}
+			// Memory is the largest sample of the step's cgroup: a RUN step
+			// holds at least its shell (tens of kB), never terabytes.
+			if s.Usage.Memory > 0 {
+				withMemory++
+				if s.Usage.Memory < 10<<10 || s.Usage.Memory > 1<<40 {
+					t.Errorf("%s %s: %d bytes of memory", b.Ref, s.Key, s.Usage.Memory)
+				}
+			}
 		}
 	}
-	if withCPU == 0 || cachedWithCPU != 0 {
-		t.Errorf("%d executed steps with CPU time, %d cached ones", withCPU, cachedWithCPU)
+	if withCPU == 0 || cachedWithCPU != 0 || withMemory == 0 {
+		t.Errorf("%d executed steps with CPU time, %d cached ones, %d with memory", withCPU, cachedWithCPU, withMemory)
 	}
 }

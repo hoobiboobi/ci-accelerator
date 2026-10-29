@@ -17,9 +17,9 @@
   </form>
   {{if .Groups}}
     {{range .Groups}}<section class="box pgroup"><a class="boxh pgh" href="{{.URL}}"><h2 class="h">{{.Title}}</h2><span class="muted">{{.Ref}} · <span class="mono">{{.SHA}}</span> · {{.Label}}{{if .Rebuilt}} · {{.Rebuilt}} not from cache{{end}}</span></a>
-      <div class="blist{{if $.F.Pick}} pick{{end}}">{{range .Items}}{{template "brow" .}}{{end}}</div></section>{{end}}
+      <div class="blist{{if $.F.Pick}} pick{{end}}"><span class="bgrip" role="separator" aria-orientation="vertical" aria-label="Width of the image names" tabindex="0" title="Drag to widen the image names; double-click to fit the longest"></span>{{range .Items}}{{template "brow" .}}{{end}}</div></section>{{end}}
   {{else if .Items}}
-  <section class="box"><div class="blist{{if .F.Pick}} pick{{end}}">{{range .Items}}{{template "brow" .}}{{end}}</div></section>
+  <section class="box"><div class="blist{{if .F.Pick}} pick{{end}}"><span class="bgrip" role="separator" aria-orientation="vertical" aria-label="Width of the image names" tabindex="0" title="Drag to widen the image names; double-click to fit the longest"></span>{{range .Items}}{{template "brow" .}}{{end}}</div></section>
   {{else}}
   <div class="empty"><b>No build matches.</b><p>{{if .F.Before}}No older builds.{{else}}Change the filters, or wait for the next build.{{end}}</p></div>
   {{end}}

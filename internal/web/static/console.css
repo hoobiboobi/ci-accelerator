@@ -640,8 +640,8 @@ a.boxh:hover { background: var(--hover); }
 .filters input[type="search"] { width: 100%; }
 .filters input[aria-invalid="true"] { border-color: var(--del); }
 .filters select { height: 28px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; font-size: 12.5px; padding: 0 6px; max-width: 220px; }
-.blist { display: grid; }
-.brow { display: grid; grid-template-columns: 76px minmax(80px, 150px) 170px minmax(0, 1fr) 120px minmax(0, 170px); gap: 12px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
+.blist { --bnw: 150px; display: grid; position: relative; }
+.brow { display: grid; grid-template-columns: 76px var(--bnw) 170px minmax(0, 1fr) 120px minmax(0, 170px); gap: 12px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
 .blist > .brow:first-child { border-top: 0; }
 .brow:hover { background: var(--hover); }
 .brow .bt { color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 12px; }
@@ -931,6 +931,15 @@ a.boxh:hover { background: var(--hover); }
 /* Comparing two builds: picking the pair, marking which is which */
 .pickbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px; border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line)); border-radius: 8px; background: color-mix(in oklab, var(--accent) 12%, var(--panel)); font-size: 13px; }
 .pickbar .ml { margin-left: auto; }
+/* The image names' column border: drag to widen the names, double-click
+   to fit the longest, arrows from the keyboard; one width for every list
+   on the page, remembered. */
+.blist .bgrip { position: absolute; top: 0; bottom: 0; left: calc(14px + 76px + 12px + var(--bnw) + 2px); width: 8px; cursor: col-resize; z-index: 3; touch-action: none; }
+.blist .bgrip::after { content: ""; position: absolute; top: 6px; bottom: 6px; left: 3px; width: 2px; border-radius: 1px; background: var(--line-2); }
+.blist .bgrip:hover::after, .blist .bgrip:focus-visible::after, .blist.resizing .bgrip::after { background: var(--focus); }
+.blist .bgrip:focus-visible { outline: none; }
+.blist.resizing, .blist.resizing * { cursor: col-resize !important; user-select: none; }
+@media (max-width: 760px) { .blist .bgrip { display: none; } }
 .blist.pick a.brow:hover { background: color-mix(in oklab, var(--accent) 8%, var(--panel)); }
 .brow.picked { background: color-mix(in oklab, var(--accent) 14%, var(--panel)); box-shadow: inset 3px 0 0 var(--accent); }
 .chip.self { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, var(--line)); background: color-mix(in oklab, var(--accent) 12%, var(--panel)); }
@@ -942,3 +951,50 @@ a.boxh:hover { background: var(--hover); }
 .cmp.self-a td:nth-child(2), .cmp.self-a thead th:nth-child(2), .cmp.self-b td:nth-child(3), .cmp.self-b thead th:nth-child(3) { background: color-mix(in oklab, var(--accent) 7%, var(--panel)); }
 .cmp.self-a thead th:nth-child(2), .cmp.self-b thead th:nth-child(3) { box-shadow: inset 0 2px 0 var(--accent); }
 .picks li.cur { margin: 0 -6px; padding: 2px 6px; border-radius: 6px; background: color-mix(in oklab, var(--accent) 10%, var(--panel)); }
+
+/* Load: the probe's CPU and memory readings (the daemons' table, a daemon's page). */
+.spark { width: 72px; height: 18px; vertical-align: middle; margin-right: 8px; }
+.spark polyline { fill: none; stroke-width: 1.4; } .spark .c { stroke: var(--built); } .spark .m { stroke: var(--xfer); } .spark line { stroke: var(--line-2); stroke-width: 1; }
+.ntable td.ld { white-space: nowrap; }
+.c-daemon { background: var(--built); } .c-host { background: color-mix(in oklab, var(--ink-3) 70%, var(--panel)); } .c-mem { background: var(--xfer); }
+.nload { display: grid; gap: 8px; }
+.lrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) max-content; gap: 10px; align-items: center; font-size: 12.5px; }
+.lrow .k { color: var(--ink-3); }
+.lrow .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 1px; background: color-mix(in oklab, var(--ink-3) 18%, var(--panel)); }
+.lrow .bar i { display: block; height: 100%; }
+.lrow .v { color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; } .lrow .v b { color: var(--ink); }
+.lrow .v.wide { grid-column: 2 / 4; white-space: normal; }
+@media (max-width: 640px) { .lrow { grid-template-columns: 56px minmax(0, 1fr); } .lrow .v { grid-column: 2; white-space: normal; } }
+
+/* Charts: the plot stretches to its box (no aspect ratio, strokes keep
+   their width); the tick labels are HTML placed in percent, so text never
+   scales with the page. */
+.chsub { margin: 10px 0 2px; }
+.ch { --ch-h: 200px; display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; grid-template-rows: var(--ch-h) 20px; column-gap: 8px; margin: 10px 0 12px; }
+.ch-y { position: relative; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; min-width: 2.4em; }
+.ch-y span { position: absolute; transform: translateY(-50%); white-space: nowrap; line-height: 1; }
+.ch-y.l span { right: 0; } .ch-y.r span { left: 0; }
+.ch-plot { position: relative; border: 1px solid var(--line-2); border-top: 0; border-right-color: transparent; background: color-mix(in oklab, var(--ink) 2%, var(--panel)); }
+.ch.load .ch-plot { border-right-color: var(--line-2); }
+.ch-plot svg { width: 100%; height: 100%; display: block; }
+.ch-plot .grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ch-plot polyline { fill: none; stroke-width: 1.6; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.ch-x { grid-column: 2; position: relative; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ch-x span { position: absolute; top: 5px; transform: translateX(-50%); white-space: nowrap; }
+.ch-x span.l { transform: none; } .ch-x span.r { transform: translateX(-100%); }
+.ch .podfill { fill: color-mix(in oklab, var(--built) 22%, transparent); }
+.ch .node { stroke: color-mix(in oklab, var(--ink-3) 85%, var(--panel)); } .ch .pod { stroke: var(--built); } .ch .mem { stroke: var(--xfer); }
+.ch .ln { stroke: var(--built); }
+.ch .cap { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.ch .fill { fill: color-mix(in oklab, var(--built) 22%, transparent); }
+.ch .over { fill: color-mix(in oklab, var(--warn) 40%, transparent); }
+@media (max-width: 640px) { .ch { --ch-h: 150px; } }
+
+/* Resources: what a build's executed steps used. */
+.demand { padding: 4px 14px 0; }
+.peak { margin: 0; font-size: 12.5px; color: var(--warn); font-weight: 500; }
+.rtable td.nm { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); max-width: 0; min-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtable td.nm a { color: var(--ink-2); } .rtable td.nm a:hover { color: var(--ink); text-decoration: underline; }
+.rtable .cores { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.rtable .gt2 { position: relative; width: 110px; height: 8px; border-radius: 3px; background: color-mix(in oklab, var(--ink) 5%, var(--panel)); overflow: hidden; flex: none; }
+.rtable .gt2 i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; background: var(--built); }

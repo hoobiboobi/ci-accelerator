@@ -19,10 +19,14 @@ import (
 
 // NodesView is the build farm at a glance: one row per daemon, the ones
 // that need something first, and below what is the same on every node.
+// PressureTitle explains the "waiting for CPU" chip of the daemons' table.
+const PressureTitle = "some task on the node waited for a core this share of the last minute (pressure stall information)"
+
 type NodesView struct {
 	Shell
-	Release      string
-	Ready, Total int
+	PressureTitle string
+	Release       string
+	Ready, Total  int
 	// Builds and Running sum up the daemons shown, 24 hours.
 	Builds, Running int
 	// Attention counts the daemons that need something: not reachable,
@@ -75,6 +79,7 @@ type NodeRow struct {
 	Err                   string
 	Segs                  []NSeg // the cache by kind
 	Disk                  *DiskView
+	Load                  *LoadView
 }
 
 // NodeNote is one problem, with the nodes it is on.
@@ -185,6 +190,7 @@ func (s *Server) nodeRow(d collector.DaemonState, c store.DaemonCount, loc *time
 		}
 	}
 	row.Disk = diskView(d.Inspection)
+	row.Load = loadView(d.Inspection, s.now(), loc)
 	switch {
 	case !d.Connected:
 		row.Level = "bad"
@@ -230,7 +236,7 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	}
 	sh.LiveNodes = true
 	sh.Title = "Build nodes"
-	v := &NodesView{Release: s.opt.Release, Filtered: r.URL.Query().Get("show") == "attention"}
+	v := &NodesView{Release: s.opt.Release, Filtered: r.URL.Query().Get("show") == "attention", PressureTitle: PressureTitle}
 	in := store.ProjectsIn{}
 	if sh.Project.ID != 0 && !sh.NoProjects {
 		in.Only = sh.Project.ProjectKey

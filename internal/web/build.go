@@ -173,6 +173,9 @@ type BuildView struct {
 	Unparsed int
 	// NoDockerfile says why a failed build shows no Dockerfile.
 	NoDockerfile string
+	// Resources is what the executed steps used; nil when none ran or
+	// BuildKit recorded no usage.
+	Resources *ResourcesView
 }
 
 // Change is one difference from the previous build of the target.
@@ -332,10 +335,14 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	nodeHost := map[string]string{}
+	cores := 0 // the build's node now, when its probe reports load
 	// Without the daemons' live state (none known) nothing is said gone.
 	if daemons := s.data.Daemons(); len(daemons) > 0 {
 		for _, dm := range daemons {
 			nodeHost[dm.Name] = dm.Inspection.Node
+			if dm.Name == b.Daemon && dm.Inspection.Load != nil {
+				cores = dm.Inspection.Load.Cores
+			}
 		}
 		if _, ok := nodeHost[b.Daemon]; ok {
 			v.NodeURL = nodeURL(b.Daemon)
@@ -432,6 +439,9 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v.Shell = sh
+	if !running {
+		v.Resources = resources(b, d.Views, cores, b.Completed.Sub(b.Started))
+	}
 	s.render(w, "build", http.StatusOK, v)
 }
 
@@ -795,6 +805,9 @@ func usageFacts(u history.Usage, d time.Duration) []KV {
 	}
 	if u.Throttled > 0 {
 		out = append(out, KV{"Held back by a CPU limit", duration(u.Throttled)})
+	}
+	if u.Memory > 0 {
+		out = append(out, KV{"Memory, the highest sample", bytesText(u.Memory) + " (anonymous memory, file cache and kernel memory of the step's processes; a short spike between BuildKit's samples is missed)"})
 	}
 	// The cgroup counts block I/O: reads served from the page cache and
 	// writes still waiting to be flushed when the step ended are not in it,

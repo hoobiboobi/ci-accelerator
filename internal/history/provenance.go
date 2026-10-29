@@ -42,6 +42,10 @@ type Usage struct {
 	Throttled  time.Duration // time the CPU limit held them back
 	ReadBytes  int64         // read from block devices
 	WriteBytes int64         // written to block devices
+	// Memory is the most its cgroup held in one of BuildKit's samples
+	// (anonymous memory, file cache and kernel memory: what a memory limit
+	// counts), not a true peak: a short spike between samples is missed.
+	Memory int64
 }
 
 // LineRange is a range of Dockerfile lines, both ends included.
@@ -79,6 +83,14 @@ type rawProvenance struct {
 								ReadBytes  int64 `json:"readBytes"`
 								WriteBytes int64 `json:"writeBytes"`
 							} `json:"ioStat"`
+							MemoryStat *struct {
+								Anon        int64 `json:"anon"`
+								File        int64 `json:"file"`
+								KernelStack int64 `json:"kernelStack"`
+								PageTables  int64 `json:"pageTables"`
+								Slab        int64 `json:"slab"`
+								Sock        int64 `json:"sock"`
+							} `json:"memoryStat"`
 						} `json:"samples"`
 					} `json:"resourceUsage"`
 				} `json:"llbDefinition"`
@@ -149,6 +161,10 @@ func ParseProvenance(data []byte, key []byte) (*Provenance, error) {
 				}
 				if io := x.IOStat; io != nil {
 					u.ReadBytes, u.WriteBytes = max(u.ReadBytes, io.ReadBytes), max(u.WriteBytes, io.WriteBytes)
+				}
+				if m := x.MemoryStat; m != nil {
+					// Memory is not a counter: the largest sample is kept.
+					u.Memory = max(u.Memory, m.Anon+m.File+m.KernelStack+m.PageTables+m.Slab+m.Sock)
 				}
 			}
 			p.Usage[s.ID] = u

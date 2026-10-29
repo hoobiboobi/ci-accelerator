@@ -256,7 +256,7 @@ func (s *Store) loadSteps(ctx context.Context, st *Stored) error {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.key, COALESCE(s.name, d.name, ''), s.identity, s.state, s.start_ms, s.dur_ms, s.lines,
 			(SELECT ref FROM builds x WHERE x.id = s.received_from), s.error,
-			s.cpu_ms, s.throttled_ms, s.read_bytes, s.write_bytes
+			s.cpu_ms, s.throttled_ms, s.read_bytes, s.write_bytes, s.mem_bytes
 		FROM steps s LEFT JOIN step_defs d ON d.identity = s.identity
 		WHERE s.build_id = ? ORDER BY s.idx`, st.ID)
 	if err != nil {
@@ -275,7 +275,7 @@ func (s *Store) loadSteps(ctx context.Context, st *Stored) error {
 			cpu, thr   int64
 		)
 		if err := rows.Scan(&step.Key, &step.Name, &ident, &state, &start, &dur, &lines, &from, &step.Error,
-			&cpu, &thr, &step.Usage.ReadBytes, &step.Usage.WriteBytes); err != nil {
+			&cpu, &thr, &step.Usage.ReadBytes, &step.Usage.WriteBytes, &step.Usage.Memory); err != nil {
 			return err
 		}
 		if ident.Valid {

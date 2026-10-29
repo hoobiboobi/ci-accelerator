@@ -16,6 +16,7 @@ import (
 
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
+	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -36,7 +37,7 @@ func TestUI(t *testing.T) {
 	}
 	started := testNow.Add(-42 * time.Second)
 	daemons := live{{Name: "box-buildkit-abcde", Connected: true, InspectedAt: time.Now(),
-		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1",
+		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1", Load: fixtureLoad(), Disk: &diskprobe.Disk{Total: 100 << 30, Free: 60 << 30, Available: 55 << 30, Inodes: 1000, InodesFree: 900},
 			GC:    []collector.GCRule{{Filters: []string{"type==exec.cachemount"}, Keep: 336 * time.Hour}, {MaxUsed: 40 << 30, MinFree: 16 << 30}},
 			Usage: collector.Usage{Total: 300 << 20, Images: 200 << 20, Layers: 90 << 20, Mounts: 10 << 20}},
 		Active: []collector.Active{{Daemon: "box-buildkit-abcde", Target: "api" + evil, Started: started}}},
@@ -183,7 +184,8 @@ func TestDevServer(t *testing.T) {
 		return s
 	}
 	daemons := live{{Name: "box-buildkit-abcde", Connected: true, InspectedAt: time.Now(),
-		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1"}}}
+		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1", Load: fixtureLoad(),
+			Disk: &diskprobe.Disk{Total: 100 << 30, Free: 60 << 30, Available: 55 << 30, Inodes: 1000, InodesFree: 900}}}}
 	f, _ := fakeGitLab(t, "Running with gitlab-runner\n$ make\nok\n")
 	_, st, _, _ := consoleBuild(t, func(*store.Store) testOpts {
 		return testOpts{Live: daemons, Release: "dev", API: f, Token: gitlab.Token("t"), Assets: os.DirFS(".")}
@@ -193,4 +195,19 @@ func TestDevServer(t *testing.T) {
 	seedRunning(t, st)
 	t.Logf("the console with the fixtures: http://%s/ (pages read from internal/web; Ctrl-C stops)", addr)
 	select {}
+}
+
+// fixtureLoad is a probe's last hour: a build's peak in the middle of it.
+func fixtureLoad() *diskprobe.Load {
+	var series []diskprobe.Sample
+	for i := 0; i < 360; i++ {
+		cpu := 0.2 + 0.1*float64(i%3)
+		if i > 150 && i < 200 {
+			cpu = 3.1
+		}
+		series = append(series, diskprobe.Sample{At: time.Now().Add(-time.Hour + time.Duration(i)*10*time.Second).Unix(),
+			NodeCPU: cpu, NodeMem: 2<<30 + uint64(i)<<21, PodCPU: cpu - 0.1, PodMem: 1 << 30})
+	}
+	return &diskprobe.Load{At: time.Now(), Cores: 4, MemTotal: 8 << 30, Node: diskprobe.Point{CPU: 0.2, Mem: 2 << 30}, Pod: diskprobe.Point{CPU: 0.1, Mem: 1 << 30},
+		PodKnown: true, PodMemLimit: 6 << 30, Pressure: &diskprobe.Pressure{CPU60: 12}, Series: series}
 }

@@ -294,6 +294,7 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 				s.Usage.Throttled += u.Throttled
 				s.Usage.ReadBytes += u.ReadBytes
 				s.Usage.WriteBytes += u.WriteBytes
+				s.Usage.Memory = max(s.Usage.Memory, u.Memory)
 			}
 			s.Line = b.prov.Lines[s.StepID]
 			s.Lines = b.prov.Ranges[s.StepID]
