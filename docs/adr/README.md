@@ -55,3 +55,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0049](0049-ci-runs-what-a-change-touches.md) | CI runs what a change touches; one aggregating result per workflow |
 | [0050](0050-component-tested-in-a-real-gitlab.md) | The CI component is tested in a real GitLab, at the oldest supported version and a current one |
 | [0051](0051-a-build-record-is-stored-once.md) | A build record is stored once; repairs keep the schema version |
+| [0052](0052-resources-and-node-load.md) | What a build's steps used and what a node carries: BuildKit's readings and the probe's, nothing estimated |

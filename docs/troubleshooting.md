@@ -65,7 +65,7 @@ kubectl -n ci-accelerator describe pod <daemon pod> | tail -20
 | `ContainerCreating`, event about the TLS Secret | The certificate is not issued yet: `kubectl -n ci-accelerator get certificate`, then `kubectl describe certificate` |
 | `CrashLoopBackOff`, log `failed to load config` | A configuration buildkitd rejects (often `config.extraConfig`). The rollout stops on the first node; `helm rollback` |
 | `CrashLoopBackOff` with hostPath, lock error | Another daemon holds the state directory: a second release on the same path, or a surge pod (the chart refuses `maxSurge` with hostPath) |
-| `disk-probe` in `ImagePullBackOff`, daemon pod not started | The probe runs the `ghcr.io/hoobiboobi/ci-accelerator` image at its own pinned tag (`buildkit.diskProbe.image`, default tag `v0.3.0`), and a pod starts only with all its images: mirror that tag too, or `buildkit.diskProbe.enabled=false` |
+| `disk-probe` in `ImagePullBackOff`, daemon pod not started | The probe runs the `ghcr.io/hoobiboobi/ci-accelerator` image at its own pinned tag (`buildkit.diskProbe.image`, default tag `v0.3.3`), and a pod starts only with all its images: mirror that tag too, or `buildkit.diskProbe.enabled=false` |
 | No pods at all after a successful `helm install` | The namespace enforces `baseline`/`restricted` without a label the chart could see (some distributions default to `baseline`); see the DaemonSet's events |
 
 The daemons run BuildKit v0.34.1. To check what they actually run, the
