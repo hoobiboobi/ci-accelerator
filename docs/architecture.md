@@ -11,7 +11,7 @@ rollouts. The decisions behind it are in [adr/](adr/README.md).
 | Part | Where | Notes |
 |---|---|---|
 | buildkitd | DaemonSet `<release>-buildkit` on build nodes (`ci-accelerator.io/node-role=build`) | Privileged, rootful; one per node; its own PriorityClass |
-| Disk probe | A container in each daemon pod (on in the box) | The `ci-accelerator` image in its `disk-probe` role; reports the cache disk's size and free space (statfs) |
+| Disk probe | A container in each daemon pod (on in the box) | The `ci-accelerator` image in its `disk-probe` role; reports the cache disk's size and free space (statfs), and the node's and the daemon pod's CPU and memory, read from `/proc` and the pod's cgroup every 10 s and kept for an hour (the host's `/sys/fs/cgroup` is mounted read-only; the pod's cgroup is found by its UID, on cgroup v2) |
 | gitlab-runner manager | Box namespace, a node without the build taint | Polls GitLab, creates job pods |
 | CI job pods | Jobs namespace, build nodes | Thin clients: `buildctl` and the build context |
 | Build router | DaemonSet `<release>-router` on build nodes, Service `<release>-router` | Passes each job's connection to the daemon where its project is warm; holds no key, stores nothing |
@@ -311,15 +311,18 @@ What the controller does:
   TLS port (1234), with its client certificate. The daemons' NetworkPolicy
   admits pods labelled `ci-accelerator.io/component: controller` (never
   the web's).
-- **Disk space from the disk probes.** BuildKit reports what the cache
-  holds, not how much room its disk has left. Once a minute, with each
-  daemon's inspection, the controller asks the probe next to it (plain HTTP on
-  the daemon pod's address, on the port the daemon states in a worker
-  label, 9180 by default) for the size, free
-  space and inodes of the cache's filesystem. The daemons' NetworkPolicy
-  opens that port to the same peers as the TLS port. The Nodes page shows
-  it against BuildKit's keep-free floor and the kubelet's eviction
-  thresholds.
+- **Disk and load from the disk probes.** BuildKit reports what the cache
+  holds, not how much room its disk has left, nor what its node carries.
+  Once a minute, with each daemon's inspection, the controller asks the
+  probe next to it (plain HTTP on the daemon pod's address, on the port the
+  daemon states in a worker label, 9180 by default) for the size, free
+  space and inodes of the cache's filesystem (`GET /disk`) and for the
+  node's and the daemon pod's CPU and memory with the last hour of
+  readings (`GET /load`). The daemons' NetworkPolicy opens that port to the
+  same peers as the TLS port. The Nodes page shows the disk against
+  BuildKit's keep-free floor and the kubelet's eviction thresholds, and
+  the load as an hour's chart; the node's memory is total minus available,
+  the pod's its working set (the kubelet's measure), so the two add up.
 - **Job data from the job pods.** A Role in the jobs namespace lets it get,
   list and watch pods. The pods' annotations tie each build to its
   pipeline, job, project and commit; the trace id ties the build record to
