@@ -312,3 +312,13 @@ DELETE FROM builds WHERE id IN (SELECT id FROM build_copies);
 DROP TABLE build_copies;
 CREATE UNIQUE INDEX IF NOT EXISTS builds_ref ON builds (ref);
 `
+
+// tolerated columns are added by the repairs when missing (SQLite has no
+// ADD COLUMN IF NOT EXISTS): a column an earlier release of the same
+// schema version never reads or writes, so rolling back to it keeps
+// working on the same store.
+var toleratedColumns = []struct{ table, column, def string }{
+	// The most memory a step's cgroup held in one of BuildKit's samples
+	// (0.3.3; 0.3.2 stores 0 there without knowing).
+	{"steps", "mem_bytes", "INTEGER NOT NULL DEFAULT 0"},
+}

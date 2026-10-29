@@ -544,6 +544,11 @@ func TestBuildListPages(t *testing.T) {
 	if n := strings.Count(first.body, `class="brow`); n != pageSize {
 		t.Fatalf("first page: %d builds", n)
 	}
+	// The image names' column has its resizable border (the script does
+	// the rest; the browser checks drag it).
+	if !strings.Contains(first.body, `<span class="bgrip" role="separator"`) {
+		t.Error("no grip for the image names' column")
+	}
 	m := regexp.MustCompile(`href="(/builds\?before=\d+)"`).FindStringSubmatch(first.body)
 	if m == nil {
 		t.Fatal("no address for older builds")

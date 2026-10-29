@@ -369,6 +369,44 @@ async function pipelinePage(s, pages) {
 // reload too), double-click fits the longest name and then goes back, the
 // keys move it; labels never run off the track; the wheel inside the box
 // reaches the page once the box is at its end.
+// The builds list: the image names' column is widened by dragging its
+// border, kept after a reload, fitted to the longest name by a double
+// click and back to the default by another.
+async function buildsColumn(s) {
+  await s.eval(`localStorage.removeItem("ci-accelerator-bl-nw")`);
+  await s.go("/builds");
+  if (!(await s.eval(`!!document.querySelector(".blist .bgrip")`))) return check("/builds has a resizable image column", false, "no grip");
+  const nw = () => s.eval(`Math.round(document.querySelector(".blist .brow .bn").getBoundingClientRect().width)`);
+  const w0 = await nw();
+  const g = await s.eval(`(() => { const b = document.querySelector(".blist .bgrip").getBoundingClientRect(); return [b.left + b.width / 2, b.top + Math.min(b.height / 2, 30)]; })()`);
+  await s.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: g[0], y: g[1] });
+  await s.send("Input.dispatchMouseEvent", { type: "mousePressed", x: g[0], y: g[1], button: "left", buttons: 1, clickCount: 1 });
+  for (const dx of [40, 80, 120]) await s.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: g[0] + dx, y: g[1], button: "left", buttons: 1 });
+  await s.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: g[0] + 120, y: g[1], button: "left", buttons: 0, clickCount: 1 });
+  await sleep(200);
+  const w1 = await nw();
+  check("/builds dragging the image column's border widens it", Math.abs(w1 - w0 - 120) <= 3, `${w0} -> ${w1}`);
+  check("/builds every row follows the column", await s.eval(`[...document.querySelectorAll(".blist .brow .bn")].every(b => Math.abs(b.getBoundingClientRect().width - ${w1}) <= 1)`));
+  await s.go("/builds");
+  check("/builds the width is kept after a reload", Math.abs((await nw()) - w1) <= 1, `${await nw()} vs ${w1}`);
+  await s.eval(`document.querySelector(".blist .bgrip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+  await sleep(150);
+  const cut = await s.eval(`[...document.querySelectorAll(".blist .brow .bn")].filter(b => b.scrollWidth > b.clientWidth + 1).length`);
+  check("/builds double-click fits the longest image name", cut === 0, `${cut} cut`);
+  await s.eval(`document.querySelector(".blist .bgrip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+  await sleep(150);
+  check("/builds double-click again: back to the default width",
+    await s.eval(`document.querySelector(".blist").style.getPropertyValue("--bnw") === "" && localStorage.getItem("ci-accelerator-bl-nw") === null`), `${await nw()}`);
+  await s.eval(`document.querySelector(".blist .bgrip").focus()`);
+  const k0 = await nw();
+  await s.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await s.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await sleep(150);
+  check("/builds the arrow keys move the column", (await nw()) === k0 + 16, `${k0} -> ${await nw()}`);
+  await s.eval(`localStorage.removeItem("ci-accelerator-bl-nw")`);
+  check("/builds column: no errors", s.take().length === 0);
+}
+
 async function timelineColumn(s, pages) {
   let p = null;
   for (const x of settled(pages)) {
@@ -748,6 +786,7 @@ try {
   await buildPage(s, pages);
   await pipelinePage(s, pages);
   await timelineColumn(s, pages);
+  await buildsColumn(s);
   await pipelinesPage(s);
   await buildList(s);
   await jobPage(s, pages);

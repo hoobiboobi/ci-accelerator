@@ -17,6 +17,7 @@
 <div class="nums">
   {{if .Dur}}<span><b>{{.Dur}}</b>{{if .Delta}} <span class="{{if .Slower}}slow{{else}}fast{{end}}" title="usual {{.Usual}}: {{.UsualOf}}">{{.Delta}} vs usual</span>{{else if .Usual}} <span class="muted" title="{{.UsualOf}}">usual {{.Usual}}</span>{{end}}</span>{{else}}<span><b>building</b></span>{{end}}
   <span><b>{{.Ran}}</b> of {{.Steps}} step{{if ne .Steps 1}}s{{end}} ran</span>
+  {{with .Resources}}{{if .CoresText}}<span><b>{{.CoresText}}</b> cores busy on average</span>{{end}}{{end}}
 </div>
 {{with .LogURL}}<details class="box fold"><summary>{{icon "chev" 14 "chev"}}<b>Job log</b><span class="muted">the end of it, read from GitLab when you open this</span></summary><div class="pad">{{template "logbox" .}}</div></details>{{end}}
 {{with .Others}}<p class="others">This job ran {{add (len .) 1}} builds: {{range $i, $o := .}}{{if $i}}, {{end}}<a class="link" href="{{$o.URL}}">{{$o.Target}}</a> ({{$o.Dur}}, {{$o.Status.Label}}){{end}}.</p>{{end}}
@@ -35,7 +36,7 @@
 
 <section class="box" aria-labelledby="stT">
   <div class="boxh"><h2 class="h" id="stT">Steps</h2>
-    {{if .Blocks}}<nav class="seg" role="tablist" aria-label="Steps as"><a role="tab" href="#steps" data-tab="steps" aria-selected="true">List</a>{{if .Gantt}}<a role="tab" href="#timeline" data-tab="timeline" aria-selected="false">Timeline</a>{{end}}{{if .Lines}}<a role="tab" href="#dockerfile" data-tab="dockerfile" aria-selected="false">Dockerfile</a>{{end}}</nav>
+    {{if .Blocks}}<nav class="seg" role="tablist" aria-label="Steps as"><a role="tab" href="#steps" data-tab="steps" aria-selected="true">List</a>{{if .Gantt}}<a role="tab" href="#timeline" data-tab="timeline" aria-selected="false">Timeline</a>{{end}}{{if .Lines}}<a role="tab" href="#dockerfile" data-tab="dockerfile" aria-selected="false">Dockerfile</a>{{end}}{{if .Resources}}<a role="tab" href="#resources" data-tab="resources" aria-selected="false">Resources</a>{{end}}</nav>
     <button class="btn ml" type="button" data-act="toggleall">{{icon "chevD" 13}}<span>Expand all</span></button>{{end}}</div>
   {{if not .Blocks}}<p class="muted pad">{{if .Failed}}No step ran: {{with .Unparsed}}BuildKit could not parse line {{.}} of the Dockerfile.{{else}}the build failed before its first step.{{end}}{{else}}This build ran no steps.{{end}}</p>
   {{if .Lines}}<div class="dfwrap">{{template "dockerfile" .}}</div>{{else}}{{with .NoDockerfile}}<p class="muted pad">{{.}}</p>{{end}}{{end}}
@@ -76,6 +77,30 @@
       {{template "dockerfile" .}}
       <div class="dfbar"><span class="legend"><span><i class="si built">{{icon "s_built" 11}}</i>built</span><span><i class="si cached">{{icon "s_cached" 11}}</i>from cache</span><span><i class="si received">{{icon "s_received" 11}}</i>from another job</span><span><i class="si image">{{icon "s_image" 11}}</i>base image</span>{{if .Failed}}<span><i class="si failed">{{icon "warn" 11}}</i>failed</span>{{else}}<span>dimmed: not part of this {{if .Target}}target{{else}}build{{end}}</span>{{end}}</span>{{if .Failed}}<span class="muted">A failed build has only its failed step's lines on record.</span>{{end}}</div>
     </div>
+  </div>
+  {{end}}
+  {{with .Resources}}
+  <div class="tabpane" id="resources" data-pane="resources" role="tabpanel" aria-label="Resources" hidden>
+    {{with .Demand}}<div class="demand">
+      <div class="sub chsub"><span class="q">Cores the running steps used together</span><span>the sum over the steps running at each moment{{if .Cores}}; the dashed line is the node's {{.Cores}} cores{{end}}</span></div>
+      <div class="ch" role="img" aria-label="Cores the running steps used together over the build, up to {{.Top}}{{if .Cores}}, on a node with {{.Cores}}{{end}}">
+        <div class="ch-y l">{{range .Axes.Left}}<span style="top: {{.Pct}}%">{{.Label}}</span>{{end}}</div>
+        <div class="ch-plot"><svg viewBox="0 0 {{.W}} {{.H}}" preserveAspectRatio="none" aria-hidden="true">
+          {{range .Axes.Grid}}<line class="grid" x1="0" y1="{{.}}" x2="{{$.Resources.Demand.W}}" y2="{{.}}"/>{{end}}{{range .Axes.XGrid}}<line class="grid" x1="{{.}}" y1="0" x2="{{.}}" y2="{{$.Resources.Demand.H}}"/>{{end}}
+          <polygon class="fill" points="{{.Fill}}"/>{{if .Over}}<polygon class="over" points="{{.Over}}"/>{{end}}
+          {{if .CapY}}<line class="cap" x1="0" y1="{{.CapY}}" x2="{{.W}}" y2="{{.CapY}}"/>{{end}}
+          <polyline class="ln" points="{{.Line}}"/>
+        </svg></div>
+        <div class="ch-x">{{range .Axes.X}}<span class="{{.Align}}" style="left: {{.Pct}}%">{{.Label}}</span>{{end}}</div>
+      </div>
+    </div>{{end}}
+    {{with .Peak}}<p class="peak pad">{{.}}</p>{{end}}
+    <div class="tbox flat rtable"><table><thead><tr><th>Step <span class="muted">by CPU time</span></th><th>Cores <span class="muted">average over the step</span></th><th class="num">CPU</th><th class="num">Time</th><th class="num">Memory <span class="muted">highest sample</span></th><th class="num">Written</th></tr></thead><tbody>
+      {{range .Rows}}<tr><td class="nm"><a class="steplink" href="/builds/{{$.ID}}/steps/{{.Index}}" title="{{.Name}}">{{if .Line}}<span class="muted">{{.Line}}</span> {{end}}{{.Name}}</a>{{with .Stage}} <span class="muted">({{.}})</span>{{end}}</td><td><span class="cores"><span class="gt2" aria-hidden="true"><i style="width: {{.Bar}}%"></i></span>{{.Cores}}</span></td><td class="num">{{.CPU}}</td><td class="num">{{.Dur}}</td><td class="num">{{if .Memory}}{{.Memory}}{{else}}<span class="muted" title="recorded for builds since 0.3.3">—</span>{{end}}</td><td class="num">{{.Written}}</td></tr>
+      {{end}}
+      {{if .More}}<tr><td class="nm muted">{{.More}} more step{{if ne .More 1}}s{{end}} used {{.MoreCPU}} of CPU together</td><td></td><td class="num muted">{{.MoreCPU}}</td><td class="num muted">{{.MoreDur}}</td><td></td><td class="num muted">{{.MoreWritten}}</td></tr>{{end}}
+    </tbody></table></div>
+    <div class="dfbar"><span class="legend"><span><b>{{.CPU}}</b> CPU in all</span><span><b>{{.Written}}</b> written</span><span><b>{{.Read}}</b> read</span>{{if .TopMemory}}<span><b>{{.TopMemory}}</b> the most one step held ({{.TopMemoryStep}})</span>{{end}}</span><span class="muted">BuildKit's cgroup readings of each step; steps from the cache used nothing and are left out.</span></div>
   </div>
   {{end}}
   {{end}}

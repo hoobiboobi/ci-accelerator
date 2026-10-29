@@ -137,6 +137,17 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, repairs); err != nil {
 		return fmt.Errorf("store: repairs: %w", err)
 	}
+	for _, c := range toleratedColumns {
+		var n int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info(?) WHERE name = ?", c.table, c.column).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", c.table, c.column, c.def)); err != nil {
+				return fmt.Errorf("store: adding %s.%s: %w", c.table, c.column, err)
+			}
+		}
+	}
 	return tx.Commit()
 }
 

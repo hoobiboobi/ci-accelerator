@@ -84,6 +84,75 @@
     setupFilters();
     setupHowTo();
     setupLog();
+    setupBuildLists();
+  }
+
+  // Builds list: the image names' column is resized by its border (drag,
+  // arrows, double-click to fit the longest name and back); one width for
+  // every list on the page, remembered across pages.
+  const blMin = 80, blDefault = 150;
+  function blLimit(list) { return Math.max(blMin, list.clientWidth - 520); }
+  function setBNW(w, save) {
+    const lists = $$(".blist", main);
+    lists.forEach(l => {
+      if (w === null) l.style.removeProperty("--bnw");
+      else l.style.setProperty("--bnw", Math.round(Math.min(Math.max(w, blMin), blLimit(l))) + "px");
+    });
+    if (!save) return;
+    if (w === null) store.del("bl-nw"); else store.set("bl-nw", String(Math.round(w)));
+  }
+  function currentBNW(list) {
+    const bn = $(".brow .bn", list);
+    return bn ? bn.getBoundingClientRect().width : blDefault;
+  }
+  function fittedBNW() {
+    let need = 0;
+    $$(".blist .brow .bn", main).forEach(bn => { need = Math.max(need, bn.scrollWidth); });
+    return Math.ceil(need) + 2;
+  }
+  function setupBuildLists() {
+    const lists = $$(".blist", main);
+    if (!lists.length) return;
+    const saved = parseInt(store.get("bl-nw") || "", 10);
+    if (saved > 0) setBNW(saved, false);
+    lists.forEach(list => {
+      const grip = $(".bgrip", list);
+      if (!grip) return;
+      grip.addEventListener("pointerdown", ev => {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        const x0 = ev.clientX, w0 = currentBNW(list);
+        grip.setPointerCapture(ev.pointerId);
+        list.classList.add("resizing");
+        const move = e => setBNW(w0 + e.clientX - x0, false);
+        const up = e => {
+          grip.removeEventListener("pointermove", move);
+          grip.removeEventListener("pointerup", up);
+          grip.removeEventListener("pointercancel", up);
+          list.classList.remove("resizing");
+          setBNW(w0 + e.clientX - x0, true);
+        };
+        grip.addEventListener("pointermove", move);
+        grip.addEventListener("pointerup", up);
+        grip.addEventListener("pointercancel", up);
+      });
+      grip.addEventListener("dblclick", () => {
+        if (list.dataset.fitted && list.style.getPropertyValue("--bnw") === list.dataset.fitted) {
+          lists.forEach(l => { delete l.dataset.fitted; });
+          setBNW(null, true);
+          return;
+        }
+        setBNW(fittedBNW(), true);
+        lists.forEach(l => { l.dataset.fitted = l.style.getPropertyValue("--bnw"); });
+      });
+      grip.addEventListener("keydown", ev => {
+        const step = ev.shiftKey ? 64 : 16;
+        if (ev.key === "ArrowRight") { ev.preventDefault(); setBNW(currentBNW(list) + step, true); }
+        if (ev.key === "ArrowLeft") { ev.preventDefault(); setBNW(currentBNW(list) - step, true); }
+        if (ev.key === "Home") { ev.preventDefault(); setBNW(null, true); }
+        if (ev.key === "Enter") { ev.preventDefault(); grip.dispatchEvent(new MouseEvent("dblclick")); }
+      });
+    });
   }
 
   // Tabs: the hash names the pane (#steps, #dockerfile, #timeline, ...).

@@ -14,6 +14,25 @@
     {{if .Inspected}}<div class="tile"><span class="k">Cache</span><span class="v">{{bytes .Cache}}</span><span class="s">as BuildKit counts it</span></div>{{end}}
     {{with .Disk}}{{if not .Err}}<div class="tile"><span class="k">Available to pods</span><span class="v{{if eq .Level "crit"}} tone-crit{{else if eq .Level "warn"}} tone-warn{{end}}">{{.Avail}}</span><span class="s">of the cache's disk</span></div>{{end}}{{end}}
   </div>
+  {{with .Load}}<section class="box" aria-labelledby="ldT"><div class="boxh"><h2 class="h" id="ldT">Load</h2><span class="muted">{{if .Err}}the probe reports no load{{else}}the node and the daemon's pod · {{.Measured}}{{end}}</span></div>
+    {{if .Err}}<p class="muted pad">The probe next to this daemon reports no load ({{.Err}}): a probe image from before 0.3.3, or it did not answer yet.</p>{{else}}<div class="pad nload">
+      <div class="lrow"><span class="k">CPU</span><span class="bar" role="img" aria-label="CPU: {{range $i, $s := .CPUSegs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .CPUSegs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</span><span class="v"><b>{{.CPUText}}</b> cores{{if .PodKnown}} · daemon <b>{{.PodCPU}}</b>{{end}}</span></div>
+      <div class="lrow"><span class="k">Memory</span><span class="bar" role="img" aria-label="Memory: {{range $i, $s := .MemSegs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .MemSegs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</span><span class="v"><b>{{.MemText}}</b>{{if .PodKnown}} · daemon <b>{{.PodMem}}</b>{{with .PodMemLimit}} of its {{.}} limit{{end}}{{end}}</span></div>
+      {{if not .PodKnown}}<div class="lrow"><span class="k">Daemon</span><span class="v wide muted">its own share is not measured: the probe reads the pod's cgroup on cgroup v2 nodes only</span></div>{{end}}
+      <div class="lrow"><span class="k">Pressure</span><span class="v wide">{{if .Pressure}}{{with .PressureChip}}<span class="chip warn">{{.}}</span> {{end}}{{.Pressure}}{{else}}not reported by this node's kernel{{end}}</span></div>
+      <div class="lrow"><span class="k">Builds</span><span class="v wide"><b>{{len $.Active}}</b> running now</span></div>
+      {{with .Chart}}<div class="sub chsub"><span class="q">The last hour</span>{{with .Since}}<span>{{.}} (the probe started then)</span>{{end}}</div>
+      <div class="ch load" role="img" aria-label="The last hour: CPU of the node and of the daemon's pod, memory of the node">
+        <div class="ch-y l">{{range .Axes.Left}}<span style="top: {{.Pct}}%">{{.Label}}</span>{{end}}</div>
+        <div class="ch-plot"><svg viewBox="0 0 {{.W}} {{.H}}" preserveAspectRatio="none" aria-hidden="true">
+          {{range .Axes.Grid}}<line class="grid" x1="0" y1="{{.}}" x2="{{$.Row.Load.Chart.W}}" y2="{{.}}"/>{{end}}{{range .Axes.XGrid}}<line class="grid" x1="{{.}}" y1="0" x2="{{.}}" y2="{{$.Row.Load.Chart.H}}"/>{{end}}
+          {{with .PodFill}}<polygon class="podfill" points="{{.}}"/>{{end}}<polyline class="node" points="{{.NodeCPU}}"/>{{with .PodCPU}}<polyline class="pod" points="{{.}}"/>{{end}}<polyline class="mem" points="{{.Mem}}"/>
+        </svg></div>
+        <div class="ch-y r">{{range .Axes.Right}}<span style="top: {{.Pct}}%">{{.Label}}</span>{{end}}</div>
+        <div class="ch-x">{{range .Axes.X}}<span class="{{.Align}}" style="left: {{.Pct}}%">{{.Label}}</span>{{end}}</div>
+      </div>
+      <div class="legend">{{if $.Row.Load.PodKnown}}<span><i class="sw c-daemon"></i>CPU: the daemon's pod</span>{{end}}<span><i class="sw c-host"></i>CPU: the whole node</span><span><i class="sw c-mem"></i>memory: the whole node (right axis)</span></div>{{end}}
+    </div>{{end}}</section>{{end}}
   <div class="cards2">
     <section class="box" aria-labelledby="cbT"><div class="boxh"><h2 class="h" id="cbT">Cache by BuildKit</h2>{{if .Inspected}}<span class="muted">{{bytes .Cache}}</span>{{end}}</div>
       {{if .Inspected}}{{if .Segs}}<div class="pad"><div class="sstack" role="img" aria-label="{{range $i, $s := .Segs}}{{if $i}}, {{end}}{{$s.Label}} {{$s.Size}}{{end}}">{{range .Segs}}<i class="c-{{.Class}}" style="flex: {{.Flex}}" title="{{.Label}}: {{.Size}}"></i>{{end}}</div>
