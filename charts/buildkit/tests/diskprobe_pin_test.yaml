@@ -31,14 +31,14 @@ tests:
           value: ghcr.io/hoobiboobi/ci-accelerator:v0.3.3
   # README: pin the probe by digest. Under the default tag only its own
   # release's digest is taken: another release's would run that release.
-  # (0.3.3 moved the tag: the probe reports load; its digest joins the
-  # list once published, the earlier ones are refused.)
+  # (0.3.3 moved the tag: the probe reports load; the earlier digests are
+  # refused.)
   - it: refuses the v0.3.0 digest a 0.3.0-0.3.2 install pinned, now that the probe moved on
     set:
       diskProbe.image.digest: sha256:785091522e89806379d527acff74cbadf6dc6f8371bb31adc408cace2af842a2
     asserts:
       - failedTemplate:
-          errorPattern: "diskProbe.image.digest \\(buildkit.diskProbe.image.digest in the box\\) is the digest of the v0.3.0 image, but the disk probe runs v0.3.3: its digest is in its release notes"
+          errorPattern: "diskProbe.image.digest \\(buildkit.diskProbe.image.digest in the box\\) is the digest of the v0.3.0 image, but the disk probe runs v0.3.3: its digest is sha256:8103f17d6512ed305f445fc436dfe19cf9669d57745ae95f2cc98756f39b1204"
   - it: still takes the v0.3.0 digest with the v0.3.0 tag set as well (a pin kept on purpose)
     set:
       diskProbe.image.tag: v0.3.0
@@ -52,7 +52,7 @@ tests:
       diskProbe.image.digest: sha256:e7252ed4cd63943a63b7876410005080050d51fe52f4f3c6f843663a03fb18f0
     asserts:
       - failedTemplate:
-          errorPattern: "diskProbe.image.digest \\(buildkit.diskProbe.image.digest in the box\\) is the digest of the v0.3.1 image, but the disk probe runs v0.3.3: its digest is in its release notes"
+          errorPattern: "diskProbe.image.digest \\(buildkit.diskProbe.image.digest in the box\\) is the digest of the v0.3.1 image, but the disk probe runs v0.3.3: its digest is sha256:8103f17d6512ed305f445fc436dfe19cf9669d57745ae95f2cc98756f39b1204"
   - it: takes a null digest as none
     set:
       diskProbe.image.digest: null
@@ -68,3 +68,10 @@ tests:
       - equal:
           path: spec.template.spec.containers[1].image
           value: ghcr.io/hoobiboobi/ci-accelerator:v9.8.7@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - it: takes the v0.3.3 digest under the default tag (the release notes' digest)
+    set:
+      diskProbe.image.digest: sha256:8103f17d6512ed305f445fc436dfe19cf9669d57745ae95f2cc98756f39b1204
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: ghcr.io/hoobiboobi/ci-accelerator:v0.3.3@sha256:8103f17d6512ed305f445fc436dfe19cf9669d57745ae95f2cc98756f39b1204
