@@ -58,6 +58,10 @@ type Inspection struct {
 	// daemon; nil without one. DiskErr: the probe did not answer.
 	Disk    *diskprobe.Disk
 	DiskErr string
+	// Load is the node's and the pod's CPU and memory, from the same
+	// probe; nil without one or before its second reading (LoadErr says).
+	Load    *diskprobe.Load
+	LoadErr string
 }
 
 // Inspector is a Source that can describe its daemon.

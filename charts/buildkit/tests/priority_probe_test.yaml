@@ -104,6 +104,9 @@ tests:
             - name: state
               mountPath: /var/lib/buildkit
               readOnly: true
+            - name: cgroup
+              mountPath: /host/cgroup
+              readOnly: true
       - equal:
           path: spec.template.spec.containers[1].securityContext.runAsNonRoot
           value: true
