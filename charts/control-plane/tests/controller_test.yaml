@@ -175,6 +175,13 @@ tests:
           path: spec.template.spec.containers[0].volumeMounts
           content: { name: gitlab-token, mountPath: /gitlab, readOnly: true }
 
+  - it: refuses one GitLab token for several GitLabs
+    set:
+      gitlab.token: { existingSecret: gl }
+      gitlab.urls: [https://gitlab.example.com/, https://gitlab.other.example/]
+    asserts:
+      - failedTemplate: { errorPattern: "gitlab.token is a token of one GitLab" }
+
   - it: names the controller's objects after its role, and selects by it
     asserts:
       - equal: { path: metadata.name, value: c-controller }

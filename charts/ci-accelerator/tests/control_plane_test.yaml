@@ -75,6 +75,15 @@ tests:
       global.tls.issuerRef.name: company-ca
     asserts:
       - equal: { path: spec.issuerRef.name, value: company-ca }
+  # The whole reference: an issuer of another group (an external issuer)
+  # left the controller's certificates pointing at cert-manager.io's.
+  - it: takes the global issuer's kind and group with its name
+    template: charts/control-plane/templates/certificate.yaml
+    set:
+      control-plane.enabled: true
+      global.tls.issuerRef: { name: company-ca, kind: Issuer, group: example.io }
+    asserts:
+      - equal: { path: spec.issuerRef, value: { name: company-ca, kind: Issuer, group: example.io } }
 
   - it: asks for the controller's own certificates when the daemons' come from a Secret
     template: validate.yaml
