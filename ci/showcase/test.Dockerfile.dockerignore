@@ -1,0 +1,7 @@
+# The Go sources with their test data (the image's build leaves the test
+# data out).
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/

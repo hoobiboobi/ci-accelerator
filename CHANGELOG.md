@@ -9,7 +9,26 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.3.5, `helm upgrade` in place. Nothing in the box changed: the
+  controller, the web and the routers restart once for the new image's
+  version; the daemons, their disk probe and the runner stay as they are.
+
+### Added
+
+- **A live demo:** [demo.ci-accelerator.io](https://demo.ci-accelerator.io)
+  is the console of a ci-accelerator box that builds this repository on
+  every push, through its read-only GitLab mirror
+  [gitlab.com/ci-accelerator/ci-accelerator](https://gitlab.com/ci-accelerator/ci-accelerator).
+  The console runs without sign-in and reads GitLab with a fine-grained
+  token that may only read the mirror; it is reached through a Cloudflare
+  Tunnel (no open port on the box).
+- The project builds itself on its own build farm: every branch pushed to
+  GitHub goes to the mirror, whose pipeline builds the image (pushed to
+  the mirror's registry with the job's token, `:edge` for main) and runs
+  `go test` and `go vet` as builds of their own
+  (`ci/showcase/test.Dockerfile`, Go caches in cache mounts). The three
+  jobs start together and share their first steps on the daemon. The
+  commit on GitHub gets the status "ci-accelerator / own build farm".
 
 ## 0.3.5 - 2026-10-30
 
