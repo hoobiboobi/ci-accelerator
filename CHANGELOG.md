@@ -9,7 +9,51 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- `helm upgrade` in place. The controller, the web and the routers restart
+  once for the new image; the routers' DaemonSet now rolls with
+  `maxSurge: 1, maxUnavailable: 0` (no pod restarts for that alone). The
+  controller adds an index of executed steps at its first start (no
+  schema change: a rollback keeps working).
+- Refused now, with a message saying what to change: the standalone
+  control-plane chart with `gitlab.token` and more than one `gitlab.urls`
+  (the token was sent to each GitLab: use sign-in or one URL); in the box,
+  runner tiers named `gitlab` or `caches`, and another
+  `buildkit.service.port` without the router.
+- The CI component's integrity hash changes (see the release notes).
+
+### Fixed
+
+- **Live tail:** a progress bar that redraws its line no longer freezes at
+  an early percentage, and a cut drawing can no longer show the first part
+  of a secret; secret build arguments of several lines and armored PGP
+  private keys are masked (PGP keys also in stored output).
+- **Router:** a daemon still listed but not reachable (a lost node) no
+  longer fails the jobs routed to it: the router tries the next choice and
+  passes that daemon over for 30 seconds. A rollout starts each node's new
+  router before the old one drains.
+- **Sign-in:** two tabs signing in at once both completed nothing; the
+  second completes now. Behind an ended session the pages' scripts no
+  longer start sign-ins at GitLab every few seconds: the page stops
+  updating and says so.
+- **Control plane:** the installation's GitLab token is refused for more
+  than one GitLab; in the box, the controller's certificates use the
+  global issuer's kind and group, not only its name.
+- **Console:** pipelines created in the same second at a page's edge are
+  no longer skipped; a job that built twice is drawn by its newest build;
+  steps received from another job carry no CPU or memory of their own and
+  wait for their own stage only; pick mode hears of the pinned project;
+  projects of several GitLabs are told apart; huge numbers in an address
+  are 404, not 500; with sign-in a reader's refused commit comparison is
+  not stored for everyone.
+- **Store:** saving a build no longer walks every cached run of each step
+  under the write lock (1.4 s per save at 60,000 builds); a read cut short
+  reports its error.
+- **Box and component:** clashing tier names and another daemon port are
+  refused instead of rendering broken objects; the component no longer
+  fails a job after a successful build whose log has no context-transfer
+  line, and trims indented build-args and secrets lines;
+  `scripts/buildkit-certs.sh` names a missing option value and keeps
+  wildcard SANs as written.
 
 ## 0.3.8 - 2026-10-31
 
