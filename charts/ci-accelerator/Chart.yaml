@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.3.7
+version: 0.3.8
 # The box's own version (its control plane's image); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.3.7"
+appVersion: "0.3.8"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -26,7 +26,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.34.1
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.7
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.8
       platforms:
         - linux/amd64
         - linux/arm64
@@ -45,12 +45,8 @@ annotations:
       url: https://github.com/hoobiboobi/ci-accelerator/issues
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
-    - kind: changed
-      description: The console opens on Pipelines; the former Overview (why images were rebuilt, by the build time it cost) is Insights at /insights
-    - kind: changed
-      description: The console opens in its dark theme until the viewer picks the light one, instead of following the system's colour scheme
-    - kind: changed
-      description: A step's panel closes on a click outside it and can be widened by its left edge
+    - kind: added
+      description: Console links shared in Telegram, Slack or another chat show a preview card with the page's title, its project and the sentence it leads with; behind sign-in the card shows no project
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -58,10 +54,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.3.7
+    version: 0.3.8
     repository: file://../buildkit
   - name: control-plane
-    version: 0.3.7
+    version: 0.3.8
     repository: file://../control-plane
     condition: control-plane.enabled
   - name: gitlab-runner
