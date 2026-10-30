@@ -998,3 +998,62 @@ a.boxh:hover { background: var(--hover); }
 .rtable .cores { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
 .rtable .gt2 { position: relative; width: 110px; height: 8px; border-radius: 3px; background: color-mix(in oklab, var(--ink) 5%, var(--panel)); overflow: hidden; flex: none; }
 .rtable .gt2 i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; background: var(--built); }
+
+/* ---- a build that is still running (a running job's page) ---- */
+.lvb { display: grid; gap: 14px; margin-bottom: 18px; min-width: 0; }
+.verdict.live { --tone: var(--accent); }
+.verdict.live .k > span { min-width: 0; }
+.dot-live { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; flex: none; box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 50%, transparent); animation: lvpulse 1.6s infinite; }
+@keyframes lvpulse { 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .dot-live { animation: none; } }
+.ltiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.ltile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--panel); min-width: 0; }
+.ltile .k { font-size: 11.5px; color: var(--ink-3); }
+.ltile .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.ltile .s { font-size: 12px; color: var(--ink-2); }
+.lspark { display: block; width: 100%; height: 22px; margin-top: 4px; }
+.lspark polyline { fill: none; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.lspark .c { stroke: var(--built); } .lspark .m { stroke: var(--received); }
+.lvc { font-size: 12.5px; }
+.ltscroll { overflow-x: auto; padding: 6px 0 4px; }
+.lt { --lw: 260px; min-width: 680px; padding: 0 14px; }
+.ltaxis { position: relative; height: 20px; margin-left: var(--lw); font-size: 11px; color: var(--ink-3); }
+.ltaxis span { position: absolute; transform: translateX(-50%); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ltaxis span:first-child { transform: none; }
+.ltaxis .nowl { color: var(--accent); font-weight: 600; transform: translateX(calc(-100% - 6px)); }
+.lstep + .lstep { border-top: 1px solid color-mix(in oklab, var(--line) 60%, transparent); }
+.lrow { display: grid; grid-template-columns: var(--lw) minmax(0, 1fr); align-items: center; min-height: 28px; list-style: none; cursor: pointer; }
+.lrow::-webkit-details-marker { display: none; }
+.lrow:hover { background: var(--hover); }
+.lrow:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.lstep.wait .lrow { cursor: default; }
+.lstep.wait .lrow:hover { background: none; }
+.lrow .nm { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 10px 0 2px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+.lrow .nm .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow .cv { flex: none; width: 14px; display: inline-grid; place-items: center; color: var(--ink-3); transform: rotate(-90deg); transition: transform .12s; }
+.lstep[open] > .lrow .cv { transform: none; }
+@media (prefers-reduced-motion: reduce) { .lrow .cv { transition: none; } }
+.lstep.st-running .nm { color: var(--accent); }
+.lstep.wait .nm { color: var(--ink-3); }
+.lrow .lane { position: relative; height: 28px; border-left: 1px solid var(--line);
+  background: repeating-linear-gradient(to right, transparent 0 calc(25% - 1px), color-mix(in oklab, var(--line) 75%, transparent) calc(25% - 1px) 25%); }
+.lbar { position: absolute; top: 8px; height: 12px; border-radius: 3px; min-width: 3px; }
+.lbar.c-ghost, .sw.c-ghost { border: 1px dashed color-mix(in oklab, var(--ink-3) 70%, transparent); background: transparent; box-sizing: border-box; }
+.c-running { background: repeating-linear-gradient(-45deg, var(--accent) 0 6px, color-mix(in oklab, var(--accent) 65%, var(--panel)) 6px 12px); }
+.lnow { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--accent); pointer-events: none; }
+.lrow .lab { position: absolute; top: 6px; font-size: 11px; font-weight: 500; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.slog { margin: 2px 14px 10px var(--lw); }
+.ltail { border: 1px solid var(--line); border-radius: 8px; background: var(--raised); overflow: hidden; }
+.ltail .lh { display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); flex-wrap: wrap; }
+.ltail .lh:last-child { border-bottom: 0; }
+.ltail .lh .sp { flex: 1; }
+.ltail .lh b { color: var(--ink-2); font-weight: 500; }
+.ltail pre { margin: 0; padding: 6px 10px; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; color: var(--ink-2); white-space: pre; overflow-x: auto; }
+.ltail pre .t { color: var(--ink-3); }
+.ltail .none { padding: 8px 10px; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.lt-foot { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink-3); padding: 10px 14px 12px; border-top: 1px solid var(--line); }
+.lt-foot span { display: inline-flex; align-items: center; gap: 6px; }
+.lt-foot .sw { width: 16px; height: 8px; }
+.btn.sm { height: 22px; padding: 0 8px; font-size: 11.5px; }
+.btn.sm[aria-pressed="true"] { background: var(--sel); color: var(--ink); }
+@media (max-width: 760px) { .lt { --lw: 160px; } }

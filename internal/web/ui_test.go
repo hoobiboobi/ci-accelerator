@@ -50,11 +50,14 @@ func TestUI(t *testing.T) {
 	}
 	long.WriteString("$ helm upgrade app --password glpat-AbCdEfGhIjKlMnOpQrSt12\ndeployed " + evil + "\n")
 	f, _ := fakeGitLab(t, long.String())
-	ts, st, _, _ := consoleWith(t, testOpts{Live: daemons, Release: "box", API: f, Token: gitlab.Token("t")})
+	lf := &liveFixture{daemons: daemons}
+	ts, st, _, _ := consoleWith(t, testOpts{Live: lf, Release: "box", API: f, Token: gitlab.Token("t")})
 	f.Store = st
 	// A job that built nothing, with a log to read.
 	inst, key := seedJob(t, st)
-	browse(t, node, st, ts.URL, key, "--job", "/jobs/"+inst+"/6003")
+	// A job whose build runs, moved along by the checks.
+	lpipe, ljob, lhook := seedLive(t, st, lf)
+	browse(t, node, st, ts.URL, key, "--job", "/jobs/"+inst+"/6003", "--live-pipeline", lpipe, "--live-job", ljob, "--live-hook", lhook.URL)
 }
 
 // browse runs the browser checks against base while the pipeline key keeps

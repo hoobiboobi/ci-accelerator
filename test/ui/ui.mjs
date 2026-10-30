@@ -3,6 +3,7 @@
 //   node test/ui/ui.mjs --base http://localhost:8080 [--chrome PATH]
 //        [--live /pipelines/<instance>/<id>] [--cookie NAME=VALUE] [--job /jobs/<instance>/<id>]
 //        [--running /pipelines/<instance>/<id> --running-job /jobs/<instance>/<id> [--hook URL]]
+//        [--live-pipeline /pipelines/<instance>/<id> --live-job /jobs/<instance>/<id> --live-hook URL]
 //
 // It starts a headless Chrome of its own and talks to it over the DevTools
 // protocol (Node >= 22: WebSocket is built in; no packages). It visits every
@@ -16,6 +17,9 @@
 // by its own clock. --running-job is that job's page, the link a job's log
 // prints; a POST to --hook stores the job's build, and the open page must
 // then turn into the build's.
+// --live-job is the page of a job whose build runs: a POST to --live-hook
+// + /line prints a line, + /next ends the running step and runs the next;
+// --live-pipeline is that job's pipeline.
 // --cookie is a session cookie of a console with sign-in: the pages are
 // checked as that person, then the sign-in page, then signing out.
 // --shots DIR saves a full-page screenshot of the first two pages of each
@@ -321,7 +325,7 @@ async function buildPage(s, pages) {
 
 // Pipelines that run refresh themselves now and then: the long checks of
 // one page use pipelines that do not.
-const settled = pages => pages.filter(x => /^\/pipelines\/[^/]+\/\d+$/.test(x) && x !== args.running);
+const settled = pages => pages.filter(x => /^\/pipelines\/[^/]+\/\d+$/.test(x) && x !== args.running && x !== args["live-pipeline"]);
 
 async function pipelinePage(s, pages) {
   let p = null;
@@ -738,6 +742,69 @@ async function running(s) {
   check("running: no errors", s.take().length === 0);
 }
 
+// A job whose build runs: its running step shows its last lines, alone
+// open, and the page asks for itself every 2 s. A step the reader opened
+// stays open; once the running step ends it folds and the next one opens;
+// a paused step keeps its lines. On the pipeline's timeline the running
+// job is open, and the page asks for itself every 5 s.
+async function liveBuild(s) {
+  await s.size(1400, 900);
+  const hook = async p => { const r = await fetch(args["live-hook"] + p, { method: "POST" }); check(`live hook ${p}`, r.ok, String(r.status)); };
+  // The page asked for itself and swapped in what it got.
+  const updated = async () => {
+    const was = await s.eval(`(document.getElementById("live") || {}).textContent || ""`);
+    let now = was;
+    for (let i = 0; i < 60 && (now === was || !/^Updated/.test(now)); i++) {
+      await sleep(150);
+      now = await s.eval(`(document.getElementById("live") || {}).textContent || ""`);
+    }
+    // One more round, so that a page asked for just before the hook's
+    // change is not the one read.
+    await sleep(2300);
+    return /^Updated/.test(now);
+  };
+  const state = () => s.eval(`(() => {
+    const d = [...document.querySelectorAll("details.lstep")], name = x => x.querySelector(".t").textContent;
+    const run = document.querySelector("details.lstep.st-running");
+    return { every: (document.querySelector("[data-refresh-every]") || { dataset: {} }).dataset.refreshEvery,
+      open: d.filter(x => x.open).map(name), running: d.filter(x => x.classList.contains("st-running")).map(name),
+      tail: run && run.querySelector("pre") ? run.querySelector("pre").textContent : "",
+      sentence: (document.querySelector(".verdict.live .vt") || {}).textContent || "", tiles: document.querySelectorAll(".ltile").length };
+  })()`);
+  await s.go(args["live-job"]);
+  const a = await state();
+  check(`${args["live-job"]} a running build: its running step alone is open, the page asks for itself every 2 s`,
+    a.every === "2" && a.running.length === 1 && a.open.length === 1 && a.open[0] === a.running[0] && /modules/.test(a.running[0]) &&
+    /done in about/.test(a.sentence) && a.tiles === 4 && /snd-soc-wm8907/.test(a.tail), JSON.stringify(a));
+  await s.eval(`[...document.querySelectorAll("details.lstep > summary")].find(x => /vmlinux/.test(x.textContent)).id = "liveVm"`);
+  await s.click("#liveVm", 200);
+  await hook("/line");
+  const up1 = await updated();
+  const b = await state();
+  check("a running build: a step the reader opened stays open, new lines show", up1 && b.open.some(n => /vmlinux/.test(n)) && /printed-line-1/.test(b.tail), JSON.stringify(b));
+  await s.click('details.lstep.st-running [data-act="pauselog"]', 200);
+  const frozen = (await state()).tail;
+  await hook("/line");
+  await updated();
+  const c = await state();
+  check("a running build: a paused step keeps its lines", c.tail === frozen && !/printed-line-2/.test(c.tail), JSON.stringify({ frozen, now: c.tail }));
+  await s.click('details.lstep.st-running [data-act="pauselog"]', 200);
+  await updated();
+  check("a running build: lines show again once it goes on", /printed-line-2/.test((await state()).tail));
+  await hook("/next");
+  await updated();
+  const d = await state();
+  check("a running build: the step that ended folds, the next one opens, the reader's stays",
+    d.running.length === 1 && /modules_install/.test(d.running[0]) && d.open.some(n => /modules_install/.test(n)) &&
+    !d.open.some(n => /make -j"32" modules$/.test(n)) && d.open.some(n => /vmlinux/.test(n)), JSON.stringify(d));
+  await s.go(args["live-pipeline"]);
+  const p = await s.eval(`(() => { const r = document.querySelector("[data-wf] .row.k-job");
+    return { open: r && r.getAttribute("aria-expanded"), bars: document.querySelectorAll("[data-wf] .bar.c-running").length,
+      every: (document.querySelector("[data-refresh-every]") || { dataset: {} }).dataset.refreshEvery }; })()`);
+  check(`${args["live-pipeline"]} the running job is open on the timeline, its running steps drawn`, p.open === "true" && p.bars >= 1 && p.every === "5", JSON.stringify(p));
+  check("running build: no errors", s.take().length === 0);
+}
+
 // The page's pipeline changes while the reader has unfolded part of it:
 // the update keeps it unfolded.
 async function liveUpdate(s, p) {
@@ -803,6 +870,7 @@ try {
   await keys(s, pages);
   await notFound(s);
   if (args.running) await running(s);
+  if (args["live-job"]) await liveBuild(s);
   if (args.live) await liveUpdate(s, args.live);
   if (args.cookie) await signedIn(s);
   await s.close();

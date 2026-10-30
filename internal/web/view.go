@@ -166,6 +166,11 @@ func stagesOf(steps []StepView) []StageView {
 			}
 		}
 		for _, s := range g.Steps {
+			if s.State == "running" && g.State != "image" {
+				g.State = "running"
+			}
+		}
+		for _, s := range g.Steps {
 			if s.State == "failed" || (s.State == "canceled" && g.State != "failed") {
 				g.State = s.State
 			}

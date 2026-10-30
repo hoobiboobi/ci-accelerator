@@ -61,6 +61,8 @@ type Server struct {
 	streams chan struct{}
 	// Job logs being read from GitLab, bounded: each streams a whole log.
 	logs chan struct{}
+	// refs are the builds running ones are compared with.
+	refs refCache
 	// Heartbeat keeps idle streams open through proxies.
 	Heartbeat time.Duration
 	// APIWait is how long a page waits for GitLab's API.
@@ -520,6 +522,7 @@ var funcs = template.FuncMap{
 	"dur":         dur,
 	"when":        when,
 	"icon":        icon,
+	"lane":        func(v *LiveView, r LiveRow) liveLane { return liveLane{v, r} },
 	"short":       short,
 	"shortd":      shortDaemon,
 	"bytes":       bytesText,

@@ -59,6 +59,9 @@ type Backend interface {
 
 	// Daemons is the build daemons as the collector sees them now.
 	Daemons() []collector.DaemonState
+	// LiveBuild is a running build of a daemon, its progress followed
+	// while its page asks; nil when the daemon runs no such build.
+	LiveBuild(ctx context.Context, daemon, ref string) (*collector.LiveBuild, error)
 }
 
 // GitLab reads GitLab's API for the pages. Whose token it reads with

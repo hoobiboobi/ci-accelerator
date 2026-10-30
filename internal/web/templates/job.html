@@ -3,7 +3,8 @@
 <div class="page">
   <header class="phead"><div class="crumbs">{{if .PipeURL}}<a href="{{.PipeURL}}" data-back aria-label="Back to the pipeline">{{icon "back" 12}}</a><a href="{{.PipeURL}}">Pipeline {{.PipeLabel}}</a><span class="sepr">/</span>{{end}}<span>{{.Name}}</span></div>
     <div class="titlerow"><h1 class="t" tabindex="-1">{{.Name}}</h1>{{if .GitLabURL}}<div class="tools"><a class="btn" href="{{.GitLabURL}}" target="_blank" rel="noopener noreferrer">{{icon "ext" 13}}<span class="lbl2">GitLab job</span></a></div>{{end}}</div></header>
-  {{if or .Running .Waiting}}<span hidden data-refresh-every="15"></span>{{end}}
+  {{if .LiveBuilds}}<span hidden data-refresh-every="2"></span>{{else if or .Running .Waiting}}<span hidden data-refresh-every="15"></span>{{end}}
+  {{range .LiveBuilds}}{{template "livebuild" .}}{{end}}
   <section class="box" aria-labelledby="jfT"><div class="boxh"><h2 class="h" id="jfT">The job</h2></div>
     <div class="pad"><dl class="kv">
       <dt>Result</dt><dd>{{.Result}}</dd>
@@ -16,7 +17,7 @@
       {{if .Node}}<dt>Node</dt><dd><span class="mono">{{.Node}}</span></dd>{{end}}
       {{if .StartedBy}}<dt>Started by</dt><dd>{{.StartedBy}}</dd>{{end}}
     </dl>
-    <p class="muted note0">{{if .Running}}This job is running and has no finished image build on the box yet; a build shows up when BuildKit completes it.{{else if .Waiting}}This job has not started yet; a build shows up when BuildKit completes it.{{else}}This job built no image on the box.{{end}} The console explains image builds; everything else about the job is in GitLab{{if .GitLabURL}} (the button above opens it in a new tab){{end}}.</p></div></section>
+    <p class="muted note0">{{if .LiveBuilds}}This job's build runs on the box (above); the build's page takes over when BuildKit completes it.{{else if .Running}}This job is running and has no finished image build on the box yet; a build shows up when BuildKit completes it.{{else if .Waiting}}This job has not started yet; a build shows up when BuildKit completes it.{{else}}This job built no image on the box.{{end}} The console explains image builds; everything else about the job is in GitLab{{if .GitLabURL}} (the button above opens it in a new tab){{end}}.</p></div></section>
   <section class="box" aria-labelledby="lgT"><div class="boxh"><h2 class="h" id="lgT">Log</h2></div>
     <div class="pad">{{if .LogURL}}{{template "logbox" .LogURL}}{{else}}<p class="muted note0">The end of the job's log is read from GitLab on request; that needs a GitLab token or sign-in.</p>{{end}}</div></section>
 </div>
