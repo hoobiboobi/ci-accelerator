@@ -31,7 +31,7 @@ var secretPatterns = []*regexp.Regexp{
 	// Slack tokens.
 	regexp.MustCompile(`xox[abposr]-[0-9A-Za-z\-]{10,}`),
 	// Private keys, whole blocks.
-	regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----`),
+	regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----.*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----`),
 }
 
 // Secrets that keep their context: the password of a URL, a bearer token,
@@ -54,8 +54,8 @@ func SecretArg(name string) bool {
 // The halves of a private key block that a part of a longer text can hold
 // once the whole blocks are masked: up to its last END, from its BEGIN on.
 var (
-	keyEnd   = regexp.MustCompile(`(?s)\A.*-----END [A-Z0-9 ]*PRIVATE KEY-----`)
-	keyBegin = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*\z`)
+	keyEnd   = regexp.MustCompile(`(?s)\A.*-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----`)
+	keyBegin = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----.*\z`)
 )
 
 // MaskSecrets hides the known secret formats (tokens, keys, passwords in
@@ -87,8 +87,18 @@ func maskText(s string, args map[string]string, keepLines bool) string {
 	}
 	var values []string
 	for k, v := range args {
-		if SecretArg(k) && len(v) >= 4 {
-			values = append(values, v)
+		if !SecretArg(k) || len(v) < 4 {
+			continue
+		}
+		values = append(values, v)
+		// A value of several lines is also masked line by line: a step's
+		// live tail sees one line at a time.
+		if strings.Contains(v, "\n") {
+			for _, l := range strings.Split(v, "\n") {
+				if l = strings.TrimRight(l, "\r"); len(strings.TrimSpace(l)) >= 4 {
+					values = append(values, l)
+				}
+			}
 		}
 	}
 	// Longest first, so a value containing another is masked whole.

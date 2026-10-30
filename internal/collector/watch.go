@@ -125,15 +125,15 @@ func (c *Collector) LiveBuild(ctx context.Context, daemon, ref string) (*LiveBui
 	w := c.watch.m[key]
 	if w != nil {
 		w.mu.Lock()
-		if w.ended && !w.done && (w.err == "" || now.Sub(w.endedAt) > retryAfter) {
+		again := w.ended && !w.done && (w.err == "" || now.Sub(w.endedAt) > retryAfter)
+		if !again {
+			w.until = now.Add(watchFor)
+		}
+		w.mu.Unlock()
+		if again {
 			// Nobody asked for a while and the reading stopped, or it
 			// failed a while ago: read the build again from its start.
 			w = nil
-		} else {
-			w.until = now.Add(watchFor)
-		}
-		if w != nil {
-			w.mu.Unlock()
 		}
 	}
 	if w == nil {

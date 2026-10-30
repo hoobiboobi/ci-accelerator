@@ -418,6 +418,8 @@ func Link(builds []*Build) {
 					if t, ok := o.vertexStart[s.vertex]; ok && t.Equal(start) {
 						s.State, s.ReceivedVertex, s.ReceivedFrom = Received, s.vertex, o.Ref
 						s.foreignStarted, changed = start, true
+						// Its CPU and memory are the build's that ran it.
+						s.Usage = Usage{}
 						break
 					}
 				}

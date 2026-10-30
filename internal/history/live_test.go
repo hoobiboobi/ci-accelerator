@@ -152,6 +152,21 @@ func TestLiveTailPrivateKey(t *testing.T) {
 	}
 }
 
+// An armored PGP key ("PRIVATE KEY BLOCK") is a private key too.
+func TestLiveTailPGPKey(t *testing.T) {
+	l := NewLive(nil)
+	run := "[deploy 1/1] RUN gpg --export-secret-keys --armor"
+	l.Add(&client.SolveStatus{Vertexes: []*client.Vertex{vtx(run, lat(0), nil, false, "")}})
+	l.Add(&client.SolveStatus{Logs: []*client.VertexLog{logOf(run, 1,
+		"-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOYBGVjZXJ0aWZpY2F0ZQ\n=Xq4t\n-----END PGP PRIVATE KEY BLOCK-----\nafter\n")}})
+	s := l.Steps()[0]
+	for _, tl := range s.Tail {
+		if tl.Text != Masked && tl.Text != "after" && tl.Text != "" {
+			t.Errorf("a line of the key shows: %q", tl.Text)
+		}
+	}
+}
+
 func TestLiveTailProgressBar(t *testing.T) {
 	l := NewLive(nil)
 	run := "[source 2/2] RUN curl -o linux.tar.xz https://example.com/linux.tar.xz"
@@ -217,5 +232,99 @@ func TestLiveTailRedrawInKey(t *testing.T) {
 		if tl.Text != Masked {
 			t.Errorf("shows %q", tl.Text)
 		}
+	}
+}
+
+// A progress bar that redraws for minutes keeps showing its latest state
+// (the kept text used to fill up and freeze at an early percentage).
+func TestLiveTailLongRedraw(t *testing.T) {
+	l := NewLive(nil)
+	run := "[src 1/1] RUN curl -o big.tar https://example.com/big.tar"
+	l.Add(&client.SolveStatus{Vertexes: []*client.Vertex{vtx(run, lat(0), nil, false, "")}})
+	for p := 0; p <= 100; p++ {
+		l.Add(&client.SolveStatus{Logs: []*client.VertexLog{logOf(run, 1, fmt.Sprintf("\rDownloading 123456789 bytes ....... %3d%%", p))}})
+		if p == 99 {
+			if tl := l.Steps()[0].Tail; len(tl) == 0 || !strings.HasSuffix(tl[len(tl)-1].Text, " 98%") {
+				t.Errorf("while drawing: %q", tl)
+			}
+		}
+	}
+	l.Add(&client.SolveStatus{Logs: []*client.VertexLog{logOf(run, 1, "\n")}})
+	if tl := l.Steps()[0].Tail; len(tl) != 1 || !strings.HasSuffix(tl[0].Text, "100%") {
+		t.Errorf("after the line ended: %q", tl)
+	}
+}
+
+// A secret in a redrawn line is masked whole in every drawing, however
+// long the line has been redrawing.
+func TestLiveTailSecretInRedraw(t *testing.T) {
+	sec := "Zq8vK2mN7pL4xR9tW3yB6cD1"
+	l := NewLive(map[string]string{"DEPLOY_TOKEN": sec})
+	run := "[deploy 1/1] RUN curl"
+	l.Add(&client.SolveStatus{Vertexes: []*client.Vertex{vtx(run, lat(0), nil, false, "")}})
+	for _, c := range []string{"\r" + strings.Repeat("#", 1560), "\rcurl -H 'PRIVATE-TOKEN: " + sec + "' https://x 50%",
+		"\rcurl -H 'PRIVATE-TOKEN: " + sec + "' https://x 100%"} {
+		l.Add(&client.SolveStatus{Logs: []*client.VertexLog{logOf(run, 1, c)}})
+		for _, tl := range l.Steps()[0].Tail {
+			if strings.Contains(tl.Text, sec[:6]) {
+				t.Fatalf("part of the secret shows: %q", tl.Text)
+			}
+		}
+	}
+	l.Add(&client.SolveStatus{Logs: []*client.VertexLog{logOf(run, 1, "\n")}})
+	if tl := l.Steps()[0].Tail; len(tl) != 1 || !strings.Contains(tl[0].Text, "[masked]") || !strings.HasSuffix(tl[0].Text, "100%") {
+		t.Errorf("after the line ended: %q", tl)
+	}
+}
+
+// A secret build argument of several lines is masked in a tail that sees
+// one line at a time.
+func TestLiveTailMultiLineSecret(t *testing.T) {
+	l := NewLive(map[string]string{"SECRET_ENV": "user=admin\npassword=hunter2hunter2\n"})
+	run := "[app 1/1] RUN cat .env"
+	l.Add(&client.SolveStatus{Vertexes: []*client.Vertex{vtx(run, lat(0), nil, false, "")}})
+	l.Add(&client.SolveStatus{Logs: []*client.VertexLog{logOf(run, 1, "user=admin\npassword=hunter2hunter2\ndone\n")}})
+	for _, tl := range l.Steps()[0].Tail {
+		if strings.Contains(tl.Text, "hunter2") || strings.Contains(tl.Text, "user=admin") {
+			t.Errorf("a line of the secret shows: %q", tl.Text)
+		}
+	}
+}
+
+// A drawing longer than the bound is cut; once whole it shows as an
+// ellipsis, never as the piece that was kept (it may end in half a secret).
+func TestLiveTailCutDrawing(t *testing.T) {
+	sec := "Zq8vK2mN7pL4xR9tW3yB6cD1"
+	l := NewLive(map[string]string{"DEPLOY_TOKEN": sec})
+	run := "[deploy 1/1] RUN curl"
+	l.Add(&client.SolveStatus{Vertexes: []*client.Vertex{vtx(run, lat(0), nil, false, "")}})
+	long := strings.Repeat("#", 4*maxTailLine-10) + sec + " 1%"
+	l.Add(&client.SolveStatus{Logs: []*client.VertexLog{logOf(run, 1, "\r"+long+"\rnext 2%")}})
+	tl := l.Steps()[0].Tail
+	if len(tl) != 1 || tl[0].Text != "…" {
+		t.Errorf("the cut drawing shows as %q", tl)
+	}
+}
+
+// A step received from another job waits for the steps of its own stage,
+// not for a stage that runs beside it.
+func TestWaitsByStage(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	steps := []Step{
+		{Key: "[test 2/2]", Line: 3, State: Built, Started: at(1), Completed: at(300)},
+		{Key: "[app 2/2]", Line: 7, State: Received, foreignStarted: at(-20), Completed: at(60)},
+	}
+	waits(t0, steps)
+	if s := steps[1]; !s.Started.Equal(t0) || !s.Completed.Equal(at(60)) {
+		t.Errorf("received step: +%s to +%s, want +0s to +60s", s.Started.Sub(t0), s.Completed.Sub(t0))
+	}
+	steps = []Step{
+		{Key: "[app 1/2]", Line: 6, State: Built, Started: at(0), Completed: at(30)},
+		{Key: "[app 2/2]", Line: 7, State: Received, foreignStarted: at(10), Completed: at(60)},
+	}
+	waits(t0, steps)
+	if s := steps[1]; !s.Started.Equal(at(30)) {
+		t.Errorf("within its stage: starts +%s, want +30s", s.Started.Sub(t0))
 	}
 }

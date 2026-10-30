@@ -362,24 +362,40 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 }
 
 // waits sets the start of each received step to when this build reached
-// it: after its previous step, and not before the other build started it.
+// it: after the previous step of its stage, and not before the other build
+// started it. Stages run in parallel: a step waits for its own stage only.
 func waits(start time.Time, steps []Step) {
-	reached := start
+	reached := map[string]time.Time{}
 	for i := range steps {
 		s := &steps[i]
+		st := stageOfKey(s.Key)
+		at, ok := reached[st]
+		if !ok {
+			at = start
+		}
 		if s.State == Received {
 			s.Started = s.foreignStarted
-			if reached.After(s.Started) {
-				s.Started = reached
+			if at.After(s.Started) {
+				s.Started = at
 			}
 			if s.Completed.Before(s.Started) {
 				s.Completed = s.Started
 			}
 		}
-		if s.Completed.After(reached) {
-			reached = s.Completed
+		if s.Completed.After(at) {
+			reached[st] = s.Completed
 		}
 	}
+}
+
+var stageKeyRE = regexp.MustCompile(`^\[(?:(.+) )?\d+/\d+\]$`)
+
+// stageOfKey is the stage of a step's "[stage n/m]" key ("" for none).
+func stageOfKey(key string) string {
+	if m := stageKeyRE.FindStringSubmatch(key); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // lessStep orders steps by Dockerfile line when both are known (with
