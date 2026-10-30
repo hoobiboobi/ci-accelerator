@@ -19,6 +19,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 )
 
@@ -56,8 +57,8 @@ type Object struct {
 type Scan struct {
 	At      time.Time
 	Objects []Object
-	// Lifecycle: the bucket has a lifecycle rule (old caches expire); nil:
-	// the store did not say.
+	// Lifecycle: the bucket has a lifecycle rule that expires the folder's
+	// objects (old caches expire); nil: the store did not say.
 	Lifecycle *bool
 }
 
@@ -102,6 +103,32 @@ func (l Lister) client() *s3.Client {
 // and the cache key: [runner/<token>/]project/<id>/<key>.
 var cacheKey = regexp.MustCompile(`^(?:runner/[^/]+/)?project/([0-9]+)/(.+)$`)
 
+// expires says whether rule r deletes every cache archive under the folder
+// prefix: enabled, expiring current objects (not only delete markers),
+// for a prefix the folder lies in, and not narrowed to tagged or sized
+// objects (the runner sets no tags; a size limit leaves some caches).
+func expires(r types.LifecycleRule, prefix string) bool {
+	e := r.Expiration
+	if r.Status != types.ExpirationStatusEnabled || e == nil || (aws.ToInt32(e.Days) <= 0 && e.Date == nil) {
+		return false
+	}
+	// A rule has either a filter or (older rules) a prefix of its own.
+	rulePrefix := aws.ToString(r.Prefix)
+	if f := r.Filter; f != nil {
+		if f.Tag != nil || f.ObjectSizeGreaterThan != nil || f.ObjectSizeLessThan != nil {
+			return false
+		}
+		rulePrefix = aws.ToString(f.Prefix)
+		if a := f.And; a != nil {
+			if len(a.Tags) > 0 || a.ObjectSizeGreaterThan != nil || a.ObjectSizeLessThan != nil {
+				return false
+			}
+			rulePrefix = aws.ToString(a.Prefix)
+		}
+	}
+	return strings.HasPrefix(prefix, rulePrefix)
+}
+
 // Scan lists the store's caches and asks whether the bucket expires them.
 func (l Lister) Scan(ctx context.Context, now time.Time) (Scan, error) {
 	c := l.client()
@@ -137,7 +164,7 @@ func (l Lister) Scan(ctx context.Context, now time.Time) (Scan, error) {
 	case err == nil:
 		has := false
 		for _, r := range lc.Rules {
-			has = has || (r.Status == "Enabled" && r.Expiration != nil)
+			has = has || expires(r, prefix)
 		}
 		out.Lifecycle = &has
 	case errors.As(err, &api) && api.ErrorCode() == "NoSuchLifecycleConfiguration":

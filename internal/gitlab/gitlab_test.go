@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -113,11 +115,11 @@ type saver struct {
 	saved []store.APIPipeline
 }
 
-func (s *saver) SaveAPIPipeline(_ context.Context, p store.APIPipeline) error {
+func (s *saver) SaveAPIPipeline(_ context.Context, p store.APIPipeline) ([]uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.saved = append(s.saved, p)
-	return nil
+	return nil, nil
 }
 
 func (s *saver) count() int {
@@ -203,6 +205,45 @@ func TestFetcherReadsAgainWhenDue(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 	if calls.Load() != 2 {
 		t.Errorf("%d calls after the interval, want 2 (one later read for the two asks)", calls.Load())
+	}
+}
+
+// Reads of one pipeline for different projects are not one read: a
+// project that named another's pipeline first keeps reading it for
+// itself (GitLab answers 404), and the read for the pipeline's own
+// project is neither throttled by those, merged with them, nor replaced
+// by them.
+func TestFetcherReadsForEachProject(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		asked []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked = append(asked, r.URL.Path+" "+r.Header.Get("Authorization"))
+		mu.Unlock()
+		if !strings.HasPrefix(r.URL.Path, "/api/v4/projects/42/") {
+			w.WriteHeader(404)
+			return
+		}
+		fmt.Fprint(w, page1)
+	}))
+	defer srv.Close()
+	sv := &saver{}
+	f := &Fetcher{Client: New([]string{srv.URL}), Store: sv, Every: time.Hour}
+	inst := history.InstancePrefix(srv.URL)
+	f.Ensure(Token("other"), inst, 7, 105, "", time.Time{}, time.Second)
+	f.Ensure(Token("other"), inst, 7, 105, "", time.Time{}, 0) // due again later
+	f.Ensure(Token("own"), inst, 42, 105, "", time.Time{}, time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Contains(asked, "/api/v4/projects/42/pipelines/105/jobs Bearer own") || sv.count() != 1 {
+		t.Errorf("the pipeline's own project was not read: %q, %d saved", asked, sv.count())
+	}
+	for _, a := range asked {
+		if strings.HasPrefix(a, "/api/v4/projects/7/") && strings.HasSuffix(a, " own") {
+			t.Errorf("one project's credential read another's: %s", a)
+		}
 	}
 }
 
@@ -558,5 +599,58 @@ func TestJobLogNothingNewWithoutContentRange(t *testing.T) {
 		LogQuery{Lines: 500, After: int64(len(logText)), Since: true})
 	if err != nil || p.Gap || p.Text != "" || p.End != int64(len(logText)) || p.Size != int64(len(logText)) {
 		t.Errorf("nothing new: %+v, %v", p, err)
+	}
+}
+
+// A part is read in a bounded number of windows: a Before past the log's
+// end (only a crafted request sends one) and an empty log whose store
+// answers every range with 416 end after a few requests, not when the
+// context runs out (or never: the window grew until it wrapped to 0).
+func TestJobLogPartEndsOnBadRanges(t *testing.T) {
+	var b strings.Builder
+	for i := 1; i <= 2000; i++ {
+		fmt.Fprintf(&b, "2026-10-21T20:44:53Z 01O line %05d of the job log\n", i)
+	}
+	logText := b.String()
+	for _, tc := range []struct {
+		name  string
+		serve func(http.ResponseWriter, *http.Request)
+		q     LogQuery
+	}{
+		{"before past the end", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeContent(w, r, "trace", time.Time{}, strings.NewReader(logText))
+		}, LogQuery{Lines: 500, Before: math.MaxInt64}},
+		{"empty log, 416 to every range", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Range", "bytes */0")
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		}, LogQuery{Lines: 500}},
+	} {
+		var asked atomic.Int64
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			asked.Add(1)
+			tc.serve(w, r)
+		}))
+		c := New([]string{srv.URL})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		done := make(chan error, 1)
+		var p LogPart
+		go func() {
+			var err error
+			p, err = c.JobLogPart(ctx, Token("tok"), history.InstancePrefix(srv.URL), 42, 77, tc.q)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err != nil || p.Text != "" {
+				t.Errorf("%s: %+v, %v", tc.name, p, err)
+			}
+			if n := asked.Load(); n > 4 {
+				t.Errorf("%s: %d requests to GitLab", tc.name, n)
+			}
+		case <-time.After(3 * time.Second):
+			t.Errorf("%s: still reading after 3 s, %d requests", tc.name, asked.Load())
+		}
+		cancel()
+		srv.Close()
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +41,20 @@ type fakeGitLab struct {
 	next      int
 	// public: every project's jobs are readable, by anyone.
 	public bool
+	// onRefresh runs after a refresh rotated the pair, before GitLab
+	// answers (f.mu held).
+	onRefresh func()
+	// tokenHung: the token endpoint answers 503 after a second, having
+	// done nothing; tokenHits counts its requests.
+	tokenHung atomic.Bool
+	tokenHits atomic.Int32
+	// revokeDelay holds a revoke that long; revokeStatus, when set, is
+	// its answer, and nothing is revoked.
+	revokeDelay  time.Duration
+	revokeStatus int
+	// limited: the jobs API answers 429 with Retry-After of that many
+	// seconds.
+	limited int
 }
 
 var users = map[string]gitlab.User{"alice": {ID: 7, Username: "alice", Name: "Alice"}, "root": {ID: 1, Username: "root", Name: "Admin"}}
@@ -60,6 +75,14 @@ func (f *fakeGitLab) issue(user string) map[string]any {
 }
 
 func (f *fakeGitLab) serve(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/oauth/token" {
+		f.tokenHits.Add(1)
+		if f.tokenHung.Load() {
+			time.Sleep(time.Second)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	jsonOut := func(code int, v any) {
@@ -100,9 +123,18 @@ func (f *fakeGitLab) serve(w http.ResponseWriter, r *http.Request) {
 				jsonOut(400, map[string]string{"error": "invalid_grant"})
 				return
 			}
-			jsonOut(200, f.issue(user))
+			pair := f.issue(user)
+			if f.onRefresh != nil {
+				f.onRefresh()
+			}
+			jsonOut(200, pair)
 		}
 	case r.URL.Path == "/oauth/revoke":
+		time.Sleep(f.revokeDelay)
+		if f.revokeStatus != 0 {
+			w.WriteHeader(f.revokeStatus)
+			return
+		}
 		r.ParseForm()
 		tok := r.Form.Get("token")
 		f.revoked = append(f.revoked, tok)
@@ -122,6 +154,11 @@ func (f *fakeGitLab) serve(w http.ResponseWriter, r *http.Request) {
 		jsonOut(200, users[user])
 	case strings.HasPrefix(r.URL.Path, "/api/v4/projects/") && strings.HasSuffix(r.URL.Path, "/jobs"):
 		f.probes++
+		if f.limited > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(f.limited))
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
 		user, ok := f.access[bearer]
 		if !ok && !f.public {
 			w.WriteHeader(401)
@@ -169,7 +206,7 @@ func setup(t *testing.T) *env {
 	c := &clock{t: time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)}
 	key := make([]byte, 32)
 	a, err := New(Config{PublicURL: "http://127.0.0.1:8080/", Key: key, Now: c.now,
-		Instances: []Instance{{URL: gl.srv.URL, ClientID: "cid", Secret: "sec", Admins: []string{"Root"}}}},
+		Instances: []Instance{{URL: gl.srv.URL, ClientID: "cid", Secret: "sec", Admins: []string{"id:1"}}}},
 		st, gitlab.New([]string{gl.srv.URL}), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -385,6 +422,80 @@ func TestRefreshOncePerSession(t *testing.T) {
 	}
 }
 
+// A renewal whose page went away while GitLab answered still stores the
+// new pair: GitLab rotated it already, and the old refresh token is dead.
+func TestRefreshOutlivesItsRequest(t *testing.T) {
+	e := setup(t)
+	v := e.load(t, mustCookie(e.signIn(t, "alice", "/")))
+	first, _ := v.Token(context.Background())
+	e.clock.add(2*time.Hour - 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	e.gl.mu.Lock()
+	e.gl.onRefresh = func() {
+		cancel() // the person clicked on before GitLab's answer came back
+		time.Sleep(100 * time.Millisecond)
+	}
+	e.gl.mu.Unlock()
+	tok, err := v.Token(ctx)
+	e.gl.mu.Lock()
+	e.gl.onRefresh = nil
+	e.gl.mu.Unlock()
+	if err == nil && (tok == first || !strings.HasPrefix(tok, "at-alice-")) {
+		t.Fatalf("renewed token %q", tok)
+	}
+	// The next request, past the old token's life: the stored pair is the
+	// rotated one, so it renews again instead of signing the person out.
+	e.clock.add(time.Hour)
+	if tok, err := v.Token(context.Background()); err != nil || tok == first {
+		t.Fatalf("next request: %q, %v", tok, err)
+	}
+}
+
+// GitLab's token endpoint not answering: the probes of one page wait for
+// one renewal, not one each in turn, and GitLab is asked again only after
+// a while.
+func TestRefreshFailureShared(t *testing.T) {
+	e := setup(t)
+	v := e.load(t, mustCookie(e.signIn(t, "alice", "/")))
+	e.a.cfg.HTTP = &http.Client{Timeout: 200 * time.Millisecond}
+	e.clock.add(2*time.Hour + time.Minute) // expired
+	e.gl.tokenHung.Store(true)
+	hits := e.gl.tokenHits.Load()
+	start := time.Now()
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = v.Token(context.Background())
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err == nil || errors.Is(err, ErrSignedOut) {
+			t.Errorf("probe %d: %v", i, err)
+		}
+	}
+	if n := e.gl.tokenHits.Load() - hits; n != 1 {
+		t.Errorf("asked GitLab %d times", n)
+	}
+	if d := time.Since(start); d > 600*time.Millisecond {
+		t.Errorf("the probes took %s", d)
+	}
+	// After a while GitLab is asked again; once it answers, the person
+	// is still signed in.
+	e.clock.add(16 * time.Second)
+	if _, err := v.Token(context.Background()); err == nil || e.gl.tokenHits.Load()-hits != 2 {
+		t.Errorf("asked again: %v, %d requests", err, e.gl.tokenHits.Load()-hits)
+	}
+	e.gl.tokenHung.Store(false)
+	e.clock.add(16 * time.Second)
+	if tok, err := v.Token(context.Background()); err != nil || !strings.HasPrefix(tok, "at-alice-") {
+		t.Errorf("GitLab back: %q, %v", tok, err)
+	}
+}
+
 func TestRevokedGrantSignsOut(t *testing.T) {
 	e := setup(t)
 	cookie, _ := e.signIn(t, "alice", "/")
@@ -461,6 +572,36 @@ func TestSignOutRevokes(t *testing.T) {
 	}
 }
 
+// A sign-out ends the session even when the browser goes away while
+// GitLab is slow to revoke, and says so when GitLab did not revoke.
+func TestSignOutEndsTheSession(t *testing.T) {
+	e := setup(t)
+	cookie, _ := e.signIn(t, "alice", "/")
+	e.gl.mu.Lock()
+	e.gl.revokeDelay = 300 * time.Millisecond
+	e.gl.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	e.a.EndCookie(ctx, cookie.Value)
+	if v := e.load(t, cookie); v != nil {
+		t.Error("the session outlived a sign-out whose page went away")
+	}
+	if len(e.gl.revoked) != 1 {
+		t.Errorf("revoked %v", e.gl.revoked)
+	}
+
+	cookie, _ = e.signIn(t, "alice", "/")
+	e.gl.mu.Lock()
+	e.gl.revokeDelay, e.gl.revokeStatus = 0, http.StatusInternalServerError
+	e.gl.mu.Unlock()
+	if err := e.a.EndCookie(context.Background(), cookie.Value); !errors.Is(err, ErrNotRevoked) {
+		t.Errorf("GitLab did not revoke: %v", err)
+	}
+	if v := e.load(t, cookie); v != nil {
+		t.Error("the session outlived a sign-out GitLab did not revoke")
+	}
+}
+
 func TestCanRead(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
@@ -507,6 +648,81 @@ func TestCanRead(t *testing.T) {
 	ok, err := e.a.CanRead(ctx, &Viewer{Instance: e.inst, UserID: 99, a: e.a, id: []byte("x")}, e.inst, 42)
 	if ok || err == nil {
 		t.Errorf("unanswered: %v, %v", ok, err)
+	}
+}
+
+// GitLab limiting the person's requests: the permission probe waits as
+// long as GitLab asked (within bounds), not 10 seconds.
+func TestCanReadRateLimited(t *testing.T) {
+	e := setup(t)
+	e.clock.t = time.Now() // GitLab's Retry-After counts from the real clock
+	alice := e.load(t, mustCookie(e.signIn(t, "alice", "/")))
+	e.gl.mu.Lock()
+	e.gl.limited = 120
+	e.gl.mu.Unlock()
+	ctx := context.Background()
+	var rl *gitlab.RateLimited
+	if ok, err := e.a.CanRead(ctx, alice, e.inst, 42); ok || !errors.As(err, &rl) {
+		t.Fatalf("rate limited: %v, %v", ok, err)
+	}
+	probes := e.gl.probes
+	e.clock.add(11 * time.Second)
+	if ok, err := e.a.CanRead(ctx, alice, e.inst, 42); ok || !errors.As(err, &rl) || e.gl.probes != probes {
+		t.Errorf("asked again while GitLab asked to wait: %v, %v, %d probes", ok, err, e.gl.probes-probes)
+	}
+	e.gl.mu.Lock()
+	e.gl.limited = 0
+	e.gl.mu.Unlock()
+	e.clock.add(2 * time.Minute)
+	if ok, err := e.a.CanRead(ctx, alice, e.inst, 42); !ok || err != nil || e.gl.probes != probes+1 {
+		t.Errorf("after the wait: %v, %v, %d probes", ok, err, e.gl.probes-probes)
+	}
+	// A wait longer than a few minutes is cut short.
+	e.gl.mu.Lock()
+	e.gl.limited = 3600
+	e.gl.mu.Unlock()
+	e.a.CanRead(ctx, alice, e.inst, 43)
+	e.clock.add(6 * time.Minute)
+	probes = e.gl.probes
+	e.a.CanRead(ctx, alice, e.inst, 43)
+	if e.gl.probes != probes+1 {
+		t.Error("an hour's Retry-After hid the project for an hour")
+	}
+}
+
+// Admins named by user id: the account, not whoever holds its username
+// now (GitLab gives a freed username to the next account that asks).
+func TestAdminsByID(t *testing.T) {
+	e := setup(t)
+	users["claimed"] = gitlab.User{ID: 2, Username: "root", Name: "Not root"}
+	t.Cleanup(func() { delete(users, "claimed") })
+	b, err := New(Config{PublicURL: "http://localhost:8080", Key: make([]byte, 32), Now: e.clock.now,
+		Instances: []Instance{{URL: e.gl.srv.URL, ClientID: "cid", Secret: "sec", Admins: []string{"id:1"}}}},
+		e.st, gitlab.New([]string{e.gl.srv.URL}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	load := func(c *http.Cookie) *Viewer {
+		t.Helper()
+		v, _, err := b.LoadCookie(context.Background(), c.Value)
+		if err != nil || v == nil {
+			t.Fatalf("session: %+v, %v", v, err)
+		}
+		return v
+	}
+	if v := load(mustCookie(e.signIn(t, "root", "/"))); !v.Admin {
+		t.Error("the admin's own account is not an admin")
+	}
+	if v := load(mustCookie(e.signIn(t, "claimed", "/"))); v.Admin || v.Username != "root" {
+		t.Errorf("another account under the admin's old username: %+v", v)
+	}
+	// A username is refused: whoever holds it next would be an admin.
+	for _, bad := range []string{"id:", "id:0", "id:x", "id:-1", "root", "Root"} {
+		if _, err := New(Config{PublicURL: "http://localhost:8080", Key: make([]byte, 32),
+			Instances: []Instance{{URL: e.gl.srv.URL, ClientID: "cid", Secret: "sec", Admins: []string{bad}}}},
+			e.st, gitlab.New([]string{e.gl.srv.URL}), nil); err == nil {
+			t.Errorf("admin %q accepted", bad)
+		}
 	}
 }
 

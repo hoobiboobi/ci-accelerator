@@ -9,7 +9,8 @@
 // GitLab token is sealed with a key the store does not hold.
 //
 // A person may see a project when GitLab lets their token read its jobs;
-// admins (GitLab usernames named in the configuration) see everything.
+// admins (GitLab user ids named in the configuration) see
+// everything.
 package auth
 
 import (
@@ -27,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,7 +58,9 @@ type Instance struct {
 	// ClientID and Secret are the OAuth application's.
 	ClientID string `json:"-"`
 	Secret   string `json:"-"`
-	// Admins are GitLab usernames who see everything in the console.
+	// Admins see everything in the console, as "id:<GitLab user id>". Not
+	// usernames: GitLab gives a freed one (a renamed or deleted account) to
+	// the next account that takes it; an id never passes to another.
 	Admins []string `json:"admins"`
 }
 
@@ -90,6 +94,9 @@ var (
 	ErrSignIn = errors.New("auth: the sign-in did not complete")
 	// ErrDenied: the person did not allow the console at GitLab.
 	ErrDenied = errors.New("auth: access was not allowed at GitLab")
+	// ErrNotRevoked: a sign-out ended the session, but GitLab did not
+	// confirm that it revoked the session's token.
+	ErrNotRevoked = errors.New("auth: the session ended, but GitLab did not revoke its token")
 )
 
 // Auth signs people in and answers what they may see.
@@ -103,15 +110,25 @@ type Auth struct {
 	insts  map[string]*inst
 	order  []string
 
-	locks sync.Map // session id (hex) -> *sync.Mutex: one refresh at a time
+	locks sync.Map // session id (hex) -> *renewal: one refresh at a time
 	cache access
+}
+
+// renewal is a session's token renewal: one at a time, and the last
+// failure, which the renewals queued behind it share for a while instead
+// of each asking a GitLab that did not answer.
+type renewal struct {
+	mu     sync.Mutex
+	failed string // the access token whose renewal failed
+	err    error
+	until  time.Time
 }
 
 type inst struct {
 	Instance
 	prefix, host string
 	oauth        *oauth2.Config
-	admins       map[string]bool
+	adminIDs     map[uint64]bool
 }
 
 // ParseKey reads a session key: 32 bytes, base64. The error says what the
@@ -192,13 +209,18 @@ func New(cfg Config, st *store.Store, client *gitlab.Client, log *slog.Logger) (
 			return nil, fmt.Errorf("auth: %q is not a URL", in.URL)
 		}
 		base := strings.TrimRight(in.URL, "/")
-		x := &inst{Instance: in, prefix: prefix, host: u.Host, admins: map[string]bool{}, oauth: &oauth2.Config{
+		x := &inst{Instance: in, prefix: prefix, host: u.Host, adminIDs: map[uint64]bool{}, oauth: &oauth2.Config{
 			ClientID: in.ClientID, ClientSecret: in.Secret, Scopes: Scopes,
 			Endpoint:    oauth2.Endpoint{AuthURL: base + "/oauth/authorize", TokenURL: base + "/oauth/token", AuthStyle: oauth2.AuthStyleInHeader},
 			RedirectURL: public + "/auth/callback/" + prefix,
 		}}
 		for _, n := range in.Admins {
-			x.admins[strings.ToLower(n)] = true
+			id, ok := strings.CutPrefix(n, "id:")
+			uid, err := strconv.ParseUint(id, 10, 64)
+			if !ok || err != nil || uid == 0 {
+				return nil, fmt.Errorf("auth: %s: admin %q is not id:<GitLab user id> (the number on the person's GitLab profile page; usernames are not taken: GitLab gives a freed one to another account)", in.URL, n)
+			}
+			x.adminIDs[uid] = true
 		}
 		a.insts[prefix] = x
 		a.order = append(a.order, prefix)
@@ -547,11 +569,12 @@ func (a *Auth) LoadCookie(ctx context.Context, raw string) (v *Viewer, touched b
 		touched = true
 	}
 	return &Viewer{Instance: x.Instance, Host: in.host, UserID: x.UserID, Username: x.Username, Name: x.Name,
-		Admin: in.admins[strings.ToLower(x.Username)], a: a, id: id}, touched, nil
+		Admin: in.adminIDs[x.UserID], a: a, id: id}, touched, nil
 }
 
-// SignOut ends the session on r: the token is revoked at GitLab (so it
-// opens nothing any more), the session deleted and the cookie cleared.
+// SignOut ends the session on r: the cookie cleared, the session deleted
+// and the token revoked at GitLab (so it opens nothing any more);
+// ErrNotRevoked when only the revoke failed.
 func (a *Auth) SignOut(w http.ResponseWriter, r *http.Request) error {
 	ClearSessionCookie(w)
 	c, err := r.Cookie(SessionCookie)
@@ -570,8 +593,13 @@ func (a *Auth) EndCookie(ctx context.Context, raw string) error {
 	return a.end(ctx, hash(cookie))
 }
 
-// end revokes a session's token at GitLab and deletes the session.
+// end deletes a session and revokes its token at GitLab; ErrNotRevoked
+// when GitLab did not confirm the revoke. Neither step stops when the
+// browser goes away: a sign-out that leaves the session or its grant
+// alive is worse than a slow one. The session goes first, so a GitLab
+// that does not answer cannot keep it.
 func (a *Auth) end(ctx context.Context, id []byte) error {
+	ctx = context.WithoutCancel(ctx)
 	x, err := a.store.Session(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
@@ -579,22 +607,29 @@ func (a *Auth) end(ctx context.Context, id []byte) error {
 	if err != nil {
 		return err
 	}
+	deleted := a.store.DeleteSession(ctx, id)
+	revoked := false
+	host := ""
 	if in := a.insts[x.Instance]; in != nil {
+		host = in.host
 		if t, err := a.openTokens(id, x.Instance, x.Token); err == nil {
-			if err := a.revoke(ctx, in, t.Access); err != nil && a.log != nil {
-				a.log.Warn("token not revoked at GitLab", "gitlab", in.host, "err", err)
+			if err := a.revoke(ctx, in, t.Access); err != nil {
+				if a.log != nil {
+					a.log.Warn("token not revoked at GitLab", "gitlab", in.host, "err", err)
+				}
+			} else {
+				revoked = true
 			}
 		}
 	}
-	if err := a.store.DeleteSession(ctx, id); err != nil {
-		return err
+	if deleted != nil {
+		return deleted
 	}
 	if a.log != nil {
-		host := ""
-		if in := a.insts[x.Instance]; in != nil {
-			host = in.host
-		}
 		a.log.Info("signed out", "gitlab", host, "user", x.Username)
+	}
+	if !revoked {
+		return ErrNotRevoked
 	}
 	return nil
 }
@@ -631,6 +666,13 @@ func (a *Auth) Prune(ctx context.Context) (int64, error) {
 
 // refreshAhead renews a token this long before it expires.
 const refreshAhead = time.Minute
+
+// renewFor bounds a renewal, which runs on after its request has gone.
+const renewFor = 30 * time.Second
+
+// renewRetry is how long a failed renewal stands before GitLab is asked
+// again.
+const renewRetry = 15 * time.Second
 
 // Token returns the viewer's GitLab token, renewed when it is about to
 // expire.
@@ -677,12 +719,13 @@ func (a *Auth) tokens(ctx context.Context, v *Viewer) (tokens, error) {
 // GitLab revokes a refresh token as soon as it is used, so a second,
 // concurrent renewal would fail and end the session. stale is the token
 // the caller has; when the session already holds a newer one that is not
-// about to expire, that one is returned without asking GitLab.
+// about to expire, that one is returned without asking GitLab; when
+// renewing it failed a moment ago, so does this one.
 func (a *Auth) refresh(ctx context.Context, v *Viewer, stale string) (string, error) {
-	m, _ := a.locks.LoadOrStore(fmt.Sprintf("%x", v.id), &sync.Mutex{})
-	mu := m.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
+	m, _ := a.locks.LoadOrStore(fmt.Sprintf("%x", v.id), &renewal{})
+	rn := m.(*renewal)
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
 	t, err := a.tokens(ctx, v)
 	if err != nil {
 		return "", err
@@ -690,6 +733,19 @@ func (a *Auth) refresh(ctx context.Context, v *Viewer, stale string) (string, er
 	if t.Access != stale && (t.Expiry.IsZero() || t.Expiry.After(a.cfg.Now().Add(refreshAhead))) {
 		return t.Access, nil
 	}
+	if rn.failed == t.Access && a.cfg.Now().Before(rn.until) {
+		return "", rn.err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	// From here on the renewal does not stop with the request that asked
+	// for it: GitLab rotates the pair as soon as it reads the refresh
+	// token, so an answer dropped because a page went away would leave
+	// the session holding a dead refresh token, and the next request would
+	// sign the person out.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), renewFor)
+	defer cancel()
 	in := a.insts[v.Instance]
 	if in == nil || t.Refresh == "" {
 		a.store.DeleteSession(ctx, v.id)
@@ -705,8 +761,11 @@ func (a *Auth) refresh(ctx context.Context, v *Viewer, stale string) (string, er
 			a.store.DeleteSession(ctx, v.id)
 			return "", ErrSignedOut
 		}
-		return "", fmt.Errorf("auth: renewing the GitLab token: %v", redactErr(err))
+		err = fmt.Errorf("auth: renewing the GitLab token: %v", redactErr(err))
+		rn.failed, rn.err, rn.until = t.Access, err, a.cfg.Now().Add(renewRetry)
+		return "", err
 	}
+	rn.failed = ""
 	next := tokens{Access: nt.AccessToken, Refresh: nt.RefreshToken, Expiry: a.expiry(nt)}
 	if next.Refresh == "" {
 		next.Refresh = t.Refresh
@@ -715,9 +774,12 @@ func (a *Auth) refresh(ctx context.Context, v *Viewer, stale string) (string, er
 	if err != nil {
 		return "", err
 	}
-	// Stored before use: the old pair is gone at GitLab already.
+	// Stored before use: the old pair is gone at GitLab already, so a
+	// failed write is tried once more.
 	if err := a.store.SetSessionToken(ctx, v.id, sealed); err != nil {
-		return "", err
+		if err := a.store.SetSessionToken(ctx, v.id, sealed); err != nil {
+			return "", err
+		}
 	}
 	return next.Access, nil
 }
@@ -748,6 +810,10 @@ type access struct {
 
 // maxAnswers bounds the kept answers.
 const maxAnswers = 20000
+
+// maxRateLimitWait bounds how long GitLab's rate limit keeps a permission
+// probe from being asked again.
+const maxRateLimitWait = 5 * time.Minute
 
 // CanRead says whether v may see a project's builds and jobs: admins
 // always; others when GitLab lets their token read the project's jobs. A
@@ -787,6 +853,16 @@ func (a *Auth) CanRead(ctx context.Context, v *Viewer, instance string, project 
 				// The page went away; nothing learned.
 			case err != nil:
 				ans.until = a.cfg.Now().Add(10 * time.Second)
+				// GitLab asked to wait: asked again only then, and at most
+				// a few minutes on, so a wrong header does not hide the
+				// project for long.
+				var rl *gitlab.RateLimited
+				if errors.As(err, &rl) && rl.Until.After(ans.until) {
+					ans.until = rl.Until
+					if limit := a.cfg.Now().Add(maxRateLimitWait); ans.until.After(limit) {
+						ans.until = limit
+					}
+				}
 			case allow:
 				ans.until = a.cfg.Now().Add(a.cfg.Allow)
 			default:
