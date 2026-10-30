@@ -202,7 +202,7 @@ against the cluster.
         sessionKey: { existingSecret: console-session }
         gitlab:
           - existingSecret: console-gitlab-oauth
-            admins: [alice]                   # GitLab usernames who see everything
+            admins: ["id:1234567"]            # GitLab user ids who see everything
 ```
 
 Drop `control-plane.gitlab.token` then. The console must be served over
@@ -331,7 +331,10 @@ daemons directly: leave out `--router` and admit the jobs namespace in
 - The jobs namespace is part of the release (`jobsNamespace.create`); set
   it to `false` when your tool creates it, keeping its `baseline` Pod
   Security label and the client certificate the box issues into it (with
-  cert-manager the Certificate is still the release's).
+  cert-manager the Certificate is still the release's). On a release that
+  created the namespace, `false` would delete it with everything in it:
+  annotate it `helm.sh/resource-policy=keep` first (the chart refuses the
+  change until then).
 - An upgrade that changes the daemons' pod template rolls the DaemonSet one
   node at a time; `emptyDir` caches are lost then (README, "Where the
   cache lives"). A chart release that changes nothing in that template

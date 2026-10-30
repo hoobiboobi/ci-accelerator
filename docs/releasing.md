@@ -23,12 +23,13 @@ On a branch `release/v<v>`:
    - `VERSION=` in `scripts/quickstart.sh` (the one-node installer installs it; the release attaches the script);
    - in `README.md`: the status line, the quickstart's download links (`releases/download/v<v>/...`), `helm install ... --version <v>`, the one-node upgrade command (it runs the Helm that `HELM_VERSION=` in `scripts/quickstart.sh` installs) and the GitLab CI component's `include` (`.../ci-accelerator/v<v>/ci/gitlab/build.yml`);
    - the component's `include` lines in `ci/gitlab/README.md`;
+   - the box's `helm install ... --version <v>` in `integrations/gitlab-runner/README.md` (the check refuses an install of another version anywhere in the README, `docs/`, `integrations/` or `ci/`);
    - the Flux `version:` and the Argo CD `targetRevision:` in `docs/gitops.md`;
    - the ci-accelerator image tag in `artifacthub.io/images` of `charts/control-plane/Chart.yaml` and `charts/ci-accelerator/Chart.yaml`, and the release's `artifacthub.io/changes` in the umbrella's `Chart.yaml` (Artifact Hub shows them on the version page).
 
    Then run `make chart-docs`: it regenerates the charts' READMEs, whose install commands take the chart's version (the packaged README is what Artifact Hub shows; `make lint` fails when they are stale).
 
-   Leave the disk probe's image tag alone (the default in `charts/buildkit/templates/_helpers.tpl`) unless the probe program or its image changed: moving it restarts every daemon on upgrade. If it moves, set `UPGRADE_ROLLOUT_EXPECTED=1` in `test/e2e/run.sh` and say so in the upgrade notes.
+   Leave the disk probe's image tag alone (the default in `charts/buildkit/templates/_helpers.tpl`) unless the probe program or its image changed: moving it restarts every daemon on upgrade. A Go or base image bump that fixes an advisory in the probe's image counts as a change: the weekly security run scans the probe's image while it lags behind (`scripts/default-images.sh`), so a finding there means the tag moves. If it moves, set `UPGRADE_ROLLOUT_EXPECTED=1` in `test/e2e/run.sh` and say so in the upgrade notes.
 2. In `CHANGELOG.md`:
    - rename `## Unreleased` to `## <v> - <yyyy-mm-dd>`;
    - read its **Upgrade notes** as a user would, and make sure they say what to do;

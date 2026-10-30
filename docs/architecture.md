@@ -60,7 +60,9 @@ routers run with the same PriorityClass: they carry the daemons' builds.
       steps once;
    4. else, when the zone has no ready daemon, the hash over every ready
       daemon (`control-plane.router.crossZone`, on by default; off, the
-      connection is refused).
+      connection is refused). A node keeps its zone while its daemon is
+      between pods; a node that never had a daemon (a runner tier on any
+      node) has no known zone, so every daemon is in its zone.
 
    **Warm** means the project built on that node within
    `control-plane.router.warmDays` (7 by default), or a router sent one of
@@ -190,12 +192,16 @@ pages. `kubectl port-forward` still works.
 
   | Policy | What it removes |
   |---|---|
-  | Build contexts and git checkouts | Records unused for 48 h |
+  | Build contexts and git checkouts | Records unused for 48 h (while the whole cache is above 512 MB) |
   | Cache mounts (`RUN --mount=type=cache`) | Records unused for 14 days (`config.gc.cacheMounts.keepDuration`) |
-  | Everything else | Records unused for 60 days; and while the cache is above `maxUsedSpace` or free disk is below `minFreeSpace`, the least recently used records, down to the caps but never below `reservedSpace` |
+  | Everything else | Nothing by age alone. While the cache is above `maxUsedSpace` or free disk is below `minFreeSpace`: records unused for 60 days first, then the least recently used records, down to the caps but never below `reservedSpace` |
 
   - A size cap on a filtered policy is compared with the size of the whole
     cache, not with the filtered records.
+  - A policy with both an age and a cap removes only records older than
+    the age, and only while the cap is exceeded. So
+    `config.gc.cacheMounts.maxUsedSpace` keeps cache mounts longer, not
+    shorter, unless `cacheMounts.keepDuration` is `"0"`.
   - Sizes use BuildKit's binary units: `10GB` means 10 GiB.
 
 ## Identity and certificates
