@@ -1030,8 +1030,8 @@ a.boxh:hover { background: var(--hover); }
 .lstep.wait .lrow:hover { background: none; }
 .lrow .nm { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 10px 0 2px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
 .lrow .nm .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lrow .cv { flex: none; width: 14px; display: inline-grid; place-items: center; color: var(--ink-3); transform: rotate(-90deg); transition: transform .12s; }
-.lstep[open] > .lrow .cv { transform: none; }
+.lrow .cv { flex: none; width: 14px; display: inline-grid; place-items: center; color: var(--ink-3); transition: transform .12s; }
+.lstep[open] > .lrow .cv { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .lrow .cv { transition: none; } }
 .lstep.st-running .nm { color: var(--accent); }
 .lstep.wait .nm { color: var(--ink-3); }
