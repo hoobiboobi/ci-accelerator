@@ -34,6 +34,10 @@ type Job struct {
 type View interface {
 	// Daemons is every daemon known, ready or not.
 	Daemons() []route.Daemon
+	// Zone is the zone of a node as its daemons last showed it ("" for a
+	// node without a zone label); known is false for a node never seen
+	// with a daemon. A node keeps its zone while its daemon is away.
+	Zone(node string) (zone string, known bool)
 	// Job is the job whose pod has ip.
 	Job(ip string) (Job, bool)
 	// Warm is a project's activity by node.
@@ -177,10 +181,11 @@ func (r *Router) Decide(ip string) (route.Decision, store.Decision, error) {
 		req.Project, req.Node = &job.Project, job.Node
 	}
 	daemons := r.View.Daemons()
-	for _, d := range daemons {
-		if d.Node == req.Node && d.Zone != "" && !r.IgnoreZones {
-			req.Zone = d.Zone
-		}
+	if !r.IgnoreZones {
+		// From what the node's daemons showed, not only the ones listed
+		// now: a node whose daemon is between pods is still in its zone.
+		// A node never seen with a daemon has no known zone ("").
+		req.Zone, _ = r.View.Zone(req.Node)
 	}
 	var warm []route.Activity
 	if known {
