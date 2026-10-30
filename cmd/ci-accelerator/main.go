@@ -367,6 +367,11 @@ func run(c config, log *slog.Logger) error {
 		}
 	}
 	if c.gitlabTokenFile != "" {
+		if len(c.gitlabURLs) > 1 {
+			// The token is one GitLab's: every read of another GitLab's
+			// jobs would send it there.
+			return errors.New("-gitlab-token-file is a token of one GitLab, but several -gitlab-url are given: it would be sent to each of them; use -sign-in (each person's own token), or one URL")
+		}
 		token, err := os.ReadFile(c.gitlabTokenFile)
 		if err != nil {
 			return err

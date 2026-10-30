@@ -189,14 +189,21 @@ cert-manager fills.
 
 {{/*
 Issuer of the certificates: tls.certManager.issuerRef, else
-global.tls.issuerRef. The name is rendered with tpl. As YAML.
+global.tls.issuerRef. The name is rendered with tpl; a name that is the
+global issuer's (as the box passes it) takes the global kind and group
+too. As YAML.
 */}}
 {{- define "control-plane.issuerRef" -}}
 {{- $ref := .Values.tls.certManager.issuerRef }}
 {{- if not $ref.name }}
 {{- $ref = .Values.global.tls.issuerRef }}
 {{- end }}
-{{- toYaml (dict "name" (tpl (default "" $ref.name) .) "kind" (default "ClusterIssuer" $ref.kind) "group" (default "cert-manager.io" $ref.group)) }}
+{{- $name := tpl (default "" $ref.name) . }}
+{{- $global := dig "tls" "issuerRef" (dict) (.Values.global | default dict) }}
+{{- if and $global.name (eq $name (toString $global.name)) }}
+{{- $ref = $global }}
+{{- end }}
+{{- toYaml (dict "name" $name "kind" (default "ClusterIssuer" $ref.kind) "group" (default "cert-manager.io" $ref.group)) }}
 {{- end }}
 
 {{- define "control-plane.pvcName" -}}
@@ -308,6 +315,9 @@ Checks that fail the render with a message naming the value to set.
 {{- if .Values.gitlab.token.existingSecret }}
 {{- fail "control-plane: gitlab.token and sign-in exclude each other: with sign-in GitLab is read with each person's own token" }}
 {{- end }}
+{{- end }}
+{{- if and .Values.gitlab.token.existingSecret (gt (len (default (list) .Values.gitlab.urls)) 1) }}
+{{- fail "control-plane: gitlab.token is a token of one GitLab, but gitlab.urls names several: the console would send it to each of them. Use sign-in (each person's own token), or one URL" }}
 {{- end }}
 {{- if and .Values.tls.existingSecret (not .Values.controller.api.tls.existingSecret) }}
 {{- fail (printf "control-plane: with tls.existingSecret (no cert-manager) the controller's API needs controller.api.tls.existingSecret too: a Secret with tls.crt, tls.key and ca.crt for the name %s" (include "control-plane.controllerName" .)) }}
