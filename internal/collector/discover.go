@@ -95,10 +95,13 @@ func (s *Supervisor) stream(ctx context.Context, addr string) {
 	// The address left the Service: forget the daemon read there, also when
 	// its stream had broken before (a rollout stops the pod first) and this
 	// one only waited to reconnect.
-	var name string
+	var (
+		name string
+		n    uint64
+	)
 	defer func() {
 		if name != "" && errors.Is(context.Cause(ctx), ErrGone) {
-			s.Collector.live.forget(name)
+			s.Collector.gone(name, n)
 		}
 	}()
 	delay := time.Second
@@ -107,7 +110,7 @@ func (s *Supervisor) stream(ctx context.Context, addr string) {
 		if err == nil {
 			name = src.Name()
 			s.Log.Info("reading build history", "daemon", src.Name(), "addr", addr)
-			err = s.Collector.Run(ctx, src)
+			n, err = s.Collector.run(ctx, src)
 			if c, ok := src.(interface{ Close() error }); ok {
 				c.Close()
 			}

@@ -54,7 +54,9 @@ func (b *blocking) Listen(ctx context.Context, fn func(controlapi.BuildHistoryEv
 		return errors.New("stream broke")
 	}
 }
-func (b *blocking) Blob(context.Context, *controlapi.Descriptor) ([]byte, error) { return nil, nil }
+func (b *blocking) Open(context.Context, *controlapi.Descriptor) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
 
 func TestSupervisorFollowsTheDaemons(t *testing.T) {
 	c, _ := newCollector(t)

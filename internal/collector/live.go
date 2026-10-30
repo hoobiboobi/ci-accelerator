@@ -87,39 +87,74 @@ type live struct {
 	mu      sync.Mutex
 	daemons map[string]*DaemonState
 	active  map[string]map[string]Active
+	// streams numbers each daemon's latest stream. A daemon's address can
+	// leave the Service and come back before its old stream has ended:
+	// only the latest stream changes what is known of the daemon.
+	streams map[string]uint64
+	seq     uint64
 	// changed is called when what pages show live changes.
 	changed func()
 }
 
 func (l *live) state(name string) *DaemonState {
 	if l.daemons == nil {
-		l.daemons, l.active = map[string]*DaemonState{}, map[string]map[string]Active{}
+		l.daemons, l.active, l.streams = map[string]*DaemonState{}, map[string]map[string]Active{}, map[string]uint64{}
 	}
 	d := l.daemons[name]
 	if d == nil {
 		d = &DaemonState{Name: name}
 		l.daemons[name] = d
 	}
+	if l.active[name] == nil {
+		l.active[name] = map[string]Active{}
+	}
 	return d
 }
 
-func (l *live) connected(name string, on bool) {
+// connect marks a daemon connected by a new stream and returns the
+// stream's number.
+func (l *live) connect(name string) uint64 {
 	l.mu.Lock()
 	d := l.state(name)
-	d.Connected, d.Since = on, time.Now()
+	d.Connected, d.Since = true, time.Now()
 	// A new stream reports the running builds again.
+	l.active[name] = map[string]Active{}
+	l.seq++
+	l.streams[name] = l.seq
+	stream := l.seq
+	l.mu.Unlock()
+	l.notify()
+	return stream
+}
+
+// disconnected marks a daemon disconnected when its latest stream ended.
+func (l *live) disconnected(name string, stream uint64) {
+	l.mu.Lock()
+	if l.streams[name] != stream {
+		l.mu.Unlock()
+		return
+	}
+	d := l.state(name)
+	d.Connected, d.Since = false, time.Now()
 	l.active[name] = map[string]Active{}
 	l.mu.Unlock()
 	l.notify()
 }
 
-// forget drops a daemon that is gone for good.
-func (l *live) forget(name string) {
+// forget drops a daemon that is gone for good, when stream is its latest
+// stream, and reports whether it did.
+func (l *live) forget(name string, stream uint64) bool {
 	l.mu.Lock()
+	if s, ok := l.streams[name]; !ok || s != stream {
+		l.mu.Unlock()
+		return false
+	}
 	delete(l.daemons, name)
 	delete(l.active, name)
+	delete(l.streams, name)
 	l.mu.Unlock()
 	l.notify()
+	return true
 }
 
 func (l *live) event(name string, t controlapi.BuildHistoryEventType, rec *controlapi.BuildHistoryRecord) {
