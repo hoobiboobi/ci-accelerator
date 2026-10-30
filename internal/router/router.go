@@ -71,6 +71,40 @@ type Router struct {
 	wg    sync.WaitGroup
 	mu    sync.Mutex
 	conns map[net.Conn]struct{}
+	// down holds daemons a dial failed to reach lately, and when: a node
+	// lost without notice stays Ready in its EndpointSlice for ~40 s.
+	down map[string]time.Time
+}
+
+// downFor is how long a daemon that was not reached is passed over, and
+// dialTimeout how long one attempt to reach a daemon may take.
+const (
+	downFor     = 30 * time.Second
+	dialTimeout = 3 * time.Second
+)
+
+// skipped returns the daemons to pass over now: the ones not reached lately.
+func (r *Router) skipped(now time.Time) map[string]bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := map[string]bool{}
+	for name, at := range r.down {
+		if now.Sub(at) < downFor {
+			out[name] = true
+		} else {
+			delete(r.down, name)
+		}
+	}
+	return out
+}
+
+func (r *Router) markDown(name string, at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.down == nil {
+		r.down = map[string]time.Time{}
+	}
+	r.down[name] = at
 }
 
 // keepalive notices a peer that vanished (a node lost without a FIN):
@@ -148,6 +182,9 @@ func (r *Router) Serve(ctx context.Context, ln net.Listener, drain time.Duration
 			c.Close()
 		}
 		r.mu.Unlock()
+		// Connections still waiting for their pod or dialing a daemon stop
+		// too, so the pod is gone within its grace period.
+		stop()
 		<-done
 	}
 	return nil
@@ -173,14 +210,23 @@ func (r *Router) Open() int {
 	return len(r.conns)
 }
 
-// Decide routes a connection from ip.
-func (r *Router) Decide(ip string) (route.Decision, store.Decision, error) {
+// Decide routes a connection from ip, passing over the daemons in skip.
+func (r *Router) Decide(ip string, skip ...map[string]bool) (route.Decision, store.Decision, error) {
 	req := route.Request{Node: r.Node}
 	job, known := r.View.Job(ip)
 	if known {
 		req.Project, req.Node = &job.Project, job.Node
 	}
 	daemons := r.View.Daemons()
+	if len(skip) > 0 && len(skip[0]) > 0 {
+		kept := make([]route.Daemon, 0, len(daemons))
+		for _, d := range daemons {
+			if !skip[0][d.Name] {
+				kept = append(kept, d)
+			}
+		}
+		daemons = kept
+	}
 	if !r.IgnoreZones {
 		// From what the node's daemons showed, not only the ones listed
 		// now: a node whose daemon is between pods is still in its zone.
@@ -205,17 +251,32 @@ func (r *Router) handle(ctx context.Context, c net.Conn) {
 	defer c.Close()
 	ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
 	r.awaitJob(ctx, ip)
-	d, rec, err := r.Decide(ip)
-	if err != nil {
-		r.Log.Warn("connection refused: no daemon", "from", ip, "err", err)
-		return
-	}
-	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	up, err := r.dial(dctx, net.JoinHostPort(d.Daemon.Addr, r.Port))
-	cancel()
-	if err != nil {
+	// A daemon that is listed but cannot be reached (its node lost, its
+	// listener closed before the endpoint went) is passed over: the job
+	// goes to the next choice rather than fail.
+	skip := r.skipped(r.now())
+	var d route.Decision
+	var rec store.Decision
+	var up net.Conn
+	for attempt := 0; ; attempt++ {
+		var err error
+		d, rec, err = r.Decide(ip, skip)
+		if err != nil {
+			r.Log.Warn("connection refused: no daemon", "from", ip, "err", err, "passed_over", len(skip))
+			return
+		}
+		dctx, cancel := context.WithTimeout(ctx, dialTimeout)
+		up, err = r.dial(dctx, net.JoinHostPort(d.Daemon.Addr, r.Port))
+		cancel()
+		if err == nil {
+			break
+		}
 		r.Log.Warn("daemon not reached", "daemon", d.Daemon.Name, "from", ip, "err", err)
-		return
+		r.markDown(d.Daemon.Name, r.now())
+		skip[d.Daemon.Name] = true
+		if attempt == 2 || ctx.Err() != nil {
+			return
+		}
 	}
 	defer up.Close()
 	if r.Report != nil && rec.Reason != route.UnknownLocal && rec.Reason != route.UnknownHash {

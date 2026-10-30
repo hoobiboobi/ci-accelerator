@@ -18,6 +18,13 @@ tests:
       router.enabled: false
     asserts:
       - hasDocuments: { count: 0 }
+  # Routing Local: a node's jobs reach only its own router, so a rollout
+  # starts the new one before the old one drains.
+  - it: starts a node's new router before its old one goes
+    template: router.yaml
+    documentIndex: 0
+    asserts:
+      - equal: { path: spec.updateStrategy, value: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } } }
   - it: needs the jobs namespace (it knows a job by its pod)
     template: controller.yaml
     set:
