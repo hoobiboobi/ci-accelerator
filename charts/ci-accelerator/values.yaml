@@ -44,8 +44,9 @@ global:
     service: '{{ .Release.Name | trunc 40 | trimSuffix "-" }}-router'
   console:
     # -- The console's address as users reach it (https://...). When set,
-    # every job prints the link to its page in its log, and sign-in through
-    # GitLab (control-plane.signIn) uses it. Empty: no link.
+    # every job prints the link to its page in its log, sign-in through
+    # GitLab (control-plane.signIn) uses it, and links shared in chats show
+    # previews with addresses there. Empty: no link in the job logs.
     url: ""
 
 # Install-time checks against the live cluster. Skipped by `helm template`
