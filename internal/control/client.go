@@ -233,6 +233,8 @@ func fromWire(e *wireErr) error {
 		base = auth.ErrDenied
 	case "signin":
 		base = auth.ErrSignIn
+	case "notrevoked":
+		base = auth.ErrNotRevoked
 	case "notoken":
 		base = ErrNoToken
 	case "ratelimited":

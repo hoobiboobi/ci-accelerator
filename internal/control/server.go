@@ -196,6 +196,12 @@ func (s *Server) authorized(want Role, h http.Handler) http.Handler {
 				if errors.Is(err, ErrForbidden) {
 					status = http.StatusForbidden
 				}
+				if errors.Is(err, ErrReviewUnavailable) {
+					// Not the caller's fault: a 5xx makes the web show
+					// "try again" instead of an error of its own.
+					status = http.StatusServiceUnavailable
+					w.Header().Set("Retry-After", "5")
+				}
 				s.Log.Warn("controller API refused a call", "path", r.URL.Path, "err", err)
 				http.Error(w, err.Error(), status)
 				return
@@ -239,6 +245,8 @@ func toWire(err error) *wireErr {
 		e.Kind = "denied"
 	case errors.Is(err, auth.ErrSignIn):
 		e.Kind = "signin"
+	case errors.Is(err, auth.ErrNotRevoked):
+		e.Kind = "notrevoked"
 	case errors.Is(err, ErrNoToken):
 		e.Kind = "notoken"
 	case errors.As(err, &rl):

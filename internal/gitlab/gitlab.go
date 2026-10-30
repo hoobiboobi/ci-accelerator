@@ -296,7 +296,9 @@ func (c *Client) JobLogPart(ctx context.Context, cred Credential, instance strin
 	if limit == 0 {
 		limit = -1
 	}
-	for w := int64(logWindow); data == nil; w *= 4 {
+	// The windows end at logWindowMax whatever came back: nothing (a 416:
+	// an empty log, or a Before past its end) must not grow them forever.
+	for w := int64(logWindow); ; w *= 4 {
 		lo := int64(0)
 		if limit > 0 {
 			lo = max(0, limit-w)
@@ -309,6 +311,7 @@ func (c *Client) JobLogPart(ctx context.Context, cred Credential, instance strin
 		}
 		if f == 0 || w >= logWindowMax || bytes.Count(d, []byte{'\n'}) > q.Lines {
 			data, from = d, f
+			break
 		}
 	}
 	end := lastLineEnd(data)
@@ -630,19 +633,24 @@ func seconds(v *float64) time.Duration {
 	return time.Duration(*v * float64(time.Second))
 }
 
-// Saver stores what the API returned.
+// Saver stores what the API returned, and says which jobs' builds took
+// their project from it.
 type Saver interface {
-	SaveAPIPipeline(ctx context.Context, p store.APIPipeline) error
+	SaveAPIPipeline(ctx context.Context, p store.APIPipeline) (attached []uint64, err error)
 }
 
 // Fetcher reads pipelines when pages need them, with the credential of the
-// page that asked: at most one request per pipeline at a time, a running
-// pipeline again only after Every, a finished one never again, and nothing
+// page that asked: at most one request per pipeline and project at a time,
+// a running pipeline again only after Every, a finished one never again, and nothing
 // with a credential GitLab rate limits.
 type Fetcher struct {
 	Client *Client
 	Store  Saver
-	Log    *slog.Logger
+	// Known compares the builds of a job that GitLab's answer gave a
+	// project (its pod was never seen), as when the pod is; what it does
+	// not finish stays due in the store (Collector.CompareDue).
+	Known func(ctx context.Context, instance string, job uint64) error
+	Log   *slog.Logger
 	// Every is the shortest time between two reads of a running pipeline
 	// (default 20 s).
 	Every time.Duration
@@ -681,7 +689,10 @@ func (f *Fetcher) Ensure(cred Credential, instance string, project, pipeline uin
 	if store.Finished(status) && !read.IsZero() {
 		return
 	}
-	key := store.PipelineKey(instance, pipeline)
+	// One read per pipeline AND project: a job of another project may name
+	// the pipeline (GitLab answers it 404), and its reads must neither
+	// stand in for, nor hold back, the read for the pipeline's own project.
+	key := store.PipelineKey(instance, pipeline) + "/" + strconv.FormatUint(project, 10)
 	every := f.Every
 	if every == 0 {
 		every = 20 * time.Second
@@ -737,16 +748,30 @@ func (f *Fetcher) read(key string, cred Credential, instance string, project, pi
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	p, err := f.Client.Pipeline(ctx, cred, instance, project, pipeline)
+	var attached []uint64
 	if err == nil && len(p.Jobs) > 0 {
-		err = f.Store.SaveAPIPipeline(ctx, p)
+		attached, err = f.Store.SaveAPIPipeline(ctx, p)
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	delete(f.inflight, key)
 	f.lastErr = err
 	f.wait(cred, err)
+	f.mu.Unlock()
 	if err != nil && f.Log != nil {
 		f.Log.Warn("gitlab api", "pipeline", key, "err", err)
+	}
+	// Each comparison with its own time, after the read: one waits for
+	// the collector, which may be busy storing builds. One that fails is
+	// done later (the store keeps it due).
+	for _, job := range attached {
+		if f.Known == nil {
+			break
+		}
+		kctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		if err := f.Known(kctx, instance, job); err != nil && f.Log != nil {
+			f.Log.Warn("job's builds not compared", "job", job, "err", err)
+		}
+		cancel()
 	}
 }
 

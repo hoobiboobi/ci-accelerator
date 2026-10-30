@@ -41,6 +41,9 @@ func (r Role) may(want Role) bool { return r == want || r == RoleAny }
 var (
 	ErrUnauthenticated = errors.New("control: no valid token")
 	ErrForbidden       = errors.New("control: this caller may not call the controller")
+	// ErrReviewUnavailable: Kubernetes could not be asked about the token
+	// (the API server restarting or slow); the caller may try again.
+	ErrReviewUnavailable = errors.New("control: Kubernetes could not check the token")
 )
 
 // Audience is the audience the callers' tokens are projected for.
@@ -76,6 +79,11 @@ type TokenReviewer struct {
 	// Keep is how long an answer is kept (default 5 minutes; a token
 	// lives for an hour at least).
 	Keep time.Duration
+	// Grace is how long a confirmed token stays good while Kubernetes
+	// cannot be asked (default 10 minutes: the kubelet renews an hour's
+	// projected token after 48 minutes, so one in use was valid for at
+	// least 12 more when it was confirmed).
+	Grace time.Duration
 
 	mu      sync.Mutex
 	answers map[[32]byte]review
@@ -85,6 +93,7 @@ type review struct {
 	role  Role
 	err   error
 	until time.Time
+	stale time.Time
 }
 
 // Authorize checks r's token and says the caller's role.
@@ -101,21 +110,42 @@ func (t *TokenReviewer) Authorize(r *http.Request) (Role, error) {
 	}
 	t.mu.Unlock()
 	role, err, keep := t.review(r.Context(), token)
-	if keep {
-		t.mu.Lock()
-		if t.answers == nil || len(t.answers) > 10000 {
+	now := time.Now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !keep {
+		// Kubernetes is away, not the caller wrong: a token it confirmed
+		// a short while ago is still good, so the pages keep working
+		// through an API server restart.
+		if a, ok := t.answers[key]; ok && a.err == nil && now.Before(a.stale) {
+			return a.role, nil
+		}
+		return role, err
+	}
+	if t.answers == nil {
+		t.answers = map[[32]byte]review{}
+	}
+	if len(t.answers) > 10000 {
+		for k, a := range t.answers {
+			if !now.Before(a.stale) {
+				delete(t.answers, k)
+			}
+		}
+		if len(t.answers) > 10000 {
 			t.answers = map[[32]byte]review{}
 		}
-		k := t.Keep
-		if k == 0 {
-			k = 5 * time.Minute
-		}
-		if err != nil {
-			k = 10 * time.Second
-		}
-		t.answers[key] = review{role: role, err: err, until: time.Now().Add(k)}
-		t.mu.Unlock()
 	}
+	k, g := t.Keep, t.Grace
+	if k == 0 {
+		k = 5 * time.Minute
+	}
+	if g == 0 {
+		g = 10 * time.Minute
+	}
+	if err != nil {
+		k, g = 10*time.Second, 10*time.Second
+	}
+	t.answers[key] = review{role: role, err: err, until: now.Add(k), stale: now.Add(g)}
 	return role, err
 }
 
@@ -128,7 +158,7 @@ func (t *TokenReviewer) review(ctx context.Context, token string) (Role, error, 
 		Spec: authnv1.TokenReviewSpec{Token: token, Audiences: []string{t.Audience}},
 	}, metav1.CreateOptions{})
 	if err != nil {
-		return "", fmt.Errorf("%w: Kubernetes could not check the token: %v", ErrUnauthenticated, err), false
+		return "", fmt.Errorf("%w: %v", ErrReviewUnavailable, err), false
 	}
 	if !tr.Status.Authenticated {
 		return "", ErrUnauthenticated, true

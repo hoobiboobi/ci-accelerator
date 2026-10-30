@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -203,6 +204,80 @@ func TestTokenReview(t *testing.T) {
 	}
 	if err := check(""); !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("no token: %v", err)
+	}
+}
+
+// TestTokenReviewWhileKubernetesIsAway: a token Kubernetes confirmed a
+// moment ago stays good while Kubernetes cannot be asked (an API server
+// restart), and a token never confirmed is not let through then; the
+// refusal says the check could not be made, so callers can tell it from
+// a bad token.
+func TestTokenReviewWhileKubernetesIsAway(t *testing.T) {
+	kube := fake.NewSimpleClientset()
+	down := false
+	kube.PrependReactor("create", "tokenreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if down {
+			return true, nil, errors.New("connection refused")
+		}
+		tr := a.(k8stesting.CreateAction).GetObject().(*authnv1.TokenReview)
+		if tr.Spec.Token == "web-token" {
+			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, Audiences: []string{Audience},
+				User: authnv1.UserInfo{Username: "system:serviceaccount:box:box-web"}}
+		}
+		return true, tr, nil
+	})
+	r := &TokenReviewer{Kube: kube, Audience: Audience, Allow: map[string]Role{"box/box-web": RoleWeb}, Keep: time.Millisecond}
+	check := func(token string) (Role, error) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		return r.Authorize(req)
+	}
+	if role, err := check("web-token"); err != nil || role != RoleWeb {
+		t.Fatalf("the web: %s, %v", role, err)
+	}
+	if _, err := check("garbage"); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("an unknown token: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	down = true
+	if role, err := check("web-token"); err != nil || role != RoleWeb {
+		t.Errorf("the web while Kubernetes is away: %s, %v", role, err)
+	}
+	if role, err := check("garbage"); err == nil || role != "" {
+		t.Errorf("an unknown token while Kubernetes is away: %s, %v", role, err)
+	}
+	if role, err := check("new-token"); err == nil || role != "" || !errors.Is(err, ErrReviewUnavailable) {
+		t.Errorf("a new token while Kubernetes is away: %s, %v", role, err)
+	}
+	// Only for a while: past the grace, the confirmed token is not
+	// trusted any more either.
+	r.mu.Lock()
+	for k, a := range r.answers {
+		a.stale = time.Now().Add(-time.Second)
+		r.answers[k] = a
+	}
+	r.mu.Unlock()
+	if role, err := check("web-token"); !errors.Is(err, ErrReviewUnavailable) || role != "" {
+		t.Errorf("the web long after Kubernetes went away: %s, %v", role, err)
+	}
+}
+
+// TestCallersWhileTheCheckIsDown: when the controller cannot check
+// tokens, its callers see it as away for a moment, not as refused.
+func TestCallersWhileTheCheckIsDown(t *testing.T) {
+	st := newStore(t)
+	down := false
+	c, _ := serve(t, st, func(r *http.Request) (Role, error) {
+		if down {
+			return "", fmt.Errorf("%w: connection refused", ErrReviewUnavailable)
+		}
+		return RoleWeb, nil
+	}, "t")
+	down = true
+	_, err := c.Projects(ctx)
+	var away interface{ Unavailable() bool }
+	if !errors.As(err, &away) || !away.Unavailable() {
+		t.Fatalf("token check down: %v", err)
 	}
 }
 
