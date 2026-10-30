@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -111,14 +112,22 @@ func (d *Daemon) Listen(ctx context.Context, fn func(controlapi.BuildHistoryEven
 	}
 }
 
-// Blob reads a record's blob through the daemon's content API.
-func (d *Daemon) Blob(ctx context.Context, desc *controlapi.Descriptor) ([]byte, error) {
+// Open reads a record's blob through the daemon's content API.
+func (d *Daemon) Open(ctx context.Context, desc *controlapi.Descriptor) (io.ReadCloser, error) {
 	dg, err := digest.Parse(desc.Digest)
 	if err != nil {
 		return nil, err
 	}
 	store := proxy.NewContentStore(d.c.ContentClient())
-	return content.ReadBlob(ctx, store, ocispecs.Descriptor{MediaType: desc.MediaType, Digest: dg, Size: desc.Size})
+	ra, err := store.ReaderAt(ctx, ocispecs.Descriptor{MediaType: desc.MediaType, Digest: dg, Size: desc.Size})
+	if err != nil {
+		return nil, err
+	}
+	// Each read is a request to the daemon: read in large pieces.
+	return struct {
+		io.Reader
+		io.Closer
+	}{bufio.NewReaderSize(content.NewReader(ra), 1<<20), ra}, nil
 }
 
 // The worker labels the buildkit chart gives each daemon: the Kubernetes

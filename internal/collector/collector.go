@@ -4,10 +4,10 @@
 package collector
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sort"
 	"strings"
@@ -15,6 +15,7 @@ import (
 	"time"
 
 	controlapi "github.com/moby/buildkit/api/services/control"
+	"github.com/moby/buildkit/client"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -33,8 +34,8 @@ type Source interface {
 	// Listen calls fn with every record the daemon has, then with every
 	// event as it happens, until ctx ends or the stream breaks.
 	Listen(ctx context.Context, fn func(controlapi.BuildHistoryEventType, *controlapi.BuildHistoryRecord) error) error
-	// Blob reads one of a record's blobs.
-	Blob(ctx context.Context, d *controlapi.Descriptor) ([]byte, error)
+	// Open reads one of a record's blobs.
+	Open(ctx context.Context, d *controlapi.Descriptor) (io.ReadCloser, error)
 }
 
 // Collector turns records into stored builds. It is safe for concurrent
@@ -67,17 +68,50 @@ type window struct {
 	builds map[string]*history.Build
 	gens   map[string]int64
 	newest time.Time
+	// replayed are the builds read again from a record the store has, with
+	// the links they were stored with (step index -> build): such a build
+	// is stored again only once linking has found all of them.
+	replayed map[string]map[int]string
+}
+
+// forget drops a build from the window.
+func (w *window) forget(ref string) {
+	delete(w.builds, ref)
+	delete(w.gens, ref)
+	delete(w.replayed, ref)
+}
+
+// relinked reports whether b, read again from a stored record, has every
+// link it was stored with: before that, storing it again would drop links
+// to builds the stream has not replayed yet, and the reason with them.
+func (w *window) relinked(b *history.Build) bool {
+	want, ok := w.replayed[b.Ref]
+	if !ok {
+		return true
+	}
+	for i, from := range want {
+		if i >= len(b.Steps) || b.Steps[i].ReceivedFrom != from {
+			return false
+		}
+	}
+	return true
 }
 
 // Run reads src until ctx ends or its stream breaks.
 func (c *Collector) Run(ctx context.Context, src Source) error {
+	_, err := c.run(ctx, src)
+	return err
+}
+
+// run is Run, and returns the number of the stream it read.
+func (c *Collector) run(ctx context.Context, src Source) (uint64, error) {
 	name := src.Name()
-	c.live.connected(name, true)
+	stream := c.live.connect(name)
 	defer func() {
 		if errors.Is(context.Cause(ctx), ErrGone) {
-			c.live.forget(name)
+			c.gone(name, stream)
 		} else {
-			c.live.connected(name, false)
+			c.live.disconnected(name, stream)
 		}
 	}()
 	if in, ok := src.(Inspector); ok {
@@ -85,7 +119,7 @@ func (c *Collector) Run(ctx context.Context, src Source) error {
 		defer cancel()
 		go c.inspect(ictx, name, in)
 	}
-	return src.Listen(ctx, func(t controlapi.BuildHistoryEventType, rec *controlapi.BuildHistoryRecord) error {
+	return stream, src.Listen(ctx, func(t controlapi.BuildHistoryEventType, rec *controlapi.BuildHistoryRecord) error {
 		c.live.event(name, t, rec)
 		if t != controlapi.BuildHistoryEventType_COMPLETE {
 			return nil // STARTED: running, nothing to store yet; DELETED: the store keeps it
@@ -98,6 +132,18 @@ func (c *Collector) Run(ctx context.Context, src Source) error {
 	})
 }
 
+// gone forgets a daemon whose pod is gone, unless a newer stream than
+// stream reads it: what it knew of the daemon, and its builds in memory
+// (a pod of the same name reads its history again).
+func (c *Collector) gone(name string, stream uint64) {
+	if !c.live.forget(name, stream) {
+		return
+	}
+	c.mu.Lock()
+	delete(c.daemons, name)
+	c.mu.Unlock()
+}
+
 // Record stores one completed record and whatever its arrival changes:
 // builds of the same daemon linked to it, and the reasons of its pipeline.
 func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.BuildHistoryRecord) error {
@@ -108,23 +154,40 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 	defer c.mu.Unlock()
 	w := c.daemons[src.Name()]
 	if w == nil {
-		w = &window{builds: map[string]*history.Build{}, gens: map[string]int64{}}
+		w = &window{builds: map[string]*history.Build{}, gens: map[string]int64{}, replayed: map[string]map[int]string{}}
 		c.daemons[src.Name()] = w
 	}
 	gen := int64(rec.Generation)
 	if old, ok := w.gens[rec.Ref]; ok && old >= gen {
 		return nil
 	}
+	// A record stored already belongs to the daemon pod that sent it
+	// first: a pod that replaced another on the same hostPath sends the old
+	// pod's records again, and reasons compare the daemons builds ran on.
+	under, storedGen, err := c.store.StoredUnder(ctx, rec.Ref)
+	if err != nil {
+		return err
+	}
+	// A stream read again replays the history in the order of the record
+	// ids, not in time order. A stored record older than the window has
+	// nothing new to tell, and the builds it was linked with have left
+	// memory: read again, it would be stored without its links.
+	replay := under != "" && storedGen >= gen
+	if replay && rec.GetCreatedAt().AsTime().Before(w.newest.Add(-Window)) {
+		return nil
+	}
 	b, err := c.read(ctx, src, rec)
 	if err != nil {
 		return err
 	}
-	// A record stored already belongs to the daemon pod that sent it
-	// first: a pod that replaced another on the same hostPath sends the old
-	// pod's records again, and reasons compare the daemons builds ran on.
-	under, err := c.store.StoredUnder(ctx, b.Ref)
-	if err != nil {
-		return err
+	if replay {
+		links, err := c.store.ReceivedFrom(ctx, b.Ref)
+		if err != nil {
+			return err
+		}
+		w.replayed[b.Ref] = links
+	} else {
+		delete(w.replayed, b.Ref)
 	}
 	b.Daemon = src.Name()
 	if under != "" {
@@ -152,14 +215,13 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 	old := b.Started.Before(w.newest.Add(-Window))
 	for ref, x := range w.builds {
 		if x != b && x.Started.Before(w.newest.Add(-Window)) {
-			delete(w.builds, ref)
-			delete(w.gens, ref)
+			w.forget(ref)
 			delete(before, ref)
 		}
 	}
 	defer func() {
 		if old {
-			delete(w.builds, b.Ref)
+			w.forget(b.Ref)
 		}
 	}()
 	list := make([]*history.Build, 0, len(w.builds))
@@ -185,15 +247,19 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 				continue
 			}
 		}
+		if !w.relinked(x) {
+			continue
+		}
 		r, err := c.save(ctx, x, w.gens[x.Ref])
 		if err != nil {
 			if x == b {
 				// Not stored: the record is read again when it comes again.
-				delete(w.gens, b.Ref)
-				delete(w.builds, b.Ref)
+				w.forget(b.Ref)
 			}
 			return err
 		}
+		// Stored with all its links: linking does not take links away.
+		delete(w.replayed, x.Ref)
 		c.logStored(x, r, x == b && !known, x == b && gotJob)
 		if a := x.Attribution; a.State == history.Attributed {
 			pipelines[pipelineKey{a.Instance, a.Pipeline}] = true
@@ -201,10 +267,12 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 		// Records arrive out of order (one stream per daemon, history read
 		// again after a restart): the next build of the target may have
 		// been compared with an older one.
-		if next, err := c.recompute(ctx, x); err != nil {
+		changed, err := c.recompute(ctx, x)
+		if err != nil {
 			return err
-		} else if next != nil {
-			pipelines[pipelineKey{next.Attribution.Instance, next.Attribution.Pipeline}] = true
+		}
+		for _, n := range changed {
+			pipelines[pipelineKey{n.Attribution.Instance, n.Attribution.Pipeline}] = true
 		}
 	}
 	for p := range pipelines {
@@ -239,40 +307,69 @@ func (c *Collector) JobKnown(ctx context.Context, instance string, job uint64) e
 		}
 		pipeline = cur.Build.Attribution.Pipeline
 		// Its project now known, it is also the previous build of the next.
-		next, err := c.recompute(ctx, cur.Build)
+		changed, err := c.recompute(ctx, cur.Build)
 		if err != nil {
 			return err
 		}
-		if next != nil {
-			if err := c.settle(ctx, next.Attribution.Instance, next.Attribution.Pipeline); err != nil {
+		for _, n := range changed {
+			if err := c.settle(ctx, n.Attribution.Instance, n.Attribution.Pipeline); err != nil {
 				return err
 			}
 		}
 	}
-	if pipeline == 0 {
-		return nil
+	if pipeline != 0 {
+		if err := c.settle(ctx, instance, pipeline); err != nil {
+			return err
+		}
 	}
-	return c.settle(ctx, instance, pipeline)
+	return c.store.CompareDone(ctx, instance, job)
+}
+
+// CompareDue compares the builds that took their project after they were
+// stored and whose comparison has not been done (JobKnown failed, or the
+// controller stopped before it), each job with its own time.
+func (c *Collector) CompareDue(ctx context.Context) error {
+	due, err := c.store.DueJobs(ctx, 100)
+	if err != nil {
+		return err
+	}
+	for _, j := range due {
+		jctx, cancel := context.WithTimeout(ctx, time.Minute)
+		err := c.JobKnown(jctx, j.Instance, j.Job)
+		cancel()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			c.log.Warn("job's builds not compared", "job", j.Job, "err", err)
+		}
+	}
+	return nil
 }
 
 // recompute compares the builds after b (same project and target) again,
-// now that b is stored, and returns one when a reason changed. Builds of
-// one pipeline never compare with each other, so EVERY build of the next
-// pipeline that built this target has b as its previous build.
-func (c *Collector) recompute(ctx context.Context, b *history.Build) (*history.Build, error) {
+// now that b is stored, and returns those whose reason changed: the failed
+// builds up to the next that succeeded, and that one (store.Next). Builds
+// of one pipeline never compare with each other, so EVERY build of the
+// next pipeline that built this target has b as its previous build.
+func (c *Collector) recompute(ctx context.Context, b *history.Build) ([]*history.Build, error) {
 	next, err := c.store.Next(ctx, b)
-	if err != nil || next == nil {
+	if err != nil || len(next) == 0 {
 		return nil, err
 	}
-	candidates := []*store.Stored{next}
-	if p := next.Build.Attribution; p.State == history.Attributed {
+	candidates := next
+	listed := map[string]bool{}
+	for _, n := range next {
+		listed[n.Build.Ref] = true
+	}
+	if p := next[len(next)-1].Build.Attribution; p.State == history.Attributed {
 		// Pipeline() does not restore the graphs; Load the siblings.
 		sts, err := c.store.Pipeline(ctx, p.Instance, p.Pipeline)
 		if err != nil {
 			return nil, err
 		}
 		for _, st := range sts {
-			if st.Build.Target != b.Target || st.Build.Ref == b.Ref || st.Build.Ref == next.Build.Ref {
+			if st.Build.Target != b.Target || st.Build.Ref == b.Ref || listed[st.Build.Ref] {
 				continue
 			}
 			loaded, err := c.store.Load(ctx, st.ID)
@@ -282,7 +379,7 @@ func (c *Collector) recompute(ctx context.Context, b *history.Build) (*history.B
 			candidates = append(candidates, loaded)
 		}
 	}
-	var changed *history.Build
+	var changed []*history.Build
 	for _, cand := range candidates {
 		r, err := c.reason(ctx, cand.Build)
 		if err != nil {
@@ -294,7 +391,7 @@ func (c *Collector) recompute(ctx context.Context, b *history.Build) (*history.B
 		if err := c.store.SetReason(ctx, cand.Build.Ref, cand.Build.Daemon, r); err != nil {
 			return nil, err
 		}
-		changed = cand.Build
+		changed = append(changed, cand.Build)
 	}
 	return changed, nil
 }
@@ -390,25 +487,49 @@ func (c *Collector) settle(ctx context.Context, instance string, pipeline uint64
 	return nil
 }
 
-// read fetches a record's blobs and assembles the build.
+// maxBlob bounds a record's provenance, trace and error blobs, which are
+// read whole. BuildKit bounds none of them, and any build can add spans to
+// its trace.
+const maxBlob = 64 << 20
+
+// read fetches a record's blobs and assembles the build. The progress blob
+// is read as it streams: BuildKit does not bound it, and only the head and
+// tail of each step's log are kept.
 func (c *Collector) read(ctx context.Context, src Source, rec *controlapi.BuildHistoryRecord) (*history.Build, error) {
 	blob := func(d *controlapi.Descriptor) ([]byte, error) {
 		if d == nil || d.Digest == "" {
 			return nil, nil
 		}
-		return src.Blob(ctx, d)
+		r, err := src.Open(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		defer r.Close()
+		b, err := io.ReadAll(io.LimitReader(r, maxBlob+1))
+		if err == nil && len(b) > maxBlob {
+			err = fmt.Errorf("%s is larger than %d MiB", d.Digest, maxBlob>>20)
+		}
+		return b, err
 	}
-	logs, err := blob(rec.Logs)
-	if err != nil {
-		return nil, fmt.Errorf("logs: %w", err)
+	var progress []*client.SolveStatus
+	if d := rec.Logs; d != nil && d.Digest != "" {
+		r, err := src.Open(ctx, d)
+		if err != nil {
+			return nil, fmt.Errorf("logs: %w", err)
+		}
+		progress, err = history.DecodeProgress(r)
+		r.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
-	progress, err := history.DecodeProgress(bytes.NewReader(logs))
-	if err != nil {
-		return nil, err
-	}
-	prov, err := blob(provenance(rec))
-	if err != nil {
-		return nil, fmt.Errorf("provenance: %w", err)
+	var prov [][]byte
+	for _, d := range provenance(rec) {
+		p, err := blob(d)
+		if err != nil {
+			return nil, fmt.Errorf("provenance: %w", err)
+		}
+		prov = append(prov, p)
 	}
 	trace, err := blob(rec.Trace)
 	if err != nil {
@@ -423,10 +544,11 @@ func (c *Collector) read(ctx context.Context, src Source, rec *controlapi.BuildH
 	return history.NewBuild(rec, progress, prov, trace, errBlob, c.cfg)
 }
 
-// provenance picks the record's SLSA provenance attestation. A build for
-// several platforms has one result per platform; the first in name order
-// is used.
-func provenance(rec *controlapi.BuildHistoryRecord) *controlapi.Descriptor {
+// provenance picks the SLSA provenance attestation of each of the record's
+// results: a build for several platforms has one result per platform, and
+// each one's provenance covers only that platform's steps. Results are in
+// platform name order.
+func provenance(rec *controlapi.BuildHistoryRecord) []*controlapi.Descriptor {
 	results := []*controlapi.BuildResultInfo{rec.Result}
 	var platforms []string
 	for p := range rec.Results {
@@ -436,20 +558,21 @@ func provenance(rec *controlapi.BuildHistoryRecord) *controlapi.Descriptor {
 	for _, p := range platforms {
 		results = append(results, rec.Results[p])
 	}
+	var out []*controlapi.Descriptor
 	for _, r := range results {
-		if r == nil {
+		if r == nil || len(r.Attestations) == 0 {
 			continue
 		}
+		att := r.Attestations[0]
 		for _, a := range r.Attestations {
 			if strings.Contains(a.Annotations["in-toto.io/predicate-type"], "slsa.dev/provenance") {
-				return a
+				att = a
+				break
 			}
 		}
-		if len(r.Attestations) > 0 {
-			return r.Attestations[0]
-		}
+		out = append(out, att)
 	}
-	return nil
+	return out
 }
 
 // fingerprint is what linking can change in a build.

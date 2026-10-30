@@ -3,9 +3,13 @@ package collector
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
@@ -43,12 +48,12 @@ func (f *fake) Listen(ctx context.Context, fn func(controlapi.BuildHistoryEventT
 	return nil
 }
 
-func (f *fake) Blob(ctx context.Context, d *controlapi.Descriptor) ([]byte, error) {
+func (f *fake) Open(ctx context.Context, d *controlapi.Descriptor) (io.ReadCloser, error) {
 	b, ok := f.blobs[d.Digest]
 	if !ok {
 		return nil, fmt.Errorf("no blob %s", d.Digest)
 	}
-	return b, nil
+	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
 // recorded reads the history package's fixtures (one daemon) as records
@@ -72,10 +77,13 @@ func recorded(t *testing.T) *fake {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for desc, file := range map[*controlapi.Descriptor]string{rec.Logs: "logs.bin", provenance(rec): "provenance.json", rec.Trace: "trace.json", rec.ExternalError: "error.bin"} {
+		for desc, file := range map[*controlapi.Descriptor]string{rec.Logs: "logs.bin", rec.Trace: "trace.json", rec.ExternalError: "error.bin"} {
 			if desc != nil {
 				f.blobs[desc.Digest] = read(file)
 			}
+		}
+		for _, desc := range provenance(rec) {
+			f.blobs[desc.Digest] = read("provenance.json")
 		}
 		f.recs = append(f.recs, rec)
 	}
@@ -267,7 +275,8 @@ func TestProvenanceDescriptor(t *testing.T) {
 		"linux/arm64": {Attestations: []*controlapi.Descriptor{att("sha256:arm", "https://slsa.dev/provenance/v1")}},
 		"linux/amd64": {Attestations: []*controlapi.Descriptor{att("sha256:sbom", "https://spdx.dev/Document"), att("sha256:amd", "https://slsa.dev/provenance/v1")}},
 	}}
-	if d := provenance(rec); d == nil || d.Digest != "sha256:amd" {
+	// Each platform's provenance covers only its own steps: all of them.
+	if d := provenance(rec); len(d) != 2 || d[0].Digest != "sha256:amd" || d[1].Digest != "sha256:arm" {
 		t.Errorf("multi-platform: %v", d)
 	}
 	if d := provenance(&controlapi.BuildHistoryRecord{}); d != nil {
@@ -470,6 +479,255 @@ func TestReplacedDaemonReplaysHistory(t *testing.T) {
 		if !strings.Contains(after, line+"\n") {
 			t.Errorf("after the replay the store no longer has\n  %s\nall:\n%s", line, after)
 			break
+		}
+	}
+}
+
+// After a restart a daemon replays its history in the order of its record
+// ids, not in time order: a record stored already whose partners are not
+// read again (they lie outside the window by then, or come later) keeps
+// the links and reasons it was stored with.
+func TestReplayKeepsLinks(t *testing.T) {
+	f := recorded(t)
+	const owner = "z0cxzdh0u2ppmgc6kbkoo37uj" // fixtures' builds received from it
+	var ownerStart time.Time
+	for _, r := range f.recs {
+		if r.Ref == owner {
+			ownerStart = r.CreatedAt.AsTime()
+		}
+	}
+	last := f.recs[len(f.recs)-1]
+	for name, newest := range map[string]time.Time{
+		// Every fixture leaves the window.
+		"hours later": last.CreatedAt.AsTime().Add(3 * time.Hour),
+		// The owner leaves the window, the builds that received from it
+		// stay in it.
+		"at the window's edge": ownerStart.Add(Window + time.Millisecond),
+	} {
+		t.Run(name, func(t *testing.T) {
+			newer := proto.Clone(last).(*controlapi.BuildHistoryRecord)
+			newer.Ref = "newerbuildthanthefixtures"
+			newer.CreatedAt = timestamppb.New(newest)
+			newer.CompletedAt = timestamppb.New(newest.Add(time.Minute))
+			all := append(append([]*controlapi.BuildHistoryRecord(nil), f.recs...), newer)
+
+			c, s := newCollector(t)
+			for _, j := range jobs(t, f) {
+				if err := s.SaveJob(ctx, j); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := c.Run(ctx, &fake{name: f.name, recs: all, blobs: f.blobs}); err != nil {
+				t.Fatal(err)
+			}
+			want := dump(t, s)
+			if !strings.Contains(want, "from="+owner) {
+				t.Fatalf("the fixtures' received steps are not linked:\n%s", want)
+			}
+			n := len(all)
+			for order, at := range map[string]func(i int) int{
+				"newest first": func(i int) int { return (i + n - 1) % n },
+				"reverse":      func(i int) int { return n - 1 - i },
+				"shuffled":     func(i int) int { return (i*5 + 2) % n },
+			} {
+				replay := &fake{name: f.name, blobs: f.blobs}
+				for i := range n {
+					replay.recs = append(replay.recs, all[at(i)])
+				}
+				again := New(s, instances, slog.New(slog.NewTextHandler(io.Discard, nil)))
+				if err := again.Run(ctx, replay); err != nil {
+					t.Fatal(err)
+				}
+				if got := dump(t, s); got != want {
+					t.Errorf("%s: the replay changed the store\n got:\n%s\nwant:\n%s", order, got, want)
+				}
+			}
+		})
+	}
+}
+
+// A job whose pod was never seen (it ran while the controller was away) is
+// learnt from GitLab's API when a page reads its pipeline: its builds take
+// its project then and are compared as when its pod is seen, and so are
+// the builds after them. A comparison that fails then (the controller busy
+// or stopped) is done later: what is due is kept in the store.
+func TestJobsLearntFromGitLab(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("comparison fails %v", fail), func(t *testing.T) { jobsLearntFromGitLab(t, fail) })
+	}
+}
+
+func jobsLearntFromGitLab(t *testing.T, fail bool) {
+	f := recorded(t)
+	js := jobs(t, f)
+	want := func() string {
+		c, s := newCollector(t)
+		for _, j := range js {
+			if err := s.SaveJob(ctx, j); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := c.Run(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+		return dump(t, s)
+	}()
+	c, s := newCollector(t)
+	if err := c.Run(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	byPipeline := map[uint64][]store.APIJob{}
+	var pipelines []uint64
+	for _, j := range js {
+		if byPipeline[j.PipelineID] == nil {
+			pipelines = append(pipelines, j.PipelineID)
+		}
+		byPipeline[j.PipelineID] = append(byPipeline[j.PipelineID], store.APIJob{ID: j.JobID, Name: "build", Status: "success"})
+	}
+	sort.Slice(pipelines, func(i, j int) bool { return pipelines[i] > pipelines[j] }) // newest first
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var pipeline uint64
+		if _, err := fmt.Sscanf(r.URL.Path, "/api/v4/projects/42/pipelines/%d/jobs", &pipeline); err != nil {
+			w.WriteHeader(404)
+			return
+		}
+		var out []map[string]any
+		for _, j := range byPipeline[pipeline] {
+			out = append(out, map[string]any{"id": j.ID, "name": j.Name, "status": j.Status,
+				"pipeline": map[string]any{"id": pipeline, "project_id": 42, "status": "success"}})
+		}
+		json.NewEncoder(w).Encode(out)
+	}))
+	defer srv.Close()
+	// The fixtures' trace ids name gitlab.example.com.
+	client := gitlab.New([]string{"https://gitlab.example.com/"})
+	client.HTTP = &http.Client{Transport: redirect{srv.URL}}
+	known := c.JobKnown
+	if fail {
+		known = func(context.Context, string, uint64) error { return context.DeadlineExceeded }
+	}
+	fetch := &gitlab.Fetcher{Client: client, Store: s, Known: known}
+	for _, p := range pipelines {
+		fetch.Ensure(gitlab.Token("t"), js[0].Instance, 42, p, "", time.Time{}, 5*time.Second)
+	}
+	if fail {
+		if got := dump(t, s); got == want {
+			t.Fatal("the builds were compared although every comparison failed")
+		}
+		if err := c.CompareDue(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := dump(t, s); got != want {
+		t.Errorf("stored differently\n got:\n%s\nwant:\n%s", got, want)
+	}
+	if due, err := s.DueJobs(ctx, 10); err != nil || len(due) != 0 {
+		t.Errorf("still due after the comparisons: %v, %v", due, err)
+	}
+}
+
+// redirect sends every request to a test server.
+type redirect struct{ to string }
+
+func (r redirect) RoundTrip(req *http.Request) (*http.Response, error) {
+	u, err := url.Parse(r.to)
+	if err != nil {
+		return nil, err
+	}
+	req = req.Clone(req.Context())
+	req.URL.Scheme, req.URL.Host = u.Scheme, u.Host
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// A failed build is compared with the last build of its image that
+// succeeded. When that build arrives late (its job is seen after the
+// failed build was stored, or its record is replayed), the failed build is
+// compared again, and so is the next build that succeeded.
+func TestFailedBuildComparedWhenItsPreviousArrivesLate(t *testing.T) {
+	f := recorded(t)
+	c, s := newCollector(t)
+	var mem []*history.Build
+	for _, r := range f.recs {
+		b, err := c.read(ctx, f, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Daemon = f.name
+		mem = append(mem, b)
+	}
+	history.Link(mem)
+	var good, cur *history.Build
+	for i, x := range mem {
+		for _, y := range mem[i+1:] {
+			if x.Target != "" && x.Target == y.Target && x.Error == "" && y.Error == "" && x.Attribution.State == history.Attributed &&
+				y.Attribution.State == history.Attributed && x.Attribution.Pipeline != y.Attribution.Pipeline {
+				good, cur = x, y
+				break
+			}
+		}
+		if good != nil {
+			break
+		}
+	}
+	if good == nil {
+		t.Fatal("fixtures: no image built in two pipelines")
+	}
+	// A pipeline in between failed in a step it changed: no provenance (no
+	// step identities).
+	failed := *good
+	failed.Ref, failed.Error, failed.Images = "failed-"+good.Ref, "process \"/bin/sh -c npm test\" did not complete successfully: exit code: 1", nil
+	failed.Started = good.Started.Add(cur.Started.Sub(good.Started) / 2)
+	failed.Completed = failed.Started.Add(time.Second)
+	failed.Attribution.Pipeline, failed.Attribution.Job = good.Attribution.Pipeline+900000, good.Attribution.Job+900000
+	failed.Steps = append([]history.Step(nil), good.Steps...)
+	for i := range failed.Steps {
+		failed.Steps[i].Identity, failed.Steps[i].StepID, failed.Steps[i].ReceivedFrom = "", "", ""
+	}
+	last := &failed.Steps[len(failed.Steps)-1]
+	last.State, last.Error, last.Name = history.Built, "exit code: 1", last.Name+" && npm test"
+	known := func(b *history.Build) {
+		t.Helper()
+		a := b.Attribution
+		if err := s.SaveJob(ctx, store.Job{Instance: a.Instance, JobID: a.Job, PipelineID: a.Pipeline, ProjectID: 42, Name: "build"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, b := range []*history.Build{cur, &failed} {
+		known(b)
+		if _, err := c.save(ctx, b, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.save(ctx, good, 1); err != nil {
+		t.Fatal(err)
+	}
+	known(good)
+	if err := c.JobKnown(ctx, good.Attribution.Instance, good.Attribution.Job); err != nil {
+		t.Fatal(err)
+	}
+	if p, _, err := s.Previous(ctx, &failed); err != nil || p == nil || p.Build.Ref != good.Ref {
+		t.Fatalf("previous of the failed build: %v, %v", p, err)
+	}
+	if r, err := c.reason(ctx, &failed); err != nil || r.Kind != history.StepChanged {
+		t.Fatalf("fixture: the failed build compared with its previous: %s, %v", r.Kind, err)
+	}
+	stored, err := s.Recent(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 3 {
+		t.Fatalf("%d builds stored", len(stored))
+	}
+	for _, st := range stored {
+		if st, err = s.Load(ctx, st.ID); err != nil {
+			t.Fatal(err)
+		}
+		want, err := c.reason(ctx, st.Build)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := st.Reason; got.Kind != want.Kind || got.Step.Key != want.Step.Key || got.Old != want.Old || got.New != want.New {
+			t.Errorf("%s (failed %v): reason %s at %s, want %s at %s", st.Build.Ref, st.Build.Error != "", got.Kind, got.Step.Key, want.Kind, want.Step.Key)
 		}
 	}
 }

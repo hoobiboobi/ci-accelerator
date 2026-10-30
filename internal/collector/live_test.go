@@ -1,7 +1,9 @@
 package collector
 
 import (
+	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -37,7 +39,7 @@ func TestLiveState(t *testing.T) {
 	var c Collector
 	calls := 0
 	c.OnLiveChange(func() { calls++ })
-	c.live.connected("d1", true)
+	stream := c.live.connect("d1")
 	rec := func(ref, target string) *controlapi.BuildHistoryRecord {
 		return &controlapi.BuildHistoryRecord{Ref: ref, FrontendAttrs: map[string]string{"target": target},
 			CreatedAt: timestamppb.New(time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC))}
@@ -65,7 +67,7 @@ func TestLiveState(t *testing.T) {
 	if calls != 6 {
 		t.Errorf("a changed inspection was not announced")
 	}
-	c.live.connected("d1", false)
+	c.live.disconnected("d1", stream)
 	ds = c.Daemons()
 	if ds[0].Connected || len(ds[0].Active) != 0 || ds[0].Inspection.Node != "n1" || ds[0].InspectedAt.IsZero() {
 		t.Errorf("after the stream ended: %+v", ds[0])
@@ -74,9 +76,9 @@ func TestLiveState(t *testing.T) {
 
 func TestForgetGoneDaemon(t *testing.T) {
 	var c Collector
-	c.live.connected("old", true)
-	c.live.connected("new", true)
-	c.live.forget("old")
+	old := c.live.connect("old")
+	c.live.connect("new")
+	c.live.forget("old", old)
 	if ds := c.Daemons(); len(ds) != 1 || ds[0].Name != "new" {
 		t.Errorf("%+v", ds)
 	}
@@ -86,11 +88,121 @@ func TestForgetGoneDaemon(t *testing.T) {
 // probe during a rollout) does not bring the daemon back.
 func TestInspectionDoesNotResurrect(t *testing.T) {
 	var l live
-	l.connected("d", true)
-	l.forget("d")
+	l.forget("d", l.connect("d"))
 	l.inspected("d", Inspection{Version: "v0.33.1"}, nil)
 	l.inspected("d", Inspection{}, errors.New("timeout"))
 	if _, ok := l.daemons["d"]; ok {
 		t.Error("a forgotten daemon came back")
+	}
+}
+
+// An event for a daemon the console has forgotten is taken, not a crash.
+func TestEventAfterForget(t *testing.T) {
+	var l live
+	l.forget("d", l.connect("d"))
+	l.event("d", controlapi.BuildHistoryEventType_STARTED, &controlapi.BuildHistoryRecord{Ref: "r"})
+	if len(l.active["d"]) != 1 {
+		t.Errorf("%+v", l.active)
+	}
+}
+
+// scripted is a daemon whose stream sends recs, then waits for release,
+// announces after as started, and stays open until its context ends.
+type scripted struct {
+	name      string
+	recs      []*controlapi.BuildHistoryRecord
+	after     []*controlapi.BuildHistoryRecord
+	blobs     map[string][]byte
+	listening chan struct{} // closed once recs are sent
+	release   chan struct{}
+	sent      chan struct{} // closed once after is sent
+}
+
+func (s *scripted) Name() string { return s.name }
+func (s *scripted) Listen(ctx context.Context, fn func(controlapi.BuildHistoryEventType, *controlapi.BuildHistoryRecord) error) error {
+	for _, r := range s.recs {
+		if err := fn(controlapi.BuildHistoryEventType_COMPLETE, r); err != nil {
+			return err
+		}
+	}
+	close(s.listening)
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	for _, r := range s.after {
+		if err := fn(controlapi.BuildHistoryEventType_STARTED, r); err != nil {
+			return err
+		}
+	}
+	close(s.sent)
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (s *scripted) Open(ctx context.Context, d *controlapi.Descriptor) (io.ReadCloser, error) {
+	return (&fake{blobs: s.blobs}).Open(ctx, d)
+}
+
+func newScripted(name string) *scripted {
+	return &scripted{name: name, listening: make(chan struct{}), release: make(chan struct{}), sent: make(chan struct{})}
+}
+
+// The stream of a daemon that is gone ends late, after a new stream to
+// the same daemon began (its address left the Service for a moment): the
+// old stream's end leaves the new one's state alone.
+func TestLateEndOfAnOldStream(t *testing.T) {
+	c, _ := newCollector(t)
+	oldCtx, gone := context.WithCancelCause(ctx)
+	old := newScripted("d")
+	oldDone := make(chan error)
+	go func() { oldDone <- c.Run(oldCtx, old) }()
+	<-old.listening
+
+	curCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	cur := newScripted("d")
+	cur.after = []*controlapi.BuildHistoryRecord{{Ref: "r", CreatedAt: timestamppb.Now()}}
+	go c.Run(curCtx, cur)
+	<-cur.listening
+
+	gone(ErrGone)
+	<-oldDone
+	close(cur.release)
+	select {
+	case <-cur.sent:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the new stream's events were not taken")
+	}
+	ds := c.Daemons()
+	if len(ds) != 1 || !ds[0].Connected || len(ds[0].Active) != 1 || ds[0].Active[0].Ref != "r" {
+		t.Errorf("after the old stream ended: %+v", ds)
+	}
+}
+
+// A daemon that is gone leaves no builds behind in memory; one whose
+// stream only broke keeps them for when it comes back.
+func TestGoneDaemonLeavesMemory(t *testing.T) {
+	f := recorded(t)
+	c, _ := newCollector(t)
+	run := func(name string, cause error) {
+		rctx, cancel := context.WithCancelCause(ctx)
+		src := newScripted(name)
+		src.recs, src.blobs = f.recs[:1], f.blobs
+		done := make(chan error)
+		go func() { done <- c.Run(rctx, src) }()
+		<-src.listening
+		cancel(cause)
+		<-done
+	}
+	run("gone", ErrGone)
+	run("broken", nil)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.daemons["gone"]; ok {
+		t.Error("the builds of a daemon that is gone stay in memory")
+	}
+	if w := c.daemons["broken"]; w == nil || len(w.builds) != 1 {
+		t.Error("a broken stream dropped its daemon's builds")
 	}
 }
