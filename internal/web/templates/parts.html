@@ -12,6 +12,12 @@
 {{end}}
 
 {{/* A status: shape, colour and words together. */}}
+{{/* Why a signed-in person sees no project, on the pages a visit starts from. */}}
+{{define "noprojects"}}{{if .Unanswered}}
+  <div class="callout neutral">{{icon "info" 16}}<div><b class="k">GitLab did not answer which projects you can read</b>GitLab is down or is limiting your requests. Your projects show again once it answers.</div></div>
+  {{else}}
+  <div class="callout neutral">{{icon "info" 16}}<div><b class="k">No project you can read builds here</b>The console shows the builds of projects whose jobs GitLab lets you read.</div></div>
+  {{end}}{{end}}
 {{define "status"}}<span class="stat st-{{.Key}}">{{icon .Icon 12}}{{.Label}}</span>{{end}}
 {{define "statuslong"}}<span class="stat st-{{.Key}}">{{icon .Icon 12}}{{.Long}}</span>{{end}}
 

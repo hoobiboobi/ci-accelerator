@@ -3,11 +3,8 @@
 <div class="page">
   <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div>
     <div class="titlerow"><h1 class="t" tabindex="-1">Insights</h1>
-      <nav class="seg" aria-label="Window"><a href="/" {{if eq .Window "24h"}}aria-current="true"{{end}}>24 hours</a><a href="/?window=7d" {{if eq .Window "7d"}}aria-current="true"{{end}}>7 days</a></nav></div></header>
-  {{if and .NoProjects .Unanswered}}
-  <div class="callout neutral">{{icon "info" 16}}<div><b class="k">GitLab did not answer which projects you can read</b>GitLab is down or is limiting your requests. Your projects show again once it answers.</div></div>
-  {{else if .NoProjects}}
-  <div class="callout neutral">{{icon "info" 16}}<div><b class="k">No project you can read builds here</b>The console shows the builds of projects whose jobs GitLab lets you read.</div></div>
+      <nav class="seg" aria-label="Window"><a href="/insights" {{if eq .Window "24h"}}aria-current="true"{{end}}>24 hours</a><a href="/insights?window=7d" {{if eq .Window "7d"}}aria-current="true"{{end}}>7 days</a></nav></div></header>
+  {{if .NoProjects}}{{template "noprojects" .}}
   {{else if .Empty}}
   <div class="empty"><b>No image builds in {{.WindowLabel}}.</b><p>A job that runs <code>buildctl</code> against the box's daemons shows up here when its build ends. Its log carries a link to its page.</p></div>
   {{else}}

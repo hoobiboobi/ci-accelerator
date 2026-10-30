@@ -449,6 +449,10 @@ func TestInsights(t *testing.T) {
 	if w := get(t, ts, "/insights?window=7d"); !strings.Contains(w.body, "in the last 7 days") {
 		t.Error("7-day window")
 	}
+	// The window switch stays on the insights (the home page is the pipelines).
+	if !strings.Contains(p.body, `href="/insights?window=7d"`) || !strings.Contains(p.body, `href="/insights" aria-current="true"`) {
+		t.Error("the insights' window switch leaves the page")
+	}
 }
 
 // parseDur reads a duration as the pages print it.

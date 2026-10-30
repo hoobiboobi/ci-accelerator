@@ -311,6 +311,9 @@ func TestSignedInSeesWhatGitLabAllows(t *testing.T) {
 
 	// bob may read nothing: every page of the project is "not found", the
 	// list and search are empty, and the home page says why.
+	if p := fetch(t, bob, ts, "GET", "/", nil); p.status != 200 || !strings.Contains(p.body, "No project you can read builds here") {
+		t.Errorf("bob's home page, the pipelines, does not say why it is empty: %d", p.status)
+	}
 	bh := fetch(t, bob, ts, "GET", "/insights", nil)
 	bh.safe(t)
 	if bh.status != 200 || !strings.Contains(bh.body, "No project you can read builds here") || strings.Contains(bh.body, "/images/api") ||
@@ -429,6 +432,9 @@ func TestNoAnswerIsNotNoProjects(t *testing.T) {
 	g.mu.Lock()
 	g.down = true
 	g.mu.Unlock()
+	if p := fetch(t, alice, ts, "GET", "/", nil); !strings.Contains(p.body, "GitLab did not answer which projects you can read") {
+		t.Error("alice's home page, the pipelines, does not say GitLab did not answer")
+	}
 	p := fetch(t, alice, ts, "GET", "/insights", nil)
 	if p.status != 200 || strings.Contains(p.body, "No project you can read builds here") ||
 		!strings.Contains(p.body, "GitLab did not answer which projects you can read") || strings.Contains(p.body, "example/") {
