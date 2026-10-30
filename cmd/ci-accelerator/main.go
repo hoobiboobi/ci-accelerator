@@ -57,6 +57,7 @@ type config struct {
 	logLevel                                   string
 	caches, namespace                          string
 	devAssets                                  string
+	gitlabURLsFile, gitlabURLsWas              string
 	cacheEvery                                 time.Duration
 	daemons, gitlabURLs                        []string
 	keepDays, keepOutputDays                   int
@@ -183,6 +184,7 @@ func controllerMain(args []string, splitRole bool) error {
 	fs.StringVar(&c.tlsDir, "tls-dir", "/certs", "directory with ca.crt, tls.crt and tls.key (the client certificate)")
 	fs.StringVar(&c.serverName, "server-name", "", "name in the daemons' certificate (default: the host of -discover)")
 	fs.Var(&gitlabURLs, "gitlab-url", "URL of a GitLab instance, exactly as the runner has it (repeatable; also $GITLAB_URLS, comma-separated)")
+	fs.StringVar(&c.gitlabURLsFile, "gitlab-urls-file", "", "file listing GitLab URLs as $GITLAB_URLS does (a mounted ConfigMap); when it changes the controller ends, to start again with them")
 	fs.StringVar(&c.jobsNamespace, "jobs-namespace", "", "namespace of the CI job pods; empty: jobs are not watched")
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig outside a cluster (default: the pod's service account)")
 	fs.StringVar(&c.kubeContext, "kube-context", "", "context of -kubeconfig")
@@ -213,6 +215,13 @@ func controllerMain(args []string, splitRole bool) error {
 	}
 	c.daemons = daemons
 	c.gitlabURLs = append(gitlabURLs, split(os.Getenv("GITLAB_URLS"))...)
+	if c.gitlabURLsFile != "" {
+		was, urls, err := readURLsFile(c.gitlabURLsFile)
+		if err != nil {
+			return fmt.Errorf("-gitlab-urls-file: %w", err)
+		}
+		c.gitlabURLs, c.gitlabURLsWas = append(c.gitlabURLs, urls...), was
+	}
 	c.split, c.apiAllow, c.apiAllowRouter = splitRole, allow, allowRouter
 	c.logLevel = lf.Level
 	role := "all"
@@ -277,6 +286,14 @@ func run(c config, log *slog.Logger) error {
 		cfg = append(cfg, "listen", c.listen)
 	}
 	started(log, cfg...)
+	if c.gitlabURLsFile != "" {
+		// The instances are fixed at start (the collector, the job watch,
+		// GitLab's client): a new URL starts the controller again.
+		go followURLsFile(ctx, c.gitlabURLsFile, c.gitlabURLsWas, urlsEvery, func(urls []string) {
+			log.Info("the GitLab URLs changed: starting again", "gitlab", hosts(urls))
+			stop()
+		})
+	}
 
 	st, err := store.Open(ctx, c.data, store.Options{Keep: time.Duration(c.keepDays) * 24 * time.Hour, KeepOutput: c.keepOutputDays})
 	if err != nil {
@@ -329,7 +346,7 @@ func run(c config, log *slog.Logger) error {
 		if signIn, err = loadSignIn(c.signIn, c.gitlabURLs, st, client, log); err != nil {
 			return err
 		}
-		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: client, Store: st, Log: log}, Auth: signIn}
+		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: client, Store: st, Known: col.JobKnown, Log: log}, Auth: signIn}
 		for _, ch := range signIn.Instances() {
 			log.Info("sign-in through GitLab", "gitlab", ch.Host, "redirect_uri", signIn.RedirectURL(ch.Instance))
 		}
@@ -341,7 +358,7 @@ func run(c config, log *slog.Logger) error {
 		}
 		client := gitlab.New(c.gitlabURLs)
 		client.Log = log
-		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: client, Store: st, Log: log},
+		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: client, Store: st, Known: col.JobKnown, Log: log},
 			Token: gitlab.Token(strings.TrimSpace(string(token)))}
 	}
 	// "Files or node" is settled without anyone opening a page: with the
@@ -352,6 +369,7 @@ func run(c config, log *slog.Logger) error {
 		changer = gl
 	}
 	go settleRebuilds(ctx, st, changer, log)
+	go compareDue(ctx, col, log)
 	local := &control.Local{Store: st, Live: col}
 	var srv *http.Server
 	if c.split {
@@ -627,6 +645,22 @@ func scanCache(ctx context.Context, s runnercache.Store, ns string, kube kuberne
 		return aws.Credentials{AccessKeyID: ak, SecretAccessKey: sk, Source: "secret " + s.Secret}, nil
 	})
 	return runnercache.Lister{Store: s, Keys: keys}.Scan(ctx, time.Now())
+}
+
+// compareDue compares, once a minute, the builds that took their project
+// after they were stored and whose comparison failed or was cut off by a
+// restart.
+func compareDue(ctx context.Context, col *collector.Collector, log *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Minute):
+		}
+		if err := col.CompareDue(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("comparing builds whose job became known", "err", err)
+		}
+	}
 }
 
 // settleRebuilds settles the rebuilds whose cache was elsewhere with

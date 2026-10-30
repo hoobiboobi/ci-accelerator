@@ -29,7 +29,7 @@ func TestLoadSignIn(t *testing.T) {
 	}
 	defer st.Close()
 	client := gitlab.New([]string{"https://gitlab.com"})
-	good := `{"url":"https://ci.example.com","sessionKeyFile":"` + key + `","gitlab":[{"url":"https://gitlab.com","clientIdFile":"` + id + `","secretFile":"` + secret + `","admins":["alice"]}]}`
+	good := `{"url":"https://ci.example.com","sessionKeyFile":"` + key + `","gitlab":[{"url":"https://gitlab.com","clientIdFile":"` + id + `","secretFile":"` + secret + `","admins":["id:7"]}]}`
 	a, err := loadSignIn(write("good.json", good), []string{"https://gitlab.com"}, st, client, nil)
 	if err != nil {
 		t.Fatal(err)

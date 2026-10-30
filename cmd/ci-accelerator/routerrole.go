@@ -36,6 +36,7 @@ func routerMain(args []string) error {
 	jobs := fs.String("jobs-namespace", "", "namespace of the CI job pods")
 	var gitlabURLs list
 	fs.Var(&gitlabURLs, "gitlab-url", "URL of a GitLab instance, exactly as the runner has it (repeatable; also $GITLAB_URLS)")
+	urlsFile := fs.String("gitlab-urls-file", "", "file listing GitLab URLs as $GITLAB_URLS does (a mounted ConfigMap), followed while the router runs")
 	controller := fs.String("controller", "", "the controller's API, https://host:port; empty: no warmth, projects go by hash")
 	caFile := fs.String("controller-ca", "/api-tls/ca.crt", "CA certificate the controller's certificate chains to")
 	tokenFile := fs.String("token-file", "/var/run/secrets/ci-accelerator/token", "file with the token sent to the controller")
@@ -49,6 +50,14 @@ func routerMain(args []string) error {
 		return nil
 	}
 	urls := append(gitlabURLs, split(os.Getenv("GITLAB_URLS"))...)
+	fixed, urlsWas := urls, ""
+	if *urlsFile != "" {
+		was, fromFile, err := readURLsFile(*urlsFile)
+		if err != nil {
+			return fmt.Errorf("-gitlab-urls-file: %w", err)
+		}
+		urls, urlsWas = append(urls, fromFile...), was
+	}
 	switch {
 	case *node == "":
 		return errors.New("give -node (or $CI_ACCELERATOR_NODE_NAME)")
@@ -74,6 +83,14 @@ func routerMain(args []string) error {
 	defer stop()
 
 	view := router.NewCluster(urls)
+	if *urlsFile != "" {
+		// Taken in place: ending the routers would drain every node's
+		// router at about the same moment.
+		go followURLsFile(ctx, *urlsFile, urlsWas, urlsEvery, func(fromFile []string) {
+			log.Info("the GitLab URLs changed", "gitlab", hosts(fromFile))
+			view.SetGitLabs(append(append([]string(nil), fixed...), fromFile...))
+		})
+	}
 	watchErr := make(chan error, 1)
 	wctx, cancelWatch := context.WithCancel(context.Background())
 	defer cancelWatch()
