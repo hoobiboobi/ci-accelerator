@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.3.4
+version: 0.3.5
 # The box's own version (its control plane's image); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.3.4"
+appVersion: "0.3.5"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -26,7 +26,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.34.1
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.4
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.5
       platforms:
         - linux/amd64
         - linux/arm64
@@ -45,22 +45,12 @@ annotations:
       url: https://github.com/hoobiboobi/ci-accelerator/issues
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
-    - kind: security
-      description: With sign-in, a CI job could choose a trace id (or CI_PIPELINE_ID) that opened another project's build pages; a build is now its job's project's only when its pipeline agrees and GitLab confirms whose the pipeline is, otherwise admins only
+    - kind: added
+      description: A running build shows live on its job's page - the step running now, how long the rest likely takes against the last build of the image, the node's CPU, memory and pressure, and every step's last lines on a growing timeline
+    - kind: added
+      description: On a pipeline's timeline a running job opens into its stages and steps so far, and folds once it is done
     - kind: changed
-      description: Console admins are named by GitLab user id only (id:<n>); usernames are refused because GitLab gives a freed username to another account
-    - kind: fixed
-      description: The controller no longer runs out of memory on builds that print hundreds of MiB, nor grows by ~11 MB per project and day of kept step output
-    - kind: fixed
-      description: A controller restart no longer stores older builds again without the steps they received from other builds
-    - kind: fixed
-      description: Multi-platform builds show every platform's steps; images without a target are compared with their own previous build; a build after a failed one is not "your change"
-    - kind: fixed
-      description: Secrets are masked in Dockerfiles, after a letter, and across job log parts; a job log request can no longer spin the controller
-    - kind: fixed
-      description: The charts refuse settings that never worked (router switch mismatch, GC sizes in workerOCI, a tier unreachable with Local routing, jobsNamespace.create=false that would delete the namespace)
-    - kind: fixed
-      description: The GitLab CI component builds without a GitLab registry, uses the Dependency Proxy, mounts File-type secrets and reports timeouts; quickstart.sh keeps its build cache on a second run
+      description: The GitLab CI component passes the job's TRACEPARENT as the build option ci-accelerator.io/traceparent, which names a running build's job; cache keys do not change
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -68,10 +58,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.3.4
+    version: 0.3.5
     repository: file://../buildkit
   - name: control-plane
-    version: 0.3.4
+    version: 0.3.5
     repository: file://../control-plane
     condition: control-plane.enabled
   - name: gitlab-runner

@@ -50,7 +50,7 @@ job's BuildKit client matches the daemons:
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.4/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.5/ci/gitlab/build.yml
     integrity: sha256-<from the release notes>
     inputs:
       runner-tags: [ci-accelerator]
@@ -71,7 +71,7 @@ Several images of a monorepo, each its own job:
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.4/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.5/ci/gitlab/build.yml
     integrity: sha256-...
     inputs:
       job-name: build-api
@@ -80,7 +80,7 @@ include:
       images: |
         $CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA
         $CI_REGISTRY_IMAGE/api:latest
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.4/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.5/ci/gitlab/build.yml
     integrity: sha256-...
     inputs:
       job-name: build-web

@@ -1,6 +1,6 @@
 # ci-accelerator
 
-![Version: 0.3.4](https://img.shields.io/badge/Version-0.3.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.3.4](https://img.shields.io/badge/AppVersion-0.3.4-informational?style=flat-square)
+![Version: 0.3.5](https://img.shields.io/badge/Version-0.3.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.3.5](https://img.shields.io/badge/AppVersion-0.3.5-informational?style=flat-square)
 
 A self-hosted fast CI runner for GitLab: persistent BuildKit daemons with a shared cache on dedicated build nodes, and a gitlab-runner that sends CI jobs to them.
 
@@ -16,7 +16,7 @@ What the release runs (with the release name `ci-accelerator`, objects are `ci-a
 Before you install: Kubernetes 1.34 or newer, cert-manager (the daemons, the jobs and the controller authenticate each other with certificates it issues), build nodes labelled and tainted `ci-accelerator.io/node-role=build`, a release namespace that allows privileged pods (the daemons need them), a default StorageClass for the controller's volume, and a CNI that enforces NetworkPolicy for the policies the box ships.
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.4 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.5 \
   -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -33,8 +33,8 @@ Kubernetes: `>=1.34.0-0`
 
 | Repository | Name | Version |
 |------------|------|---------|
-| file://../buildkit | buildkit | 0.3.4 |
-| file://../control-plane | control-plane | 0.3.4 |
+| file://../buildkit | buildkit | 0.3.5 |
+| file://../control-plane | control-plane | 0.3.5 |
 | https://charts.gitlab.io | gitlab-runner | 0.93.0 |
 
 ## Values
