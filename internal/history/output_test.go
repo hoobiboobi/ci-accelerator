@@ -44,15 +44,53 @@ func TestMask(t *testing.T) {
 		"Cookie: _gitlab_session=0123abcd":                                                     "Cookie: [masked]",
 		"npm config set //registry/:_authToken=npm-s3cr3t-value":                               "npm config set //registry/:_authToken=[masked]",
 		"connecting with hunter22":                                                             "connecting with [masked]",
+		// Right after a letter, as in a printf's literal \n.
+		`printf 'glpat-AbCdEfGhIjKlMnOpQrSt\nghp_` + strings.Repeat("a1", 18) + `\nAKIAABCDEFGHIJKLMNOP\n'`:  `printf '[masked]\n[masked]\n[masked]\n'`,
+		`echo x\ngithub_pat_` + strings.Repeat("Ab1_", 6) + `\nxoxb-1234567890-abcdef\nASIAABCDEFGHIJKLMNOP`: `echo x\n[masked]\n[masked]\n[masked]`,
+		"key=AKIAABCDEFGHIJKLMNOP": "key=[masked]",
 		// Not secrets: short or non-secret build arguments, look-alikes.
 		"version 1.2.3 with abc":                  "version 1.2.3 with abc",
 		"glpat is a prefix, glpat-short is not":   "glpat is a prefix, glpat-short is not",
 		"see https://gitlab.example.com/a/b.git":  "see https://gitlab.example.com/a/b.git",
 		"AKIA alone, ghp_short, xoxb- and tokens": "AKIA alone, ghp_short, xoxb- and tokens",
+		// AKIA inside a longer run of capitals and digits is not a key id.
+		"HASH0AKIAABCDEFGHIJKLMNOP and AKIAABCDEFGHIJKLMNOPQ": "HASH0AKIAABCDEFGHIJKLMNOP and AKIAABCDEFGHIJKLMNOPQ",
 	} {
 		if got := mask(in, args); got != want {
 			t.Errorf("mask(%q)\n got %q\nwant %q", in, got, want)
 		}
+	}
+}
+
+// A job's log is read in parts, so a printed private key can be cut in
+// two: each half is masked on its own, the rest of the part kept.
+func TestMaskSecretsHalfAKey(t *testing.T) {
+	for in, want := range map[string]string{
+		"before\n-----BEGIN RSA PRIVATE KEY-----\nBODYLINE1\nBODYLINE2\n":                                          "before\n[masked]",
+		"BODYLINE1\nBODYLINE2\n-----END RSA PRIVATE KEY-----\nafter\n":                                             "[masked]\nafter\n",
+		"BODY1\n-----END EC PRIVATE KEY-----\nmid\n-----BEGIN EC PRIVATE KEY-----\nBODY2\n":                        "[masked]\nmid\n[masked]",
+		"BODY1\n-----END EC PRIVATE KEY-----\n-----BEGIN EC PRIVATE KEY-----\nB\n-----END EC PRIVATE KEY-----\nok": "[masked]\n[masked]\nok",
+		"no key here\n-----BEGIN CERTIFICATE-----\nMIIB\n":                                                         "no key here\n-----BEGIN CERTIFICATE-----\nMIIB\n",
+	} {
+		if got := MaskSecrets(in); got != want {
+			t.Errorf("MaskSecrets(%q)\n got %q\nwant %q", in, got, want)
+		}
+	}
+}
+
+// A Dockerfile is shown by line number: masking keeps its lines.
+func TestMaskDockerfile(t *testing.T) {
+	in := "FROM alpine\nRUN printf 'x\\nghp_" + strings.Repeat("a1", 18) + "'\nCOPY <<EOF /k\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn\n-----END OPENSSH PRIVATE KEY-----\nEOF\nRUN true\n"
+	want := "FROM alpine\nRUN printf 'x\\n[masked]'\nCOPY <<EOF /k\n[masked]\n\n\nEOF\nRUN true\n"
+	if got := MaskDockerfile(in); got != want {
+		t.Errorf("MaskDockerfile\n got %q\nwant %q", got, want)
+	}
+	// A build's Dockerfile, as stored, also hides its secret build
+	// arguments' values.
+	b := &Build{prov: &Provenance{DockerfileName: "Dockerfile", Dockerfile: in + "ARG NPM_TOKEN=npm-s3cr3t-value\n"},
+		BuildArgs: map[string]string{"NPM_TOKEN": "npm-s3cr3t-value"}}
+	if _, got := b.Dockerfile(); got != want+"ARG NPM_TOKEN=[masked]\n" {
+		t.Errorf("Dockerfile()\n got %q\nwant %q", got, want+"ARG NPM_TOKEN=[masked]\n")
 	}
 }
 

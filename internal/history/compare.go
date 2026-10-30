@@ -111,6 +111,23 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 			// provenance still holds every step, so the same step (same
 			// identity: its operation and all below it) is found there.
 			if !prev.prov.has(s.Identity) {
+				if ok {
+					// The previous build reported the step without its
+					// definition (another build's vertex, or a platform
+					// whose provenance was not read, as in builds stored
+					// before every platform's was): not new. Only its
+					// text can be compared; the same text says nothing.
+					if k, o, n, ok := argInText(prev, cur, p.Name, s.Name); ok {
+						if SecretArg(k) {
+							o, n = Masked, Masked
+						}
+						return Reason{Kind: ArgChanged, Step: s, Arg: k, Old: o, New: n}, true
+					}
+					if p.Name != s.Name {
+						return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: s.Name}, true
+					}
+					return Reason{}, false
+				}
 				if len(prev.Steps) < len(prev.prov.Steps) && !prev.complete() {
 					// Not reported and not the same: new, or changed.
 					return Reason{Kind: StepChanged, Step: s}, true

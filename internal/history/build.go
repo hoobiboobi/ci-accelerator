@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,16 +57,16 @@ type Step struct {
 }
 
 // Dockerfile returns the Dockerfile the build used and its file name, as
-// recorded in the provenance; empty when the build has none.
+// recorded in the provenance; empty when the build has none. Secrets in
+// it are masked, as in the steps' names, keeping its lines.
 func (b *Build) Dockerfile() (name, text string) {
-	if b.prov != nil {
-		return b.prov.DockerfileName, b.prov.Dockerfile
+	switch {
+	case b.prov != nil:
+		name, text = b.prov.DockerfileName, b.prov.Dockerfile
+	case b.errSrc != nil:
+		name, text = b.errSrc.Name, b.errSrc.Text
 	}
-
-	if b.errSrc != nil {
-		return b.errSrc.Name, b.errSrc.Text
-	}
-	return "", ""
+	return name, maskText(text, b.BuildArgs, true)
 }
 
 // Duration is how long the step took in this build; for a received step,
@@ -131,14 +132,16 @@ type Config struct {
 	SecretKey []byte
 }
 
-// NewBuild assembles a build from its record and blobs. provenance and trace
+// NewBuild assembles a build from its record and blobs. provenance holds
+// one attestation per result: a build for several platforms has one per
+// platform, each covering only that platform's steps. provenance and trace
 // may be empty: a failed build has no provenance, and a trace is attached a
 // few seconds after a build or never.
 //
 // errBlob is the record's ExternalError blob (empty for a build that did
 // not fail); what it says about the Dockerfile is used only when there is
 // no provenance, and a blob that does not parse is ignored.
-func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus, provenance, trace, errBlob []byte, cfg Config) (*Build, error) {
+func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus, provenance [][]byte, trace, errBlob []byte, cfg Config) (*Build, error) {
 	b := &Build{
 		Ref:       rec.Ref,
 		Target:    rec.FrontendAttrs["target"],
@@ -166,13 +169,20 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 			b.Images = append(b.Images, n)
 		}
 	}
-	if len(bytes.TrimSpace(provenance)) > 0 {
-		p, err := ParseProvenance(provenance, cfg.SecretKey)
+	var provs []*Provenance
+	for _, blob := range provenance {
+		if len(bytes.TrimSpace(blob)) == 0 {
+			continue
+		}
+		p, err := ParseProvenance(blob, cfg.SecretKey)
 		if err != nil {
 			return nil, err
 		}
-		b.prov = p
-		for d := range p.DigestMapping {
+		provs = append(provs, p)
+	}
+	if len(provs) > 0 {
+		b.prov = mergeProvenance(provs)
+		for d := range b.prov.DigestMapping {
 			b.Vertices[d] = true
 		}
 	}
@@ -212,7 +222,7 @@ type vertex struct {
 // build's own vertex for it then only shows the wait.
 func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 	vs := map[string]*vertex{}
-	logs := map[string]*strings.Builder{}
+	logs := map[string]*logBuffer{}
 	var order []string
 	var ctxBytes int64
 	for _, st := range progress {
@@ -238,7 +248,12 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 		for _, l := range st.Logs {
 			d := l.Vertex.String()
 			if logs[d] == nil {
-				logs[d] = &strings.Builder{}
+				logs[d] = &logBuffer{}
+			}
+			if l.Stream == cutStream {
+				n, _ := strconv.ParseInt(string(l.Data), 10, 64)
+				logs[d].cut += n
+				continue
 			}
 			logs[d].Write(l.Data)
 		}
@@ -331,7 +346,7 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 		} else if !v.started.IsZero() {
 			s.State = Built
 			if l := logs[d]; l != nil {
-				s.Output = clip(mask(l.String(), b.BuildArgs))
+				s.Output = l.output(b.BuildArgs)
 			}
 		}
 	}

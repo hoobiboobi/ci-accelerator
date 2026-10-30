@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -206,6 +207,65 @@ func ParseProvenance(data []byte, key []byte) (*Provenance, error) {
 		}
 	}
 	return p, nil
+}
+
+// mergeProvenance joins the provenances of a build's results into one. A
+// build for several platforms has one per platform, each numbering its
+// steps from step0 and mapping only that platform's vertices, so the steps
+// of every platform after the first get their own ids ("p1.step3"). A step
+// with the same identity as one of an earlier platform (a stage built for
+// the build platform, the build context) is the same operation, with the
+// same vertex: it keeps the earlier id. Dockerfile and request come from
+// the first.
+func mergeProvenance(ps []*Provenance) *Provenance {
+	if len(ps) == 1 {
+		return ps[0]
+	}
+	m := *ps[0]
+	m.Steps, m.DigestMapping, m.Identity = maps.Clone(m.Steps), maps.Clone(m.DigestMapping), maps.Clone(m.Identity)
+	m.Lines, m.Ranges, m.Usage = maps.Clone(m.Lines), maps.Clone(m.Ranges), maps.Clone(m.Usage)
+	byIdentity := map[string]string{}
+	for id, v := range m.Identity {
+		byIdentity[v] = id
+	}
+	for i, p := range ps[1:] {
+		ids := make(map[string]string, len(p.Steps))
+		for id := range p.Steps {
+			if same, ok := byIdentity[p.Identity[id]]; ok {
+				ids[id] = same
+			} else {
+				ids[id] = fmt.Sprintf("p%d.%s", i+1, id)
+			}
+		}
+		for id, s := range p.Steps {
+			to := ids[id]
+			if _, ok := m.Steps[to]; ok {
+				continue
+			}
+			inputs := make([]string, len(s.Inputs))
+			for j, in := range s.Inputs {
+				inputs[j] = ids[in]
+			}
+			m.Steps[to] = ProvStep{ID: to, Inputs: inputs, Op: s.Op}
+			m.Identity[to] = p.Identity[id]
+			byIdentity[p.Identity[id]] = to
+			if l, ok := p.Lines[id]; ok {
+				m.Lines[to] = l
+			}
+			if r, ok := p.Ranges[id]; ok {
+				m.Ranges[to] = r
+			}
+			if u, ok := p.Usage[id]; ok {
+				m.Usage[to] = u
+			}
+		}
+		for d, id := range p.DigestMapping {
+			if _, ok := m.DigestMapping[d]; !ok {
+				m.DigestMapping[d] = ids[id]
+			}
+		}
+	}
+	return &m
 }
 
 // identity is a hash of the step's operation and of its inputs' identities.
