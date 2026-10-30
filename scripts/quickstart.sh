@@ -20,7 +20,8 @@
 #                            console shows how long jobs waited for a runner
 #                            and decides "files or node" for rebuilds
 #   --version V              the release to install (default: this script's)
-#   --build-dir DIR          the build cache (default /var/lib/ci-accelerator/buildkit)
+#   --build-dir DIR          the build cache (default /var/lib/ci-accelerator/buildkit;
+#                            first install only: then values.yaml says where)
 #   --allow-docker           install next to Docker (its iptables rules can
 #                            break pod networking)
 #   --yes                    do not ask before installing
@@ -66,14 +67,14 @@ export KUBECONFIG
 CHART=${CI_ACCELERATOR_CHART:-}
 IMAGE_TAR=${CI_ACCELERATOR_IMAGE_TAR:-}
 
-gitlab_url="" runner_token_file="" gitlab_token_file="" allow_docker=0 yes=0 uninstall=0
+gitlab_url="" runner_token_file="" gitlab_token_file="" build_dir_set=0 allow_docker=0 yes=0 uninstall=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --gitlab-url) gitlab_url=${2:?}; shift 2 ;;
     --runner-token-file) runner_token_file=${2:?}; shift 2 ;;
     --gitlab-token-file) gitlab_token_file=${2:?}; shift 2 ;;
     --version) VERSION=${2:?}; shift 2 ;;
-    --build-dir) BUILD_DIR=${2:?}; shift 2 ;;
+    --build-dir) BUILD_DIR=${2:?}; build_dir_set=1; shift 2 ;;
     --allow-docker) allow_docker=1; shift ;;
     --yes) yes=1; shift ;;
     --uninstall) uninstall=1; shift ;;
@@ -85,6 +86,25 @@ done
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
+
+# values_cache_dir <values.yaml>: the build cache's hostPath there, or
+# nothing when the daemons keep their cache another way.
+values_cache_dir() {
+  awk '
+    /^[[:space:]]*(#|$)/ { next }
+    {
+      match($0, /^ */); ind = RLENGTH
+      key = substr($0, ind + 1); sub(/:.*/, "", key)
+      val = $0; sub(/^[^:]*:[[:space:]]*/, "", val); sub(/[[:space:]]+#.*$/, "", val)
+      gsub(/^["\047]|["\047]$/, "", val)
+      while (n > 0 && ind <= lvl[n]) n--
+      lvl[++n] = ind; k[n] = key
+      path = k[1]; for (i = 2; i <= n; i++) path = path "." k[i]
+      v[path] = val
+    }
+    END { if (v["buildkit.storage.type"] == "hostPath") print v["buildkit.storage.hostPath.path"] }
+  ' "$1"
+}
 
 [ "$(id -u)" = 0 ] || die "run it as root (sudo)"
 [ "$(uname -s)" = Linux ] || die "this is for Linux"
@@ -98,9 +118,13 @@ esac
 
 if [ "$uninstall" = 1 ]; then
   [ -x /usr/local/bin/k3s-uninstall.sh ] || [ -d "$STATE" ] || die "nothing to uninstall"
-  # The build cache may live outside $STATE (--build-dir); the install
-  # recorded where. Only an absolute path other than / is removed.
-  cache=$(cat "$STATE/build-dir" 2>/dev/null || echo "$BUILD_DIR")
+  # The build cache may live outside $STATE (--build-dir): where the
+  # daemons keep it is in values.yaml, else in the install's record (which
+  # earlier releases rewrote on every run, whatever values.yaml said). Only
+  # an absolute path other than / is removed.
+  cache=""
+  [ ! -f "$STATE/values.yaml" ] || cache=$(values_cache_dir "$STATE/values.yaml")
+  [ -n "$cache" ] || cache=$(cat "$STATE/build-dir" 2>/dev/null || echo "$BUILD_DIR")
   case "$cache" in /?*) ;; *) cache=$STATE/buildkit ;; esac
   if [ "$yes" = 0 ]; then
     [ -t 0 ] || die "not a terminal: pass --yes to remove without asking"
@@ -146,10 +170,31 @@ mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
 [ "$mem_kb" -ge $((3500 * 1024)) ] || die "at least 4 GB of memory is needed, 8 GB recommended"
 [ "$mem_kb" -ge $((7500 * 1024)) ] || warn "less than 8 GB of memory: builds may be slow or fail"
 [ "$(nproc)" -ge 2 ] || die "at least 2 CPUs are needed, 4 recommended"
-mkdir -p "$(dirname "$BUILD_DIR")"
-free_gb=$(df -Pk "$(dirname "$BUILD_DIR")" | awk 'NR == 2 {print int($4 / 1048576)}')
-[ "$free_gb" -ge 20 ] || die "at least 20 GB of free disk is needed under $(dirname "$BUILD_DIR"), 40 GB recommended"
-[ "$free_gb" -ge 40 ] || warn "less than 40 GB of free disk: the build cache has little room"
+# A second run keeps values.yaml, and the build cache stays where it says
+# (empty: not on a hostPath).
+rerun=0
+if [ -f "$STATE/values.yaml" ]; then
+  rerun=1
+  kept=$(values_cache_dir "$STATE/values.yaml")
+  if [ "$build_dir_set" = 1 ] && [ "${BUILD_DIR%/}" != "${kept%/}" ]; then
+    die "--build-dir $BUILD_DIR: $STATE/values.yaml, which a second run keeps, has the build cache ${kept:-not on a hostPath}${kept:+ (buildkit.storage.hostPath.path)}. To move it, change it there, move the directory and run this script again without --build-dir"
+  fi
+  BUILD_DIR=$kept
+fi
+disk_dir=$STATE
+if [ -n "$BUILD_DIR" ]; then
+  disk_dir=$(dirname "$BUILD_DIR")
+  mkdir -p "$disk_dir"
+fi
+free_gb=$(df -Pk "$disk_dir" | awk 'NR == 2 {print int($4 / 1048576)}')
+if [ "$rerun" = 1 ]; then
+  # The build cache itself fills the disk down to its garbage collector's
+  # free-space floor and makes room as builds need it.
+  [ "$free_gb" -ge 20 ] || warn "less than 20 GB of free disk under $disk_dir, part of it held by the build cache${BUILD_DIR:+ in $BUILD_DIR}, which frees room as builds need it"
+else
+  [ "$free_gb" -ge 20 ] || die "at least 20 GB of free disk is needed under $disk_dir, 40 GB recommended"
+  [ "$free_gb" -ge 40 ] || warn "less than 40 GB of free disk: the build cache has little room"
+fi
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
   warn "ufw is active: allow the pod and service networks, or pods cannot reach the API:"
   warn "  ufw allow from 10.42.0.0/16 to any && ufw allow from 10.43.0.0/16 to any"
@@ -179,7 +224,7 @@ This installs, on this machine:
   - Helm $HELM_VERSION (in $TOOLS)
   - cert-manager $CERT_MANAGER_VERSION
   - ci-accelerator $VERSION: build daemons, a GitLab runner for $gitlab_url
-    and the build console; the build cache in $BUILD_DIR
+    and the build console; the build cache in ${BUILD_DIR:-the storage set in $STATE/values.yaml}
 For trying it out, not for production. Remove it all with --uninstall.
 EOF
 if [ "$yes" = 0 ]; then
@@ -277,8 +322,10 @@ if [ -n "$gitlab_token" ]; then
   kubectl -n "$NS" create secret generic gitlab-api-token --from-file=token="$WORK/gitlab-token" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 fi
-mkdir -p "$BUILD_DIR" "$STATE"
-printf '%s\n' "$BUILD_DIR" >"$STATE/build-dir"
+if [ -n "$BUILD_DIR" ]; then
+  mkdir -p "$BUILD_DIR"
+  printf '%s\n' "$BUILD_DIR" >"$STATE/build-dir"
+fi
 
 if [ -z "$CHART" ]; then
   helm pull "$CHARTS/ci-accelerator" --version "$VERSION" -d "$WORK" >/dev/null
