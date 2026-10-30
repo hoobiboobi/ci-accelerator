@@ -147,6 +147,17 @@ tests:
       - failedTemplate: {errorPattern: "s3.server is a host"}
 
   # ---- tiers ----
+  # A tier's objects are <release>-runner-<tier>: "gitlab" and "caches"
+  # would be the box's own ConfigMaps a second time.
+  - it: refuses the tier names of the box's own ConfigMaps
+    set:
+      runnerTiers:
+        gitlab:
+          token: {existingSecret: runner-gitlab}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: 'names one of the box''s own ConfigMaps'}
   # A tier on any node runs jobs where no router (or daemon) runs: with
   # routing Local the Service has no endpoint on their node.
   - it: refuses a tier on any node with the routers' routing Local

@@ -64,6 +64,15 @@ tests:
       - matchRegex:
           path: data["config.template.toml"]
           pattern: '"BUILDKIT_REMOTE_ADDR=tcp://box-buildkit\.ci-accelerator\.svc:1234"'
+  # The runner's config is rendered in the runner chart, which cannot see
+  # the daemons' values: another port would leave every job unconnected.
+  - it: refuses another port for the daemons' Service without the router
+    template: validate.yaml
+    set:
+      global.router.enabled: false
+      buildkit.service.port: 443
+    asserts:
+      - failedTemplate: { errorPattern: "without the router the box's jobs reach the daemons' Service on port 1234" }
 
   - it: runs the router on the build nodes with the daemons' priority
     template: charts/control-plane/templates/router.yaml

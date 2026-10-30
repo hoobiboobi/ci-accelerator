@@ -119,6 +119,9 @@ subcharts must agree on.
 {{- if eq $jobs .Release.Namespace }}
 {{- fail (printf "global.jobs.namespace is the release namespace (%s). CI jobs run untrusted code: give them their own namespace, apart from the runner and the daemons." $jobs) }}
 {{- end }}
+{{- if and (ne (toString (dig "router" "enabled" false .Values.global)) "true") (ne (int (dig "buildkit" "service" "port" 1234 .Values.AsMap)) 1234) }}
+{{- fail "buildkit.service.port: without the router the box's jobs reach the daemons' Service on port 1234 (the runner's config is written for it); keep 1234" }}
+{{- end }}
 {{- if $runner.enabled }}
 {{- if not $runner.gitlabUrl }}
 {{- fail "gitlab-runner.gitlabUrl is required: the URL of your GitLab, e.g. https://gitlab.example.com/ (to use your own runner with integrations/gitlab-runner/values.yaml, set gitlab-runner.enabled=false and this to the URL it uses)." }}
@@ -274,5 +277,5 @@ at the tag v<chart version>): its integrity is the sha256 of that file, kept
 equal to it by the component's tests and the release check.
 */}}
 {{- define "ci-accelerator.componentIntegrity" -}}
-sha256-82NUzhQdIQ+kDE+rrRcqKl/3qfVvjpWjn5iYbfq5MMM=
+sha256-9msWU00cARLmnFwWBnthJYVcUJFJGPOwhcuC8ImWl1k=
 {{- end }}
