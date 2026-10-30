@@ -313,8 +313,31 @@ async function buildPage(s, pages) {
     await s.click("#drawer [data-dstep]", 900);
     check(`${b} panel moves to another step`, await s.visible("#drawer"));
   }
+  if (await s.eval(`innerWidth > 760`)) {
+    // The panel's left edge widens it; the width stays for the next panel.
+    await s.eval(`localStorage.removeItem("ci-accelerator-drawer-w")`);
+    const dw = () => s.eval(`Math.round(document.querySelector("#drawer").getBoundingClientRect().width)`);
+    const w0 = await dw();
+    const g = await s.eval(`(() => { const b = document.querySelector("#drawer .dgrip").getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()`);
+    await s.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: g[0], y: g[1] });
+    await s.send("Input.dispatchMouseEvent", { type: "mousePressed", x: g[0], y: g[1], button: "left", buttons: 1, clickCount: 1 });
+    for (const dx of [40, 80, 120]) await s.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: g[0] - dx, y: g[1], button: "left", buttons: 1 });
+    await s.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: g[0] - 120, y: g[1], button: "left", buttons: 0, clickCount: 1 });
+    await sleep(200);
+    const w1 = await dw();
+    check(`${b} dragging the panel's edge widens it`, Math.abs(w1 - w0 - 120) <= 3 && (await s.visible("#drawer")), `${w0} -> ${w1}`);
+    await s.key("Escape");
+    await s.click(sel, 900);
+    check(`${b} the next panel keeps the width`, Math.abs((await dw()) - w1) <= 1, `${await dw()} vs ${w1}`);
+    await s.eval(`document.querySelector("#drawer .dgrip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`);
+    await sleep(150);
+    check(`${b} double-click on the edge: back to the default width`, (await dw()) === w0 && (await s.eval(`localStorage.getItem("ci-accelerator-drawer-w") === null`)), `${await dw()}`);
+  }
   await s.key("Escape");
   check(`${b} Esc closes the panel`, !(await s.visible("#drawer")));
+  await s.click(sel, 900);
+  await s.click("h1", 300);
+  check(`${b} a click outside the panel closes it`, !(await s.visible("#drawer")));
   if (await s.eval(`!!document.querySelector('[data-act="toggleall"]')`)) {
     const rows = () => s.eval(`document.querySelectorAll("tr[data-of]:not([hidden])").length`);
     const a = await rows(); await s.key("e"); const c = await rows(); await s.key("e"); const d = await rows();

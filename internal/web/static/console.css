@@ -386,7 +386,12 @@ details.why ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 5px; c
 .pop .ft { font-size: 11px; color: var(--ink-3); }
 
 /* ---------- drawer ---------- */
-.drawer { position: fixed; z-index: 35; top: max(8px, env(safe-area-inset-top, 0px)); bottom: max(8px, env(safe-area-inset-bottom, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); width: min(480px, calc(100vw - 16px)); background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.drawer { position: fixed; z-index: 35; top: max(8px, env(safe-area-inset-top, 0px)); bottom: max(8px, env(safe-area-inset-bottom, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); width: min(var(--dw, 480px), calc(100vw - 16px)); background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.drawer .dgrip { position: absolute; top: 0; bottom: 0; left: 0; width: 8px; cursor: col-resize; z-index: 2; touch-action: none; }
+.drawer .dgrip::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 2px; width: 2px; border-radius: 1px; background: transparent; }
+.drawer .dgrip:hover::after, .drawer .dgrip:focus-visible::after, .drawer.resizing .dgrip::after { background: var(--focus); }
+.drawer .dgrip:focus-visible { outline: none; }
+.drawer.resizing { user-select: none; }
 .drh { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--raised); }
 .drh .kind { font-size: 11.5px; color: var(--ink-3); }
 .drh h2 { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; font-family: var(--mono); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -457,6 +462,7 @@ pre.logb { margin: 0; font-family: var(--mono); font-size: 11px; line-height: 1.
   .tools .lbl2 { display: none; }
 
   .drawer { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 86dvh; border-radius: 14px 14px 0 0; z-index: 36; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .drawer .dgrip { display: none; }
   .pop { display: none !important; }
 
 
