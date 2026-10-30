@@ -1058,9 +1058,14 @@ PY
     sleep 2
   done
   check "the live job succeeds" test "$state" = success
+  # The step's output is on the step's page (the build page links it).
   box_live_done() {
+    local step
     kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/$inst/$id" 2>/dev/null >"$page"
-    ! grep -q 'class="verdict live"' "$page" && grep -q 'class="dl step st-built' "$page" && grep -q 'live-line-60' "$page"
+    ! grep -q 'class="verdict live"' "$page" && grep -q 'class="dl step st-built' "$page" || return 1
+    step=$(grep -o 'href="/builds/[0-9]*/steps/[0-9]*"' "$page" | head -1 | cut -d'"' -f2)
+    [ -n "$step" ] && kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080$step" 2>/dev/null \
+      | grep -q 'live-line-60'
   }
   check "once BuildKit completes it, the job's page is the build's, with the step's whole output" eventually 90 box_live_done
 }
