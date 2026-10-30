@@ -247,3 +247,30 @@ func TestLiveBuildLimits(t *testing.T) {
 		t.Errorf("failed reading: %+v after %d tries", lb, g.statusCalls())
 	}
 }
+
+// A reading that failed is read again after a while; the watcher it
+// replaces is left unlocked, or a page still holding it would wait forever.
+func TestLiveBuildRetryUnlocksTheOldWatcher(t *testing.T) {
+	shortWatch(t)
+	d := &progressDaemon{err: errors.New("rpc error: code = Canceled desc = grpc: the client connection is closing")}
+	c := liveCollector()
+	c.live.connectSource("d1", d)
+	c.live.event("d1", controlapi.BuildHistoryEventType_STARTED, startedRec("r1", nil))
+	if _, err := c.LiveBuild(context.Background(), "d1", "r1"); err != nil {
+		t.Fatal(err)
+	}
+	old := c.watch.m["d1\x00r1"]
+	old.mu.Lock()
+	old.endedAt = old.endedAt.Add(-retryAfter - time.Second)
+	old.mu.Unlock()
+	if _, err := c.LiveBuild(context.Background(), "d1", "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if c.watch.m["d1\x00r1"] == old {
+		t.Fatal("the failed reading was not started again")
+	}
+	if !old.mu.TryLock() {
+		t.Fatal("the replaced watcher's mutex is still locked")
+	}
+	old.mu.Unlock()
+}

@@ -39,8 +39,8 @@ const maxTailLine = 400
 // A private key's first and last lines, when a step prints one line by
 // line.
 var (
-	keyBeginLine = regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----`)
-	keyEndLine   = regexp.MustCompile(`-----END [A-Z0-9 ]*PRIVATE KEY-----`)
+	keyBeginLine = regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----`)
+	keyEndLine   = regexp.MustCompile(`-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----`)
 )
 
 // The states of a running build's steps, beyond those of a completed one.
@@ -218,6 +218,37 @@ type tail struct {
 	partial []byte      // the line being printed
 	partAt  time.Time
 	inKey   bool // inside a private key block
+	cut     bool // the drawing being printed outgrew its bound
+}
+
+// add appends to the line being printed. A progress bar redraws its line
+// with \r: only its last whole drawing and the one being drawn are kept,
+// so a bar that redraws for minutes keeps showing its latest state. Each
+// drawing is kept to a bound: what a tail shows of a line that never ends
+// is its start, and a drawing that outgrew the bound shows, once whole,
+// as an ellipsis rather than as a piece that may hold part of a secret.
+func (t *tail) add(b []byte) {
+	for {
+		i := bytes.IndexByte(b, '\r')
+		seg := b
+		if i >= 0 {
+			seg = b[:i]
+		}
+		start := bytes.LastIndexByte(t.partial, '\r') + 1
+		if room := 4*maxTailLine - (len(t.partial) - start); len(seg) > room {
+			seg, t.cut = seg[:max(room, 0)], true
+		}
+		t.partial = append(t.partial, seg...)
+		if i < 0 {
+			return
+		}
+		cur := append([]byte(nil), t.partial[start:]...)
+		if t.cut {
+			cur = []byte("…")
+		}
+		t.partial, t.cut = append(append(t.partial[:0], cur...), '\r'), false
+		b = b[i+1:]
+	}
 }
 
 type tailEntry struct {
@@ -232,21 +263,15 @@ func (t *tail) write(p []byte, at time.Time, args map[string]string) {
 			if len(t.partial) == 0 {
 				t.partAt = at
 			}
-			// A line that never ends is kept to a bound: what a tail shows
-			// of it is its start.
-			if room := 4*maxTailLine - len(t.partial); room > 0 {
-				t.partial = append(t.partial, p[:min(len(p), room)]...)
-			}
+			t.add(p)
 			return
 		}
 		if len(t.partial) == 0 {
 			t.partAt = at
 		}
-		if room := 4*maxTailLine - len(t.partial); room > 0 {
-			t.partial = append(t.partial, p[:min(i, room)]...)
-		}
+		t.add(p[:i])
 		t.line(string(t.partial), t.partAt, args)
-		t.partial = t.partial[:0]
+		t.partial, t.cut = t.partial[:0], false
 		p = p[i+1:]
 	}
 }

@@ -58,3 +58,27 @@ func loadRecords(t *testing.T) []*Build {
 	sort.Slice(out, func(i, j int) bool { return out[i].Started.Before(out[j].Started) })
 	return out
 }
+
+// A step that turns out to be received from another job when the builds
+// are linked carries no CPU or memory: they are the other build's (the
+// step's drawer and figures would show another job's usage, divided by
+// this build's wait).
+func TestLinkedStepsCarryNoUsage(t *testing.T) {
+	builds := loadRecords(t)
+	Link(builds)
+	n := 0
+	for _, b := range builds {
+		for _, s := range b.Steps {
+			if s.State != Received {
+				continue
+			}
+			n++
+			if s.Usage != (Usage{}) {
+				t.Errorf("job %d %s: received from %s with usage %+v", b.Attribution.Job, s.Key, s.ReceivedFrom, s.Usage)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("the fixtures have no received step")
+	}
+}
