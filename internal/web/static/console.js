@@ -34,9 +34,8 @@
   function toggleTheme() {
     const next = root.dataset.theme === "light" ? "dark" : "light";
     root.dataset.theme = next;
-    // Back to the system's theme: follow the system again.
-    // (the system's theme as theme.js picks it: light only when asked for)
-    if (next === (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")) store.del("theme");
+    // Back to the default (dark, as theme.js picks it): nothing to remember.
+    if (next === "dark") store.del("theme");
     else store.set("theme", next);
     toast(next === "dark" ? "Dark theme" : "Light theme");
   }
@@ -814,7 +813,7 @@
     if (typing || ev.metaKey || ev.ctrlKey || ev.altKey) return;
     if (gPressed && Date.now() - gPressed < 1200) {
       gPressed = 0;
-      const to = { o: "/", p: "/pipelines", b: "/builds", i: "/images", n: "/nodes" }[ev.key];
+      const to = { p: "/", s: "/insights", b: "/builds", i: "/images", n: "/nodes" }[ev.key];
       if (to) { location.href = to; return; }
     }
     switch (ev.key) {

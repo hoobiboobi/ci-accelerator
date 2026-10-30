@@ -16,7 +16,7 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
-// The overview, the build list and the images pages: what a project's
+// The insights, the build list and the images pages: what a project's
 // image builds came down to, the exceptions first.
 
 // statsFor is how far back a project's figures (usual times, the images'
@@ -744,10 +744,10 @@ func imageKey(t string) string {
 
 func percentile(ds []time.Duration, p int) time.Duration { return store.Percentile(ds, p) }
 
-// ---- the overview ----
+// ---- the insights ----
 
-// OverviewView is what needs attention in a project now.
-type OverviewView struct {
+// InsightsView is what needs attention in a project now.
+type InsightsView struct {
 	Shell
 	Window      string // 24h or 7d
 	WindowLabel string
@@ -769,16 +769,16 @@ func windowOf(r *http.Request) (string, time.Duration, string) {
 	return "24h", 24 * time.Hour, "the last 24 hours"
 }
 
-func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
+func (s *Server) insights(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	sh, err := s.projectPage(r, "overview")
+	sh, err := s.projectPage(r, "insights")
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.settleLater(r, sh.Project.ProjectKey)
-	sh.Title = "Overview"
-	v := &OverviewView{}
+	sh.Title = "Insights"
+	v := &InsightsView{}
 	var span time.Duration
 	v.Window, span, v.WindowLabel = windowOf(r)
 	st, err := s.recent(ctx, sh.Project.ProjectKey)
@@ -822,7 +822,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		v.Reasons, v.MoreReasons = all[:6], fmt.Sprintf("%d more reasons", len(all)-6)
 	}
 	v.Shell = sh
-	s.render(w, "overview", http.StatusOK, v)
+	s.render(w, "insights", http.StatusOK, v)
 }
 
 // ---- images ----

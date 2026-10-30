@@ -1,8 +1,8 @@
-{{define "overview"}}{{template "layout" .}}{{end}}
+{{define "insights"}}{{template "layout" .}}{{end}}
 {{define "content"}}
 <div class="page">
   <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div>
-    <div class="titlerow"><h1 class="t" tabindex="-1">Overview</h1>
+    <div class="titlerow"><h1 class="t" tabindex="-1">Insights</h1>
       <nav class="seg" aria-label="Window"><a href="/" {{if eq .Window "24h"}}aria-current="true"{{end}}>24 hours</a><a href="/?window=7d" {{if eq .Window "7d"}}aria-current="true"{{end}}>7 days</a></nav></div></header>
   {{if and .NoProjects .Unanswered}}
   <div class="callout neutral">{{icon "info" 16}}<div><b class="k">GitLab did not answer which projects you can read</b>GitLab is down or is limiting your requests. Your projects show again once it answers.</div></div>

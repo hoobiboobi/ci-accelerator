@@ -87,7 +87,7 @@ const MaxLogReads = 4
 
 // The templates of each page besides the layout and the shared parts.
 var pageFiles = map[string][]string{
-	"overview":  nil,
+	"insights":  nil,
 	"builds":    nil,
 	"pipelines": nil,
 	"images":    nil,
@@ -156,8 +156,10 @@ func parsePages(src fs.FS) (map[string]*template.Template, map[string]string, er
 func (s *Server) Register(mux *http.ServeMux) {
 	static, _ := fs.Sub(s.files, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheFor(http.FileServerFS(static))))
-	mux.HandleFunc("GET /{$}", s.overview)
+	// Pipelines are the console's home page; /pipelines stays its address too.
+	mux.HandleFunc("GET /{$}", s.pipelines)
 	mux.HandleFunc("GET /pipelines", s.pipelines)
+	mux.HandleFunc("GET /insights", s.insights)
 	mux.HandleFunc("GET /builds", s.builds)
 	mux.HandleFunc("GET /images", s.images)
 	mux.HandleFunc("GET /images/{target}", s.image)
@@ -265,7 +267,7 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 
 // Shell is what every page's frame needs.
 type Shell struct {
-	Nav string // overview, builds, images, nodes
+	Nav string // pipelines, insights, builds, images, nodes
 	// Live is what changes update the page: a pipeline key, "project:" and
 	// a project key, or "". A page on a project only says that something
 	// is new (Notify); a pipeline's page updates itself.
@@ -375,7 +377,7 @@ func pinProject(sh *Shell, instance string, project uint64) {
 	}
 }
 
-var pagesOf = map[string]bool{"/": true, "/pipelines": true, "/builds": true, "/images": true, "/nodes": true}
+var pagesOf = map[string]bool{"/": true, "/pipelines": true, "/insights": true, "/builds": true, "/images": true, "/nodes": true}
 
 // imagePath is an image's page, the one other place switching the project
 // may lead to (an image's address holds no project).
@@ -384,7 +386,7 @@ var imagePath = regexp.MustCompile(`^/images/[A-Za-z0-9._~%-]+$`)
 // navPage is the address of a section, for the project switcher to stay in it.
 func navPage(nav string) string {
 	switch nav {
-	case "pipelines", "builds", "images", "nodes":
+	case "pipelines", "insights", "builds", "images", "nodes":
 		return "/" + nav
 	}
 	return ""

@@ -4,6 +4,6 @@
   <div><div class="titlerow"><h1 class="t">Not found</h1></div><div class="sub">{{if .Hint}}{{.Hint}}{{else if .Elsewhere}}This {{.What}} is not in {{with .Project}}{{.Path}}{{end}}; it is built in:{{else}}No {{.What}} with this address is stored here.{{end}}</div></div>
   {{with .Links}}<ul class="plain">{{range .}}<li><a class="link" href="{{.Value}}">{{.Label}}</a></li>{{end}}</ul>{{end}}
   {{with .Elsewhere}}<ul class="plain">{{range .}}<li><a class="link" href="{{.Value}}">{{.Label}}</a></li>{{end}}</ul>{{end}}
-  <p><a class="link" href="/">Overview</a></p>
+  <p><a class="link" href="/">Pipelines</a></p>
 </div>
 {{end}}

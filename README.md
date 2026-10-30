@@ -126,14 +126,14 @@ out takes the router with it: set `control-plane.enabled=false` and
 `global.router.enabled=false`, and the jobs connect to the daemons'
 Service (their own node's daemon). Five sections:
 
-- **Overview:** why images were rebuilt, the reasons ranked by the build
+- **Pipelines** (the home page): each pipeline's jobs by stage on a time
+  axis, with how long each waited for a runner and ran, searchable by
+  pipeline number, commit, title, branch, author or job name within a
+  period (24 hours, 7 or 30 days, or dates). A pipeline opens into a
+  waterfall of every job, and its image builds into stages and steps.
+- **Insights:** why images were rebuilt, the reasons ranked by the build
   time they cost, with the build farm's share of the rebuild time and,
   apart, the unclear share.
-- **Pipelines:** each pipeline's jobs by stage on a time axis, with how
-  long each waited for a runner and ran, searchable by pipeline number,
-  commit, title, branch, author or job name within a period (24 hours, 7
-  or 30 days, or dates). A pipeline opens into a waterfall of every job,
-  and its image builds into stages and steps.
 - **Builds:** every image build, filtered by branch, outcome, image or
   your own, and grouped by pipeline if you like.
 - **Images:** cache rate and build time per image over 24 hours or 7

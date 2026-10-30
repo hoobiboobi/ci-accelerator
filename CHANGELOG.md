@@ -9,7 +9,21 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.3.6, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the daemons, their disk probe and
+  the runner stay as they are.
+- The console's home page (`/`) is now Pipelines; the page that was
+  Overview is Insights, at `/insights` (keys `g s`). Links to `/pipelines`
+  keep working.
+
+### Changed
+
+- The console opens on Pipelines, the page most visits start from. The
+  former Overview (why images were rebuilt, by the build time it cost) is
+  called Insights and comes second in the menu.
+- The console opens in its dark theme, as the project's site does, until
+  the viewer picks the light one (`t` or the sidebar); it no longer follows
+  the system's colour scheme. A light theme picked earlier is kept.
 
 ## 0.3.6 - 2026-10-30
 

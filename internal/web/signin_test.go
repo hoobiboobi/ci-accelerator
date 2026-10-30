@@ -265,7 +265,7 @@ func TestSignedInSeesWhatGitLabAllows(t *testing.T) {
 	orphan := fmt.Sprintf("/builds/%d", none[0])
 	paths := []string{"/pipelines/" + key, "/jobs/" + inst + "/6003", build, build + "/steps/0", "/projects/" + inst + "/42", "/images/api"}
 
-	home := fetch(t, alice, ts, "GET", "/", nil)
+	home := fetch(t, alice, ts, "GET", "/insights", nil)
 	home.safe(t)
 	if home.status != 200 || !strings.Contains(home.body, "@alice") || !strings.Contains(home.body, `action="/auth/sign-out"`) ||
 		!strings.Contains(home.body, `class="rrow"`) || strings.Contains(home.body, "Sign-in is off") {
@@ -311,7 +311,7 @@ func TestSignedInSeesWhatGitLabAllows(t *testing.T) {
 
 	// bob may read nothing: every page of the project is "not found", the
 	// list and search are empty, and the home page says why.
-	bh := fetch(t, bob, ts, "GET", "/", nil)
+	bh := fetch(t, bob, ts, "GET", "/insights", nil)
 	bh.safe(t)
 	if bh.status != 200 || !strings.Contains(bh.body, "No project you can read builds here") || strings.Contains(bh.body, "/images/api") ||
 		strings.Contains(bh.body, "example/") || strings.Contains(bh.body, "fix &lt;") {
@@ -422,14 +422,14 @@ func TestTraceNamingAJobOfAnotherProject(t *testing.T) {
 func TestNoAnswerIsNotNoProjects(t *testing.T) {
 	ts, _, _, g, browser := signedIn(t)
 	alice, bob := browser("alice"), browser("bob")
-	if p := fetch(t, bob, ts, "GET", "/", nil); !strings.Contains(p.body, "No project you can read builds here") ||
+	if p := fetch(t, bob, ts, "GET", "/insights", nil); !strings.Contains(p.body, "No project you can read builds here") ||
 		strings.Contains(p.body, "GitLab did not answer") {
 		t.Error("bob may read none: the home page no longer says so")
 	}
 	g.mu.Lock()
 	g.down = true
 	g.mu.Unlock()
-	p := fetch(t, alice, ts, "GET", "/", nil)
+	p := fetch(t, alice, ts, "GET", "/insights", nil)
 	if p.status != 200 || strings.Contains(p.body, "No project you can read builds here") ||
 		!strings.Contains(p.body, "GitLab did not answer which projects you can read") || strings.Contains(p.body, "example/") {
 		t.Errorf("alice's home while GitLab does not answer: %d", p.status)
