@@ -138,3 +138,27 @@ tests:
       control-plane.enabled: false
     asserts:
       - notFailedTemplate: {}
+  # The runners' address, the daemons' NetworkPolicy and their certificate
+  # follow global.router.enabled: the control plane's own switch must agree.
+  - it: refuses the router switched off in the control plane only
+    template: validate.yaml
+    set:
+      control-plane.router.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: 'control-plane.router.enabled must be left unset or equal global.router.enabled'
+  - it: refuses the router switched on in the control plane only
+    template: validate.yaml
+    set:
+      global.router.enabled: false
+      control-plane.router.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: 'control-plane.router.enabled must be left unset or equal global.router.enabled'
+  - it: accepts both router switches off
+    template: validate.yaml
+    set:
+      global.router.enabled: false
+      control-plane.router.enabled: false
+    asserts:
+      - notFailedTemplate: {}

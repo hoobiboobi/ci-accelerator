@@ -46,17 +46,24 @@ tests:
       - contains: { path: "spec.template.spec.containers[0].args", content: -server-name=c-buildkit.ci-accelerator.svc }
       - contains: { path: "spec.template.spec.containers[0].args", content: -jobs-namespace=ci-accelerator-jobs }
 
+  # Mounted, not an environment variable: the controller notices a new
+  # URL in the file and starts again, which nothing in the pod template
+  # would make it do.
   - it: reads the GitLab URLs from a ConfigMap when told
     set:
       gitlab.urls: []
       gitlab.urlsFrom.configMap: '{{ .Release.Name }}-gitlab'
+      gitlab.urlsFrom.key: list
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].env
-          value:
-            - name: GITLAB_URLS
-              valueFrom: { configMapKeyRef: { name: c-gitlab, key: urls } }
+      - notExists: { path: "spec.template.spec.containers[0].env" }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-gitlab-urls-file=/gitlab-urls/urls" }
       - notContains: { path: "spec.template.spec.containers[0].args", content: -gitlab-url=https://gitlab.example.com/ }
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: { name: gitlab-urls, mountPath: /gitlab-urls, readOnly: true }
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: gitlab-urls, configMap: { name: c-gitlab, items: [{ key: list, path: urls }] } }
 
   # The token only to watch job pods.
   # The controller checks the web's tokens with Kubernetes (TokenReview).

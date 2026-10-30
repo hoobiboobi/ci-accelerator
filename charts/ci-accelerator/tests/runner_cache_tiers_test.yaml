@@ -70,6 +70,56 @@ tests:
           path: data["config.template.toml"]
           pattern: 'Path = "shared/ci"[\s\S]*Insecure = true\n      PathStyle = true'
 
+  # false is a value: the runner and the controller use path style on
+  # every server but AWS when it is left out.
+  - it: keeps path style off when told
+    set:
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        s3: {server: oss.example.com, bucket: ci-cache, region: eu-1, pathStyle: false}
+    template: charts/gitlab-runner/templates/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'Insecure = false\n      PathStyle = false'
+  - it: takes path style as a string too
+    set:
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        s3: {server: oss.example.com, bucket: ci-cache, region: eu-1, pathStyle: "false"}
+    template: charts/gitlab-runner/templates/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.template.toml"]
+          pattern: 'Insecure = false\n      PathStyle = false'
+  - it: keeps a tier's path style off when told
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+          cache:
+            secretName: runner-cache
+            s3: {server: oss.example.com, bucket: ci-cache, region: eu-1, pathStyle: false}
+    template: runner-tiers.yaml
+    documentSelector: {path: kind, value: ConfigMap}
+    asserts:
+      - matchRegex:
+          path: data["config.toml"]
+          pattern: 'Insecure = false\n      PathStyle = false'
+  - it: tells the controller path style is off
+    set:
+      control-plane.enabled: true
+      gitlab-runner.runners.cache:
+        secretName: runner-cache
+        s3: {server: oss.example.com, bucket: ci-cache, region: eu-1, pathStyle: false}
+    template: runner-caches.yaml
+    documentIndex: 0
+    asserts:
+      - matchRegex:
+          path: data["caches.json"]
+          pattern: '"pathStyle":false'
+
   - it: refuses an incomplete S3 cache
     set:
       gitlab-runner.runners.cache:
@@ -97,6 +147,51 @@ tests:
       - failedTemplate: {errorPattern: "s3.server is a host"}
 
   # ---- tiers ----
+  # A tier on any node runs jobs where no router (or daemon) runs: with
+  # routing Local the Service has no endpoint on their node.
+  - it: refuses a tier on any node with the routers' routing Local
+    set:
+      control-plane.router.routing: Local
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: 'runnerTiers.deploy.nodes is any, but control-plane.router.routing is Local'}
+  - it: refuses a tier on any node with the daemons' routing Local and no router
+    set:
+      global.router.enabled: false
+      buildkit.service.routing: Local
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: validate.yaml
+    asserts:
+      - failedTemplate: {errorPattern: 'runnerTiers.deploy.nodes is any, but buildkit.service.routing is Local'}
+  - it: accepts a tier on the build nodes with routing Local
+    set:
+      control-plane.router.routing: Local
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+          nodes: build
+    template: validate.yaml
+    asserts:
+      - notFailedTemplate: {}
+  - it: accepts a tier on any node with the routers' PreferSameNode, whatever the daemons'
+    set:
+      buildkit.service.routing: Local
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+    template: validate.yaml
+    asserts:
+      - notFailedTemplate: {}
+
   - it: renders no tier by default
     template: runner-tiers.yaml
     asserts:

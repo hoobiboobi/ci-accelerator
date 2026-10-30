@@ -63,6 +63,9 @@ preflight:
 jobsNamespace:
   # -- false: the namespace exists already (or GitOps creates it); it needs
   # the client certificate (issued here) and Pod Security "baseline".
+  # Switching an installed release to false deletes the namespace it
+  # created, unless it is annotated helm.sh/resource-policy=keep first (the
+  # chart refuses the upgrade until then).
   create: true
   # -- Pod Security level enforced for the job pods.
   podSecurity: baseline
@@ -96,7 +99,9 @@ buildkit:
     enabled: true
 
 # The official gitlab-runner chart. Set enabled=false to keep your own
-# runner and use integrations/gitlab-runner/values.yaml with it instead.
+# runner and use integrations/gitlab-runner/values.yaml with it instead;
+# gitlabUrl is still required then (the URL your runner uses), while the
+# control plane is on.
 gitlab-runner:
   enabled: true
   # 19.4.0 (the chart's default) lists pod events on every poll and
@@ -230,6 +235,6 @@ control-plane:
   #     sessionKey: { existingSecret: console-session }
   #     gitlab:
   #       - existingSecret: console-gitlab-oauth   # client-id, client-secret
-  #         admins: [alice]
+  #         admins: ["id:1234567"]               # GitLab user ids
   signIn:
     enabled: false

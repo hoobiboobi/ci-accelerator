@@ -167,7 +167,7 @@ exec:
 OpenTelemetry environment of the daemon. buildkitd reads its exporters from
 the environment only. Resource attributes name the daemon on every metric
 and span; the probes start buildctl with an empty environment, so none of
-this reaches them. extraEnv comes after this and can override it.
+this reaches them. extraEnv can replace any of it (buildkit.env).
 */}}
 {{- define "buildkit.otelEnv" -}}
 {{- $o := .Values.otel }}
@@ -199,6 +199,31 @@ this reaches them. extraEnv comes after this and can override it.
 - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
   value: {{ $o.protocol | quote }}
 {{- end }}
+{{- end }}
+
+{{/*
+The daemon's environment: the chart's variables, then extraEnv. An extraEnv
+entry named like one of the chart's takes its place (and its position, for
+the $(VAR) references after it): the API keys env by name, and server-side
+apply refuses a name given twice.
+*/}}
+{{- define "buildkit.env" -}}
+{{- $user := dict }}
+{{- range .Values.extraEnv }}{{ $_ := set $user (toString .name) . }}{{ end }}
+{{- $env := list }}
+{{- $replaced := dict }}
+{{- range (include "buildkit.otelEnv" . | fromYamlArray) }}
+{{- if hasKey $user .name }}
+{{- $env = append $env (get $user .name) }}
+{{- $_ := set $replaced .name true }}
+{{- else }}
+{{- $env = append $env . }}
+{{- end }}
+{{- end }}
+{{- range .Values.extraEnv }}
+{{- if not (hasKey $replaced (toString .name)) }}{{ $env = append $env . }}{{ end }}
+{{- end }}
+{{- toYaml $env }}
 {{- end }}
 
 {{/*

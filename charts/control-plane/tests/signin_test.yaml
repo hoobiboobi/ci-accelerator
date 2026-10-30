@@ -15,7 +15,7 @@ set:
     gitlab:
       - url: "https://gitlab.example.com/"
         existingSecret: console-oauth
-        admins: [alice]
+        admins: ["id:7"]
 tests:
   - it: is off by default and adds nothing to the pod
     set:
@@ -32,7 +32,7 @@ tests:
     asserts:
       - equal:
           path: data["sign-in.json"]
-          value: '{"gitlab":[{"admins":["alice"],"clientIdFile":"/sign-in/gitlab-0/client-id","secretFile":"/sign-in/gitlab-0/client-secret","url":"https://gitlab.example.com/"}],"sessionKeyFile":"/sign-in/key/key","url":"https://ci.example.com"}'
+          value: '{"gitlab":[{"admins":["id:7"],"clientIdFile":"/sign-in/gitlab-0/client-id","secretFile":"/sign-in/gitlab-0/client-secret","url":"https://gitlab.example.com/"}],"sessionKeyFile":"/sign-in/key/key","url":"https://ci.example.com"}'
   - it: mounts the session key and each OAuth application, and passes the file
     template: controller.yaml
     asserts:
@@ -51,13 +51,32 @@ tests:
   - it: names the sign-in file's content on the pod (the controller reads it at start)
     template: controller.yaml
     asserts:
-      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/sign-in-checksum"]', value: b74e07231eaf304b }
+      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/sign-in-checksum"]', value: b4baa9fdead46d71 }
   - it: restarts the controller when the admins change
     template: controller.yaml
     set:
-      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: console-oauth, admins: [alice, bob] }]
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: console-oauth, admins: ["id:7", "id:8"] }]
     asserts:
-      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/sign-in-checksum"]', value: e628f22fcf6d27e2 }
+      - equal: { path: 'spec.template.metadata.annotations["ci-accelerator.io/sign-in-checksum"]', value: b04fcabfae23a0a2 }
+  - it: takes admins by GitLab user id
+    template: signin-configmap.yaml
+    set:
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: console-oauth, admins: ["id:123", "id:7"] }]
+    asserts:
+      - matchRegex: { path: 'data["sign-in.json"]', pattern: '"admins":\["id:123","id:7"\]' }
+  - it: refuses an admin id that is not a number (the schema)
+    template: signin-configmap.yaml
+    set:
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: console-oauth, admins: ["id:alice"] }]
+    asserts:
+      - failedTemplate: {}
+  # GitLab gives a freed username to the next account that takes it.
+  - it: refuses an admin named by username (the schema)
+    template: signin-configmap.yaml
+    set:
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: console-oauth, admins: [alice] }]
+    asserts:
+      - failedTemplate: {}
   - it: takes the console's address from global.console.url
     template: signin-configmap.yaml
     set:

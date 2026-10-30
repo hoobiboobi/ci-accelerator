@@ -228,11 +228,53 @@ tests:
       - failedTemplate:
           errorPattern: 'gitlab-runner.runners.secret is required: .*kubectl -n ci-accelerator create secret generic gitlab-runner-token --from-literal=runner-token=glrt-'
 
-  - it: needs neither without its own runner
+  - it: needs neither without its own runner and the control plane
     template: validate.yaml
     set:
       gitlab-runner.enabled: false
       gitlab-runner.gitlabUrl: ""
+      gitlab-runner.runners.secret: ""
+      control-plane.enabled: false
+      global.router.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  # The controller and the router tell jobs by a hash of the runner's URL
+  # and do not start without one.
+  - it: needs the GitLab URL of your own runner for the control plane
+    template: validate.yaml
+    set:
+      gitlab-runner.enabled: false
+      gitlab-runner.gitlabUrl: ""
+      gitlab-runner.runners.secret: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: 'gitlab-runner.gitlabUrl is required while the control plane is on, also with gitlab-runner.enabled=false'
+  # The URLs may come from a ConfigMap of your own instead.
+  - it: takes the GitLab URL of your own runner from your own ConfigMap
+    template: validate.yaml
+    set:
+      gitlab-runner.enabled: false
+      gitlab-runner.gitlabUrl: ""
+      gitlab-runner.runners.secret: ""
+      control-plane.gitlab.urlsFrom.configMap: my-gitlab-urls
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: needs the GitLab URL when the control plane reads the box's ConfigMap
+    template: validate.yaml
+    set:
+      gitlab-runner.enabled: false
+      gitlab-runner.gitlabUrl: ""
+      gitlab-runner.runners.secret: ""
+      control-plane.gitlab.urlsFrom.configMap: box-runner-gitlab
+    asserts:
+      - failedTemplate:
+          errorPattern: 'gitlab-runner.gitlabUrl is required while the control plane is on'
+  - it: takes the GitLab URL of your own runner without its token
+    template: validate.yaml
+    set:
+      gitlab-runner.enabled: false
       gitlab-runner.runners.secret: ""
     asserts:
       - hasDocuments:

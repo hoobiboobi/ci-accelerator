@@ -1,5 +1,6 @@
 {{- include "buildkit.validate" . }}
 {{- include "buildkit.preflight" . }}
+{{- include "buildkit.priorityClassGuard" . }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -86,10 +87,7 @@ spec:
               containerPort: 1234
               protocol: TCP
           env:
-            {{- include "buildkit.otelEnv" . | trim | nindent 12 }}
-            {{- with .Values.extraEnv }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
+            {{- include "buildkit.env" . | trim | nindent 12 }}
           {{- with .Values.preStopSleepSeconds }}
           lifecycle:
             # Keep accepting connections while the endpoint is withdrawn;

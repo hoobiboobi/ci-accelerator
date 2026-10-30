@@ -55,3 +55,24 @@ installer may not read the objects (Forbidden): switch the check off then.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+Kubernetes refuses to change either field of an existing PriorityClass, and
+its error does not say the way out. Only on upgrade: the class belongs to the
+release and goes with it on uninstall, so an install never finds one, and a
+namespace-scoped installer (who may not read cluster-scoped objects, so the
+lookup fails on Forbidden) still gets the preflights' messages. Included
+after buildkit.preflight for the same reason. lookup is empty offline.
+*/}}
+{{- define "buildkit.priorityClassGuard" -}}
+{{- if and .Release.IsUpgrade (not .Values.priorityClassName) (dig "create" true (.Values.priorityClass | default dict)) }}
+{{- $name := include "buildkit.priorityClassName" . }}
+{{- $value := int64 (dig "value" 1000000 (.Values.priorityClass | default dict)) }}
+{{- $policy := dig "preemptionPolicy" "Never" (.Values.priorityClass | default dict) }}
+{{- with lookup "scheduling.k8s.io/v1" "PriorityClass" "" $name }}
+{{- if or (ne (int64 .value) $value) (ne (toString (default "PreemptLowerPriority" .preemptionPolicy)) (toString $policy)) }}
+{{- fail (printf "priorityClass.value and priorityClass.preemptionPolicy cannot change on the existing PriorityClass %s (value %d, %s): Kubernetes refuses it. Keep the old settings, or delete the class and upgrade again: kubectl delete priorityclass %s (running daemon pods keep their priority until they restart)." $name (int64 .value) (toString (default "PreemptLowerPriority" .preemptionPolicy)) $name) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

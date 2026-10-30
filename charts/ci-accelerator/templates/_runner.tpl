@@ -110,8 +110,10 @@ certificate, trace context, job data and placement rules. A dict:
       BucketName = {{ toString $s3.bucket | quote }}
       BucketLocation = {{ toString $s3.region | quote }}
       Insecure = {{ default false $s3.insecure }}
-      {{- if ne (toString (default "" $s3.pathStyle)) "" }}
-      PathStyle = {{ $s3.pathStyle }}
+      {{- /* Not default: it takes false for "not set", and an unset
+      PathStyle means path style on every server but AWS. */}}
+      {{- if not (has (toString $s3.pathStyle) (list "" "<nil>")) }}
+      PathStyle = {{ eq (toString $s3.pathStyle) "true" }}
       {{- end }}
 {{- end }}
 {{ printf "" }}
@@ -192,6 +194,14 @@ Render-time checks of the tiers.
 */}}
 {{- define "ci-accelerator.checkTiers" -}}
 {{- $runner := index .Values "gitlab-runner" }}
+{{- /* The Service the jobs dial: the routers' or, without them, the
+daemons'. Both run only on the build nodes. */}}
+{{- $routingKey := "control-plane.router.routing" }}
+{{- $routing := dig "control-plane" "router" "routing" "PreferSameNode" .Values.AsMap }}
+{{- if ne (toString (dig "router" "enabled" false .Values.global)) "true" }}
+{{- $routingKey = "buildkit.service.routing" }}
+{{- $routing = dig "buildkit" "service" "routing" "PreferSameNode" .Values.AsMap }}
+{{- end }}
 {{- range $name, $tier := (default (dict) .Values.runnerTiers) }}
 {{- $tier = default (dict) $tier }}
 {{- if not (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" $name) }}
@@ -215,6 +225,9 @@ Render-time checks of the tiers.
 {{- end }}
 {{- if not (has (default "any" $tier.nodes) (list "any" "build")) }}
 {{- fail (printf "runnerTiers.%s.nodes must be any (any node of the jobs' architecture) or build (the build nodes, next to a daemon), got %q" $name (toString $tier.nodes)) }}
+{{- end }}
+{{- if and (ne (default "any" $tier.nodes) "build") $.Values.global.buildNodes.enabled (eq (toString $routing) "Local") }}
+{{- fail (printf "runnerTiers.%s.nodes is any, but %s is Local: the tier's jobs run on nodes without a router or daemon, where that Service has no endpoint, so they cannot connect. Use routing PreferSameNode or Cluster, or nodes: build." $name $routingKey) }}
 {{- end }}
 {{- if and $tier.concurrent (lt (int $tier.concurrent) 1) }}
 {{- fail (printf "runnerTiers.%s.concurrent must be at least 1" $name) }}

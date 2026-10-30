@@ -103,9 +103,18 @@ by digest: another tag with it would still run the appVersion image. */}}
 {{- $budget := mulf $limit 0.8 }}
 {{- $caps := list }}
 {{- if $v.config.gcPolicy }}
+{{- $capped := false }}
 {{- range $i, $p := $v.config.gcPolicy }}
 {{- $caps = append $caps (dict "name" (printf "config.gcPolicy[%d].maxUsedSpace" $i) "value" $p.maxUsedSpace) }}
 {{- $caps = append $caps (dict "name" (printf "config.gcPolicy[%d].reservedSpace" $i) "value" $p.reservedSpace) }}
+{{- /* Only a policy without filters can keep the whole cache under its
+       cap: a filtered one removes only the records it matches. */}}
+{{- if and (not $p.filters) (not (include "buildkit.isZeroSize" $p.maxUsedSpace)) }}
+{{- $capped = true }}
+{{- end }}
+{{- end }}
+{{- if not $capped }}
+{{- fail (printf "storage.emptyDir.sizeLimit is %s: one config.gcPolicy entry without filters needs an absolute maxUsedSpace of at most 80%% of it (e.g. \"%dGB\"); otherwise the cache outgrows the limit and the pod is evicted." $v.storage.emptyDir.sizeLimit (int64 (divf $budget 1024))) }}
 {{- end }}
 {{- else }}
 {{- $caps = list (dict "name" "config.gc.maxUsedSpace" "value" $gc.maxUsedSpace) (dict "name" "config.gc.reservedSpace" "value" $gc.reservedSpace) (dict "name" "config.gc.cacheMounts.maxUsedSpace" "value" $gc.cacheMounts.maxUsedSpace) }}
@@ -157,6 +166,12 @@ by digest: another tag with it would still run the appVersion image. */}}
 {{- end }}
 {{- if has $k (list "enabled" "gc" "max-parallelism" "gcpolicy") }}
 {{- fail (printf "config.workerOCI.%s: the chart sets this [worker.oci] key itself%s." $k (ternary " (use config.maxParallelism)" (ternary " (use config.gcPolicy)" "" (eq $k "gcpolicy")) (eq $k "max-parallelism"))) }}
+{{- end }}
+{{- /* buildkitd reads these only to make its default policies when none
+       is configured, and the chart always renders its own (keys match
+       without regard to case). */}}
+{{- if has (lower $k) (list "reservedspace" "maxusedspace" "minfreespace" "gckeepstorage") }}
+{{- fail (printf "config.workerOCI.%s: buildkitd ignores worker-level GC caps when GC policies exist, and the chart always renders them: use config.gc.reservedSpace, maxUsedSpace and minFreeSpace (applied to every capped policy) or config.gcPolicy." $k) }}
 {{- end }}
 {{- end }}
 
