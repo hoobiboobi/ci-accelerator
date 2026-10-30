@@ -39,7 +39,9 @@ while IFS= read -r f; do
     # The image's own recipe (.dockerignore decides what its build sees):
     # the image job, the e2e and the quickstart build it.
     cmd/ci-accelerator/Dockerfile | scripts/build-image.sh | .dockerignore) all=true ;;
-    docs/* | *.md | artifacthub/* | .github/ISSUE_TEMPLATE/* | .gitignore | .editorconfig) ;;
+    # .gitlab-ci.yml is the mirror's pipeline at gitlab.com: GitLab is its
+    # check.
+    docs/* | *.md | artifacthub/* | .github/ISSUE_TEMPLATE/* | .gitignore | .editorconfig | .gitlab-ci.yml) ;;
     # The Go job runs the vulnerability gate, lint shellchecks it.
     scripts/vulncheck.sh) charts=true; go=true ;;
     cmd/* | internal/* | go.mod | go.sum | test/ui/* | .govulncheck-allow | .trivyignore.yaml) go=true ;;
