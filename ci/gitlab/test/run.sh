@@ -106,6 +106,9 @@ run_case "defaults: context, Dockerfile, push with the job token" 0 -- \
   'argv:^label:org\.opencontainers\.image\.revision=0123abc$' 'argv:^--progress$' \
   'config.json:"registry\.example\.com":\{"auth":"Z2l0bGFiLWNpLXRva2VuOmpvYi10b2tlbi12YWx1ZQ=="\}' \
   'env:!^DOCKER_AUTH_CONFIG=' 'stdout:Dockerfile steps: 1 from cache, 1 run; context sent: 1\.23MB'
+# Lines of build-args and secrets may be indented (a YAML block).
+run_case "indented build-args and secrets lines" 0 "CIA_BUILD_ARGS=  VERSION=1.2 3" "CIA_SECRETS=  npmrc = NPM_TOKEN " NPM_TOKEN=s3cr3t -- \
+  'argv:^build-arg:VERSION=1\.2 3$' 'argv:^id=npmrc,env=NPM_TOKEN$'
 # A context BuildKit fetched itself (a git URL) prints no transfer line:
 # the build passed, so does the job.
 run_case "no context transfer in the log" 0 FAKE=nocontext -- \

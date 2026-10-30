@@ -51,19 +51,22 @@ EXTRA_SANS=""
 CONTROLLER=""
 ROUTER=""
 
+# A SAN such as DNS:*.example.com is a name, never a file pattern.
+set -f
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --name) NAME=${2:-}; shift 2 ;;
-    --namespace) NAMESPACE=${2:-}; shift 2 ;;
-    --out) OUT=${2:-}; shift 2 ;;
-    --cluster-domain) CLUSTER_DOMAIN=${2:-}; shift 2 ;;
-    --san) EXTRA_SANS="$EXTRA_SANS ${2:-}"; shift 2 ;;
-    --client) CLIENT=${2:-}; shift 2 ;;
+    --name) NAME=${2:?--name needs a value}; shift 2 ;;
+    --namespace) NAMESPACE=${2:?--namespace needs a value}; shift 2 ;;
+    --out) OUT=${2:?--out needs a value}; shift 2 ;;
+    --cluster-domain) CLUSTER_DOMAIN=${2:?--cluster-domain needs a value}; shift 2 ;;
+    --san) EXTRA_SANS="$EXTRA_SANS ${2:?--san needs a value}"; shift 2 ;;
+    --client) CLIENT=${2:?--client needs a value}; shift 2 ;;
     --no-server) SERVER=0; shift ;;
-    --controller) CONTROLLER=${2:-}; shift 2 ;;
-    --router) ROUTER=${2:-}; shift 2 ;;
-    --ca-days) CA_DAYS=${2:-}; shift 2 ;;
-    --days) DAYS=${2:-}; shift 2 ;;
+    --controller) CONTROLLER=${2:?--controller needs a value}; shift 2 ;;
+    --router) ROUTER=${2:?--router needs a value}; shift 2 ;;
+    --ca-days) CA_DAYS=${2:?--ca-days needs a value}; shift 2 ;;
+    --days) DAYS=${2:?--days needs a value}; shift 2 ;;
     -h|--help) usage 0 ;;
     *) echo "unknown argument: $1" >&2; usage 2 ;;
   esac
