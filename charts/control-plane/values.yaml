@@ -334,5 +334,6 @@ global:
       kind: ClusterIssuer
       group: cert-manager.io
   console:
-    # -- Where browsers reach the console; the default of signIn.url.
+    # -- Where browsers reach the console; the default of signIn.url, and
+    # the address of the pages' link previews.
     url: ""

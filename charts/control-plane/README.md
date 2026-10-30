@@ -64,7 +64,7 @@ Kubernetes: `>=1.34.0-0`
 | global.buildNodes.tolerations[0].key | string | `"ci-accelerator.io/node-role"` |  |
 | global.buildNodes.tolerations[0].operator | string | `"Equal"` |  |
 | global.buildNodes.tolerations[0].value | string | `"build"` |  |
-| global.console.url | string | `""` | Where browsers reach the console; the default of signIn.url. |
+| global.console.url | string | `""` | Where browsers reach the console; the default of signIn.url, and the address of the pages' link previews. |
 | global.router.enabled | bool | `false` |  |
 | global.router.service | string | `""` | The router's Service, for the daemons' certificate; when set it must be this chart's <prefix>-router. Rendered with tpl. |
 | global.tls.issuerRef.group | string | `"cert-manager.io"` |  |
