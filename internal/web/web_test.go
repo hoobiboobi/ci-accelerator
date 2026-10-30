@@ -376,9 +376,9 @@ func TestStaticFilesAreVersioned(t *testing.T) {
 	}
 }
 
-// The overview: one sentence, the reasons for rebuilds by the time they
+// The insights: one sentence, the reasons for rebuilds by the time they
 // took, the images with their last builds.
-func TestOverview(t *testing.T) {
+func TestInsights(t *testing.T) {
 	ts, st, _ := console(t)
 	_, byPipe := pipelines(t, st)
 	n, cached := 0, 0
@@ -390,7 +390,7 @@ func TestOverview(t *testing.T) {
 			}
 		}
 	}
-	p := get(t, ts, "/")
+	p := get(t, ts, "/insights")
 	p.safe(t)
 	// The farm's share is the farm's alone: failed and unclear builds
 	// are not "not the code".
@@ -417,7 +417,7 @@ func TestOverview(t *testing.T) {
 	}
 	want := fmt.Sprintf("<b>%d</b> image builds in the last 24 hours, <b>%d%%</b> fully from the cache.", n, cached*100/n)
 	if !strings.Contains(p.body, want) {
-		t.Errorf("overview sentence: want %q in %s", want, p.body)
+		t.Errorf("insights sentence: want %q in %s", want, p.body)
 	}
 	if !strings.Contains(p.body, "Why images were rebuilt") || strings.Count(p.body, `class="rrow"`) == 0 {
 		t.Error("no reasons")
@@ -433,7 +433,7 @@ func TestOverview(t *testing.T) {
 	// What needs attention, not a wall of figures: the images are a page
 	// of their own, where each strip has its legend.
 	if strings.Contains(p.body, `class="sq st-`) || !strings.Contains(p.body, `href="/images"`) {
-		t.Error("the overview draws image strips, or does not link the images")
+		t.Error("the insights draw image strips, or does not link the images")
 	}
 	img := get(t, ts, "/images")
 	if strings.Count(img.body, `class="sq st-`) == 0 {
@@ -446,7 +446,7 @@ func TestOverview(t *testing.T) {
 		}
 	}
 	// A week back the same builds; two days later none in the window.
-	if w := get(t, ts, "/?window=7d"); !strings.Contains(w.body, "in the last 7 days") {
+	if w := get(t, ts, "/insights?window=7d"); !strings.Contains(w.body, "in the last 7 days") {
 		t.Error("7-day window")
 	}
 }
@@ -1449,19 +1449,19 @@ func TestDevAssets(t *testing.T) {
 		}
 	}
 	ts, _, _, _ := consoleWith(t, testOpts{Assets: os.DirFS(dir)})
-	if p := get(t, ts, "/"); p.status != 200 || strings.Contains(p.body, "edited-on-disk") {
+	if p := get(t, ts, "/insights"); p.status != 200 || strings.Contains(p.body, "edited-on-disk") {
 		t.Fatalf("before the edit: %d", p.status)
 	}
-	path := filepath.Join(dir, "templates", "overview.html")
+	path := filepath.Join(dir, "templates", "insights.html")
 	data, _ := os.ReadFile(path)
-	edited := strings.Replace(string(data), "<h1 class=\"t\" tabindex=\"-1\">Overview</h1>", "<h1 class=\"t\" tabindex=\"-1\">Overview edited-on-disk</h1>", 1)
+	edited := strings.Replace(string(data), "<h1 class=\"t\" tabindex=\"-1\">Insights</h1>", "<h1 class=\"t\" tabindex=\"-1\">Insights edited-on-disk</h1>", 1)
 	if edited == string(data) {
-		t.Fatal("the overview's title is not where the test looks for it")
+		t.Fatal("the insights' title is not where the test looks for it")
 	}
 	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if p := get(t, ts, "/"); !strings.Contains(p.body, "edited-on-disk") {
+	if p := get(t, ts, "/insights"); !strings.Contains(p.body, "edited-on-disk") {
 		t.Error("an edited template does not show without a restart")
 	}
 }
@@ -1558,11 +1558,15 @@ func TestReviewFixes(t *testing.T) {
 			res.Body.Close()
 		}
 	}
-	if p := get(t, ts, "/"); strings.Contains(p.body, `?to=`) {
-		t.Error("the project switcher on the overview names a page")
+	// The home page is the pipelines; the switcher keeps each section.
+	if p := get(t, ts, "/"); !regexp.MustCompile(`\?to=(/|%2f)pipelines"`).MatchString(p.body) || !strings.Contains(p.body, `<h1 class="t" tabindex="-1">Pipelines`) {
+		t.Error("the home page is not the pipelines, or its project switcher leaves them")
+	}
+	if p := get(t, ts, "/insights"); !regexp.MustCompile(`\?to=(/|%2f)insights"`).MatchString(p.body) {
+		t.Error("the project switcher on the insights leaves them")
 	}
 	idx := get(t, ts, "/search-index")
-	if !strings.Contains(idx.body, `"url":"/pipelines"`) {
+	if !strings.Contains(idx.body, `"label":"Pipelines","sub":"","url":"/"`) || !strings.Contains(idx.body, `"url":"/insights"`) {
 		t.Errorf("the search lacks the pipelines section: %.200s", idx.body)
 	}
 }
@@ -1740,7 +1744,7 @@ func TestImageOfAnotherProject(t *testing.T) {
 			t.Errorf("to=%q leads to %q, want /", to, p.header.Get("Location"))
 		}
 	}
-	if p := get(t, ts, "/images/no-such-image"); p.status != http.StatusNotFound || !strings.Contains(p.body, ">Overview</a>") {
+	if p := get(t, ts, "/images/no-such-image"); p.status != http.StatusNotFound || !strings.Contains(p.body, ">Pipelines</a>") {
 		t.Errorf("an unknown image: %d", p.status)
 	}
 }

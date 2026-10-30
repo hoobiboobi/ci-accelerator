@@ -33,7 +33,7 @@ signIn.enabled). To look at it:
 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $web }} {{ int .Values.web.port }}
 
-then open http://localhost:{{ int .Values.web.port }}/ (Overview, Pipelines, Builds,
+then open http://localhost:{{ int .Values.web.port }}/ (Pipelines, Insights, Builds,
 Images, Nodes) or http://localhost:{{ int .Values.web.port }}/api/v1/builds?limit=10.
 {{- end }}
 {{- if and (not .Values.gitlab.token.existingSecret) (not (include "control-plane.signIn" .)) }}

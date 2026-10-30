@@ -193,8 +193,8 @@ func TestImagesWithoutTarget(t *testing.T) {
 		noBlankName(t, get(t, ts, fmt.Sprintf("/builds/%d", id)))
 		noBlankName(t, get(t, ts, fmt.Sprintf("/builds/%d/compare", id)))
 	}
-	// The overview's reasons name both images without a target.
-	ov := get(t, ts, "/?window=7d")
+	// The insights' reasons name both images without a target.
+	ov := get(t, ts, "/insights?window=7d")
 	noBlankName(t, ov)
 	found := false
 	for _, r := range regexp.MustCompile(`<span class="ri muted">([^<]*) · last at`).FindAllStringSubmatch(ov.body, -1) {

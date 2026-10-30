@@ -683,16 +683,30 @@ async function keys(s, pages) {
   await s.key("?");
   check("? opens the shortcuts", await s.visible("#help"));
   await s.key("Escape");
-  const th = await s.eval("document.documentElement.dataset.theme");
+  // Dark until the viewer picks light, whatever the system's scheme says.
+  await s.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }] });
+  await s.eval(`localStorage.removeItem("ci-accelerator-theme")`);
+  await s.go(b);
+  check("opens dark on a light system", (await s.eval("document.documentElement.dataset.theme")) === "dark");
   await s.key("t");
-  check("t switches the theme", (await s.eval("document.documentElement.dataset.theme")) !== th);
+  check("t switches the theme", (await s.eval("document.documentElement.dataset.theme")) === "light");
+  await s.go(b);
+  check("the picked light theme is kept", (await s.eval("document.documentElement.dataset.theme")) === "light");
   await s.key("t");
+  check("back to dark forgets the choice", (await s.eval(`localStorage.getItem("ci-accelerator-theme")`)) === null);
+  await s.send("Emulation.setEmulatedMedia", { features: [] });
   await s.key("[");
   check("[ collapses the sidebar", (await s.eval(`document.getElementById("app").dataset.collapsed`)) === "true");
   await s.key("[");
   await s.key("g", { wait: 100 });
   await s.key("n", { wait: 1200 });
   check("g n opens the build nodes", (await s.eval("location.pathname")) === "/nodes");
+  await s.key("g", { wait: 100 });
+  await s.key("s", { wait: 1200 });
+  check("g s opens the insights", (await s.eval("location.pathname")) === "/insights" && (await s.eval(`document.querySelector("h1").textContent`)) === "Insights");
+  await s.key("g", { wait: 100 });
+  await s.key("p", { wait: 1200 });
+  check("g p opens the pipelines, the home page", (await s.eval("location.pathname")) === "/" && (await s.eval(`document.querySelector('nav.nav [aria-current="page"]').textContent.trim()`)) === "Pipelines");
   check("keys: no errors", s.take().length === 0);
 }
 

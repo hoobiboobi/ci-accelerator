@@ -12,19 +12,6 @@
   --scrim: rgb(8 7 6 / .55);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
-@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
-  color-scheme: light;
-  --bg: #f7f6f3; --side: #efede9; --panel: #ffffff; --raised: #fbfaf8; --hover: #f0eee9; --sel: #e7e4de;
-  --line: #e6e2dc; --line-2: #d4cfc7;
-  --ink: #1d1b18; --ink-2: #48443e; --ink-3: #69645c; --side-ink: #4a463f; --side-ink-3: #6a655d;
-  --accent: #474ed4; --accent-ink: #ffffff; --focus: #474ed4;
-  --built: #a5471a; --cached: #2261b2; --received: #19774f; --image: #6a655e; --xfer: #6c52c1; --node: #ab336d; --warn: #855800; --runner: #c8c2b9; --del: #b3341c;
-  --log-bg: #1e1d1b; --log-ink: #dedad3; --log-dim: #9b958c; --log-ok: #7fd1a4; --log-link: #b2b6ff; --log-warn: #f0cd8a;
-  --syn-s: #4541b8; --syn-f: #74550f; --syn-v: #1c6760; --syn-q: #4a6410; --syn-i: #86461a;
-  --shadow: 0 1px 2px rgb(30 25 20 / .06), 0 14px 36px rgb(30 25 20 / .16);
-  --shadow-s: 0 1px 2px rgb(30 25 20 / .08);
-  --scrim: rgb(40 36 30 / .28);
-} }
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: #f7f6f3; --side: #efede9; --panel: #ffffff; --raised: #fbfaf8; --hover: #f0eee9; --sel: #e7e4de;
@@ -502,7 +489,6 @@ pre.logb { margin: 0; font-family: var(--mono); font-size: 11px; line-height: 1.
 .aside dl dd .chip { margin-left: 2px; }
 
 :root { --fail: #f08a74; }
-@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --fail: #b3341c; } }
 :root[data-theme="light"] { --fail: #b3341c; }
 
 /* categories: icons and chips for failed and running */

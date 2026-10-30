@@ -29,8 +29,8 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := []indexItem{
-		{Kind: "Page", Label: "Overview", URL: "/", Icon: "overview"},
-		{Kind: "Page", Label: "Pipelines", URL: "/pipelines", Icon: "pipes"},
+		{Kind: "Page", Label: "Pipelines", URL: "/", Icon: "pipes"},
+		{Kind: "Page", Label: "Insights", URL: "/insights", Icon: "overview"},
 		{Kind: "Page", Label: "Builds", URL: "/builds", Icon: "builds"},
 		{Kind: "Page", Label: "Images", URL: "/images", Icon: "images"},
 		{Kind: "Page", Label: "Nodes", URL: "/nodes", Icon: "nodes"},
