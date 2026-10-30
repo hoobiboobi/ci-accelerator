@@ -48,7 +48,8 @@ type Collector struct {
 	mu      sync.Mutex
 	daemons map[string]*window
 
-	live live
+	live  live
+	watch watches
 }
 
 // New returns a collector writing to s. instances are the trace-id prefixes
@@ -59,6 +60,7 @@ func New(s *store.Store, instances map[string]bool, log *slog.Logger) *Collector
 		cfg:     history.Config{Instances: instances, SecretKey: s.SecretKey()},
 		log:     log,
 		daemons: map[string]*window{},
+		live:    live{instances: instances},
 	}
 }
 
@@ -106,7 +108,7 @@ func (c *Collector) Run(ctx context.Context, src Source) error {
 // run is Run, and returns the number of the stream it read.
 func (c *Collector) run(ctx context.Context, src Source) (uint64, error) {
 	name := src.Name()
-	stream := c.live.connect(name)
+	stream := c.live.connectSource(name, src)
 	defer func() {
 		if errors.Is(context.Cause(ctx), ErrGone) {
 			c.gone(name, stream)
@@ -120,10 +122,14 @@ func (c *Collector) run(ctx context.Context, src Source) (uint64, error) {
 		go c.inspect(ictx, name, in)
 	}
 	return stream, src.Listen(ctx, func(t controlapi.BuildHistoryEventType, rec *controlapi.BuildHistoryRecord) error {
-		c.live.event(name, t, rec)
 		if t != controlapi.BuildHistoryEventType_COMPLETE {
+			c.live.event(name, t, rec)
 			return nil // STARTED: running, nothing to store yet; DELETED: the store keeps it
 		}
+		// A completed build stays among the running ones until it is
+		// stored: its job's page goes from the build in progress straight
+		// to the stored build.
+		defer c.live.event(name, t, rec)
 		if err := c.Record(ctx, src, rec); err != nil {
 			// One bad record must not stop the daemon's stream.
 			c.log.Warn("record not stored", "daemon", src.Name(), "ref", rec.Ref, "err", err)

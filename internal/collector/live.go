@@ -4,12 +4,14 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	controlapi "github.com/moby/buildkit/api/services/control"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
+	"github.com/hoobiboobi/ci-accelerator/internal/history"
 )
 
 // Active is a build a daemon is running now.
@@ -18,6 +20,10 @@ type Active struct {
 	Ref     string
 	Target  string
 	Started time.Time
+	// The CI job the build says it is for (history.TraceOpt); zero when
+	// it says none, or names a GitLab the console does not read.
+	Instance      string
+	Pipeline, Job uint64
 }
 
 // GCRule is one of a daemon's cache policies, as it reports it.
@@ -92,6 +98,13 @@ type live struct {
 	// only the latest stream changes what is known of the daemon.
 	streams map[string]uint64
 	seq     uint64
+	// sources are the daemons' latest streams; args the running builds'
+	// build arguments (their secret values are masked in what a running
+	// build shows), by daemon and ref. Neither leaves the collector.
+	sources map[string]Source
+	args    map[string]map[string]map[string]string
+	// instances are the GitLabs' trace-id prefixes, for TraceParent.
+	instances map[string]bool
 	// changed is called when what pages show live changes.
 	changed func()
 }
@@ -99,6 +112,7 @@ type live struct {
 func (l *live) state(name string) *DaemonState {
 	if l.daemons == nil {
 		l.daemons, l.active, l.streams = map[string]*DaemonState{}, map[string]map[string]Active{}, map[string]uint64{}
+		l.sources, l.args = map[string]Source{}, map[string]map[string]map[string]string{}
 	}
 	d := l.daemons[name]
 	if d == nil {
@@ -108,17 +122,24 @@ func (l *live) state(name string) *DaemonState {
 	if l.active[name] == nil {
 		l.active[name] = map[string]Active{}
 	}
+	if l.args[name] == nil {
+		l.args[name] = map[string]map[string]string{}
+	}
 	return d
 }
 
 // connect marks a daemon connected by a new stream and returns the
 // stream's number.
-func (l *live) connect(name string) uint64 {
+func (l *live) connect(name string) uint64 { return l.connectSource(name, nil) }
+
+// connectSource is connect for a stream read from src.
+func (l *live) connectSource(name string, src Source) uint64 {
 	l.mu.Lock()
 	d := l.state(name)
 	d.Connected, d.Since = true, time.Now()
 	// A new stream reports the running builds again.
-	l.active[name] = map[string]Active{}
+	l.active[name], l.args[name] = map[string]Active{}, map[string]map[string]string{}
+	l.sources[name] = src
 	l.seq++
 	l.streams[name] = l.seq
 	stream := l.seq
@@ -136,7 +157,8 @@ func (l *live) disconnected(name string, stream uint64) {
 	}
 	d := l.state(name)
 	d.Connected, d.Since = false, time.Now()
-	l.active[name] = map[string]Active{}
+	l.active[name], l.args[name] = map[string]Active{}, map[string]map[string]string{}
+	delete(l.sources, name)
 	l.mu.Unlock()
 	l.notify()
 }
@@ -152,6 +174,8 @@ func (l *live) forget(name string, stream uint64) bool {
 	delete(l.daemons, name)
 	delete(l.active, name)
 	delete(l.streams, name)
+	delete(l.sources, name)
+	delete(l.args, name)
 	l.mu.Unlock()
 	l.notify()
 	return true
@@ -166,13 +190,24 @@ func (l *live) event(name string, t controlapi.BuildHistoryEventType, rec *contr
 		if rec.CreatedAt != nil {
 			a.Started = rec.CreatedAt.AsTime()
 		}
+		if at := history.TraceParent(rec.FrontendAttrs, l.instances); at.State == history.Attributed {
+			a.Instance, a.Pipeline, a.Job = at.Instance, at.Pipeline, at.Job
+		}
 		l.active[name][rec.Ref] = a
+		args := map[string]string{}
+		for k, v := range rec.FrontendAttrs {
+			if n, ok := strings.CutPrefix(k, "build-arg:"); ok {
+				args[n] = v
+			}
+		}
+		l.args[name][rec.Ref] = args
 	case controlapi.BuildHistoryEventType_COMPLETE, controlapi.BuildHistoryEventType_DELETED:
 		if _, ok := l.active[name][rec.Ref]; !ok {
 			l.mu.Unlock()
 			return
 		}
 		delete(l.active[name], rec.Ref)
+		delete(l.args[name], rec.Ref)
 	}
 	l.mu.Unlock()
 	l.notify()
