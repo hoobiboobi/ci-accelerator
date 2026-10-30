@@ -1024,6 +1024,47 @@ sys.exit("unexpected: %r" % bad if bad else 0)' "$pod"
 # box_disk: the daemons run with their own PriorityClass (evicted after
 # CI jobs under node pressure) and a disk probe whose numbers reach the
 # console's Nodes page.
+# box_live: a CI job whose build runs for a minute, passing its TRACEPARENT
+# as the CI component does: while the step runs, the job's page shows the
+# build live (its running step and that step's last lines, asking for
+# itself every 2 s); once the build is stored the page is the build's.
+box_live() {
+  local spec id inst page=$LOGS/box-live-page.html i seen=0 state
+  spec=$(python3 - "$IMAGE" <<'PY'
+import json, sys
+print(json.dumps({"image": sys.argv[1], "pipeline_id": 779, "script": [
+    'mkdir -p ctx && echo "FROM alpine:3.22" > ctx/Dockerfile && echo "ARG BUST" >> ctx/Dockerfile',
+    'echo "RUN echo bust=\\$BUST && for i in \\$(seq 1 60); do echo live-line-\\$i; sleep 1; done" >> ctx/Dockerfile',
+    'buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build --frontend dockerfile.v0 --local context=ctx --local dockerfile=ctx --opt "ci-accelerator.io/traceparent=$TRACEPARENT" --opt build-arg:BUST=$CI_JOB_ID --progress plain',
+]}))
+PY
+)
+  id=$(fake_gitlab POST /e2e/jobs "$spec" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') \
+    || { fail "queue the live job"; return; }
+  inst=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 779 "$id" | cut -c6-11)
+  for i in $(seq 1 60); do
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/$inst/$id" 2>/dev/null >"$page"
+    if grep -q 'class="verdict live"' "$page" && grep -q 'class="lstep st-running"' "$page" &&
+      grep -Eq '</span>  live-line-[0-9]+$' "$page" && grep -q 'data-refresh-every="2"' "$page"; then
+      seen=1; break
+    fi
+    sleep 2
+  done
+  if [ "$seen" = 1 ]; then pass "a running build shows live on its job's page: the running step and its last lines"
+  else fail "the running build never showed live on its job's page (see $page)"; fi
+  for i in $(seq 1 60); do
+    state=$(fake_gitlab GET "/e2e/jobs/$id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])' 2>/dev/null)
+    case "$state" in success|failed) break ;; esac
+    sleep 2
+  done
+  check "the live job succeeds" test "$state" = success
+  box_live_done() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/$inst/$id" 2>/dev/null >"$page"
+    ! grep -q 'class="verdict live"' "$page" && grep -q 'class="dl step st-built' "$page" && grep -q 'live-line-60' "$page"
+  }
+  check "once BuildKit completes it, the job's page is the build's, with the step's whole output" eventually 90 box_live_done
+}
+
 box_disk() {
   local pc="$BOX_NS-$BOX_REL-buildkit" sel="app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" n
   check "the daemons' PriorityClass is above CI jobs and never preempts them" \
@@ -1194,6 +1235,7 @@ PY
       grep -q 'CPU in all' "$LOGS/box-console-page.html" && ! grep -q 'recorded for builds since' "$LOGS/box-console-page.html"
   }
   check "the build's Resources tab lists its steps by CPU, with memory, against the node's cores" quiet box_resources
+  box_live
   box_logs
   box_disk
   box_console_policy
