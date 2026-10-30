@@ -489,6 +489,12 @@ func (c *Client) Daemons() []collector.DaemonState {
 	return out
 }
 
+// LiveBuild is a running build of daemon as its page shows it.
+func (c *Client) LiveBuild(ctx context.Context, daemon, ref string) (out *collector.LiveBuild, err error) {
+	err = c.call(ctx, "LiveBuild", []any{daemon, ref}, &out)
+	return
+}
+
 // ---- GitLab ----
 
 // Knows says whether instance is one of the console's GitLabs.
