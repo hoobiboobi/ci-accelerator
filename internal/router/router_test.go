@@ -1,11 +1,16 @@
 package router
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/control"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -69,9 +75,19 @@ type view struct {
 	daemons []route.Daemon
 	jobs    map[string]Job
 	warm    map[route.Project][]route.Activity
+	zones   map[string]string // nodes known without a daemon now
 }
 
 func (v *view) Daemons() []route.Daemon { return v.daemons }
+func (v *view) Zone(node string) (string, bool) {
+	for _, d := range v.daemons {
+		if d.Node == node {
+			return d.Zone, true
+		}
+	}
+	z, ok := v.zones[node]
+	return z, ok
+}
 func (v *view) Job(ip string) (Job, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -322,6 +338,105 @@ func TestReporterSendsColdProjectsAtOnce(t *testing.T) {
 	}
 }
 
+// syncBuffer is a log destination read while the logger writes to it.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) count(text string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.Count(s.b.String(), text)
+}
+
+// The router takes the controller's view, keeps it on "not modified" and
+// while the controller is away (warning once), and takes the next one when
+// the controller is back.
+func TestFollowWarm(t *testing.T) {
+	p := route.Project{Instance: "0a1b2c", ID: 7}
+	views := map[string]control.Warm{
+		"v1": {Version: "v1", Projects: []control.WarmProject{{Project: p, Activity: []route.Activity{{Node: "n2", At: time.Now()}}}},
+			Active: map[string]int{"n2": 1}},
+		"v2": {Version: "v2", Projects: []control.WarmProject{{Project: p, Activity: []route.Activity{{Node: "n3", At: time.Now()}}}}},
+	}
+	var mu sync.Mutex
+	serve, requests := "v1", map[string]int{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path != "/internal/v1/route/warm" || r.Header.Get("Authorization") != "Bearer router" {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		etag := `"` + serve + `"`
+		switch {
+		case serve == "down":
+			requests["down"]++
+			http.Error(w, "store unavailable", http.StatusServiceUnavailable)
+		case r.Header.Get("If-None-Match") == etag:
+			requests["304"]++
+			w.WriteHeader(http.StatusNotModified)
+		default:
+			requests[serve]++
+			w.Header().Set("ETag", etag)
+			json.NewEncoder(w).Encode(views[serve])
+		}
+	}))
+	defer ts.Close()
+	set := func(s string) { mu.Lock(); serve = s; mu.Unlock() }
+	seen := func(k string) int { mu.Lock(); defer mu.Unlock(); return requests[k] }
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); !ok(); time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: never", what)
+			}
+		}
+	}
+	var logs syncBuffer
+	c := NewCluster(nil)
+	rc := &control.RouterClient{URL: ts.URL, Token: func() (string, error) { return "router", nil }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go FollowWarm(ctx, rc, c, 5*time.Millisecond, slog.New(slog.NewTextHandler(&logs, nil)))
+	on := func() string {
+		w := c.Warm(p)
+		if len(w) != 1 {
+			return fmt.Sprint(w)
+		}
+		return w[0].Node
+	}
+
+	waitFor("the first view read", func() bool { return seen("v1") == 1 && seen("304") > 0 })
+	if got := on(); got != "n2" {
+		t.Fatalf("after the first view the project is warm on %s, want n2", got)
+	}
+	waitFor("not modified answers", func() bool { return seen("304") >= 3 })
+	if got := on(); got != "n2" || seen("v1") != 1 {
+		t.Errorf("after 304s warm on %s, %d full reads", got, seen("v1"))
+	}
+
+	set("down")
+	waitFor("the controller away", func() bool { return seen("down") >= 3 })
+	if got := on(); got != "n2" {
+		t.Errorf("with the controller away the project is warm on %s, want the last view's n2", got)
+	}
+	if n := logs.count("controller not reached"); n != 1 {
+		t.Errorf("warned %d times while the controller was away, want once", n)
+	}
+
+	set("v2")
+	waitFor("the next view", func() bool { return on() == "n3" })
+	waitFor("the log line", func() bool { return logs.count("controller reached again") == 1 })
+}
+
 func ptr[T any](v T) *T { return &v }
 
 func TestClusterFromKubernetes(t *testing.T) {
@@ -398,6 +513,29 @@ func TestClusterFromKubernetes(t *testing.T) {
 	if d := c.Daemons(); d[0].Active != 4 {
 		t.Errorf("active builds %+v", d[0])
 	}
+	// A node's zone outlives its daemon's endpoint (a rollout, an
+	// eviction): jobs on it still belong to their zone.
+	gone := slice.DeepCopy()
+	gone.Endpoints = gone.Endpoints[1:]
+	if _, err := kube.DiscoveryV1().EndpointSlices("box").Update(context.Background(), gone, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for len(c.Daemons()) != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the endpoint never went")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if z, ok := c.Zone("n1"); !ok || z != "a" {
+		t.Errorf("zone of n1 after its daemon went: %q %v", z, ok)
+	}
+	if z, ok := c.Zone("n3"); !ok || z != "" {
+		t.Errorf("zone of n3 (no label): %q %v", z, ok)
+	}
+	if _, ok := c.Zone("n9"); ok {
+		t.Error("a node never seen has a zone")
+	}
 }
 
 // A job's pod shows up in the watch a moment after its first connection:
@@ -439,6 +577,49 @@ func TestZones(t *testing.T) {
 	r.IgnoreZones = true
 	if d, _, _ := r.Decide("10.1.1.1"); d.Daemon.Node != "n2" || d.Reason != route.ZoneWarm {
 		t.Errorf("zones ignored: %+v", d)
+	}
+}
+
+// A job's node whose daemon is gone (between a rollout's old and new pod,
+// a daemon evicted or pending) keeps its zone: the job stays in it, or is
+// refused when crossing zones is not allowed.
+func TestZoneOfANodeWithoutADaemon(t *testing.T) {
+	v := &view{jobs: map[string]Job{"10.1.1.1": {Project: projA, JobID: 7, Node: "a1"}},
+		daemons: []route.Daemon{{Name: "bk-a2", Node: "a2", Zone: "a", Addr: "a2", Ready: true},
+			{Name: "bk-b1", Node: "b1", Zone: "b", Addr: "b1", Ready: true}, {Name: "bk-b2", Node: "b2", Zone: "b", Addr: "b2", Ready: true}},
+		zones: map[string]string{"a1": "a"}}
+	r := &Router{View: v, Node: "a1"}
+	if d, _, err := r.Decide("10.1.1.1"); err != nil || d.Daemon.Node != "a2" || d.Reason != route.ZoneHash {
+		t.Errorf("zone a has a daemon: %+v, %v", d, err)
+	}
+	v.daemons = v.daemons[1:]
+	if d, _, err := r.Decide("10.1.1.1"); !errors.Is(err, route.ErrNoDaemon) {
+		t.Errorf("zone a has none, crossing not allowed: %+v, %v", d, err)
+	}
+	r.Policy.CrossZone = true
+	if d, rec, err := r.Decide("10.1.1.1"); err != nil || d.Reason != route.CrossZone || rec.Reason != route.CrossZone {
+		t.Errorf("zone a has none, crossing allowed: %+v, %v", d, err)
+	}
+	// A node never seen with a daemon (a runner tier on any node, a node
+	// that is no build node): its zone is not known, so every ready daemon
+	// is its zone. The project's warm daemon takes it, whichever zone that
+	// is, and it is never refused for crossing zones.
+	v.zones = nil
+	v.daemons = append(v.daemons, route.Daemon{Name: "bk-a2", Node: "a2", Zone: "a", Addr: "a2", Ready: true})
+	for _, node := range []string{"a2", "b1", "b2"} {
+		v.warm = map[route.Project][]route.Activity{projA: {{Node: node, At: time.Now().Add(-time.Hour)}}}
+		for _, cross := range []bool{true, false} {
+			r.Policy.CrossZone = cross
+			if d, rec, err := r.Decide("10.1.1.1"); err != nil || d.Daemon.Node != node || d.Reason != route.ZoneWarm || rec.Reason != route.ZoneWarm {
+				t.Errorf("zone unknown, warm on %s, crossZone=%v: %+v, %v", node, cross, d, err)
+			}
+		}
+	}
+	v.warm = nil
+	// Zones ignored: every daemon is one zone.
+	r.IgnoreZones = true
+	if d, _, err := r.Decide("10.1.1.1"); err != nil || d.Reason != route.ZoneHash {
+		t.Errorf("zones ignored: %+v, %v", d, err)
 	}
 }
 
@@ -514,5 +695,91 @@ func TestReporterKeepsUnsentWhenDroppingDuringASend(t *testing.T) {
 	r.mu.Unlock()
 	if fmt.Sprint(left) != "[5 6 7]" {
 		t.Errorf("left after the send %v, want [5 6 7]", left)
+	}
+}
+
+// The GitLab URLs change while the router runs (the runners' gitlabUrl
+// was corrected): the pods it already knows are read again with them.
+func TestClusterNewGitLabURLs(t *testing.T) {
+	old, now := "https://gitlab.example.com/", "https://gitlab.example.com"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "job-a", Namespace: "jobs", UID: "uid-a",
+		Labels: map[string]string{"ci-accelerator.io/component": "ci-job"},
+		Annotations: map[string]string{"job.runner.gitlab.com/url": "https://gitlab.example.com/g/p/-/jobs/5",
+			"job.runner.gitlab.com/id": "5", "project.runner.gitlab.com/id": "7"}},
+		Spec: corev1.PodSpec{NodeName: "n2"}, Status: corev1.PodStatus{PodIP: "10.2.0.5", Phase: corev1.PodRunning}}
+	kube := fake.NewClientset(pod)
+	c := NewCluster([]string{old})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Watch(ctx, kube, "box", "box-buildkit-headless", "jobs")
+	deadline := time.Now().Add(5 * time.Second)
+	for _, ok := c.Job("10.2.0.5"); !ok; _, ok = c.Job("10.2.0.5") {
+		if time.Now().After(deadline) {
+			t.Fatal("the job never known")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	c.SetGitLabs([]string{now})
+	j, ok := c.Job("10.2.0.5")
+	if want := history.InstancePrefix(now); !ok || j.Project.Instance != want {
+		t.Errorf("job %+v %v, want instance %s", j, ok, want)
+	}
+	c.SetGitLabs([]string{"https://elsewhere.example.com/"})
+	if j, ok := c.Job("10.2.0.5"); ok {
+		t.Errorf("a job of a GitLab no longer configured is known: %+v", j)
+	}
+}
+
+// racingStore is a pod store whose pod is deleted while it is listed: the
+// watch drops a pod from its store first and runs the delete handler
+// after, so a list can hold a pod whose deletion is being handled.
+type racingStore struct {
+	cache.Store
+	onList func()
+}
+
+func (s *racingStore) List() []any {
+	out := s.Store.List()
+	s.onList()
+	return out
+}
+
+// Reading the pods again for new GitLab URLs never brings back a job pod
+// deleted meanwhile: its address would count as that job's until another
+// pod took it, and a new pod there would be routed as the old job.
+func TestClusterNewGitLabURLsWhileAPodGoes(t *testing.T) {
+	url := "https://gitlab.example.com"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "job-a", Namespace: "jobs", UID: "uid-a",
+		Labels: map[string]string{"ci-accelerator.io/component": "ci-job"},
+		Annotations: map[string]string{"job.runner.gitlab.com/url": url + "/g/p/-/jobs/5",
+			"job.runner.gitlab.com/id": "5", "project.runner.gitlab.com/id": "7"}},
+		Spec: corev1.PodSpec{NodeName: "n2"}, Status: corev1.PodStatus{PodIP: "10.2.0.5", Phase: corev1.PodRunning}}
+	c := NewCluster([]string{url})
+	c.setPod(pod)
+	if _, ok := c.Job("10.2.0.5"); !ok {
+		t.Fatal("the job is not known")
+	}
+	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
+	if err := store.Add(pod); err != nil {
+		t.Fatal(err)
+	}
+	handled := make(chan struct{})
+	c.pods = &racingStore{Store: store, onList: func() {
+		_ = store.Delete(pod)
+		go func() {
+			c.deletePod(pod)
+			close(handled)
+		}()
+		// Give the handler its chance to run before the listed pods are
+		// read; it may have to wait for them instead.
+		select {
+		case <-handled:
+		case <-time.After(200 * time.Millisecond):
+		}
+	}}
+	c.SetGitLabs([]string{url})
+	<-handled
+	if j, ok := c.Job("10.2.0.5"); ok {
+		t.Errorf("a deleted job pod is known again: %+v", j)
 	}
 }

@@ -12,6 +12,9 @@
 //  4. no ready daemon in the zone: the hash over every ready daemon, or no
 //     daemon when crossing zones is not allowed.
 //
+// A job on a node whose zone is not known (no zone label, or no daemon ever
+// seen there) has every daemon as its zone.
+//
 // A connection whose job is unknown goes to the daemon on its own node, as
 // a plain Service with PreferSameNode would send it. Decide is a pure
 // function: the router feeds it what it watches.

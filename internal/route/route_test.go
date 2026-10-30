@@ -34,6 +34,7 @@ var projA = &Project{Instance: "0123456789ab", ID: 7}
 
 func TestDecide(t *testing.T) {
 	cold, _ := hash(projA.Key(), daemons("n1/a", "n2/a", "n3/a"))
+	spread, _ := hash(projA.Key(), daemons("n1/a", "n2/a", "n3/b"))
 	for _, tc := range []struct {
 		name    string
 		req     Request
@@ -68,6 +69,10 @@ func TestDecide(t *testing.T) {
 		{name: "unknown job: its node's daemon even if cold", req: Request{Node: "n2", Zone: "a"}, ds: daemons("n1/a", "n2/a"),
 			node: "n2", reason: UnknownLocal},
 		{name: "unknown job on a node without a daemon", req: Request{Node: "n9", Zone: "a"}, ds: daemons("n1/a"), node: "n1", reason: UnknownHash},
+		{name: "job's zone unknown, daemons in several zones: the warm one, not refused", req: Request{Project: projA, Node: "n9"},
+			ds: daemons("n1/a", "n2/b"), warm: []Activity{ago("n2", time.Minute)}, node: "n2", reason: ZoneWarm},
+		{name: "job's zone unknown, nowhere warm: the hash over every zone", req: Request{Project: projA, Node: "n9"},
+			ds: daemons("n1/a", "n2/a", "n3/b"), node: spread.Node, reason: ZoneHash},
 		{name: "nodes without zones are one zone", req: Request{Project: projA, Node: "n1"}, ds: daemons("n1", "n2", "n3"),
 			warm: []Activity{ago("n2", time.Minute)}, node: "n2", reason: ZoneWarm},
 		{name: "overloaded local warm daemon spills to a warm neighbour", req: Request{Project: projA, Node: "n1", Zone: "a"},
