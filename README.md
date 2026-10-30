@@ -861,10 +861,12 @@ make e2e                      # end-to-end on kind
   [gitlab.com/ci-accelerator/ci-accelerator](https://gitlab.com/ci-accelerator/ci-accelerator)
   (`.github/workflows/mirror.yml`), whose pipeline (`.gitlab-ci.yml`)
   builds the ci-accelerator image with this repository's CI component on a
-  ci-accelerator box. The commit on GitHub gets the status
-  "ci-accelerator / own build farm" with a link to that pipeline. The
-  image built there is not published: releases are built and signed by
-  GitHub Actions.
+  ci-accelerator box and pushes it with the job's token to the mirror's
+  registry (`registry.gitlab.com/ci-accelerator/ci-accelerator`, `:edge`
+  for main, `:<commit>` for every commit). Those are unsigned development
+  builds: releases are built, signed and published to ghcr.io by GitHub
+  Actions. The commit on GitHub gets the status "ci-accelerator / own
+  build farm" with a link to that pipeline.
 - **Mutation testing:** the checks are broken on purpose (the code they
   guard is changed or removed) to make sure each one can actually fail.
 - **Helm versions:** the checks pass on Helm 3 and Helm 4.
