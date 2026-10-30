@@ -111,8 +111,10 @@ runner's cache folder when it starts and then every 10 minutes
 (`control-plane.caches.every`). The Nodes page then shows, under "Runner
 cache in S3", for the project the console shows: how much it stores and
 in how many cache keys, when the bucket was last listed, a warning when
-the bucket has no lifecycle rule that expires objects ("Old caches are
-never deleted"), and the error when the last listing failed. The
+no enabled lifecycle rule expires the objects in the runners' folder ("Old
+caches are never deleted"; a rule for another prefix, for tagged objects
+or object sizes, or only for delete markers does not count), and the
+error when the last listing failed. The
 controller's log has a `cache listed` line per folder (objects and bytes)
 or `cache not listed` with the reason.
 
@@ -129,7 +131,9 @@ With your own runner and `charts/control-plane` installed on its own,
 name the folders in `caches.stores` (`server`, `bucket`, `region`,
 `path` as the runner's `Path`, `gitlabUrl` exactly as the runner has it,
 `existingSecret` with `accesskey` and `secretkey`) in the control plane's
-values.
+values. Runners with `Shared = false` (the runner's default) keep their
+own copy of a cache key under `runner/<token>/`: the page counts such a
+key once, with the size of all its copies.
 
 ### What a cache can do
 
@@ -184,7 +188,10 @@ job like any other and sends its build to the node where its project
 built before, so a tier on `nodes: any` reaches the project's cache from
 any node (with `global.router.enabled=false` it reaches the daemons'
 Service from a node without a daemon, so any daemon, with that node's
-cache). A job's size is the tier's: jobs cannot raise it themselves.
+cache). That needs the routing PreferSameNode (the default) or Cluster:
+with `Local` a node without a router or daemon has no endpoint, so the
+chart refuses `nodes: any` then. A job's size is the tier's: jobs cannot
+raise it themselves.
 
 On a rollout a tier's new runner pod starts before the old one stops; the
 old one finishes its running jobs first (up to the grace period).

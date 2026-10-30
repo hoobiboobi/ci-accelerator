@@ -33,6 +33,7 @@ names the fix; the common ones:
 | `the build router is part of the control plane` | With `control-plane.enabled=false`, also set `global.router.enabled=false`: the jobs then connect to the daemons' Service |
 | `Namespace ... (global.jobs.namespace) exists and was not created by this release` | Helm cannot adopt a namespace it did not create: `jobsNamespace.create=false` to use yours (label it `baseline`), or delete it |
 | `Namespace ... (global.jobs.namespace) is still being deleted` | A reinstall right after uninstall: wait for the namespace to go |
+| `jobsNamespace.create=false would make Helm delete Namespace ...` | The release created the jobs namespace; Helm deletes what leaves its manifest. `kubectl annotate namespace <jobs> helm.sh/resource-policy=keep`, then upgrade (or keep `create=true`) |
 | `gitlab-runner.runners.config does not render to valid TOML` | Your own `runners.config` (or a value it uses) breaks the TOML; the message names the line |
 | `global.buildNodes.selector has kubernetes.io/arch=...` | Set `global.jobs.architecture` to the same architecture |
 | `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
@@ -210,7 +211,10 @@ and a project warms up once per zone. Where every node carries its own
 zone label, every job stays on its own node: set
 `control-plane.router.zones=false` when crossing zones costs nothing.
 `control-plane.router.crossZone=false` refuses a job whose zone has no
-ready daemon instead of sending it to another zone.
+ready daemon instead of sending it to another zone. A job on a node that
+never had a daemon (a runner tier on any node) has no known zone: it goes
+to the project's warm daemon or its daemon by hash in any zone, and is
+never refused for crossing zones.
 
 Then the build itself:
 
@@ -310,8 +314,11 @@ Other causes:
   (300) and then closes them (log `drain time over: closing open
   connections`); builds longer than that fail on a rollout of the routers.
   The routers roll one node at a time, when their own settings
-  (`control-plane.router.*`, the log settings, the GitLab URLs) or the
-  image change; a daemon rollout does not restart them.
+  (`control-plane.router.*`, the log settings, `control-plane.gitlab.urls`)
+  or the image change; a daemon rollout does not restart them. A new
+  `gitlab-runner.gitlabUrl` in the box does not roll them: the routers
+  take it in place and the controller starts again by itself, within
+  about two minutes of the upgrade.
 
 Fixed upstream: the daemon panic when one of several builds sharing a step
 was cancelled (moby/buildkit#7253) is fixed in BuildKit v0.34.0. If
@@ -711,9 +718,15 @@ every job pod in it. It leaves:
   ```
 - **the certificate Secrets** (cert-manager keeps them when their
   Certificates are deleted):
-  - the CA key in cert-manager's namespace:
+  - the CA key in cert-manager's namespace (or in
+    `buildkit.tls.certManager.clusterResourceNamespace`), named
+    `<box namespace>-<release>-buildkit-ca`; there is none with your own
+    `global.tls.issuerRef`. Delete it by name: another box with the same
+    release name in another namespace carries the same labels, and
+    without its CA key cert-manager makes it a new CA that its existing
+    certificates do not chain to.
     ```sh
-    kubectl -n cert-manager delete secret -l app.kubernetes.io/instance=ci-accelerator
+    kubectl -n cert-manager delete secret ci-accelerator-ci-accelerator-buildkit-ca
     ```
   - the daemons' certificate and the controller's certificates in the
     box namespace:

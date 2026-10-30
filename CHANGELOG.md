@@ -9,7 +9,143 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- The controller and the routers restart once (their pod templates read
+  the GitLab URLs from a file now); the daemons do not.
+- The charts now refuse a few settings that never worked, at render time
+  instead of failing later. Each message says what to change:
+  - `control-plane.router.enabled` different from `global.router.enabled`
+    in the box (use `global.router.enabled` only);
+  - `gitlab-runner.enabled=false` with the control plane on and no GitLab
+    URL for it: neither `gitlab-runner.gitlabUrl`, nor
+    `control-plane.gitlab.urls`, nor your own
+    `control-plane.gitlab.urlsFrom.configMap` (the controller and routers
+    crash-looped);
+  - a runner tier on `nodes: any` while the jobs' Service routes `Local`
+    (its jobs could not reach a router);
+  - `buildkit.storage.emptyDir.sizeLimit` with a custom `config.gcPolicy`
+    that has no unfiltered absolute `maxUsedSpace`;
+  - GC sizes under `buildkit.config.workerOCI` (`reservedSpace`,
+    `maxUsedSpace`, `minFreeSpace`, `gckeepstorage`): buildkitd ignored
+    them; set `config.gc` instead;
+  - changing `buildkit.priorityClass.value` or `preemptionPolicy` after
+    install (the message gives the `kubectl delete priorityclass` way);
+  - switching `jobsNamespace.create` to false on an installed release
+    before the namespace carries `helm.sh/resource-policy=keep` (Helm
+    deleted the namespace and the running jobs in it).
+- `s3.pathStyle: false` for the runner cache now takes effect; installs
+  that set it see one runner configuration change.
+- Multi-platform images: the first rebuild after the upgrade can show as
+  "unclear: nothing on record to compare with" when its previous build was
+  stored by 0.3.3, the first rebuilt step is of a later platform and its
+  text did not change (0.3.3
+  recorded only the first platform's step definitions); from the next
+  build on they are compared normally.
+- **Console admins are named by GitLab user id only**: write
+  `signIn.gitlab[].admins` as `["id:<n>"]` (the number on the person's
+  GitLab profile page). Usernames are refused by the chart and the
+  controller: GitLab gives a renamed or deleted account's username to the
+  next account that takes it, which would then be an admin.
+
+### Security
+
+- Console with sign-in: a CI job chooses its own trace id (and can set
+  `CI_PIPELINE_ID`), so a member of one project could open another
+  project's build pages (the previous build's Dockerfile steps, build
+  argument values, commit) by naming their own pipeline and the other
+  project's job, or claim a pipeline id before that pipeline existed
+  (pipeline ids are sequential). A build now belongs to its job's project
+  only when the job is of the pipeline the trace names and no other
+  project owns that pipeline; when the projects disagree, GitLab's answer
+  decides whose the pipeline is (asked when a build page opens; each
+  project's read is its own), and until then only admins see the build.
+  A build whose job's pod the console never saw is its pipeline's
+  project's only once GitLab has confirmed the pipeline. A build page
+  lists only its job's builds of its own pipeline, and the link in a job's
+  log opens no build when the builds naming an unknown job disagree on the
+  pipeline. README Limitations says what a job can still do with its trace
+  id.
+- A build whose job's pod was never seen kept no project, and its step
+  history listed every project's runs of the same step; it now takes its
+  project from GitLab's job list and its history stays within it.
+- A build with more than 4096 steps could show another build's step
+  output (possibly another project's) for its later steps.
+- Dockerfiles are masked like step output before they are stored and
+  shown (the Dockerfile tab printed tokens written into a Dockerfile);
+  token formats right after a letter (a literal `\n` in a `printf`) are
+  masked too; a private key cut by the edge of a job log part is masked;
+  the job log endpoint no longer takes `?lines=`.
+- Sign-out ends the session even when the browser leaves or GitLab is
+  slow, and no longer says the GitLab access was revoked when GitLab did
+  not confirm it.
+
+### Fixed
+
+- The controller ran out of memory on a build whose steps printed
+  hundreds of MiB (and again on every start until the record left the
+  daemon's history); logs are now read as a stream within bounded memory.
+- The controller's memory grew by about 11 MB per project and day of
+  kept step output (OOM within a week at the default 1Gi limit).
+- A restarted controller (or a broken history stream) stored builds
+  older than two hours again without the steps they received from other
+  builds: received steps turned into built ones and reasons and figures
+  changed.
+- A daemon whose address briefly left the Service could freeze the
+  collection of builds and the Nodes page; replaced daemon pods no longer
+  leave their last two hours of builds in memory.
+- Reading a job's log no longer spins forever on a `?before=` past its
+  end, nor floods GitLab when an empty log answers every range with 416.
+- Multi-platform builds: the steps of the second and later platforms were
+  shown as received from no build, their usage dropped and their
+  rebuilds ignored.
+- Images without a Dockerfile target: the previous build is found however
+  old, "files or node" is settled against that image's own previous
+  commit, and the usual time and slow mark are each image's own.
+- A build after a failed or canceled build of the same image was
+  reported as "Dockerfile changed: this step is new"; the previous build
+  is the last one that did not fail, and failed builds after a build stored
+  late are compared again with it.
+- A build whose job became known only from GitLab's job list (the
+  controller was away while its pod ran) was never compared, nor was the
+  next build of its image with it; such builds are now compared again until
+  it succeeds (the store gains a column and an index on start, which 0.3.3
+  ignores after a rollback).
+- When a build printed so much that a step's log was cut at the console's
+  limit, the shown start of that log could contain part of a secret.
+- A GitLab token renewal cut off by a closed page lost the rotated token
+  and signed the person out; renewals queued behind a failed one share its
+  failure instead of hitting GitLab one after another; a rate-limited
+  permission check waits as GitLab asks, and the home page says GitLab did
+  not answer instead of "no project you can read".
+- A brief Kubernetes API outage turned every console page into a 500; the
+  controller keeps recently confirmed tokens and answers 503 otherwise.
+- Changing `gitlab-runner.gitlabUrl` now reaches the controller and the
+  routers without a manual restart.
+- The router took a job's zone only from a daemon on the job's node: while
+  that node's daemon was between pods (a rollout, an eviction) the job
+  lost its zone and `crossZone: false` was ignored. A node now keeps its
+  zone; a node that never had a daemon still counts every daemon as its
+  zone, as before.
+- `buildkit.extraEnv` can override variables the chart sets (duplicate
+  names were rejected by server-side apply).
+- The runner cache page: a lifecycle rule that does not expire the
+  runners' folder no longer hides the "never deleted" warning, and
+  `Shared=false` runners' copies of a key are summed.
+- GitLab CI component: builds with `push: false` on a GitLab without a
+  container registry; base images from the Dependency Proxy get the job's
+  credentials; a File-type variable as a secret mounts the file's
+  content; a timeout is reported as one and a buildctl that ignores
+  SIGTERM is killed.
+- `quickstart.sh`: a second run keeps the build cache of `values.yaml`
+  (and refuses another `--build-dir`), `--uninstall` removes the cache
+  directory actually in use, and a second run on a disk the cache filled
+  warns instead of stopping.
+- Docs: "Uninstall completely" deleted the CA Secret of any other box
+  with the same release name; GC policies with both an age and a cap are
+  described correctly; the runner integration installed box 0.3.0.
+- CI: changes to `.dockerignore`, `LICENSE` and `scripts/vulncheck.sh`
+  run the checks that depend on them, a moved file runs the checks of the
+  place it left, the release gate scripts run on every chart change, and
+  the weekly scan covers the disk probe's image while it lags behind.
 
 ## 0.3.3 - 2026-10-29
 

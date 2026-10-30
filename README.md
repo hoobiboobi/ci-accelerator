@@ -154,10 +154,11 @@ Service (their own node's daemon). Five sections:
 Every build gets one of five outcomes: from cache, your change, build
 farm, unclear or failed. A build's page starts with one sentence, then:
 
-- what changed since the previous build of the image: commit, node,
-  Dockerfile lines, build arguments, base image, the files a rebuilt step
-  copies (a build argument that reaches a step through `ENV` counts as
-  that argument's change);
+- what changed since the previous build of the image (failed and
+  canceled builds do not count: BuildKit records no provenance for
+  them): commit, node, Dockerfile lines, build arguments, base image, the
+  files a rebuilt step copies (a build argument that reaches a step
+  through `ENV` counts as that argument's change);
 - its steps, with what each one's processes used (CPU time, time held
   back by a CPU limit, disk read and written, the most memory its cgroup
   held in one of BuildKit's samples, from BuildKit's cgroup readings) and
@@ -216,9 +217,10 @@ by tag, the daemons' by digest):
 - Helm v4.3.1 and cert-manager v1.21.3;
 - the box, with the build router and the console. The daemon keeps its
   cache in `/var/lib/ci-accelerator/buildkit` (a hostPath, so it survives
-  restarts; `--build-dir` puts it elsewhere). Its resources are sized from
-  the machine on the first install (half its CPUs and a quarter of its
-  memory requested, three quarters of the memory at most) and kept in
+  restarts; `--build-dir` on the first install puts it elsewhere). Its
+  resources are sized from the machine on the first install (half its CPUs
+  and a quarter of its memory requested, three quarters of the memory at
+  most) and kept, with the cache's path, in
   `/var/lib/ci-accelerator/values.yaml`, which later runs leave alone.
 
 It prints a job to add to `.gitlab-ci.yml` and the SSH tunnel to the
@@ -501,13 +503,16 @@ reaches over https.
        sessionKey: { existingSecret: console-session }
        gitlab:
          - existingSecret: console-gitlab-oauth   # client-id, client-secret
-           admins: [alice]                        # GitLab usernames who see everything
+           admins: ["id:1234567"]                 # GitLab user ids who see everything
    ```
 
    A `gitlab` entry without `url` is the runner's GitLab; several entries
-   serve several GitLabs. On the one-machine install the values live in
-   `/var/lib/ci-accelerator/values.yaml`; apply them with the Helm the
-   script installed:
+   serve several GitLabs. Admins are named by user id (`id:<n>`, shown on
+   the person's GitLab profile page); usernames are refused, since GitLab
+   gives a renamed or deleted account's username to the next account that
+   takes it. On the one-machine install
+   the values live in `/var/lib/ci-accelerator/values.yaml`; apply them
+   with the Helm the script installed:
 
    ```sh
    sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
@@ -672,6 +677,21 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   through BuildKit, so traces in your backend are input from builds. The
   buildctl command line, build-arg values included, is recorded in traces:
   **never pass secrets as build args**; use `--secret`.
+- **A job can claim another job's builds in the console.** The console
+  ties a build to its GitLab job and pipeline by the trace id buildctl
+  sends, and the job's pipeline id by a CI variable; a job can set both.
+  With sign-in on, a build whose trace names a job and a pipeline of
+  different projects is shown to admins only, and a pipeline keeps the
+  project it was first seen in until GitLab says whose it is, so a job
+  cannot open another project's builds this way. It can still add builds
+  to another project's lists, and a job that names a pipeline before that
+  pipeline's own jobs are seen hides that pipeline's builds from everyone
+  but admins until one of its project's members opens one of them (the
+  console then asks GitLab, with that person's token, whose pipeline it
+  is). A build whose job's pod the console never saw (it ran while the
+  controller was away, or in a namespace it does not watch) is shown to
+  admins only until GitLab has said whose its pipeline is (asked when
+  the build's page opens); in a pipeline claimed this way that stays so.
 - **Client certificates:** any certificate from the installation's CA is
   accepted. By default cert-manager lets namespace editors request
   certificates from any ClusterIssuer; on a shared cluster restrict that,
@@ -710,7 +730,9 @@ vulnerability: [SECURITY.md](SECURITY.md).)
 - **What uninstall leaves behind:**
   - with hostPath: the cache on the nodes;
   - the controller's volume `<release>-controller-data` (the console's history), kept on purpose;
-  - the certificate Secrets: the CA key in cert-manager's namespace, and
+  - the certificate Secrets: the CA key in cert-manager's namespace
+    (`<namespace>-<release>-buildkit-ca`; delete it by that name, not by
+    label: another box of the same release name shares the labels), and
     the daemons' and the controller's certificates in the box namespace
     (`<release>-buildkit-tls` among them).
 
@@ -747,8 +769,14 @@ vulnerability: [SECURITY.md](SECURITY.md).)
 - **It stores build data.** Step output is kept 7 days, masked on a best
   effort basis: known token formats, passwords in URLs, bearer tokens and
   the values of build arguments with secret-like names. Dockerfiles are
-  kept too. The API returns stored build arguments, with secret-named ones
-  masked.
+  kept too, masked the same way. The API returns stored build arguments,
+  with secret-named ones masked.
+- **Step output is clipped.** A step keeps the first 8 KiB and the last
+  56 KiB of what it printed. The controller reads a build holding at most
+  64 MiB of its output: in a build where hundreds of steps print that
+  much, the later ones show only how many bytes were cut. A build whose
+  provenance or trace is larger than 64 MiB is not stored (the controller
+  logs `record not stored`).
 - **Job pods carry the commit author's name and email** as annotations,
   and the console stores them.
 - **One controller.** SQLite on a ReadWriteOnce volume (never NFS), with
@@ -762,9 +790,10 @@ vulnerability: [SECURITY.md](SECURITY.md).)
 - **Images are told apart by Dockerfile target.** Builds without a target
   (the CI component's default) are named by the repository they push to,
   and each is compared with the previous build that pushed the same
-  repository; but the Images page and the daily figures put all of a
-  project's builds without a target in one row. Give each image its own
-  target, or one project per image, to see them apart there.
+  repository and has that repository's own usual time and slow mark; but
+  the Images page and the daily figures put all of a project's builds
+  without a target in one row. Give each image its own target, or one
+  project per image, to see them apart there.
 - **A failed build's Dockerfile** comes from BuildKit's stored error: only
   the failed step's lines are marked (BuildKit records no provenance for a
   failed build), and a canceled build has none.
@@ -811,6 +840,9 @@ make e2e                      # end-to-end on kind
 - **The quickstart** is checked on a clean Ubuntu machine:
   `test/quickstart/run.sh` runs `quickstart.sh`, two CI jobs and the
   console, then uninstalls (`.github/workflows/quickstart.yml`).
+  `test/quickstart/offline.sh` (`make quickstart-test`) runs the script in a
+  container with stand-ins for k3s and Helm: where the build cache is on
+  later runs, the free-disk check, what `--uninstall` removes.
 - **CI jobs in the e2e** come from a real gitlab-runner talking to a
   stand-in for the GitLab API. The box has also been tested by hand against
   gitlab.com.
