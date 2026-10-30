@@ -4,7 +4,7 @@ description: >-
   Persistent BuildKit daemons as a shared build service for CI, with probe
   and garbage-collection defaults derived from a production setup.
 type: application
-version: 0.3.6
+version: 0.3.7
 # Upstream moby/buildkit release; the default image tag is derived from it.
 appVersion: "v0.34.1"
 # >=1.34 for Service trafficDistribution: PreferSameNode (GA in 1.35).
