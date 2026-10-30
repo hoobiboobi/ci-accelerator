@@ -32,7 +32,7 @@ func searchWhere(q string) (string, []any) {
 	like := "%" + likeEscape(q) + "%"
 	conds := []string{`commit_title LIKE ? ESCAPE '\'`, `ref LIKE ? ESCAPE '\'`, `commit_author LIKE ? ESCAPE '\'`,
 		`EXISTS (SELECT 1 FROM jobs WHERE jobs.instance = pipelines.instance AND jobs.pipeline_id = pipelines.pipeline_id
-			AND jobs.name LIKE ? ESCAPE '\')`}
+			AND jobs.name LIKE ? ESCAPE '\' AND ` + pipelinesOwn + `)`}
 	args := []any{like, like, like, like}
 	if digits := strings.TrimPrefix(q, "#"); digits != "" {
 		if n, err := strconv.ParseUint(digits, 10, 64); err == nil && n > 0 {
@@ -131,7 +131,7 @@ func (s *Store) JobsOf(ctx context.Context, instance string, pipelines []uint64)
 		args = append(args, nullUint(id))
 	}
 	js, err := s.jobs(ctx, "INDEXED BY jobs_pipeline WHERE instance = ? AND pipeline_id IN (?"+strings.Repeat(", ?", len(pipelines)-1)+
-		") ORDER BY started_at IS NULL, started_at, queued_at, job_id", args...)
+		") AND "+pipelinesOwn+" ORDER BY started_at IS NULL, started_at, queued_at, job_id", args...)
 	if err != nil {
 		return nil, err
 	}

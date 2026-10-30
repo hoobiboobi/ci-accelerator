@@ -43,26 +43,46 @@ func Finished(status string) bool {
 }
 
 // SaveAPIPipeline stores what GitLab's API says about a pipeline and its
-// jobs. Jobs that ran on other runners are stored too: the pipeline page
-// lists them without builds.
-func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) error {
+// jobs; p.ProjectID is the project GitLab answered for. Jobs that ran on
+// other runners are stored too: the pipeline page lists them without
+// builds. It returns the jobs whose builds took their project from it
+// (their pods were never seen): they are to be compared now.
+func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) (attached []uint64, err error) {
 	instance := nullInstance(p.Instance)
 	if !instance.Valid || p.ID == 0 {
-		return fmt.Errorf("store: pipeline without instance or id: %+v", p)
+		return nil, fmt.Errorf("store: pipeline without instance or id: %+v", p)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 	project := nullUint(p.ProjectID)
 	seen := s.opts.Now().UnixMilli()
+	var owner sql.NullInt64
+	err = tx.QueryRowContext(ctx, "SELECT project_id FROM pipelines WHERE instance = ? AND pipeline_id = ?", instance, nullUint(p.ID)).Scan(&owner)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if project.Valid && owner.Valid && owner != project {
+		// A job of another project named the pipeline first (SaveJob):
+		// GitLab's word overrules it. What that job's pod said of the
+		// pipeline goes, and so does the project its builds took from it.
+		if _, err := tx.ExecContext(ctx, `UPDATE pipelines SET ref = '', sha = '', source = '', created_at = NULL,
+			commit_title = '', commit_author = '', mr_iid = NULL WHERE instance = ? AND pipeline_id = ?`, instance, nullUint(p.ID)); err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE builds SET project_id = NULL WHERE instance = ? AND pipeline_id = ? AND project_id != ?",
+			instance, nullUint(p.ID), project); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO pipelines (instance, pipeline_id, project_id, status, web_url, api_at, seen_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (instance, pipeline_id) DO UPDATE SET project_id = COALESCE(pipelines.project_id, excluded.project_id),
+		ON CONFLICT (instance, pipeline_id) DO UPDATE SET project_id = COALESCE(excluded.project_id, pipelines.project_id),
 			status = excluded.status, web_url = excluded.web_url, api_at = excluded.api_at`,
 		instance, nullUint(p.ID), project, p.Status, p.WebURL, p.Read.UnixMilli(), seen); err != nil {
-		return err
+		return nil, err
 	}
 	for _, j := range p.Jobs {
 		if j.ID == 0 {
@@ -84,14 +104,23 @@ func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) error {
 				started_by = CASE WHEN excluded.started_by = '' THEN jobs.started_by ELSE excluded.started_by END`,
 			instance, j.ID, nullUint(p.ID), project, j.Name, j.Stage, j.WebURL, nullTime(j.Started), j.Status,
 			nullTime(j.Queued), nullTime(j.Finished), nullDuration(j.Duration), nullDuration(j.Waited), j.Runner, seen, j.AllowFailure, j.User); err != nil {
-			return err
+			return nil, err
+		}
+		// A job whose pod was never seen (it ended while the controller
+		// was away) is known from here on: its builds take its project.
+		n, err := attachBuilds(ctx, tx, instance, j.ID)
+		if err != nil {
+			return nil, err
+		}
+		if n > 0 {
+			attached = append(attached, j.ID)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return err
+		return nil, err
 	}
 	s.changed(PipelineKey(fmt.Sprintf("%06x", instance.Int64), p.ID))
-	return nil
+	return attached, nil
 }
 
 func nullDuration(d time.Duration) sql.NullInt64 {
@@ -157,12 +186,16 @@ func (s *Store) Job(ctx context.Context, instance string, id uint64) (*JobInfo, 
 	return &js[0], nil
 }
 
+// pipelinesOwn keeps the rows of table jobs to those a pipeline lists:
+// not the jobs of another project that named it.
+var pipelinesOwn = "NOT " + ownedElsewhere("jobs.instance", "jobs.pipeline_id", "jobs.project_id")
+
 // PipelineJobs returns every job of a pipeline the console knows, from its
 // pods or from GitLab's API, in the order they started.
 func (s *Store) PipelineJobs(ctx context.Context, instance string, pipeline uint64) ([]JobInfo, error) {
 	// GitLab queues every job of a pipeline when it creates it: jobs that
 	// never started (skipped, canceled while waiting, manual) come last.
-	return s.jobs(ctx, "WHERE instance = ? AND pipeline_id = ? ORDER BY started_at IS NULL, started_at, queued_at, job_id",
+	return s.jobs(ctx, "WHERE instance = ? AND pipeline_id = ? AND "+pipelinesOwn+" ORDER BY started_at IS NULL, started_at, queued_at, job_id",
 		nullInstance(instance), nullUint(pipeline))
 }
 

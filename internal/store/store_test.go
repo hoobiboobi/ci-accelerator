@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -59,7 +60,7 @@ func fixtures(t *testing.T, key []byte) []*history.Build {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := history.NewBuild(rec, progress, read(d, "provenance.json"), read(d, "trace.json"), read(d, "error.bin"), cfg)
+		b, err := history.NewBuild(rec, progress, [][]byte{read(d, "provenance.json")}, read(d, "trace.json"), read(d, "error.bin"), cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -514,5 +515,63 @@ func TestJobArrivesAfterItsBuild(t *testing.T) {
 	ids, err := s.JobBuilds(ctx, a.Attribution.Instance, a.Attribution.Job)
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("builds of the job: %v, %v", ids, err)
+	}
+}
+
+// Steps past MaxSteps keep no output, and asking for one never reads
+// another build's block: the step index must not carry into the build id
+// bits of the output key.
+func TestOutputPastMaxSteps(t *testing.T) {
+	c := &clock{time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
+	s := open(t, t.TempDir(), c)
+	base := fixtures(t, s.SecretKey())[0]
+	saveJobs(t, s, []*history.Build{base})
+	save := func(ref string, n int, out string) int64 {
+		t.Helper()
+		b := *base
+		b.Ref = ref
+		b.Completed = c.t
+		b.Steps = make([]history.Step, n)
+		for i := range b.Steps {
+			b.Steps[i] = base.Steps[0]
+			b.Steps[i].Key = fmt.Sprintf("[%d/%d]", i, n)
+			b.Steps[i].Output = fmt.Sprintf("%s step %d", out, i)
+		}
+		id, err := s.SaveBuild(ctx, Build{Build: &b, Generation: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	if id := save("filler", 1, "F"); id%2 != 1 {
+		t.Fatalf("filler build id %d, want odd", id)
+	}
+	big := save("big", MaxSteps+2, "A")
+	save("next", 3, "V")
+	p, err := s.BuildPage(ctx, big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Printed[MaxSteps-1] || p.Printed[MaxSteps] || p.Printed[MaxSteps+1] {
+		t.Errorf("printed %d/%d/%d, want true/false/false", MaxSteps-1, MaxSteps, MaxSteps+1)
+	}
+	var past int
+	if err := s.db.QueryRow("SELECT count(*) FROM steps WHERE build_id = ? AND idx >= ? AND output_len > 0", big, MaxSteps).Scan(&past); err != nil || past != 0 {
+		t.Errorf("%d steps past MaxSteps stored as printed, %v", past, err)
+	}
+	// Rows saved by earlier versions carry the length of every step.
+	if _, err := s.db.Exec("UPDATE steps SET output_len = 9 WHERE build_id = ?", big); err != nil {
+		t.Fatal(err)
+	}
+	if p, err = s.BuildPage(ctx, big); err != nil || p.Printed[MaxSteps] {
+		t.Errorf("earlier rows: printed %d %v, %v", MaxSteps, p.Printed[MaxSteps], err)
+	}
+	for _, step := range []int{-1, MaxSteps, MaxSteps + 1} {
+		if got, err := s.Output(ctx, big, step); err != nil || got != "" {
+			t.Errorf("step %d: %q, %v; want nothing", step, got, err)
+		}
+	}
+	if got, err := s.Output(ctx, big, MaxSteps-1); err != nil || got != fmt.Sprintf("A step %d", MaxSteps-1) {
+		t.Errorf("last kept step: %q, %v", got, err)
 	}
 }

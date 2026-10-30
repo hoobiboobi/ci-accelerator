@@ -321,4 +321,15 @@ var toleratedColumns = []struct{ table, column, def string }{
 	// The most memory a step's cgroup held in one of BuildKit's samples
 	// (0.3.3; 0.3.2 stores 0 there without knowing).
 	{"steps", "mem_bytes", "INTEGER NOT NULL DEFAULT 0"},
+	// A build that took its project after it was stored (its job became
+	// known) and has not been compared since: the comparison is done
+	// again until it succeeds (DueJobs).
+	{"builds", "compare_due", "INTEGER NOT NULL DEFAULT 0"},
 }
+
+// toleratedIndexes are created by the repairs when missing, on tolerated
+// columns: an earlier release of the same schema version keeps them up
+// to date without knowing them.
+var toleratedIndexes = `
+CREATE INDEX IF NOT EXISTS builds_compare_due ON builds (instance, job_id) WHERE compare_due = 1;
+`

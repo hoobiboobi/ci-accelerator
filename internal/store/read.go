@@ -41,38 +41,30 @@ const buildColumns = `b.id, b.generation, d.name, b.ref, b.attribution, b.instan
 // restored for FirstRebuild; nil when there is none.
 // Builds of b's own pipeline do not count: they build the same commit at
 // the same time (parallel jobs, retries), and comparing with one makes the
-// commit's own work look like "nothing changed". known is false while b's
-// project is not known (its job not seen yet): then there is nothing to
-// compare with, which is not a first build.
+// commit's own work look like "nothing changed". Nor do failed or canceled
+// builds: BuildKit records no provenance for them, so every step compared
+// with one would look new. known is false while b's project is not known
+// (its job not seen yet): then there is nothing to compare with, which is
+// not a first build.
 func (s *Store) Previous(ctx context.Context, b *history.Build) (prev *Stored, known bool, err error) {
 	instance, job := nullInstance(b.Attribution.Instance), nullUint(b.Attribution.Job)
 	if !instance.Valid || !job.Valid {
 		return nil, false, nil
 	}
 	var project sql.NullInt64
-	err = s.db.QueryRowContext(ctx, "SELECT project_id FROM jobs WHERE instance = ? AND job_id = ?", instance, job).Scan(&project)
+	err = s.db.QueryRowContext(ctx, jobProject, instance, job, nullUint(b.Attribution.Pipeline)).Scan(&project)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !project.Valid) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+buildColumns+` FROM builds b JOIN daemons d ON d.id = b.daemon_id
-		WHERE b.instance = ? AND b.project_id = ? AND b.target = ? AND b.started_at < ? AND b.ref <> ?
-			AND b.pipeline_id IS NOT ?
-		ORDER BY b.started_at DESC LIMIT ?`, instance, project, b.Target, b.Started.UnixMilli(), b.Ref,
-		nullUint(b.Attribution.Pipeline), candidates(b))
-	if err != nil {
+	id, err := s.sameImage(ctx, instance, project, b, false)
+	if err != nil || id == 0 {
 		return nil, true, err
 	}
-	found, err := s.scanBuilds(ctx, rows)
-	if err != nil {
-		return nil, true, err
-	}
-	if p := sameImage(b, found); p != nil {
-		return p, true, s.restore(ctx, p)
-	}
-	return nil, true, nil
+	prev, err = s.Load(ctx, id)
+	return prev, true, err
 }
 
 // imageKey tells a project's images apart: the target, or for a build of a
@@ -80,65 +72,121 @@ func (s *Store) Previous(ctx context.Context, b *history.Build) (prev *Stored, k
 // that two Dockerfiles without targets (services/api, services/worker) are
 // not compared with each other; "" for a build that pushed nothing.
 func imageKey(b *history.Build) string {
-	if b.Target != "" {
-		return b.Target
+	return ImageKey(b.Target, b.Images)
+}
+
+// ImageKey is imageKey of a build's target and images, for the figures
+// that are each image's own (usual times).
+func ImageKey(target string, images []string) string {
+	if target != "" {
+		return target
 	}
-	if rs := history.Repositories(b.Images); len(rs) > 0 {
+	if rs := history.Repositories(images); len(rs) > 0 {
 		return rs[0]
 	}
 	return ""
 }
 
-// candidates is how many builds of the same target Previous and Next look
-// at: one for a target; for builds without one, enough to find the same
-// repository among the project's other images.
-func candidates(b *history.Build) int {
-	if b.Target != "" {
-		return 1
-	}
-	return 500
+// sameImage returns the id of the build of b's project and image (its
+// target, or imageKey without one) nearest to b before it (after: after
+// it), skipping b's own pipeline and failed builds; 0 when there is none.
+func (s *Store) sameImage(ctx context.Context, instance sql.NullInt64, project any, b *history.Build, after bool) (int64, error) {
+	var id int64
+	err := s.walkImage(ctx, instance, project, b, after, func(found int64, failed bool) bool {
+		if failed {
+			return true
+		}
+		id = found
+		return false
+	})
+	return id, err
 }
 
-// sameImage is the first of found (in order) of b's image.
-func sameImage(b *history.Build, found []*Stored) *Stored {
+// walkImage calls fn with the builds of b's project and image (its target,
+// or imageKey without one) before b (after: after it), nearest first,
+// skipping b's own pipeline, until fn returns false. Builds without a
+// target are matched by repository here, over all of them: a fixed window
+// of the latest ones would lose a rarely built image behind its project's
+// other images.
+func (s *Store) walkImage(ctx context.Context, instance sql.NullInt64, project any, b *history.Build, after bool,
+	fn func(id int64, failed bool) bool) error {
+	cmp, order := "<", "DESC"
+	if after {
+		cmp, order = ">", "ASC"
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.images, b.error <> '' FROM builds b INDEXED BY builds_target
+		WHERE b.instance = ? AND b.project_id = ? AND b.target = ? AND b.started_at `+cmp+` ? AND b.ref <> ?
+			AND b.pipeline_id IS NOT ?
+		ORDER BY b.started_at `+order, instance, project, b.Target, b.Started.UnixMilli(), b.Ref,
+		nullUint(b.Attribution.Pipeline))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
 	key := imageKey(b)
-	for _, f := range found {
-		if imageKey(f.Build) == key {
-			return f
+	for rows.Next() {
+		var (
+			id     int64
+			images string
+			failed bool
+			found  history.Build
+		)
+		if err := rows.Scan(&id, &images, &failed); err != nil {
+			return err
+		}
+		found.Target = b.Target
+		_ = json.Unmarshal([]byte(images), &found.Images)
+		if imageKey(&found) == key && !fn(id, failed) {
+			return nil
 		}
 	}
-	return nil
+	return rows.Err()
 }
 
-// Next returns the first build of the same project and target that
-// started after b (its reason compares it with b), restored; nil when there
-// is none or b's project is not known.
-func (s *Store) Next(ctx context.Context, b *history.Build) (*Stored, error) {
+// Next returns the builds whose reason compares them with b, restored:
+// those of the same project and image that started after b, up to and
+// with the first that did not fail (Previous skips failed builds, so b is
+// the previous build of the failed ones before it as well). None when b's
+// project is not known, or b failed (nothing is compared with a failed
+// build).
+func (s *Store) Next(ctx context.Context, b *history.Build) ([]*Stored, error) {
 	instance, job := nullInstance(b.Attribution.Instance), nullUint(b.Attribution.Job)
-	if !instance.Valid || !job.Valid {
+	if !instance.Valid || !job.Valid || b.Error != "" {
 		return nil, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+buildColumns+` FROM builds b JOIN daemons d ON d.id = b.daemon_id
-		WHERE b.instance = ? AND b.project_id = (SELECT project_id FROM jobs WHERE instance = ? AND job_id = ?)
-			AND b.target = ? AND b.started_at > ? AND b.ref <> ? AND b.pipeline_id IS NOT ?
-		ORDER BY b.started_at LIMIT ?`, instance, instance, job, b.Target, b.Started.UnixMilli(), b.Ref,
-		nullUint(b.Attribution.Pipeline), candidates(b))
+	var project sql.NullInt64
+	err := s.db.QueryRowContext(ctx, "SELECT project_id FROM jobs WHERE instance = ? AND job_id = ?", instance, job).Scan(&project)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !project.Valid) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	found, err := s.scanBuilds(ctx, rows)
+	var ids []int64
+	err = s.walkImage(ctx, instance, project, b, true, func(id int64, failed bool) bool {
+		ids = append(ids, id)
+		return failed
+	})
 	if err != nil {
 		return nil, err
 	}
-	if n := sameImage(b, found); n != nil {
-		return n, s.restore(ctx, n)
+	out := make([]*Stored, 0, len(ids))
+	for _, id := range ids {
+		st, err := s.Load(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, st)
 	}
-	return nil, nil
+	return out, nil
 }
 
-// JobBuilds returns the ids of a job's builds.
+// JobBuilds returns the ids of a job's builds: those whose trace names the
+// job and its pipeline (another job may name it with another pipeline).
 func (s *Store) JobBuilds(ctx context.Context, instance string, job uint64) ([]int64, error) {
-	return s.ids(ctx, "SELECT id FROM builds WHERE instance = ? AND job_id = ? ORDER BY started_at", nullInstance(instance), nullUint(job))
+	return s.ids(ctx, `SELECT id FROM builds b WHERE instance = ?1 AND job_id = ?2 AND NOT EXISTS (SELECT 1 FROM jobs j
+		WHERE j.instance = ?1 AND j.job_id = ?2 AND j.pipeline_id IS NOT NULL AND j.pipeline_id IS NOT b.pipeline_id)
+		ORDER BY started_at`, nullInstance(instance), nullUint(job))
 }
 
 // Recent returns the latest builds, newest first, with their steps.

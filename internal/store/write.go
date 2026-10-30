@@ -30,18 +30,45 @@ var states = map[history.StepState]int{history.Cached: 0, history.Built: 1, hist
 
 var attributions = map[history.AttributionState]int{history.Unattributed: 0, history.Attributed: 1, history.Ambiguous: 2}
 
-// StoredUnder returns the daemon a record is stored under, "" when it is
-// not stored. A record is stored once, under the daemon pod that sent it
-// first: a stream read again after a restart replays records the store
-// has, and a daemon pod that replaced another on the same hostPath sends
-// the old pod's records too (its history is on that disk).
-func (s *Store) StoredUnder(ctx context.Context, ref string) (string, error) {
-	var name string
-	err := s.db.QueryRowContext(ctx, `SELECT d.name FROM builds b JOIN daemons d ON d.id = b.daemon_id WHERE b.ref = ?`, ref).Scan(&name)
+// StoredUnder returns the daemon a record is stored under and the
+// generation it was stored from; "" and 0 when it is not stored. A record
+// is stored once, under the daemon pod that sent it first: a stream read
+// again after a restart replays records the store has, and a daemon pod
+// that replaced another on the same hostPath sends the old pod's records
+// too (its history is on that disk).
+func (s *Store) StoredUnder(ctx context.Context, ref string) (string, int64, error) {
+	var (
+		name string
+		gen  int64
+	)
+	err := s.db.QueryRowContext(ctx, `SELECT d.name, b.generation FROM builds b JOIN daemons d ON d.id = b.daemon_id WHERE b.ref = ?`, ref).Scan(&name, &gen)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return "", 0, nil
 	}
-	return name, err
+	return name, gen, err
+}
+
+// ReceivedFrom returns, by step index, the build each step of a stored
+// build received its work from, for the steps linked to a stored build.
+func (s *Store) ReceivedFrom(ctx context.Context, ref string) (map[int]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT s.idx, x.ref FROM builds b JOIN steps s ON s.build_id = b.id
+		JOIN builds x ON x.id = s.received_from WHERE b.ref = ?`, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int]string{}
+	for rows.Next() {
+		var (
+			idx  int
+			from string
+		)
+		if err := rows.Scan(&idx, &from); err != nil {
+			return nil, err
+		}
+		out[idx] = from
+	}
+	return out, rows.Err()
 }
 
 // SaveBuild stores a build, its steps, its reason and its graph, and then
@@ -103,7 +130,7 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 	instance, pipeline, job := nullInstance(a.Instance), nullUint(a.Pipeline), nullUint(a.Job)
 	var project sql.NullInt64
 	if instance.Valid && job.Valid {
-		err := tx.QueryRowContext(ctx, "SELECT project_id FROM jobs WHERE instance = ? AND job_id = ?", instance, job).Scan(&project)
+		err := tx.QueryRowContext(ctx, jobProject, instance, job, pipeline).Scan(&project)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return 0, err
 		}
@@ -222,10 +249,14 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			start = st.Started.Sub(b.Started).Milliseconds()
 		}
 		u := st.Usage
+		printed := len(st.Output)
+		if i >= MaxSteps {
+			printed = 0 // no block is kept, so the step has no output to show
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO steps (build_id, idx, key, name, identity, state, start_ms, dur_ms, lines,
 			received_from, error, output_len, cpu_ms, throttled_ms, read_bytes, write_bytes, mem_bytes)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, i, st.Key, name, ident, states[st.State], start, dur, formatLines(st.Lines), from, st.Error, len(st.Output),
+			id, i, st.Key, name, ident, states[st.State], start, dur, formatLines(st.Lines), from, st.Error, printed,
 			u.CPU.Milliseconds(), u.Throttled.Milliseconds(), u.ReadBytes, u.WriteBytes, u.Memory); err != nil {
 			return 0, err
 		}
@@ -308,6 +339,85 @@ func (s *Store) SetReason(ctx context.Context, ref, daemon string, r history.Rea
 	return err
 }
 
+// ownedElsewhere is an SQL condition: the pipeline (instance, pipeline) is
+// another project's than project. The pipeline id on a job's pod is a CI
+// variable the job may set, so a job may name another project's pipeline.
+func ownedElsewhere(instance, pipeline, project string) string {
+	return "EXISTS (SELECT 1 FROM pipelines op WHERE op.instance = " + instance + " AND op.pipeline_id = " + pipeline +
+		" AND op.project_id IS NOT NULL AND op.project_id IS NOT " + project + ")"
+}
+
+// jobProject reads the project of a build's job (instance, job, the
+// build's pipeline). The trace id that names the job is the job's own
+// choice: a job of another pipeline than the one the trace names, or of
+// another project than the pipeline's, gives the build no project.
+var jobProject = `SELECT project_id FROM jobs j WHERE instance = ?1 AND job_id = ?2 AND (pipeline_id IS NULL OR pipeline_id = ?3)
+	AND NOT ` + ownedElsewhere("?1", "?3", "j.project_id")
+
+// attachBuilds gives a job's builds saved before its project was known
+// that project (those whose trace names the job's pipeline, when that is
+// no other project's), marks them due for comparison (DueJobs), and moves
+// the project's last build time. It returns how many builds took the
+// project.
+func attachBuilds(ctx context.Context, tx *sql.Tx, instance sql.NullInt64, job uint64) (int64, error) {
+	res, err := tx.ExecContext(ctx, `UPDATE builds SET project_id = (SELECT project_id FROM jobs WHERE instance = ?1 AND job_id = ?2),
+			compare_due = 1
+		WHERE instance = ?1 AND job_id = ?2 AND project_id IS NULL AND EXISTS (SELECT 1 FROM jobs j WHERE j.instance = ?1
+			AND j.job_id = ?2 AND j.project_id IS NOT NULL AND (j.pipeline_id IS NULL OR j.pipeline_id = builds.pipeline_id)
+			AND NOT `+ownedElsewhere("?1", "builds.pipeline_id", "j.project_id")+`)`,
+		instance, job)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE projects SET last_at = max(COALESCE(last_at, 0),
+		COALESCE((SELECT max(started_at) FROM builds WHERE instance = ?1 AND job_id = ?2 AND project_id = projects.project_id), 0))
+		WHERE instance = ?1 AND project_id = (SELECT project_id FROM jobs WHERE instance = ?1 AND job_id = ?2)
+			AND EXISTS (SELECT 1 FROM builds WHERE instance = ?1 AND job_id = ?2 AND project_id = projects.project_id)`,
+		instance, job)
+	return n, err
+}
+
+// JobKey names a CI job: its GitLab instance and id.
+type JobKey struct {
+	Instance string
+	Job      uint64
+}
+
+// DueJobs returns up to limit jobs whose builds took their project after
+// they were stored and were not compared since (CompareDone).
+func (s *Store) DueJobs(ctx context.Context, limit int) ([]JobKey, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT instance, job_id FROM builds
+		WHERE compare_due = 1 AND instance IS NOT NULL AND job_id IS NOT NULL LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []JobKey
+	for rows.Next() {
+		var (
+			instance int64
+			job      uint64
+		)
+		if err := rows.Scan(&instance, &job); err != nil {
+			return nil, err
+		}
+		out = append(out, JobKey{Instance: fmt.Sprintf("%06x", instance), Job: job})
+	}
+	return out, rows.Err()
+}
+
+// CompareDone says a job's builds were compared now that their project is
+// known: they are no longer due.
+func (s *Store) CompareDone(ctx context.Context, instance string, job uint64) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE builds SET compare_due = 0 WHERE instance = ? AND job_id = ? AND compare_due = 1",
+		nullInstance(instance), nullUint(job))
+	return err
+}
+
 // Job is a CI job as its pod's annotations describe it.
 type Job struct {
 	Instance                      string // trace-id prefix, 6 hex characters
@@ -337,6 +447,20 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 	}
 	defer tx.Rollback()
 	project, pipeline := nullUint(j.ProjectID), nullUint(j.PipelineID)
+	own := pipeline.Valid
+	if pipeline.Valid {
+		// The pipeline id comes from a CI variable, which a job may set
+		// itself; the project comes from the runner. A pipeline stays with
+		// the project it was first seen in until GitLab says whose it is
+		// (SaveAPIPipeline): a job of another project that names it keeps
+		// the id, changes nothing of the pipeline and is not listed in it.
+		var owner sql.NullInt64
+		err := tx.QueryRowContext(ctx, "SELECT project_id FROM pipelines WHERE instance = ? AND pipeline_id = ?", instance, pipeline).Scan(&owner)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		own = !owner.Valid || owner == project
+	}
 	if project.Valid {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO projects (instance, project_id, path) VALUES (?, ?, ?)
 			ON CONFLICT (instance, project_id) DO UPDATE SET path = CASE WHEN excluded.path = '' THEN projects.path ELSE excluded.path END`,
@@ -344,10 +468,10 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 			return err
 		}
 	}
-	if pipeline.Valid {
+	if own {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO pipelines (instance, pipeline_id, project_id, ref, sha, source, created_at,
 			commit_title, commit_author, mr_iid, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (instance, pipeline_id) DO UPDATE SET project_id = COALESCE(excluded.project_id, pipelines.project_id),
+			ON CONFLICT (instance, pipeline_id) DO UPDATE SET project_id = COALESCE(pipelines.project_id, excluded.project_id),
 				ref = excluded.ref, sha = excluded.sha, source = excluded.source,
 				created_at = COALESCE(excluded.created_at, pipelines.created_at), commit_title = excluded.commit_title,
 				commit_author = excluded.commit_author, mr_iid = COALESCE(excluded.mr_iid, pipelines.mr_iid)`,
@@ -369,21 +493,14 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 		return err
 	}
 	if project.Valid {
-		if _, err := tx.ExecContext(ctx, "UPDATE builds SET project_id = ? WHERE instance = ? AND job_id = ? AND project_id IS NULL",
-			project, instance, j.JobID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE projects SET last_at = max(COALESCE(last_at, 0),
-			COALESCE((SELECT max(started_at) FROM builds WHERE instance = ?1 AND job_id = ?2), 0))
-			WHERE instance = ?1 AND project_id = ?3 AND EXISTS (SELECT 1 FROM builds WHERE instance = ?1 AND job_id = ?2)`,
-			instance, j.JobID, project); err != nil {
+		if _, err := attachBuilds(ctx, tx, instance, j.JobID); err != nil {
 			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if pipeline.Valid {
+	if own {
 		s.changed(pipelineKey(instance, pipeline))
 	}
 	return nil

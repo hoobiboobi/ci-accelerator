@@ -35,6 +35,11 @@ const (
 	dictSize = 64 << 10
 	// dictMin is the least earlier output worth a dictionary.
 	dictMin = 4 << 10
+	// outputWindow bounds how far an encoder looks back. A block is one
+	// step's output (at most history.MaxStepOutput) after a dictionary, so
+	// a larger window finds nothing more, while the default (8 MB) makes a
+	// dictionary encoder hold about 11 MB.
+	outputWindow = 256 << 10
 )
 
 // dictRetries are the numbers of writes without a dictionary after which a
@@ -54,12 +59,15 @@ type outputFile struct {
 	day int
 	db  *sql.DB
 
-	mu      sync.Mutex
-	dicts   map[string]*dictState // by project
+	mu    sync.Mutex
+	dicts map[string]*dictState // by project
+	// Encoders exist only while the day is being written: a file stays
+	// open for the whole retention, and one encoder per project and day
+	// would add up to hundreds of megabytes.
 	enc     map[int64]*zstd.Encoder
+	plain   *zstd.Encoder
 	dec     *zstd.Decoder
 	decDict map[int64]bool
-	plain   *zstd.Encoder
 }
 
 type dictState struct {
@@ -88,16 +96,88 @@ func (s *Store) output(ctx context.Context, d int, create bool) (*outputFile, er
 		db.Close()
 		return nil, err
 	}
-	plain, _ := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
 	dec, _ := zstd.NewReader(nil)
-	f := &outputFile{day: d, db: db, dicts: map[string]*dictState{}, enc: map[int64]*zstd.Encoder{}, dec: dec, decDict: map[int64]bool{}, plain: plain}
+	f := &outputFile{day: d, db: db, dicts: map[string]*dictState{}, enc: map[int64]*zstd.Encoder{}, dec: dec, decDict: map[int64]bool{}}
 	s.outputs[d] = f
 	return f, nil
 }
 
+// close closes a file taken out of s.outputs. Its encoders go with it
+// (they hold no goroutines): releaseEncoders may still hold the file and
+// drop them under f.mu, which close does not take.
 func (f *outputFile) close() error {
 	f.dec.Close()
 	return f.db.Close()
+}
+
+// release drops the encoders; f.mu must be held.
+func (f *outputFile) release() {
+	f.enc = map[int64]*zstd.Encoder{}
+	f.plain = nil
+}
+
+// releaseEncoders drops the encoders of the files no longer written: all
+// but day d, today's and yesterday's. A late build that still writes to
+// such a file gets them back from the stored dictionaries.
+func (s *Store) releaseEncoders(d int) {
+	keep := day(s.opts.Now().Add(-24 * time.Hour))
+	s.mu.Lock()
+	var idle []*outputFile
+	for fd, f := range s.outputs {
+		if fd != d && fd < keep {
+			idle = append(idle, f)
+		}
+	}
+	s.mu.Unlock()
+	for _, f := range idle {
+		f.mu.Lock()
+		f.release()
+		f.mu.Unlock()
+	}
+}
+
+func newEncoder(opts ...zstd.EOption) (*zstd.Encoder, error) {
+	opts = append([]zstd.EOption{zstd.WithEncoderConcurrency(1), zstd.WithWindowSize(outputWindow), zstd.WithLowerEncoderMem(true)}, opts...)
+	return zstd.NewWriter(nil, opts...)
+}
+
+// plainEncoder returns the encoder for blocks without a dictionary; f.mu
+// must be held.
+func (f *outputFile) plainEncoder() (*zstd.Encoder, error) {
+	if f.plain == nil {
+		enc, err := newEncoder()
+		if err != nil {
+			return nil, err
+		}
+		f.plain = enc
+	}
+	return f.plain, nil
+}
+
+// encoder returns the encoder of a dictionary stored in f; f.mu must be
+// held.
+func (f *outputFile) encoder(ctx context.Context, id int64) (*zstd.Encoder, error) {
+	if enc := f.enc[id]; enc != nil {
+		return enc, nil
+	}
+	content, err := f.dictContent(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	enc, err := newEncoder(zstd.WithEncoderDictRaw(uint32(id), content))
+	if err != nil {
+		return nil, err
+	}
+	f.enc[id] = enc
+	return enc, nil
+}
+
+func (f *outputFile) dictContent(ctx context.Context, id int64) ([]byte, error) {
+	var stored []byte
+	if err := f.db.QueryRowContext(ctx, "SELECT data FROM dicts WHERE id = ?", id).Scan(&stored); err != nil {
+		return nil, err
+	}
+	return f.dec.DecodeAll(stored, nil)
 }
 
 // writeOutputs stores the outputs of one build's steps (index -> output) in
@@ -116,11 +196,23 @@ func (s *Store) writeOutputs(ctx context.Context, d int, buildID int64, project 
 		idx = append(idx, i)
 	}
 	sort.Ints(idx)
+	s.releaseEncoders(d)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	dict, err := s.dictFor(ctx, f, project)
 	if err != nil {
 		return err
+	}
+	enc, err := f.plainEncoder()
+	if err != nil {
+		return err
+	}
+	var dictID any
+	if dict != 0 {
+		if enc, err = f.encoder(ctx, dict); err != nil {
+			return err
+		}
+		dictID = dict
 	}
 	tx, err := f.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -130,11 +222,6 @@ func (s *Store) writeOutputs(ctx context.Context, d int, buildID int64, project 
 	for _, i := range idx {
 		if i >= MaxSteps {
 			continue
-		}
-		enc := f.plain
-		var dictID any
-		if dict != 0 {
-			enc, dictID = f.enc[dict], dict
 		}
 		data := enc.EncodeAll([]byte(outputs[i]), nil)
 		if _, err := tx.ExecContext(ctx, "INSERT OR REPLACE INTO outputs (key, dict_id, data) VALUES (?, ?, ?)", outputKey(buildID, i), dictID, data); err != nil {
@@ -157,7 +244,7 @@ func (s *Store) dictFor(ctx context.Context, f *outputFile, project string) (int
 			return 0, err
 		}
 		if st.id != 0 {
-			return st.id, f.loadDict(ctx, st.id)
+			return st.id, nil
 		}
 	} else if st.id != 0 {
 		return st.id, nil
@@ -168,7 +255,11 @@ func (s *Store) dictFor(ctx context.Context, f *outputFile, project string) (int
 	if err != nil || len(content) < dictMin {
 		return 0, err
 	}
-	stored := f.plain.EncodeAll(content, nil)
+	plain, err := f.plainEncoder()
+	if err != nil {
+		return 0, err
+	}
+	stored := plain.EncodeAll(content, nil)
 	res, err := f.db.ExecContext(ctx, "INSERT INTO dicts (project, data) VALUES (?, ?)", project, stored)
 	if err != nil {
 		return 0, err
@@ -176,41 +267,22 @@ func (s *Store) dictFor(ctx context.Context, f *outputFile, project string) (int
 	if st.id, err = res.LastInsertId(); err != nil {
 		return 0, err
 	}
-	return st.id, f.useDict(st.id, content)
+	return st.id, nil
 }
 
-func (f *outputFile) loadDict(ctx context.Context, id int64) error {
-	if f.enc[id] != nil {
-		return nil
-	}
-	var stored []byte
-	if err := f.db.QueryRowContext(ctx, "SELECT data FROM dicts WHERE id = ?", id).Scan(&stored); err != nil {
-		return err
-	}
-	content, err := f.dec.DecodeAll(stored, nil)
-	if err != nil {
-		return err
-	}
-	return f.useDict(id, content)
-}
-
-func (f *outputFile) useDict(id int64, content []byte) error {
-	enc, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderDictRaw(uint32(id), content))
-	if err != nil {
-		return err
-	}
-	f.enc[id] = enc
+// knowDict teaches f's decoder a dictionary stored in f; f.mu must be held.
+func (f *outputFile) knowDict(ctx context.Context, id int64) error {
 	if f.decDict[id] {
 		return nil
+	}
+	content, err := f.dictContent(ctx, id)
+	if err != nil {
+		return err
 	}
 	// A decoder knows a fixed set of dictionaries: rebuild it with one more.
 	opts := []zstd.DOption{zstd.WithDecoderDictRaw(uint32(id), content)}
 	for other := range f.decDict {
-		var stored []byte
-		if err := f.db.QueryRow("SELECT data FROM dicts WHERE id = ?", other).Scan(&stored); err != nil {
-			return err
-		}
-		c, err := f.dec.DecodeAll(stored, nil)
+		c, err := f.dictContent(ctx, other)
 		if err != nil {
 			return err
 		}
@@ -236,8 +308,8 @@ func (s *Store) recentOutput(ctx context.Context, project string, current *outpu
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT b.id, b.output_day, s.idx FROM builds b JOIN steps s ON s.build_id = b.id
-		WHERE b.instance = ? AND b.project_id = ? AND b.output_day IS NOT NULL AND s.output_len > 0
-		ORDER BY b.id DESC, s.idx DESC LIMIT 256`, instance, projectID)
+		WHERE b.instance = ? AND b.project_id = ? AND b.output_day IS NOT NULL AND s.output_len > 0 AND s.idx < ?
+		ORDER BY b.id DESC, s.idx DESC LIMIT 256`, instance, projectID, MaxSteps)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +369,7 @@ func (f *outputFile) read(ctx context.Context, key int64) ([]byte, error) {
 		return nil, err
 	}
 	if dictID.Valid {
-		if err := f.loadDict(ctx, dictID.Int64); err != nil {
+		if err := f.knowDict(ctx, dictID.Int64); err != nil {
 			return nil, err
 		}
 	}
@@ -305,8 +377,13 @@ func (f *outputFile) read(ctx context.Context, key int64) ([]byte, error) {
 }
 
 // Output returns what a step printed, or "" when nothing is kept: the step
-// printed nothing, or its day's file is past retention.
+// printed nothing, it is past MaxSteps, or its day's file is past retention.
 func (s *Store) Output(ctx context.Context, buildID int64, step int) (string, error) {
+	if step < 0 || step >= MaxSteps {
+		// Such an index would carry into the build id bits of the key and
+		// read another build's output, possibly another project's.
+		return "", nil
+	}
 	var d sql.NullInt64
 	err := s.db.QueryRowContext(ctx, "SELECT output_day FROM builds WHERE id = ?", buildID).Scan(&d)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && !d.Valid) {

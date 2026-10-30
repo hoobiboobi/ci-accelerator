@@ -261,7 +261,7 @@ func (s *Store) Branches(ctx context.Context, p ProjectKey, since time.Time) ([]
 // PipelineJobCount is how many jobs of a pipeline the console saw.
 func (s *Store) PipelineJobCount(ctx context.Context, instance string, pipeline uint64) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM jobs WHERE instance = ? AND pipeline_id = ?",
+	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM jobs WHERE instance = ? AND pipeline_id = ? AND "+pipelinesOwn,
 		nullInstance(instance), nullUint(pipeline)).Scan(&n)
 	return n, err
 }

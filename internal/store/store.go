@@ -148,6 +148,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			}
 		}
 	}
+	if _, err := tx.ExecContext(ctx, toleratedIndexes); err != nil {
+		return fmt.Errorf("store: tolerated indexes: %w", err)
+	}
 	return tx.Commit()
 }
 

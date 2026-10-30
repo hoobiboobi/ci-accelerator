@@ -366,3 +366,36 @@ func TestStartDropsReplayedCopies(t *testing.T) {
 		t.Fatalf("%d builds after a second start (%v), want 4", n, err)
 	}
 }
+
+// A store 0.3.3 left (no builds.compare_due) gets the column and its index
+// on the next start, with nothing due; 0.3.3 writes builds without naming
+// it after a rollback, and the next start keeps both.
+func TestStartAddsCompareDue(t *testing.T) {
+	dir := t.TempDir()
+	c := &clock{time.Now()}
+	s := open(t, dir, c)
+	for _, q := range []string{"DROP INDEX builds_compare_due", "ALTER TABLE builds DROP COLUMN compare_due"} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+	s = open(t, dir, c)
+	if _, err := s.db.Exec(`INSERT INTO daemons (id, name, node) VALUES (1, 'bk', 'node-1');
+		INSERT INTO builds (id, daemon_id, ref, generation, attribution, instance, pipeline_id, job_id, project_id, target, started_at)
+		VALUES (1, 1, 'ref-0', 1, 1, 1, 6, 7, 42, 'api', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s = open(t, dir, c)
+	var due, indexes int
+	if err := s.db.QueryRow("SELECT compare_due FROM builds WHERE id = 1").Scan(&due); err != nil || due != 0 {
+		t.Errorf("compare_due of a build written without it: %d, %v", due, err)
+	}
+	if err := s.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'builds_compare_due'").Scan(&indexes); err != nil || indexes != 1 {
+		t.Errorf("index builds_compare_due: %d, %v", indexes, err)
+	}
+	if jobs, err := s.DueJobs(ctx, 10); err != nil || len(jobs) != 0 {
+		t.Errorf("due: %v, %v", jobs, err)
+	}
+}

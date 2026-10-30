@@ -43,6 +43,24 @@ func TestCacheScans(t *testing.T) {
 
 }
 
+// Runners with Shared = false keep a project's cache key once per runner
+// (runner/<token>/project/...): every archive takes room, so one key
+// counts all of them.
+func TestCacheKeyOfSeveralRunners(t *testing.T) {
+	c := &clock{t: time.Date(2026, 10, 22, 20, 0, 0, 0, time.UTC)}
+	s := open(t, t.TempDir(), c)
+	p := ProjectKey{Instance: "051b90", ID: 42}
+	t0, t1 := c.t.Add(-2*time.Hour), c.t.Add(-time.Hour)
+	objs := []CacheObject{{ProjectID: 42, Key: "default-protected", Bytes: 850, Modified: t1}, {ProjectID: 42, Key: "default-protected", Bytes: 900, Modified: t0}}
+	if err := s.ReplaceCacheScan(ctx, "s3/b/x", p.Instance, c.t, objs, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := s.ProjectCache(ctx, p)
+	if err != nil || len(got) != 1 || got[0].Bytes != 1750 || !got[0].Modified.Equal(t1) {
+		t.Errorf("one key of two runners: %+v, %v", got, err)
+	}
+}
+
 // A folder no longer configured is forgotten with its archives.
 func TestKeepCacheStores(t *testing.T) {
 	c := &clock{t: time.Date(2026, 10, 22, 20, 0, 0, 0, time.UTC)}

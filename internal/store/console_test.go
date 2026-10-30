@@ -140,7 +140,7 @@ func TestConsoleQueries(t *testing.T) {
 	// the pods said.
 	j0 := JobInfo{ID: p104[0].Job, Name: p104[0].JobName}
 	started := time.Date(2026, 10, 20, 11, 0, 0, 0, time.UTC)
-	err = s.SaveAPIPipeline(ctx, APIPipeline{Instance: key.Instance, ID: 104, ProjectID: 42, Status: "success",
+	_, err = s.SaveAPIPipeline(ctx, APIPipeline{Instance: key.Instance, ID: 104, ProjectID: 42, Status: "success",
 		WebURL: "https://gitlab.example.com/p/-/pipelines/104", Read: c.now(), Jobs: []APIJob{
 			{ID: j0.ID, Name: "renamed", Status: "success", Started: started, Finished: started.Add(13 * time.Second),
 				Duration: 13 * time.Second, Waited: 2 * time.Second, Runner: "box", WebURL: "https://x/jobs/1"},
@@ -261,7 +261,7 @@ func TestPipelineWithoutBuilds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	err := s.SaveAPIPipeline(ctx, APIPipeline{Instance: inst, ID: 5000, ProjectID: 42, Status: "success", Read: start.Add(time.Hour),
+	_, err := s.SaveAPIPipeline(ctx, APIPipeline{Instance: inst, ID: 5000, ProjectID: 42, Status: "success", Read: start.Add(time.Hour),
 		Jobs: []APIJob{
 			{ID: 5001, Name: "compile", Status: "success", Started: start, Finished: start.Add(30 * time.Second)},
 			{ID: 5002, Name: "deploy", Status: "success", Started: start.Add(time.Minute), Finished: start.Add(3 * time.Minute)},
@@ -303,7 +303,7 @@ func TestPipelineWithoutBuilds(t *testing.T) {
 		t.Errorf("job 5002: %+v %v", j, err)
 	}
 	// GitLab last said running; the pod ended since: not known how it went.
-	if err := s.SaveAPIPipeline(ctx, APIPipeline{Instance: inst, ID: 5000, ProjectID: 42, Status: "running", Read: start,
+	if _, err := s.SaveAPIPipeline(ctx, APIPipeline{Instance: inst, ID: 5000, ProjectID: 42, Status: "running", Read: start,
 		Jobs: []APIJob{{ID: 5004, Name: "late", Status: "running", Started: start.Add(4 * time.Minute)}}}); err != nil {
 		t.Fatal(err)
 	}

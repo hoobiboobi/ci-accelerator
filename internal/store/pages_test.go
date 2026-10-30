@@ -54,6 +54,15 @@ func TestPages(t *testing.T) {
 	if _, err := s.BuildPage(ctx, 99999); err != ErrNotFound {
 		t.Errorf("unknown build: %v", err)
 	}
+	// A Dockerfile stored with a token in it (before such text was
+	// masked) is masked when read.
+	if _, err := s.db.ExecContext(ctx, `UPDATE dockerfiles SET text = text || ? WHERE id = (SELECT dockerfile_id FROM builds WHERE id = ?)`,
+		"RUN echo glpat-ABCDEFGHIJKLMNOPQRST\n", ids[api.Ref]); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := s.BuildPage(ctx, ids[api.Ref]); err != nil || page.Dockerfile != text+"RUN echo [masked]\n" {
+		t.Errorf("stored token: %v %q", err, page.Dockerfile)
+	}
 
 	// The dependency step of job 1001's api build ran in many builds since.
 	idx := -1
