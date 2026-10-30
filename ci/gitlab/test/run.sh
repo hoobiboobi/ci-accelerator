@@ -28,7 +28,7 @@ esac
 echo "#1 [internal] load build definition from Dockerfile"
 echo "#1 DONE 0.0s"
 echo "#5 [internal] load build context"
-echo "#5 transferring context: 1.23MB 0.1s done"
+[ "${FAKE:-ok}" = nocontext ] || echo "#5 transferring context: 1.23MB 0.1s done"
 echo "#4 [base 1/3] FROM docker.io/library/alpine:3.22"
 echo "#4 DONE 0.0s"
 echo "#6 [base 2/3] RUN apk add curl"
@@ -106,6 +106,10 @@ run_case "defaults: context, Dockerfile, push with the job token" 0 -- \
   'argv:^label:org\.opencontainers\.image\.revision=0123abc$' 'argv:^--progress$' \
   'config.json:"registry\.example\.com":\{"auth":"Z2l0bGFiLWNpLXRva2VuOmpvYi10b2tlbi12YWx1ZQ=="\}' \
   'env:!^DOCKER_AUTH_CONFIG=' 'stdout:Dockerfile steps: 1 from cache, 1 run; context sent: 1\.23MB'
+# A context BuildKit fetched itself (a git URL) prints no transfer line:
+# the build passed, so does the job.
+run_case "no context transfer in the log" 0 FAKE=nocontext -- \
+  'stdout:context sent: unknown'
 run_case "the digest goes to build.env" 0 -- \
   'stdout:digest sha256:0{63}1'
 grep -q '^IMAGE_REF=registry.example.com/g/p@sha256:' "$WORK/out/build.env" && echo "  ok    build.env: IMAGE_REF without the tag" && pass=$((pass + 1)) \

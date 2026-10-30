@@ -236,7 +236,8 @@ spec:
         /^#[0-9]+ DONE / && step[$1] { done[$1] = 1 }
         END { c = 0; r = 0; for (k in step) { if (k in cached) c++; else if (k in done) r++ } print c, r }' "$log")
       cached=${counts% *}; built=${counts#* }
-      context=$(grep -oE 'transferring context: [0-9.]+[kMG]?B' "$log" | tail -n 1 | sed 's/transferring context: //')
+      # A context BuildKit fetched itself (a git URL) prints no such line.
+      context=$(grep -oE 'transferring context: [0-9.]+[kMG]?B' "$log" | tail -n 1 | sed 's/transferring context: //' || true)
       # No exporter (push false), no metadata file.
       digest=""
       [ ! -f build-metadata.json ] || digest=$(sed -n 's/.*"containerimage.digest": *"\([^"]*\)".*/\1/p' build-metadata.json | head -n 1)

@@ -207,6 +207,9 @@ daemons'. Both run only on the build nodes. */}}
 {{- if not (regexMatch "^[a-z]([-a-z0-9]*[a-z0-9])?$" $name) }}
 {{- fail (printf "runnerTiers: %q is not a valid tier name (lower-case letters, digits and '-', starting with a letter)" $name) }}
 {{- end }}
+{{- if has $name (list "gitlab" "caches") }}
+{{- fail (printf "runnerTiers: %q names one of the box's own ConfigMaps (<release>-runner-%s); choose another tier name" $name $name) }}
+{{- end }}
 {{- $full := include "ci-accelerator.tierName" (dict "root" $ "name" $name) }}
 {{- if gt (len $full) 63 }}
 {{- fail (printf "runnerTiers.%s: the objects' name %q is longer than 63 characters; use a shorter tier name" $name $full) }}
