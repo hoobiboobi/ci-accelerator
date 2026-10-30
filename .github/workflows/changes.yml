@@ -1,7 +1,8 @@
 # What a change touches, for the other workflows: a pull request's merge
 # commit against its base, a push against the commit before it; without
-# a base (a new branch, a run on demand) everything runs. The rules are in
-# scripts/ci-changes.sh (test/ci-changes.sh checks them).
+# a base (a new branch, a run on demand) everything runs. The list is
+# scripts/ci-changed-paths.sh (a rename lists both paths), the rules are in
+# scripts/ci-changes.sh (test/ci-changes.sh checks both).
 name: changes
 
 on:
@@ -44,7 +45,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -n "$BASE" ] && git fetch --quiet --depth=1 origin "$BASE" 2>/dev/null; then
-            git diff --name-only "$BASE" HEAD >changed.txt
+            scripts/ci-changed-paths.sh "$BASE" >changed.txt
             echo "changed since ${BASE}:"; sed 's/^/  /' changed.txt
           else
             echo "no base to compare with: everything runs"

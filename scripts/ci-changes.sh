@@ -18,7 +18,7 @@
 # A change the lists below do not know, an empty list or no list at all
 # runs everything: skipping is only for what is certainly untouched.
 # Documentation alone (Markdown outside the charts and the CI component,
-# docs/, the license, Artifact Hub metadata) runs nothing. A real GitLab
+# docs/, Artifact Hub metadata) runs nothing. A real GitLab
 # runs only for the component's own files.
 set -eu
 
@@ -34,11 +34,14 @@ while IFS= read -r f; do
   case "$f" in
     # Generated from values (checked by lint) or checked by the component's
     # tests: before the Markdown rule.
-    charts/*/README.md | ci/gitlab/*) charts=true ;;
-    # The image's own recipe: the image job, the e2e and the quickstart
-    # build it.
-    cmd/ci-accelerator/Dockerfile | scripts/build-image.sh) all=true ;;
-    docs/* | *.md | LICENSE | artifacthub/* | .github/ISSUE_TEMPLATE/* | .gitignore | .editorconfig | .dockerignore) ;;
+    # The license too: lint compares every chart's copy with it.
+    charts/*/README.md | ci/gitlab/* | LICENSE) charts=true ;;
+    # The image's own recipe (.dockerignore decides what its build sees):
+    # the image job, the e2e and the quickstart build it.
+    cmd/ci-accelerator/Dockerfile | scripts/build-image.sh | .dockerignore) all=true ;;
+    docs/* | *.md | artifacthub/* | .github/ISSUE_TEMPLATE/* | .gitignore | .editorconfig) ;;
+    # The Go job runs the vulnerability gate, lint shellchecks it.
+    scripts/vulncheck.sh) charts=true; go=true ;;
     cmd/* | internal/* | go.mod | go.sum | test/ui/* | .govulncheck-allow | .trivyignore.yaml) go=true ;;
     charts/* | integrations/* | examples/* | scripts/*.sh | test/e2e/* | test/quickstart/* | test/*.sh) charts=true ;;
     *) all=true ;;
