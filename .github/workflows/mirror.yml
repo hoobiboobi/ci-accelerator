@@ -1,0 +1,103 @@
+# The project builds itself on its own build farm: every branch pushed here
+# goes to the read-only mirror gitlab.com/ci-accelerator/ci-accelerator,
+# whose pipeline (.gitlab-ci.yml) runs on a ci-accelerator box; this job
+# follows that pipeline and reports it on the commit as a status
+# ("ci-accelerator / own build farm"). The status is informational, not a
+# required check: the box is one machine.
+#
+# The push uses a deploy key of the mirror project (secret
+# GITLAB_MIRROR_KEY): GitLab.com's project access tokens need a paid tier.
+# Nothing of GitHub's is stored at GitLab: the pipeline is public and read
+# without a token. Forks have no secrets and are not mirrored.
+name: mirror
+
+on:
+  push:
+    branches: ["**"]
+  delete:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: mirror-${{ github.event.ref || github.ref }}
+  cancel-in-progress: false
+
+env:
+  MIRROR: git@gitlab.com:ci-accelerator/ci-accelerator.git
+  MIRROR_API: https://gitlab.com/api/v4/projects/ci-accelerator%2Fci-accelerator
+  # gitlab.com's ED25519 host key, as GitLab publishes it
+  # (SHA256:eUXGGm1YGsMAS7vkcx6JOJdOGHPem5gQp4taiCfCLB8).
+  KNOWN_HOST: gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf
+
+jobs:
+  mirror:
+    if: github.repository == 'hoobiboobi/ci-accelerator'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Push to the mirror
+        id: push
+        env:
+          KEY: ${{ secrets.GITLAB_MIRROR_KEY }}
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.event.ref_type }}
+          DELETED_REF: ${{ github.event.ref }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::notice::no GITLAB_MIRROR_KEY secret: nothing is mirrored"
+            echo "pushed=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" >~/.ssh/mirror && chmod 600 ~/.ssh/mirror
+          printf '%s\n' "$KNOWN_HOST" >~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/mirror -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          if [ "$EVENT" = delete ]; then
+            if [ "$REF_TYPE" = branch ]; then git push "$MIRROR" --delete "refs/heads/$DELETED_REF" || true; fi
+            echo "pushed=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git push --force "$MIRROR" "$GITHUB_SHA:refs/heads/$BRANCH"
+          echo "pushed=true" >>"$GITHUB_OUTPUT"
+      - name: Report the mirror's pipeline on the commit
+        if: steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          status() {
+            gh api --silent -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+              -f state="$1" -f context="ci-accelerator / own build farm" -f description="$2" -f target_url="$3"
+          }
+          q="sha=$GITHUB_SHA&ref=$(printf '%s' "$BRANCH" | jq -sRr @uri)&per_page=1"
+          url="" id=""
+          for _ in $(seq 1 60); do
+            p=$(curl -fsS "$MIRROR_API/pipelines?$q" || echo '[]')
+            id=$(printf '%s' "$p" | jq -r '.[0].id // empty')
+            [ -n "$id" ] && url=$(printf '%s' "$p" | jq -r '.[0].web_url') && break
+            sleep 5
+          done
+          if [ -z "$id" ]; then
+            status error "the mirror started no pipeline" "https://gitlab.com/ci-accelerator/ci-accelerator/-/pipelines"
+            exit 0
+          fi
+          status pending "building on ci-accelerator's own build farm" "$url"
+          state=""
+          for _ in $(seq 1 450); do
+            state=$(curl -fsS "$MIRROR_API/pipelines/$id" | jq -r .status || true)
+            case "$state" in success|failed|canceled|skipped) break ;; esac
+            sleep 10
+          done
+          case "$state" in
+            success) status success "built on ci-accelerator's own build farm" "$url" ;;
+            failed) status failure "the build on ci-accelerator's own build farm failed" "$url" ;;
+            canceled|skipped) status error "the mirror's pipeline was $state (a newer push?)" "$url" ;;
+            *) status error "no result after 75 minutes" "$url" ;;
+          esac

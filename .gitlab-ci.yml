@@ -1,0 +1,24 @@
+# The project's own builds, on its own build farm.
+#
+# GitHub Actions (.github/workflows/mirror.yml) pushes every branch of
+# github.com/hoobiboobi/ci-accelerator to the read-only mirror
+# gitlab.com/ci-accelerator/ci-accelerator. Its runner is a ci-accelerator
+# box: this pipeline builds the ci-accelerator image with the CI component
+# in this repository, through the box's build router and daemons, and the
+# box's console explains each build. The image is built, not pushed:
+# releases are built, signed and published by GitHub Actions.
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web"
+
+stages: [build]
+
+include:
+  - local: ci/gitlab/build.yml
+    inputs:
+      runner-tags: [ci-accelerator]
+      dockerfile: cmd/ci-accelerator/Dockerfile
+      platform: linux/amd64,linux/arm64
+      push: false

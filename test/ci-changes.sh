@@ -42,6 +42,7 @@ want "the quickstart" "$CHARTS" scripts/quickstart.sh test/quickstart/run.sh
 want "go and docs" "$GO" docs/troubleshooting.md internal/store/write.go
 want "the Makefile (everything but a real GitLab)" "$EVERY" Makefile
 want "a workflow" "$EVERY" .github/workflows/checks.yml
+want "the mirror's pipeline (GitLab runs it)" "$NONE" .gitlab-ci.yml
 want "the image recipe" "$EVERY" cmd/ci-accelerator/Dockerfile
 want "the image build's context" "$EVERY" .dockerignore
 want "the vulnerability gate (run by the Go job, shellchecked by lint)" "charts=true go=true component=false e2e_matrix=[$ALL]" scripts/vulncheck.sh
