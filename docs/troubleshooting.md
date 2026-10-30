@@ -414,6 +414,17 @@ limit on build nodes.
   the release's namespace; the controller checks both with Kubernetes
   (TokenReview). The answers are kept for 5 minutes, refusals for 10
   seconds.
+- **A running job's page shows no build in progress.** The console knows a
+  running build's job only from the build option
+  `ci-accelerator.io/traceparent`, which the CI component passes since
+  0.3.5 (it holds the job's `TRACEPARENT`, set by the box's runner). A
+  component of an earlier release, or a `buildctl build` of your own,
+  needs `--opt "ci-accelerator.io/traceparent=$TRACEPARENT"`; without it
+  the build shows once it completes. "follows too many running builds"
+  means 32 running builds have open pages: it shows when it is done. Its
+  progress is read through the daemons' TLS port, like the build history:
+  "could not be read" with a TLS or connection error points to the same
+  places as missing builds (below).
 - **No pipelines on the pages.** The console lists builds of CI jobs it can
   attribute: the job pods must carry the runner's annotations (the box's
   runner configuration or `integrations/gitlab-runner/values.yaml`), and
