@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -439,5 +440,44 @@ func TestSetupChange(t *testing.T) {
 	case <-changed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the web was not told the setup changed")
+	}
+}
+
+// following answers one running build, as the collector does.
+type following struct {
+	daemons
+	lb *collector.LiveBuild
+}
+
+func (f following) LiveBuild(ctx context.Context, daemon, ref string) (*collector.LiveBuild, error) {
+	if daemon != f.lb.Daemon || ref != f.lb.Ref {
+		return nil, nil
+	}
+	return f.lb, nil
+}
+
+func TestLiveBuildThroughTheAPI(t *testing.T) {
+	st := newStore(t)
+	started := time.Date(2026, 10, 30, 11, 37, 0, 0, time.UTC)
+	lb := &collector.LiveBuild{Active: collector.Active{Daemon: "d1", Ref: "r1", Started: started, Instance: "0a1b2c", Pipeline: 8, Job: 9},
+		Steps: []history.LiveStep{{Key: "[app 1/2]", Name: "RUN make", State: history.LiveRunning, Started: started, Lines: 12,
+			Tail: []history.TailLine{{At: 1500 * time.Millisecond, Text: "CC x.o"}}}}, Running: 2}
+	srv := &Server{Local: &Local{Store: st, Live: following{daemons{{Name: "d1"}}, lb}}, Config: Config{Version: "v-test"}}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	c, err := Dial(ctx, ClientOptions{URL: ts.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.LiveBuild(ctx, "d1", "r1")
+	if err != nil || !reflect.DeepEqual(got, lb) {
+		t.Fatalf("through the API: %+v %v", got, err)
+	}
+	if got, err := c.LiveBuild(ctx, "d1", "gone"); got != nil || err != nil {
+		t.Fatalf("a build that ended: %+v %v", got, err)
+	}
+	// A controller that follows no builds answers none.
+	if got, err := (&Local{Store: st}).LiveBuild(ctx, "d1", "r1"); got != nil || err != nil {
+		t.Fatalf("no follower: %+v %v", got, err)
 	}
 }

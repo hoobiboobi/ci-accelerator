@@ -41,6 +41,21 @@ func (l *Local) Daemons() []collector.DaemonState {
 	return l.Live.Daemons()
 }
 
+// LiveFollower follows running builds' progress (the collector does).
+type LiveFollower interface {
+	LiveBuild(ctx context.Context, daemon, ref string) (*collector.LiveBuild, error)
+}
+
+// LiveBuild is a running build of daemon as its page shows it; nil when
+// the daemon runs no such build (any more), or nothing follows builds.
+func (l *Local) LiveBuild(ctx context.Context, daemon, ref string) (*collector.LiveBuild, error) {
+	f, ok := l.Live.(LiveFollower)
+	if !ok {
+		return nil, nil
+	}
+	return f.LiveBuild(ctx, daemon, ref)
+}
+
 // ErrNoToken: the request has no GitLab token to read with.
 var ErrNoToken = errors.New("control: no GitLab token for this request")
 
