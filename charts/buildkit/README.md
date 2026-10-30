@@ -1,13 +1,13 @@
 # buildkit
 
-![Version: 0.3.3](https://img.shields.io/badge/Version-0.3.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.34.1](https://img.shields.io/badge/AppVersion-v0.34.1-informational?style=flat-square)
+![Version: 0.3.4](https://img.shields.io/badge/Version-0.3.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.34.1](https://img.shields.io/badge/AppVersion-v0.34.1-informational?style=flat-square)
 
 Persistent BuildKit daemons as a shared build service for CI, with probe and garbage-collection defaults derived from a production setup.
 
 Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator); this chart is the daemons alone, for a cluster that already has a runner. It runs BuildKit v0.34.1 (the official `moby/buildkit` image, pinned by digest) as a privileged DaemonSet on the build nodes, with the probe, termination and garbage-collection defaults of a production setup: the garbage-collection policies are rendered in full by the chart (see `config.gc`). mTLS between jobs and daemons is mandatory: cert-manager issues the daemons' certificate and a client certificate (Secret `<fullname>-client`) into each of `tls.client.namespaces`, or you provide them (`tls.source=existingSecret`, made by `scripts/buildkit-certs.sh`).
 
 ```sh
-helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.3.3 \
+helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.3.4 \
   -n ci-accelerator --set 'tls.client.namespaces={ci-jobs}'
 ```
 
