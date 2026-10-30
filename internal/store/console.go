@@ -366,7 +366,7 @@ func (s *Store) PipelineProject(ctx context.Context, instance string, pipeline u
 		(SELECT project_id FROM pipelines WHERE instance = ?1 AND pipeline_id = ?2),
 		(SELECT project_id FROM jobs WHERE instance = ?1 AND pipeline_id = ?2 AND project_id IS NOT NULL LIMIT 1),
 		(SELECT project_id FROM builds WHERE instance = ?1 AND pipeline_id = ?2 AND project_id IS NOT NULL LIMIT 1))`,
-		nullInstance(instance), pipeline).Scan(&project)
+		nullInstance(instance), nullUint(pipeline)).Scan(&project)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}

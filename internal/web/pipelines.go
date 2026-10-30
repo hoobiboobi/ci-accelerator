@@ -193,6 +193,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	s.settleLater(r, sh.Project.ProjectKey)
 	if b, _ := strconv.ParseInt(q.Get("before"), 10, 64); b > 0 {
 		pq.Before, v.Newer = time.UnixMilli(b), true
+		pq.BeforeID, _ = strconv.ParseUint(q.Get("bid"), 10, 64)
 	}
 	if v.Mine && sh.Viewer != nil {
 		pq.Author = sh.Viewer.Name
@@ -259,7 +260,8 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 		v.Cards = append(v.Cards, s.pipeCard(p, jobs[p.ID], builds[p.ID], zone(r)))
 	}
 	if len(list) == pipePage {
-		v.Older = pipeLink(v, url.Values{"before": {strconv.FormatInt(list[len(list)-1].Created.UnixMilli(), 10)}})
+		last := list[len(list)-1]
+		v.Older = pipeLink(v, url.Values{"before": {strconv.FormatInt(last.Created.UnixMilli(), 10)}, "bid": {strconv.FormatUint(last.ID, 10)}})
 	}
 	v.Newest = pipeLink(v, nil)
 	v.Shell = sh
@@ -370,7 +372,9 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 		}
 		pl := placed{j: j, q: q, s: j.Started, e: e}
 		if bs := byJob[j.ID]; len(bs) > 0 {
-			st := rowStatus(bs[len(bs)-1])
+			// A job's newest build (builds come newest first) says how it
+			// ended, as its page shows.
+			st := rowStatus(bs[0])
 			pl.class, pl.why = "st-"+st.Key, st.Label
 		} else {
 			switch {
@@ -476,7 +480,7 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 				lj.QL, lj.QW = pct(pl.q.Sub(origin)), wid(pl.s.Sub(pl.q))
 			}
 			if bs := byJob[pl.j.ID]; len(bs) > 0 {
-				lj.URL = fmt.Sprintf("/builds/%d", bs[len(bs)-1].ID)
+				lj.URL = fmt.Sprintf("/builds/%d", bs[0].ID)
 			} else {
 				lj.URL = c.URL
 			}

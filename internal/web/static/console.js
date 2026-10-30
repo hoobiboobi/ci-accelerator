@@ -305,6 +305,8 @@
     if (!drawer) return;
     hidePop();
     const res = await fetch("/builds/" + build + "/steps/" + step + "?part=panel");
+    // The session ended: opening the page again leads to sign in.
+    if (res.status === 401) { location.reload(); return; }
     if (!res.ok) return;
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     drawer.replaceChildren(...doc.body.childNodes, dgrip);
@@ -923,13 +925,17 @@
   else if (live && live !== "all") params.set("pipeline", live);
   if (main.dataset.liveNodes) params.set("nodes", "1");
   const filterQ = params.toString() ? "?" + params.toString() : "";
-  let timer = null, busy = false;
+  let timer = null, busy = false, signedOut = false;
   async function refresh() {
     timer = null;
+    if (signedOut) return;
     if (busy) { timer = setTimeout(refresh, 1000); return; }
     busy = true;
     try {
       const res = await fetch(location.pathname + location.search, { cache: "no-store" });
+      // The session ended: the page stops updating and says so; a reload
+      // (the reader's) leads to sign in.
+      if (res.status === 401) { signedOut = true; disconnect(); say("Signed out: reload to sign in"); return; }
       if (!res.ok) return;
       // The page became another (a running job's page, once its build is
       // stored, is the build's): go there.
@@ -992,7 +998,7 @@
   // a few clicks through the console leave no connection for the next page.
   let es = null;
   function connect() {
-    if (es) return;
+    if (es || signedOut) return;
     es = new EventSource("/events" + filterQ);
     es.addEventListener("changed", () => {
       if (!notify) { if (!timer) timer = setTimeout(refresh, 1000); return; }

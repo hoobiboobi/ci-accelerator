@@ -336,6 +336,10 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 		} else {
 			f.Image = imageKey(anchor.Page.Build.Target)
 			pinProject(&sh, anchor.Page.Build.Attribution.Instance, projectOf(anchor.Page))
+			// The page hears of the pinned project's new builds.
+			if sh.Live != "" {
+				sh.Live = "project:" + sh.Project.String()
+			}
 		}
 	}
 	v := &BuildsView{F: f, Mine: sh.Viewer != nil}

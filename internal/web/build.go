@@ -49,14 +49,15 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 	if err != nil {
 		return nil, err
 	}
-	project := uint64(0)
+	project, instance := uint64(0), ""
 	if p.Pipeline != nil {
-		project = p.Pipeline.ProjectID
+		project, instance = p.Pipeline.ProjectID, p.Pipeline.Instance
 	}
 	name := func(ref string) string {
 		info, ok := known[ref]
-		// Work from another project's build is named, but not whose.
-		if !ok || (project != 0 && info.ProjectID != project) {
+		// Work from another project's build is named, but not whose (a
+		// project of another GitLab may have the same number).
+		if !ok || (project != 0 && (info.ProjectID != project || info.Instance != instance)) {
 			return "another build"
 		}
 		if info.JobName != "" {

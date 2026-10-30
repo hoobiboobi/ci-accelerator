@@ -1,11 +1,16 @@
 package web
 
 import (
+	"fmt"
 	"html"
 	"net/http"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hoobiboobi/ci-accelerator/internal/history"
+	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
 // meta is the content of a page's <meta property|name=key>, unescaped, and
@@ -182,5 +187,70 @@ func TestClipWords(t *testing.T) {
 	}
 	if got := plain(`Rebuilt from <code>COPY a b</code>: &lt;x&gt; changed.`); got != "Rebuilt from COPY a b: <x> changed." {
 		t.Errorf("plain: %q", got)
+	}
+}
+
+// A pipeline or job number beyond what SQLite's integers hold is a page
+// that does not exist, not a store error.
+func TestHugeNumbersAreNotFound(t *testing.T) {
+	ts, _, _ := console(t)
+	for _, p := range []string{"/pipelines/051b90/9223372036854775808", "/pipelines/051b90/18446744073709551615", "/jobs/051b90/9223372036854775808"} {
+		if got := get(t, ts, p); got.status != 404 {
+			t.Errorf("%s: %d", p, got.status)
+		}
+	}
+}
+
+// Picking the second build of a pair from another project's build: the
+// list is that project's, and so are the new builds it hears of.
+func TestPickHearsThePinnedProject(t *testing.T) {
+	ts, st, _ := console(t)
+	inst := history.InstancePrefix("https://gitlab.example.com/")
+	keys, byPipe := pipelines(t, st)
+	b, err := st.BuildPage(ctx, byPipe[keys[0]][0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := *b.Build
+	x.Target, x.Ref = "only-in-77", "other-pick"
+	x.Attribution = history.Attribution{State: history.Attributed, Instance: inst, Pipeline: 910002, Job: 7102}
+	id, err := st.SaveBuild(ctx, store.Build{Build: &x, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 7102, PipelineID: 910002, ProjectID: 77, ProjectPath: "example/other", Name: "lint"}); err != nil {
+		t.Fatal(err)
+	}
+	k42 := store.ProjectKey{Instance: inst, ID: 42}
+	p := getWith(t, ts, fmt.Sprintf("%s/builds?pick=1&a=%d", ts.URL, id), map[string]string{"Cookie": "project=" + k42.String()})
+	want := `data-live="project:` + (store.ProjectKey{Instance: inst, ID: 77}).String() + `"`
+	if !strings.Contains(p.body, want) {
+		t.Errorf("pick mode hears %s", regexp.MustCompile(`data-live="[^"]*"`).FindString(p.body))
+	}
+}
+
+// A job that built twice is drawn and linked on the pipelines page by its
+// newest build, the one its page opens.
+func TestPipelineCardShowsTheNewestBuild(t *testing.T) {
+	ts, st, _ := console(t)
+	keys, byPipe := pipelines(t, st)
+	first := byPipe[keys[0]][0]
+	b, err := st.BuildPage(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := *b.Build
+	x.Ref = "second-build-of-the-job"
+	x.Started, x.Completed = b.Build.Completed.Add(time.Second), b.Build.Completed.Add(5*time.Second)
+	id, err := st.SaveBuild(ctx, store.Build{Build: &x, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := get(t, ts, "/")
+	if !strings.Contains(home.body, fmt.Sprintf(`href="/builds/%d"`, id)) {
+		t.Errorf("the job's lane does not link its newest build %d", id)
+	}
+	if strings.Contains(home.body, fmt.Sprintf(`href="/builds/%d"`, first.ID)) {
+		t.Errorf("the job's lane still links its first build %d", first.ID)
 	}
 }

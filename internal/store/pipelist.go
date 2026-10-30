@@ -22,8 +22,12 @@ type PipeQuery struct {
 	// Since and Until bound when the pipelines were created: Since
 	// included, Until not.
 	Since, Until time.Time
-	Before       time.Time
-	Limit        int
+	// Before and BeforeID are where the previous page ended: pipelines
+	// created before Before, or at it with a lower number (several are
+	// created in the same second: a tag and its branch, schedules).
+	Before   time.Time
+	BeforeID uint64
+	Limit    int
 }
 
 // searchWhere is the condition for PipeQuery.Search on table "pipelines".
@@ -88,7 +92,10 @@ func (s *Store) PipelineList(ctx context.Context, q PipeQuery) ([]PipeRow, error
 	if !q.Until.IsZero() {
 		where, args = append(where, "COALESCE(created_at, seen_at) < ?"), append(args, q.Until.UnixMilli())
 	}
-	if !q.Before.IsZero() {
+	if !q.Before.IsZero() && q.BeforeID > 0 {
+		where = append(where, "(COALESCE(created_at, seen_at) < ? OR (COALESCE(created_at, seen_at) = ? AND pipeline_id < ?))")
+		args = append(args, q.Before.UnixMilli(), q.Before.UnixMilli(), nullUint(q.BeforeID))
+	} else if !q.Before.IsZero() {
 		where, args = append(where, "COALESCE(created_at, seen_at) < ?"), append(args, q.Before.UnixMilli())
 	}
 	limit := q.Limit
