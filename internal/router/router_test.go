@@ -783,3 +783,25 @@ func TestClusterNewGitLabURLsWhileAPodGoes(t *testing.T) {
 		t.Errorf("a deleted job pod is known again: %+v", j)
 	}
 }
+
+// A daemon still listed but not reachable (its node lost: the endpoint
+// stays Ready for ~40 s) is passed over: the job goes to the next choice
+// instead of failing, and the next jobs skip it for a while.
+func TestUnreachableDaemonIsPassedOver(t *testing.T) {
+	v := &view{jobs: map[string]Job{"127.0.0.1": {Project: projA, JobID: 99, Node: "n1"}},
+		warm: map[route.Project][]route.Activity{projA: {{Node: "n2", At: time.Now().Add(-time.Hour)}}}}
+	addr, b1, b2, reports, _, _ := setup(t, v)
+	b2.ln.Close() // the project's warm daemon refuses connections now
+	for i := 0; i < 2; i++ {
+		got, err := exchange(t, addr, "build")
+		if err != nil || got != "d1:BUILD" {
+			t.Fatalf("connection %d: got %q (%v), want the other daemon", i, got, err)
+		}
+	}
+	if len(b1.got) != 2 {
+		t.Errorf("daemon 1 saw %v", b1.got)
+	}
+	if len(*reports) != 2 || (*reports)[0].Daemon != "bk-1" {
+		t.Errorf("reports %+v", *reports)
+	}
+}

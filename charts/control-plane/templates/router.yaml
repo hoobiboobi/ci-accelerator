@@ -17,10 +17,14 @@ spec:
   revisionHistoryLimit: 3
   # One node at a time: the Service sends a node's jobs to another node's
   # router while its own drains.
+  # The new router starts beside the old one, which then drains: with
+  # routing Local a node's jobs reach only its own router, so the node is
+  # never left without one (no hostPort: both fit on the node).
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 1
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       {{- include "control-plane.selectorLabels" $r | nindent 6 }}
