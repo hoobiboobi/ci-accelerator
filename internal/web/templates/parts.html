@@ -23,3 +23,21 @@
 
 {{/* The end of a job's log, read from GitLab only when asked. */}}
 {{define "logbox"}}<div class="logbox"><button class="btn" type="button" data-act="showlog" data-url="{{.}}">{{icon "log" 13}}<span>Show the end of the job log</span></button><p class="muted note0" data-log-note>Read from GitLab when you ask, nothing before.</p><button class="btn" type="button" data-act="logearlier" hidden>{{icon "chev" 13}}<span>500 earlier lines</span></button><pre class="logb" data-log hidden></pre><button class="btn" type="button" data-act="lognew" hidden>{{icon "log" 13}}<span>Read new lines</span></button></div>{{end}}
+{{define "livebuild"}}{{$lv := .}}<div class="lvb">
+  <div class="verdict live" role="status"><div class="k">{{if .Done}}{{icon "s_built" 12}}{{else}}<span class="dot-live" aria-hidden="true"></span>{{end}}<span>{{.Head}}</span></div>
+    <div class="vt">{{.Sentence}}</div>{{with .Detail}}<div class="vd">{{.}}</div>{{end}}{{with .Err}}<div class="vd">The build runs, but {{.}}.</div>{{end}}</div>
+  {{with .Tiles}}<div class="ltiles">{{range $t := .}}<div class="ltile"><div class="k">{{$t.K}}</div><div class="v">{{$t.V}}</div>{{with $t.S}}<div class="s">{{.}}</div>{{end}}{{with $t.Spark}}<svg class="lspark" viewBox="0 0 {{.W}} {{.H}}" preserveAspectRatio="none" role="img" aria-label="The last hour"><polyline class="{{if $t.Mem}}m{{else}}c{{end}}" points="{{if $t.Mem}}{{.Mem}}{{else}}{{.NodeCPU}}{{end}}"/></svg>{{end}}</div>{{end}}</div>{{end}}
+  {{if .Rows}}<section class="box"><div class="boxh"><h2 class="h">Steps</h2><span class="muted lvc">{{.Finished}} of {{.Total}} done{{if .Cached}} · {{.Cached}} from cache{{end}}</span></div>
+    <div class="ltscroll"><div class="lt">
+      <div class="ltaxis" aria-hidden="true">{{range .Ticks}}<span style="left: {{.L}}%">{{.Label}}</span>{{end}}{{if not .Done}}<span class="nowl" style="left: {{.NowL}}%">{{.NowLabel}}</span>{{end}}</div>
+      {{range .Rows}}{{if eq .State "waiting"}}<div class="lstep wait"><div class="lrow" title="Not started yet"><span class="nm"><span class="cv"></span><span class="t" title="{{.Key}} {{.Name}}">{{.Name}}</span></span>{{template "livelane" (lane $lv .)}}</div></div>
+      {{else}}<details class="lstep st-{{.State}}" id="{{.ID}}" data-auto{{if .Open}} open{{end}}><summary class="lrow"><span class="nm"><span class="cv" aria-hidden="true">{{icon "chev" 11}}</span><span class="t" title="{{.Key}} {{.Name}}">{{.Name}}</span></span>{{template "livelane" (lane $lv .)}}</summary>
+        <div class="slog"><div class="ltail"><div class="lh">{{if eq .State "running"}}<span class="dot-live" aria-hidden="true"></span><span>Last lines, live · <b>{{.Lines}}</b></span><span class="sp"></span><button class="btn sm" type="button" data-act="pauselog" aria-pressed="false">Pause</button>{{else}}<span>Last lines · <b>{{.Lines}}</b>{{with .Took}} · {{.}}{{end}}</span>{{end}}</div>
+          {{if .Tail}}<pre>{{range .Tail}}<span class="t">{{.At}}</span>  {{.Text}}
+{{end}}</pre>{{end}}{{with .Note}}<div class="none">{{.}}</div>{{end}}</div></div></details>{{end}}
+      {{end}}
+    </div></div>
+    <div class="lt-foot"><span><i class="sw c-built"></i>built</span><span><i class="sw c-running"></i>running</span><span><i class="sw c-ghost"></i>as long as last time</span><span>Open a step for its last lines; the whole output is on the build's page once the build is done.</span></div>
+  </section>{{end}}
+</div>{{end}}
+{{define "livelane"}}<span class="lane">{{with .Row.Ghost}}<i class="lbar c-ghost" style="left: {{.L}}%; width: {{.W}}%"></i>{{end}}{{with .Row.Bar}}<i class="lbar c-{{.Class}}" style="left: {{.L}}%; width: {{.W}}%"></i>{{end}}{{if not .View.Done}}<span class="lnow" style="left: {{.View.NowL}}%"></span>{{end}}{{if .Row.LabelEnd}}<span class="lab end" style="right: {{.Row.LabelEnd}}%">{{.Row.Label}}</span>{{else}}<span class="lab" style="left: {{.Row.LabelL}}%">{{.Row.Label}}</span>{{end}}</span>{{end}}

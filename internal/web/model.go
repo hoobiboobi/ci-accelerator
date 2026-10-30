@@ -134,11 +134,14 @@ func stateIcon(state string) string {
 		return "warn"
 	case "canceled":
 		return "x"
+	case "running":
+		return "clock"
 	}
 	return "s_built"
 }
 
-var stateLabels = map[string]string{"built": "built", "cached": "from cache", "received": "from another job", "image": "base image", "failed": "failed", "canceled": "canceled"}
+var stateLabels = map[string]string{"built": "built", "cached": "from cache", "received": "from another job", "image": "base image", "failed": "failed", "canceled": "canceled",
+	"running": "running"}
 
 // ---- times ----
 

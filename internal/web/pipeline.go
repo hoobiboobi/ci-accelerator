@@ -296,6 +296,9 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "pipeline", http.StatusOK, v)
 }
 
+// maxLiveJobs bounds the running builds a pipeline's timeline follows.
+const maxLiveJobs = 8
+
 // pipelineWaterfall lays every job of a pipeline out on one time axis,
 // in the order they started: a job with an image build opens into its
 // stages and steps; any other job is one bar, as GitLab (or its pod) says.
@@ -341,7 +344,7 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, created ti
 			Views: d.Views, Link: fmt.Sprintf("/builds/%d", rows[i].ID), Stage: j.Stage})
 	}
 	with := jobsWithBuilds(rows)
-	drawn := 0
+	drawn, live := 0, 0
 	for _, j := range jobs {
 		if with[j.ID] || j.Started.IsZero() {
 			continue
@@ -369,6 +372,16 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, created ti
 		}
 		jt := jobTimes{Start: j.Started, End: end, Total: end.Sub(j.Started), Known: true}
 		jt.Queued = queuedAt(j, j.Started)
+		// A running job whose build runs: its stages and steps so far.
+		if chip != nil && live < maxLiveJobs {
+			if lbs := s.liveBuildsOf(ctx, j.Instance, j.PipelineID, j.ID); len(lbs) > 0 && len(lbs[0].Steps) > 0 && !lbs[0].Started.IsZero() {
+				live++
+				b, views := liveBuild(lbs[0], s.now())
+				wjobs = append(wjobs, wfJob{Name: j.Name, Status: chip, Times: jt, Build: b, Views: views, Live: true,
+					Link: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.ID), Stage: j.Stage})
+				continue
+			}
+		}
 		wjobs = append(wjobs, wfJob{Name: j.Name, Status: chip, Times: jt, Note: note, Link: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.ID), Stage: j.Stage})
 		if chip == nil { // the grey bars of the jobs that ended
 			drawn++
@@ -512,6 +525,9 @@ type JobView struct {
 	// Running: the job runs, Waiting: it waits to start; either way its
 	// build may still come, and the page asks for itself again.
 	Running, Waiting bool
+	// LiveBuilds are the job's builds that are running now (Live is
+	// the shell's: what the page hears of).
+	LiveBuilds []*LiveView
 }
 
 // jobFacts fills the job page's facts from a stored job; pipeStatus is
@@ -641,6 +657,15 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	}
 	if api := s.api(r); api != nil && api.Knows(instance) && j.ProjectID != 0 {
 		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", instance, id)
+	}
+	if v.Running && j.PipelineID != 0 {
+		nodes := map[string]string{}
+		for _, d := range s.data.Daemons() {
+			nodes[d.Name] = d.Inspection.Node
+		}
+		for _, lb := range s.liveBuildsOf(ctx, instance, j.PipelineID, id) {
+			v.LiveBuilds = append(v.LiveBuilds, s.liveView(ctx, lb, instance, j.ProjectID, j.Name, nodes[lb.Daemon], zone(r)))
+		}
 	}
 	sh.Title = v.Name
 	v.Shell = sh

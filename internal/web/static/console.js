@@ -534,11 +534,11 @@
       const rows = $$(".row", wf);
       const byId = new Map(rows.map(r => [r.dataset.id, r]));
       let filter = saved.filter || "all", q = saved.q || "";
+      // Rows open as the server says (a running job opens, and folds once
+      // it is done) unless the reader opened or folded them.
       function remember() {
         saved.filter = filter;
         saved.q = q;
-        saved.open = {};
-        rows.forEach(r => { if (r.hasAttribute("aria-expanded")) saved.open[r.dataset.id] = r.getAttribute("aria-expanded"); });
       }
       const isOpen = r => r.getAttribute("aria-expanded") !== "false";
       const isStep = r => r.classList.contains("k-step") || r.classList.contains("k-group");
@@ -567,6 +567,7 @@
       function toggle(r, open) {
         if (!r.hasAttribute("aria-expanded")) return;
         r.setAttribute("aria-expanded", String(open === undefined ? !isOpen(r) : open));
+        (saved.open || (saved.open = {}))[r.dataset.id] = r.getAttribute("aria-expanded");
         remember();
         render();
       }
@@ -610,9 +611,8 @@
       if (crit) crit.addEventListener("click", () => setCrit(crit.getAttribute("aria-pressed") !== "true"));
       // Depth: jobs only, jobs with their stages (cached ones folded), or
       // every step.
-      $$("[data-wf-depth]", wf).forEach(b => b.addEventListener("click", () => {
-        const d = b.dataset.wfDepth;
-        $$("[data-wf-depth]", wf).forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+      function depth(d) {
+        $$("[data-wf-depth]", wf).forEach(x => x.setAttribute("aria-pressed", String(x.dataset.wfDepth === d)));
         rows.forEach(r => {
           if (!r.hasAttribute("aria-expanded")) return;
           let open = true;
@@ -620,12 +620,17 @@
           if (r.classList.contains("k-group")) open = d === "steps" || (d === "stages" && r.dataset.state !== "cached");
           r.setAttribute("aria-expanded", String(open));
         });
-        saved.depth = d;
+      }
+      $$("[data-wf-depth]", wf).forEach(b => b.addEventListener("click", () => {
+        depth(b.dataset.wfDepth);
+        // A depth the reader chose replaces what they opened row by row.
+        saved.depth = b.dataset.wfDepth;
+        saved.open = {};
         remember();
         render();
       }));
       // Back to what the reader had before this update.
-      if (saved.depth) $$("[data-wf-depth]", wf).forEach(x => x.setAttribute("aria-pressed", String(x.dataset.wfDepth === saved.depth)));
+      if (saved.depth) depth(saved.depth);
       if (saved.open) rows.forEach(r => { const o = saved.open[r.dataset.id]; if (o && r.hasAttribute("aria-expanded")) r.setAttribute("aria-expanded", o); });
       if (saved.filter) $$("[data-wf-filter]", wf).forEach(x => x.setAttribute("aria-pressed", String(x.dataset.wfFilter === filter)));
       if (input && saved.raw !== undefined) input.value = saved.raw;
@@ -826,6 +831,26 @@
 
   setup();
 
+  // A running build's steps open while they run and fold when they are
+  // done (the server says which: data-auto); a step the reader opened or
+  // folded stays as the reader left it. A paused step keeps its lines.
+  const userFold = new Map(), paused = new Set();
+  main.addEventListener("click", ev => {
+    const sum = ev.target.closest("details[data-auto] > summary");
+    if (sum) {
+      const d = sum.parentElement;
+      setTimeout(() => userFold.set(d.id, d.open), 0);
+      return;
+    }
+    const pause = ev.target.closest('[data-act="pauselog"]');
+    if (!pause) return;
+    const d = pause.closest("details[data-auto]");
+    const on = pause.getAttribute("aria-pressed") !== "true";
+    pause.setAttribute("aria-pressed", String(on));
+    pause.textContent = on ? "Paused" : "Pause";
+    if (d) { if (on) paused.add(d.id); else paused.delete(d.id); }
+  });
+
   // ---- live updates ----
   // The server says what changed; the page fetches itself again and swaps
   // its content, at most once a second.
@@ -857,7 +882,9 @@
       // Typing in the waterfall's search: keep the caret where it was.
       const typing = active && main.contains(active) && active.matches("[data-wf-q]") ? [active.selectionStart, active.selectionEnd] : null;
       const folds = new Map($$(".grpbtn[data-blk]", main).map(b => [b.dataset.blk, b.getAttribute("aria-expanded")]));
-      const unfolded = $$("details[id][open]", main).map(d => d.id);
+      const unfolded = $$("details[id][open]:not([data-auto])", main).map(d => d.id);
+      const held = new Map();
+      paused.forEach(id => { const d = document.getElementById(id), lg = d && $(".slog", d); if (lg) held.set(id, lg); });
       // A job log the reader opened stays as read (a running job's page
       // asks for itself again; its log box holds what was read so far).
       const log = $(".logbox", main), asked = log && $('[data-act="showlog"]', log);
@@ -869,6 +896,12 @@
       if (fresh) fresh.replaceWith(keep);
       $$(".grpbtn[data-blk]", main).forEach(b => { if (folds.has(b.dataset.blk)) fold(b, folds.get(b.dataset.blk) === "true"); });
       unfolded.forEach(id => { const d = document.getElementById(id); if (d) d.open = true; });
+      $$("details[data-auto]", main).forEach(d => {
+        if (userFold.has(d.id)) d.open = userFold.get(d.id);
+        const old = held.get(d.id), fresh = $(".slog", d);
+        if (old && fresh) fresh.replaceWith(old);
+      });
+      paused.forEach(id => { if (!held.has(id) || !document.getElementById(id)) paused.delete(id); });
       if (focused !== undefined) {
         const el = $('[data-step="' + focused + '"]', main);
         if (el) el.focus({ preventScroll: true });
@@ -891,7 +924,7 @@
     clearTimeout(ticker);
     const el = $("[data-refresh-every]", main);
     if (!el || document.hidden) return;
-    ticker = setTimeout(() => { if (!document.hidden && !timer) timer = setTimeout(refresh, 0); }, Math.max(5, +el.dataset.refreshEvery || 15) * 1000);
+    ticker = setTimeout(() => { if (!document.hidden && !timer) timer = setTimeout(refresh, 0); }, Math.max(2, +el.dataset.refreshEvery || 15) * 1000);
   }
   // A browser opens at most six connections to a host over HTTP/1.1, and
   // every stream holds one. A hidden tab, or a page kept in the

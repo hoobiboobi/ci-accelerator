@@ -60,6 +60,8 @@ type Waterfall struct {
 	Jobs  int
 	// Running: some job on it has not ended (the legend says how it looks).
 	Running bool
+	// Live counts the running builds drawn as they go.
+	Live int
 	// Unfinished: the pipeline still runs, so no critical path is shown.
 	Unfinished bool
 }
@@ -77,11 +79,13 @@ type wfJob struct {
 	Note    string  // its GitLab status, for a job without a build
 	Times   jobTimes
 	Build   *history.Build
-	BuildID int64
+	BuildID int64 // 0: a running build, not stored yet
 	Views   []StepView
-	Link    string
-	Stage   string
-	Crit    bool // on the critical path
+	// Live: the build is still running; its job shows open.
+	Live  bool
+	Link  string
+	Stage string
+	Crit  bool // on the critical path
 }
 
 // CritPath sums up the jobs that set the pipeline's time.
@@ -240,7 +244,7 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 			glyph, ic = j.Status.Key, j.Status.Icon
 		}
 		row := WFRow{ID: jid, Parent: parent, Depth: depth, Kind: "job", Glyph: glyph, Icon: ic, Name: j.Name, Chip: j.Status, Note: j.Note,
-			Crit: j.Crit, Open: len(jobs) == 1, Kids: b != nil, Link: j.Link, Text: strings.ToLower(j.Name)}
+			Crit: j.Crit, Open: len(jobs) == 1 || j.Live, Kids: b != nil, Link: j.Link, Text: strings.ToLower(j.Name)}
 		// Waiting for a runner, when GitLab said when it queued the job.
 		if q := j.Times.Queued; !q.IsZero() && !q.Before(start) && j.Times.Known && q.Before(j.Times.Start) {
 			row.Bars = append(row.Bars, WFBar{Class: "queue", L: at(q), W: width(j.Times.Start.Sub(q)), Title: "Waiting for a runner: " + duration(j.Times.Start.Sub(q))})
@@ -259,7 +263,13 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 			if j.Times.Known && j.Times.End.Sub(b.Completed) >= 50*time.Millisecond {
 				row.Bars = append(row.Bars, WFBar{Class: "after", L: at(b.Completed), W: width(j.Times.End.Sub(b.Completed)), Title: "After the build: " + duration(j.Times.End.Sub(b.Completed))})
 			}
-			row.Label, row.LabelL = labelAfter(j.Times.End, waitedFor(j.Times)+fmt.Sprintf("%s · job · %s in BuildKit", duration(j.Times.Total), duration(b.Completed.Sub(b.Started))))
+			if j.Live {
+				w.Running = true
+				w.Live++
+				row.Label, row.LabelL = labelAfter(j.Times.End, waitedFor(j.Times)+fmt.Sprintf("%s · running · %s in BuildKit", duration(j.Times.Total), duration(b.Completed.Sub(b.Started))))
+			} else {
+				row.Label, row.LabelL = labelAfter(j.Times.End, waitedFor(j.Times)+fmt.Sprintf("%s · job · %s in BuildKit", duration(j.Times.Total), duration(b.Completed.Sub(b.Started))))
+			}
 		} else {
 			class := "job"
 			switch j.Note {
@@ -319,7 +329,7 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 			if g.State == "image" {
 				v := g.Steps[0]
 				r := WFRow{ID: gid, Parent: jid, Depth: depth + 1, Kind: "step", Glyph: "image", Icon: "s_image", Name: "FROM " + v.Name, Mono: true,
-					Bars: []WFBar{{Class: "image", L: at(first), W: width(g.D)}}, State: "image", Step: fmt.Sprintf("%d/%d", j.BuildID, v.Index),
+					Bars: []WFBar{{Class: "image", L: at(first), W: width(g.D)}}, State: "image", Step: stepRef(j.BuildID, v.Index),
 					Text: strings.ToLower(v.Name)}
 				if g.D < 200*time.Millisecond {
 					r.Label, r.LabelL = labelAfter(last, "already on node")
@@ -330,8 +340,13 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 				continue
 			}
 			name := fmt.Sprintf("%s · %d step%s", g.Name, len(g.Steps), plural(len(g.Steps)))
+			// A running build's stages fold once they are done.
+			open := g.State != "cached"
+			if j.Live {
+				open = g.State == "running"
+			}
 			gr := WFRow{ID: gid, Parent: jid, Depth: depth + 1, Kind: "group", Glyph: g.State, Icon: stateIcon(g.State), Name: name,
-				Kids: true, Open: g.State != "cached", State: g.State, Text: strings.ToLower(g.Name),
+				Kids: true, Open: open, State: g.State, Text: strings.ToLower(g.Name),
 				Bars: []WFBar{{Class: g.State, L: at(first), W: width(last.Sub(first))}}}
 			if g.FirstRebuilt {
 				gr.Crit = true
@@ -347,7 +362,7 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 				}
 				r := WFRow{ID: fmt.Sprintf("%s.s%d", gid, v.Index), Parent: gid, Depth: depth + 2, Kind: "step", Glyph: v.State, Icon: stateIcon(v.State),
 					Name: v.Name, Key: v.Key, Mono: true, State: v.State, Crit: v.FirstRebuilt,
-					Bars: []WFBar{{Class: v.State, L: at(st), W: width(v.D)}}, Step: fmt.Sprintf("%d/%d", j.BuildID, v.Index),
+					Bars: []WFBar{{Class: v.State, L: at(st), W: width(v.D)}}, Step: stepRef(j.BuildID, v.Index),
 					Text: strings.ToLower(v.Key + " " + v.Name)}
 				label := duration(v.D)
 				if v.State == "received" && v.From != "" {
@@ -394,6 +409,14 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 	}
 	hideFolded(w.Rows)
 	return w
+}
+
+// stepRef names a step for the step panel; "" for a build not stored yet.
+func stepRef(build int64, step int) string {
+	if build == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d", build, step)
 }
 
 // hideFolded marks the rows under a folded parent: parents come before
