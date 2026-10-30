@@ -190,12 +190,15 @@ func TestDevServer(t *testing.T) {
 		Inspection: collector.Inspection{Node: "node-1", Version: "v0.33.1", Load: fixtureLoad(),
 			Disk: &diskprobe.Disk{Total: 100 << 30, Free: 60 << 30, Available: 55 << 30, Inodes: 1000, InodesFree: 900}}}}
 	f, _ := fakeGitLab(t, "Running with gitlab-runner\n$ make\nok\n")
+	lf := &liveFixture{daemons: daemons}
 	_, st, _, _ := consoleBuild(t, func(*store.Store) testOpts {
-		return testOpts{Live: daemons, Release: "dev", API: f, Token: gitlab.Token("t"), Assets: os.DirFS(".")}
+		return testOpts{Live: lf, Release: "dev", API: f, Token: gitlab.Token("t"), Assets: os.DirFS(".")}
 	}, start)
 	f.Store = st
 	seedJob(t, st)
 	seedRunning(t, st)
+	_, ljob, lhook := seedLive(t, st, lf)
+	t.Logf("a running build: http://%s%s (POST %s/line prints a line, %s/next runs the next step)", addr, ljob, lhook.URL, lhook.URL)
 	t.Logf("the console with the fixtures: http://%s/ (pages read from internal/web; Ctrl-C stops)", addr)
 	select {}
 }

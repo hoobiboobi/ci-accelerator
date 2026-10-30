@@ -20,6 +20,6 @@
       {{end}}
     </div>
   </div></div>
-  <div class="legend"><span><i class="sw c-runner"></i>Runner &amp; checkout</span><span><i class="sw c-xfer"></i>Send context</span><span><i class="sw c-push"></i>Export &amp; push</span><span><i class="sw c-image"></i>Base image</span><span><i class="sw c-job"></i>Job without an image build</span>{{if .Running}}<span><i class="sw c-job-running"></i>Job running, no finished build yet</span>{{end}}<span><i class="sw c-queue"></i>Waiting for a runner</span><span><i class="sw c-built"></i>Built</span><span><i class="sw c-cached"></i>From cache</span><span><i class="sw c-received"></i>Waiting for another job</span></div>
+  <div class="legend"><span><i class="sw c-runner"></i>Runner &amp; checkout</span><span><i class="sw c-xfer"></i>Send context</span><span><i class="sw c-push"></i>Export &amp; push</span><span><i class="sw c-image"></i>Base image</span><span><i class="sw c-job"></i>Job without an image build</span>{{if .Running}}<span><i class="sw c-job-running"></i>Job running, no finished build yet</span>{{end}}{{if .Live}}<span><i class="sw c-running"></i>Running now</span>{{end}}<span><i class="sw c-queue"></i>Waiting for a runner</span><span><i class="sw c-built"></i>Built</span><span><i class="sw c-cached"></i>From cache</span><span><i class="sw c-received"></i>Waiting for another job</span></div>
 </div>
 {{end}}{{end}}

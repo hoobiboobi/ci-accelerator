@@ -58,7 +58,8 @@ type Waterfall struct {
 	Ticks []Tick
 	Span  time.Duration
 	Jobs  int
-	// Running: some job on it has not ended (the legend says how it looks).
+	// Running: a job runs whose build is not drawn as it goes (one bar;
+	// the legend says how it looks).
 	Running bool
 	// Live counts the running builds drawn as they go.
 	Live int
@@ -264,7 +265,6 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 				row.Bars = append(row.Bars, WFBar{Class: "after", L: at(b.Completed), W: width(j.Times.End.Sub(b.Completed)), Title: "After the build: " + duration(j.Times.End.Sub(b.Completed))})
 			}
 			if j.Live {
-				w.Running = true
 				w.Live++
 				row.Label, row.LabelL = labelAfter(j.Times.End, waitedFor(j.Times)+fmt.Sprintf("%s · running · %s in BuildKit", duration(j.Times.Total), duration(b.Completed.Sub(b.Started))))
 			} else {
