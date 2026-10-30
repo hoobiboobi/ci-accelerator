@@ -1,5 +1,7 @@
 # ci-accelerator
 
+[![Live demo: this project's own builds](https://img.shields.io/badge/Live%20demo-this%20project%27s%20own%20builds-1f6feb?style=for-the-badge)](https://demo.ci-accelerator.io)
+
 A self-hosted fast CI runner for GitLab, on your own Kubernetes cluster.
 
 You give it a GitLab URL and a runner token. You get a runner whose jobs
@@ -10,6 +12,12 @@ missed the cache. The daemons can also push their metrics and traces over
 OTLP to a backend you already run. Hosted services such as Depot,
 Namespace or Docker Build Cloud do this for you; this project does it on
 hardware you already run.
+
+> **Live demo:** [demo.ci-accelerator.io](https://demo.ci-accelerator.io) is the
+> console of a ci-accelerator box that builds this repository on every
+> push: the image, and the Go tests and vet as builds of their own, through
+> its [GitLab mirror](https://gitlab.com/ci-accelerator/ci-accelerator/-/pipelines).
+> Open a running job to watch its build live.
 
 > **Status:** v0.3.5 is released: signed charts and the ci-accelerator image on
 > ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
@@ -861,12 +869,15 @@ make e2e                      # end-to-end on kind
   [gitlab.com/ci-accelerator/ci-accelerator](https://gitlab.com/ci-accelerator/ci-accelerator)
   (`.github/workflows/mirror.yml`), whose pipeline (`.gitlab-ci.yml`)
   builds the ci-accelerator image with this repository's CI component on a
-  ci-accelerator box and pushes it with the job's token to the mirror's
+  ci-accelerator box, next to two jobs that run `go test` and `go vet` as
+  builds (`ci/showcase/test.Dockerfile`; the three share their first
+  steps), and pushes the image with the job's token to the mirror's
   registry (`registry.gitlab.com/ci-accelerator/ci-accelerator`, `:edge`
   for main, `:<commit>` for every commit). Those are unsigned development
   builds: releases are built, signed and published to ghcr.io by GitHub
   Actions. The commit on GitHub gets the status "ci-accelerator / own
-  build farm" with a link to that pipeline.
+  build farm" with a link to that pipeline; the box's console is public at
+  [demo.ci-accelerator.io](https://demo.ci-accelerator.io).
 - **Mutation testing:** the checks are broken on purpose (the code they
   guard is changed or removed) to make sure each one can actually fail.
 - **Helm versions:** the checks pass on Helm 3 and Helm 4.
