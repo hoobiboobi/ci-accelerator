@@ -30,6 +30,14 @@ None.
 - The console opens in its dark theme, as the project's site does, until
   the viewer picks the light one (`t` or the sidebar); it no longer follows
   the system's colour scheme. A light theme picked earlier is kept.
+- A step's panel closes on a click outside it (a click on another step
+  moves it there), and its left edge widens it; the width is kept in the
+  browser, a double-click on the edge restores the default.
+
+### Fixed
+
+- Signed in without a readable project, the home page says why it is
+  empty, as the former Overview did.
 
 ## 0.3.6 - 2026-10-30
 

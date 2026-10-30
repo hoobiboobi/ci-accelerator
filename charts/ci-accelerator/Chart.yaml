@@ -49,6 +49,8 @@ annotations:
       description: The console opens on Pipelines; the former Overview (why images were rebuilt, by the build time it cost) is Insights at /insights
     - kind: changed
       description: The console opens in its dark theme until the viewer picks the light one, instead of following the system's colour scheme
+    - kind: changed
+      description: A step's panel closes on a click outside it and can be widened by its left edge
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi

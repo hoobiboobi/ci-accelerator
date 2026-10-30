@@ -307,7 +307,7 @@
     const res = await fetch("/builds/" + build + "/steps/" + step + "?part=panel");
     if (!res.ok) return;
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-    drawer.replaceChildren(...doc.body.childNodes);
+    drawer.replaceChildren(...doc.body.childNodes, dgrip);
     drawer.hidden = false;
     opened = build + "/" + step;
     markOpen();
@@ -334,7 +334,65 @@
     }
     return true;
   }
+  // The panel's width: its left edge is dragged (or moved with the arrow
+  // keys), remembered in this browser; a double-click goes back to the
+  // default. A phone shows the panel as a sheet at the bottom, no edge.
+  const dgrip = document.createElement("div");
+  dgrip.className = "dgrip";
+  dgrip.tabIndex = 0;
+  dgrip.setAttribute("role", "separator");
+  dgrip.setAttribute("aria-orientation", "vertical");
+  dgrip.setAttribute("aria-label", "Resize the panel");
+  function setDW(w, save) {
+    if (w === null) drawer.style.removeProperty("--dw");
+    else {
+      w = Math.round(Math.max(360, Math.min(w, window.innerWidth - 120)));
+      drawer.style.setProperty("--dw", w + "px");
+    }
+    if (!save) return;
+    if (w === null) store.del("drawer-w"); else store.set("drawer-w", String(w));
+  }
   if (drawer) {
+    const saved = parseInt(store.get("drawer-w") || "", 10);
+    if (saved > 0) setDW(saved, false);
+    const width = () => drawer.getBoundingClientRect().width;
+    dgrip.addEventListener("pointerdown", ev => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      const x0 = ev.clientX, w0 = width();
+      dgrip.setPointerCapture(ev.pointerId);
+      drawer.classList.add("resizing");
+      const move = e => setDW(w0 + x0 - e.clientX, false);
+      const up = e => {
+        dgrip.removeEventListener("pointermove", move);
+        dgrip.removeEventListener("pointerup", up);
+        dgrip.removeEventListener("pointercancel", up);
+        drawer.classList.remove("resizing");
+        setDW(w0 + x0 - e.clientX, true);
+      };
+      dgrip.addEventListener("pointermove", move);
+      dgrip.addEventListener("pointerup", up);
+      dgrip.addEventListener("pointercancel", up);
+    });
+    dgrip.addEventListener("dblclick", () => setDW(null, true));
+    dgrip.addEventListener("keydown", ev => {
+      const step = ev.shiftKey ? 64 : 16;
+      if (ev.key === "ArrowLeft") { ev.preventDefault(); setDW(width() + step, true); }
+      if (ev.key === "ArrowRight") { ev.preventDefault(); setDW(width() - step, true); }
+      if (ev.key === "Home") { ev.preventDefault(); setDW(null, true); }
+    });
+
+    // A click outside the panel closes it, unless it opens another step
+    // (the panel moves there), did something of its own (a tab, a fold),
+    // ended selecting text, or landed in a dialog over the page.
+    document.addEventListener("click", ev => {
+      if (drawer.hidden || ev.defaultPrevented || drawer.contains(ev.target)) return;
+      if (ev.target.closest("[data-step], [data-wstep], #pal, #help, #scrim, #pop, #toast")) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+      closePanel();
+    });
+
     drawer.addEventListener("click", ev => {
       if (ev.target.closest("[data-close]")) { closePanel(); return; }
       const nav = ev.target.closest("[data-dstep], [data-hist]");
