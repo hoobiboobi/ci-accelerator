@@ -32,7 +32,7 @@ func TestRunningPipelinePage(t *testing.T) {
 	save(store.Job{JobID: 9_200_001, Name: "build-image", Stage: "build", StartedAt: testNow.Add(-90 * time.Second)})
 	save(store.Job{JobID: 9_200_002, Name: "deploy", Stage: "deploy"})
 	// GitLab says the deploy job waits (as SaveAPIPipeline stores it).
-	if err := st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: inst, ID: pid, ProjectID: 42, Status: "running", Read: testNow,
+	if _, err := st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: inst, ID: pid, ProjectID: 42, Status: "running", Read: testNow,
 		Jobs: []store.APIJob{{ID: 9_200_001, Name: "build-image", Stage: "build", Status: "running", Started: testNow.Add(-90 * time.Second)},
 			{ID: 9_200_002, Name: "deploy", Stage: "deploy", Status: "created"}}}); err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func (f runningFixture) job(pid uint64, j store.Job) string {
 
 func (f runningFixture) gitlab(pid uint64, status string, jobs ...store.APIJob) {
 	f.t.Helper()
-	if err := f.st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: f.inst, ID: pid, ProjectID: 42, Status: status, Read: testNow, Jobs: jobs}); err != nil {
+	if _, err := f.st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: f.inst, ID: pid, ProjectID: 42, Status: status, Read: testNow, Jobs: jobs}); err != nil {
 		f.t.Fatal(err)
 	}
 }

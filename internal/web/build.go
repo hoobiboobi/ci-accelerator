@@ -201,6 +201,9 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	p, err := s.data.BuildPage(ctx, id)
+	if err == nil && s.askOwner(r, p) {
+		p, err = s.data.BuildPage(ctx, id)
+	}
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !s.mayBuild(r, p)) {
 		s.notFound(w, r, "build")
 		return
@@ -297,7 +300,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err)
 			return
 		}
-		u := st.usual[b.Target]
+		u := st.usual[store.ImageKey(b.Target, b.Images)]
 		kind, n := "builds from the cache", u.CachedN
 		if d.Built > 0 {
 			kind, n = "builds that ran steps", u.RebuiltN
@@ -434,6 +437,12 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			ob := o.Page.Build
+			// A job runs in one pipeline. While it is not known any trace
+			// can name it with another; the builds of this job and pipeline
+			// are allowed by what allows this page.
+			if ob.Attribution.Pipeline != a.Pipeline {
+				continue
+			}
 			v.Others = append(v.Others, OtherBuild{URL: fmt.Sprintf("/builds/%d", oid), Target: buildName(ob.Target, ob.Images),
 				Dur: duration(ob.Completed.Sub(ob.Started)), Status: statusOf(o.Page.Reason.Kind, ob.Error, o.Built, ob.Completed.IsZero())})
 		}

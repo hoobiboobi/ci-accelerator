@@ -98,7 +98,7 @@ func fixtureBuild(t *testing.T, st *store.Store, dir string) *history.Build {
 		t.Fatal(err)
 	}
 	cfg := history.Config{Instances: map[string]bool{history.InstancePrefix("https://gitlab.example.com/"): true}, SecretKey: st.SecretKey()}
-	b, err := history.NewBuild(rec, progress, read("provenance.json"), read("trace.json"), read("error.bin"), cfg)
+	b, err := history.NewBuild(rec, progress, [][]byte{read("provenance.json")}, read("trace.json"), read("error.bin"), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestVerdictNamesTheImage(t *testing.T) {
 			}
 		}
 		v := verdictFor(b, history.Reason{}, "", 2, 0, nil)
-		if !strings.Contains(string(v.Detail), "No earlier build of "+want+" is on record") {
+		if !strings.Contains(string(v.Detail), "no earlier build of "+want+" is known") {
 			t.Errorf("target %q, not compared: %s", target, v.Detail)
 		}
 	}

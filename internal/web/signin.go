@@ -100,12 +100,13 @@ func (s *Server) mayKnown(r *http.Request, instance string, project uint64) (ok,
 }
 
 // readable keeps the projects the person on r may see, asking GitLab about
-// several at a time.
-func (s *Server) readable(r *http.Request, ps []store.Project) []store.Project {
+// several at a time; unanswered says GitLab could not say about some of
+// them (hidden meanwhile).
+func (s *Server) readable(r *http.Request, ps []store.Project) (out []store.Project, unanswered bool) {
 	if s.opt.Auth == nil {
-		return ps
+		return ps, false
 	}
-	keep := make([]bool, len(ps))
+	keep, known := make([]bool, len(ps)), make([]bool, len(ps))
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 	for i, p := range ps {
@@ -113,32 +114,25 @@ func (s *Server) readable(r *http.Request, ps []store.Project) []store.Project {
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
-			keep[i] = s.may(r, p.Instance, p.ID)
+			keep[i], known[i] = s.mayKnown(r, p.Instance, p.ID)
 			<-sem
 		}()
 	}
 	wg.Wait()
-	out := ps[:0:0]
+	out = ps[:0:0]
 	for i, p := range ps {
 		if keep[i] {
 			out = append(out, p)
 		}
+		unanswered = unanswered || !known[i]
 	}
-	return out
+	return out, unanswered
 }
 
 // mayBuild says whether the person on r may see a stored build: by its
-// pipeline's project, else its job's; a build of no known project only
-// admins.
+// project (projectOf); a build of no known project only admins.
 func (s *Server) mayBuild(r *http.Request, p *store.BuildPage) bool {
-	project := uint64(0)
-	switch {
-	case p.Pipeline != nil && p.Pipeline.ProjectID != 0:
-		project = p.Pipeline.ProjectID
-	case p.Job != nil:
-		project = p.Job.ProjectID
-	}
-	return s.may(r, p.Build.Attribution.Instance, project)
+	return s.may(r, p.Build.Attribution.Instance, projectOf(p))
 }
 
 // nothing is the project of a person who may see none: no query finds it.
@@ -161,9 +155,11 @@ var signInMessages = map[string]struct {
 	text string
 	bad  bool
 }{
-	"denied": {"GitLab did not allow the console to read with your account. Sign in again and choose Authorize to go on.", true},
-	"failed": {"The sign-in did not complete. Start it again; if it keeps failing, the console's log says why.", true},
-	"out":    {"You are signed out, and this session's access to your GitLab account was revoked. While you are signed in to GitLab, signing in here again may not ask you again: GitLab asks only when the console holds no access of yours (from another browser, say). To withdraw it everywhere, revoke the application in GitLab under Preferences > Applications.", false},
+	"denied":         {"GitLab did not allow the console to read with your account. Sign in again and choose Authorize to go on.", true},
+	"failed":         {"The sign-in did not complete. Start it again; if it keeps failing, the console's log says why.", true},
+	"out":            {"You are signed out, and this session's access to your GitLab account was revoked. While you are signed in to GitLab, signing in here again may not ask you again: GitLab asks only when the console holds no access of yours (from another browser, say). To withdraw it everywhere, revoke the application in GitLab under Preferences > Applications.", false},
+	"out-unrevoked":  {"You are signed out and this session has ended, but GitLab did not confirm that it revoked the session's access to your GitLab account. To be sure, revoke the application in GitLab under Preferences > Applications.", true},
+	"out-incomplete": {"You are signed out in this browser, but the console could not end the session: it ends once it goes unused. To end its access to your GitLab account now, revoke the application in GitLab under Preferences > Applications.", true},
 }
 
 func (s *Server) signIn(w http.ResponseWriter, r *http.Request) {
@@ -206,9 +202,18 @@ func (s *Server) signInDone(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// signOut clears the browser's cookie whatever happens, and tells the
+// person what is left when the session or its GitLab access may live on.
 func (s *Server) signOut(w http.ResponseWriter, r *http.Request) {
-	if err := s.opt.Auth.SignOut(w, r); err != nil {
+	err := s.opt.Auth.SignOut(w, r)
+	e := "out"
+	switch {
+	case err == nil:
+	case errors.Is(err, auth.ErrNotRevoked):
+		e = "out-unrevoked"
+	default:
 		s.log.Warn("sign-out", "err", err)
+		e = "out-incomplete"
 	}
-	http.Redirect(w, r, "/auth/sign-in?e=out", http.StatusSeeOther)
+	http.Redirect(w, r, "/auth/sign-in?e="+e, http.StatusSeeOther)
 }

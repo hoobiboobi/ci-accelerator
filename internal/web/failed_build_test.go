@@ -2,6 +2,8 @@ package web
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -148,5 +150,76 @@ func TestFailedBuildWithoutDockerfile(t *testing.T) {
 	if !strings.Contains(cmp.body, ": BuildKit records no Dockerfile for a canceled build.</p>") ||
 		!strings.Contains(cmp.body, ": BuildKit recorded no Dockerfile for this build.</p>") {
 		t.Errorf("compare canceled/failed: %s", regexp.MustCompile(`(?s)id="cdT".*?</section>`).FindString(cmp.body))
+	}
+}
+
+// A token written into a Dockerfile is masked on the build page's
+// Dockerfile tab and in the step drawer's source lines, as it is in the
+// step's name; a private key keeps its lines, so the lines after it keep
+// their numbers.
+func TestDockerfileSecretsMasked(t *testing.T) {
+	ts, st, _ := console(t)
+	src, _ := filepath.Glob("../history/testdata/records/39usrwksrt7qy8g8n71g38pf2")
+	dir := t.TempDir()
+	lastLine := 0
+	for _, n := range []string{"record.json", "logs.bin", "provenance.json", "trace.json"} {
+		b, err := os.ReadFile(filepath.Join(src[0], n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == "provenance.json" {
+			var prov map[string]any
+			if err := json.Unmarshal(b, &prov); err != nil {
+				t.Fatal(err)
+			}
+			info := prov["runDetails"].(map[string]any)["metadata"].(map[string]any)["buildkit_metadata"].(map[string]any)["source"].(map[string]any)["infos"].([]any)[0].(map[string]any)
+			text, _ := base64.StdEncoding.DecodeString(info["data"].(string))
+			secret := strings.Replace(string(text), "RUN sleep 1 && echo more > /more",
+				`RUN sleep 1 && printf 'glpat-ABCDEFGHIJKLMNOPQRST\nghp_`+strings.Repeat("a1", 18)+`\nAKIAABCDEFGHIJKLMNOP\n' && echo more > /more`, 1)
+			secret += "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbn\n-----END OPENSSH PRIVATE KEY-----\n# last\n"
+			if !strings.Contains(secret, "glpat-") {
+				t.Fatal("the fixture's Dockerfile changed")
+			}
+			lastLine = strings.Count(secret[:strings.Index(secret, "# last")], "\n") + 1
+			info["data"] = base64.StdEncoding.EncodeToString([]byte(secret))
+			if b, err = json.Marshal(prov); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(dir, n), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := fixtureBuild(t, st, dir)
+	id, err := st.SaveBuild(ctx, store.Build{Build: b, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := -1
+	for i, s := range b.Steps {
+		if strings.Contains(s.Name, "echo more") {
+			step = i
+		}
+	}
+	if step < 0 {
+		t.Fatal("no step for the line")
+	}
+	leaks := regexp.MustCompile(`glpat-|ghp_|AKIA|b3Blbn`)
+	p := get(t, ts, fmt.Sprintf("/builds/%d", id))
+	if !strings.Contains(p.body, `data-tab="dockerfile"`) {
+		t.Fatal("no Dockerfile tab")
+	}
+	if m := leaks.FindString(p.body); m != "" {
+		t.Errorf("the build page shows %q", m)
+	}
+	if l := dfLine(p.body, lastLine); !strings.Contains(l, "# last") {
+		t.Errorf("line %d after the key: %s", lastLine, l)
+	}
+	d := get(t, ts, fmt.Sprintf("/builds/%d/steps/%d", id, step))
+	if d.status != 200 || !strings.Contains(d.body, "[masked]") {
+		t.Errorf("step %d: %d, nothing masked", step, d.status)
+	}
+	if m := leaks.FindString(d.body); m != "" {
+		t.Errorf("the step shows %q", m)
 	}
 }

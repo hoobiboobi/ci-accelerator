@@ -28,11 +28,11 @@ const statsFresh = time.Minute
 
 type cachedStats struct {
 	at     time.Time
-	builds []store.BuildRow // newest first, over statsFor
-	usual  map[string]usualTime
+	builds []store.BuildRow     // newest first, over statsFor
+	usual  map[string]usualTime // by imageOf
 }
 
-// usualTime is a target's usual times: a build that came from the cache
+// usualTime is an image's usual times: a build that came from the cache
 // and one that rebuilt steps take very different times, so each is
 // compared with its own kind.
 type usualTime struct {
@@ -50,7 +50,7 @@ func (u usualTime) of(rebuilt bool) (usual, slow time.Duration) {
 }
 
 // recent returns a project's builds of the last week, newest first, with
-// each target's usual time; computed at most once a minute per project.
+// each image's usual time; computed at most once a minute per project.
 func (s *Server) recent(ctx context.Context, p store.ProjectKey) (*cachedStats, error) {
 	key := p.String()
 	s.statsMu.Lock()
@@ -80,18 +80,32 @@ const minForUsual = 5
 // is less than one build and the nearest-rank p95 is just the slowest.
 const minForP95 = 20
 
-// usualTimes is each target's median times over builds that finished,
-// apart for builds from the cache and builds that rebuilt steps.
+// usualTimes is each image's median times over builds that finished,
+// apart for builds from the cache and builds that rebuilt steps, keyed by
+// imageOf: two Dockerfiles without a target are two images with their own
+// times.
 func usualTimes(bs []store.BuildRow) map[string]usualTime {
+	return usualTimesBy(bs, imageOf)
+}
+
+// imageOf is a build's image as the store tells images apart: its target,
+// or without one the repository it pushed to first.
+func imageOf(b store.BuildRow) string {
+	return store.ImageKey(b.Target, b.Images)
+}
+
+// usualTimesBy is usualTimes with the builds grouped by key.
+func usualTimesBy(bs []store.BuildRow, key func(store.BuildRow) string) map[string]usualTime {
 	cached, rebuilt := map[string][]time.Duration{}, map[string][]time.Duration{}
 	for _, b := range bs {
 		if b.Completed.IsZero() || b.Error != "" {
 			continue
 		}
+		k := key(b)
 		if b.Built > 0 {
-			rebuilt[b.Target] = append(rebuilt[b.Target], b.Duration())
+			rebuilt[k] = append(rebuilt[k], b.Duration())
 		} else {
-			cached[b.Target] = append(cached[b.Target], b.Duration())
+			cached[k] = append(cached[k], b.Duration())
 		}
 	}
 	out := map[string]usualTime{}
@@ -145,7 +159,7 @@ func (s *Server) item(b store.BuildRow, usual map[string]usualTime, loc *time.Lo
 		it.Dur = duration(d)
 		// A list marks only what is slow for its kind: slower than 19 in
 		// 20 rebuilds of the image.
-		if _, slow := usual[b.Target].of(b.Built > 0); slow > 0 && d > slow && b.Error == "" {
+		if _, slow := usual[imageOf(b)].of(b.Built > 0); slow > 0 && d > slow && b.Error == "" {
 			it.Slower = true
 		}
 	} else if b.Completed.IsZero() {
@@ -554,7 +568,7 @@ func reasonText(b store.BuildRow, st Status) string {
 			}
 			return "The last build of the image ran on another node; whether its files changed is unclear"
 		}
-		return "Steps ran with no earlier build to compare with"
+		return "Steps ran with nothing on record to compare them with"
 	case "failed":
 		return "Failed: " + clip(failureText(b.Error), 120)
 	case "farm":
@@ -1011,7 +1025,9 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v.Cached = cached * 100 / max(1, len(bs))
-	ut := usualTimes(bs)[target]
+	// The page's own figures are over all its builds: without a target,
+	// those of every Dockerfile without one, as the page names them all.
+	ut := usualTimesBy(bs, func(b store.BuildRow) string { return b.Target })[target]
 	if ut.CachedN >= minForUsual {
 		v.UsualCached = duration(ut.Cached)
 	}

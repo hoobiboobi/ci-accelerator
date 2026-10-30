@@ -104,9 +104,10 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 	switch r.Kind {
 	case "":
 		if built > 0 {
-			// Its project is not known yet, or nothing to compare with.
+			// Its project is not known yet, or the records of this build or
+			// of the previous one lack the definition of a step that ran.
 			return Verdict{Tone: "first", Kicker: "Not compared", Title: template.HTML(fmt.Sprintf("%d steps were built.", built)),
-				Detail: template.HTML(strings.TrimSpace("No earlier build of " + thisImage(b) + " is on record to compare with. " + recLine))}
+				Detail: template.HTML(strings.TrimSpace("Nothing on record to compare them with: no earlier build of " + thisImage(b) + " is known, or BuildKit's records lack the definition of a step that ran. " + recLine))}
 		}
 		cached, received := 0, 0
 		for _, s := range b.Steps {

@@ -3,6 +3,7 @@ package web
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,12 +27,16 @@ import (
 // who approved; alice may read project 42's jobs, bob may not, root is an
 // admin of the console. It records the tokens the console read with.
 type signInGitLab struct {
-	srv     *httptest.Server
-	mu      sync.Mutex
-	used    []string // Authorization headers of API reads
-	revoked []string
-	down    bool          // the project API answers 500
-	skew    time.Duration // the console's clock runs ahead by this
+	srv      *httptest.Server
+	mu       sync.Mutex
+	used     []string // Authorization headers of API reads
+	revoked  []string
+	down     bool          // the project API answers 500
+	noRevoke bool          // the revoke endpoint answers 500
+	skew     time.Duration // the console's clock runs ahead by this
+	slow     time.Duration // a pipeline's jobs are answered this late
+	// answers are bodies for paths of project 42's API ("[]" otherwise).
+	answers map[string]string
 }
 
 func (g *signInGitLab) now() time.Time {
@@ -44,6 +49,12 @@ func newSignInGitLab(t *testing.T) *signInGitLab {
 	g := &signInGitLab{}
 	g.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
+		slow := g.slow
+		g.mu.Unlock()
+		if strings.HasSuffix(r.URL.Path, "/jobs") {
+			time.Sleep(slow)
+		}
+		g.mu.Lock()
 		defer g.mu.Unlock()
 		user := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer at-")
 		w.Header().Set("Content-Type", "application/json")
@@ -53,6 +64,10 @@ func newSignInGitLab(t *testing.T) *signInGitLab {
 			json.NewEncoder(w).Encode(map[string]any{"access_token": "at-" + r.Form.Get("code"), "refresh_token": "rt-" + r.Form.Get("code"),
 				"token_type": "Bearer", "expires_in": 7200})
 		case r.URL.Path == "/oauth/revoke":
+			if g.noRevoke {
+				w.WriteHeader(500)
+				return
+			}
 			r.ParseForm()
 			g.revoked = append(g.revoked, r.Form.Get("token"))
 			fmt.Fprint(w, "{}")
@@ -78,6 +93,10 @@ func newSignInGitLab(t *testing.T) *signInGitLab {
 				fmt.Fprint(w, "deployed\n")
 				return
 			}
+			if body, ok := g.answers[r.URL.Path]; ok {
+				fmt.Fprint(w, body)
+				return
+			}
 			fmt.Fprint(w, "[]")
 		default:
 			w.WriteHeader(404)
@@ -99,7 +118,7 @@ func signedIn(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *
 		client := gitlab.New([]string{gl})
 		client.HTTP = via
 		a, err := auth.New(auth.Config{PublicURL: "https://127.0.0.1", Key: make([]byte, 32), HTTP: via, Now: g.now,
-			Instances: []auth.Instance{{URL: gl, ClientID: "cid", Secret: "client-secret-value", Admins: []string{"root"}}}}, st, client, testLogger())
+			Instances: []auth.Instance{{URL: gl, ClientID: "cid", Secret: "client-secret-value", Admins: []string{"id:1"}}}}, st, client, testLogger())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -335,6 +354,199 @@ func TestSignedInSeesWhatGitLabAllows(t *testing.T) {
 	}
 }
 
+// A build's trace id is chosen by the job that runs buildctl. One that
+// names a pipeline and a job of different projects is nobody's but the
+// admins': its page shows the pipeline's commit and lists the job's other
+// builds, so whichever project alice may read, she would see the other's.
+func TestTraceNamingAJobOfAnotherProject(t *testing.T) {
+	ts, st, ids, g, browser := signedIn(t)
+	alice, root := browser("alice"), browser("root")
+	known, _ := buildsByProject(t, st, ids)
+	bp, err := st.BuildPage(ctx, known[0])
+	if err != nil || bp.Pipeline == nil || bp.Pipeline.ProjectID != 42 {
+		t.Fatalf("fixture build %d: %+v, %v", known[0], bp, err)
+	}
+	a := bp.Build.Attribution
+	// A job nobody has seen: its build is its pipeline's project's once
+	// GitLab lists the job in it (its build page asks).
+	g.mu.Lock()
+	g.answers = map[string]string{fmt.Sprintf("/api/v4/projects/42/pipelines/%d/jobs", a.Pipeline): fmt.Sprintf(`[{"id": 7999, "name": "build",
+		"status": "success", "pipeline": {"id": %d, "project_id": 42, "status": "success"}}]`, a.Pipeline)}
+	g.mu.Unlock()
+	if err := st.SaveJob(ctx, store.Job{Instance: a.Instance, JobID: 7001, PipelineID: 7100, ProjectID: 77, ProjectPath: "secret/app",
+		CommitTitle: "secret change"}); err != nil {
+		t.Fatal(err)
+	}
+	save := func(ref string, pipeline, job uint64) int64 {
+		t.Helper()
+		b := *bp.Build
+		b.Ref, b.Attribution.Pipeline, b.Attribution.Job = ref, pipeline, job
+		id, err := st.SaveBuild(ctx, store.Build{Build: &b, Generation: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	// GitLab answers later than a page waits for the API: the page that
+	// asks whose the pipeline is waits for the answer that decides it, so
+	// the first click is not a false "not found".
+	g.mu.Lock()
+	g.slow = 1500 * time.Millisecond
+	g.mu.Unlock()
+	unknown := save("tracewithajobnotseenyet00", a.Pipeline, 7999)
+	if got := fetch(t, alice, ts, "GET", fmt.Sprintf("/builds/%d", unknown), nil); got.status != 200 {
+		t.Errorf("alice, a build of her pipeline whose job GitLab lists: %d, want 200", got.status)
+	}
+	g.mu.Lock()
+	g.slow = 0
+	g.mu.Unlock()
+	// Her pipeline and the other project's job; the other project's
+	// pipeline and her job.
+	for _, forged := range []int64{save("forgedtraceofanotherjob00", a.Pipeline, 7001), save("forgedtraceofanotherpipe0", 7100, a.Job)} {
+		for _, p := range []string{"", "/steps/0", fmt.Sprintf("/compare?with=%d", known[0])} {
+			path := fmt.Sprintf("/builds/%d%s", forged, p)
+			if got := fetch(t, alice, ts, "GET", path, nil); got.status != 404 || strings.Contains(got.body, "secret") {
+				t.Errorf("alice %s: %d, want 404", path, got.status)
+			}
+			// root finds it (a pair of builds of no common project is not
+			// compared, though).
+			if got := fetch(t, root, ts, "GET", path, nil); got.status == 404 || got.status >= 500 {
+				t.Errorf("root %s: %d", path, got.status)
+			}
+		}
+	}
+}
+
+// GitLab not answering what a person may read hides the projects, and the
+// home page says GitLab did not answer, not that the person may read none.
+func TestNoAnswerIsNotNoProjects(t *testing.T) {
+	ts, _, _, g, browser := signedIn(t)
+	alice, bob := browser("alice"), browser("bob")
+	if p := fetch(t, bob, ts, "GET", "/", nil); !strings.Contains(p.body, "No project you can read builds here") ||
+		strings.Contains(p.body, "GitLab did not answer") {
+		t.Error("bob may read none: the home page no longer says so")
+	}
+	g.mu.Lock()
+	g.down = true
+	g.mu.Unlock()
+	p := fetch(t, alice, ts, "GET", "/", nil)
+	if p.status != 200 || strings.Contains(p.body, "No project you can read builds here") ||
+		!strings.Contains(p.body, "GitLab did not answer which projects you can read") || strings.Contains(p.body, "example/") {
+		t.Errorf("alice's home while GitLab does not answer: %d", p.status)
+	}
+}
+
+// A job of another project can name a pipeline before it exists, and is
+// then the first to be seen in it. The pipeline's own project's builds are
+// not hidden from its members for good: their build page asks GitLab,
+// which answers for the real project only.
+func TestPipelineClaimedBeforeItExists(t *testing.T) {
+	ts, st, ids, g, browser := signedIn(t)
+	alice, bob := browser("alice"), browser("bob")
+	known, _ := buildsByProject(t, st, ids)
+	bp, err := st.BuildPage(ctx, known[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst := bp.Build.Attribution.Instance
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 7002, PipelineID: 7300, ProjectID: 77, ProjectPath: "other/app",
+		CommitTitle: "claimed first"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 7301, PipelineID: 7300, ProjectID: 42, ProjectPath: "example/app"}); err != nil {
+		t.Fatal(err)
+	}
+	b := *bp.Build
+	b.Ref, b.Attribution.Pipeline, b.Attribution.Job = "buildofapipelineclaimed00", 7300, 7301
+	id, err := st.SaveBuild(ctx, store.Build{Build: &b, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	g.answers = map[string]string{"/api/v4/projects/42/pipelines/7300/jobs": `[{"id": 7301, "name": "build", "status": "success",
+		"pipeline": {"id": 7300, "project_id": 42, "status": "success"}}]`}
+	g.mu.Unlock()
+	path := fmt.Sprintf("/builds/%d", id)
+	if got := fetch(t, alice, ts, "GET", path, nil); got.status != 200 || strings.Contains(got.body, "claimed first") {
+		t.Errorf("alice, a build of her project's pipeline named first by another project's job: %d, want 200", got.status)
+	}
+	if project, err := st.PipelineProject(ctx, inst, 7300); err != nil || project != 42 {
+		t.Errorf("pipeline project after GitLab answered: %d, %v", project, err)
+	}
+	if got := fetch(t, bob, ts, "GET", path, nil); got.status != 404 {
+		t.Errorf("bob: %d, want 404", got.status)
+	}
+}
+
+// A build page lists the other builds of its job. While the job is not
+// known (only admins see its builds then), any trace can name it, with any
+// pipeline: the page lists only those of its own pipeline.
+func TestOtherBuildsOfAJobNotKnownYet(t *testing.T) {
+	ts, st, ids, _, browser := signedIn(t)
+	alice, root := browser("alice"), browser("root")
+	known, _ := buildsByProject(t, st, ids)
+	bp, err := st.BuildPage(ctx, known[0])
+	if err != nil || bp.Pipeline == nil || bp.Pipeline.ProjectID != 42 {
+		t.Fatalf("fixture build %d: %+v, %v", known[0], bp, err)
+	}
+	save := func(ref string, pipeline uint64) int64 {
+		t.Helper()
+		b := *bp.Build
+		b.Ref, b.Attribution.Pipeline, b.Attribution.Job = ref, pipeline, 7500
+		id, err := st.SaveBuild(ctx, store.Build{Build: &b, Generation: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	mine, sibling, elsewhere := save("buildofajobnotknownyet000", bp.Pipeline.ID), save("anotherbuildofthatjob0000", bp.Pipeline.ID),
+		save("thesamejobinanotherpipe00", 7600)
+	if got := fetch(t, alice, ts, "GET", fmt.Sprintf("/builds/%d", mine), nil); got.status != 404 {
+		t.Errorf("alice, a build of her pipeline whose job is not known, GitLab not listing it: %d, want 404", got.status)
+	}
+	got := fetch(t, root, ts, "GET", fmt.Sprintf("/builds/%d", mine), nil)
+	if got.status != 200 {
+		t.Fatalf("root, a build whose job is not known: %d", got.status)
+	}
+	if !strings.Contains(got.body, fmt.Sprintf(`"/builds/%d"`, sibling)) {
+		t.Error("the job's other build of the same pipeline is not listed")
+	}
+	if strings.Contains(got.body, fmt.Sprintf(`"/builds/%d"`, elsewhere)) {
+		t.Error("a build naming the job with another pipeline is listed")
+	}
+}
+
+// A job of project 42 (alice's) names pipeline 7700 before it exists and
+// is the first seen in it. Pipeline 7700 is another project's: its job's
+// build is stored while that job is not known (its pod was never seen).
+// Until GitLab says whose the pipeline is, the build is no project's, and
+// alice sees none of its pages.
+func TestBuildOfAnUnknownJobInAClaimedPipeline(t *testing.T) {
+	ts, st, ids, _, browser := signedIn(t)
+	alice := browser("alice")
+	known, _ := buildsByProject(t, st, ids)
+	bp, err := st.BuildPage(ctx, known[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst := bp.Build.Attribution.Instance
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 7702, PipelineID: 7700, ProjectID: 42, ProjectPath: "example/app"}); err != nil {
+		t.Fatal(err)
+	}
+	b := *bp.Build
+	b.Ref, b.Attribution.Pipeline, b.Attribution.Job = "buildofanunknownjobclaimed", 7700, 7701
+	id, err := st.SaveBuild(ctx, store.Build{Build: &b, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{fmt.Sprintf("/builds/%d", id), fmt.Sprintf("/builds/%d/steps/0", id), fmt.Sprintf("/builds/%d/compare", id),
+		fmt.Sprintf("/builds/%d/compare?with=%d", known[0], id)} {
+		if got := fetch(t, alice, ts, "GET", path, nil); got.status != 404 {
+			t.Errorf("alice, %s (a build of an unknown job in a pipeline her project's job named first): %d, want 404", path, got.status)
+		}
+	}
+}
+
 func TestLiveUpdatesOnlyOfReadableProjects(t *testing.T) {
 	ts, st, _, _, browser := signedIn(t)
 	_, key := seedJob(t, st)
@@ -467,4 +679,53 @@ func TestSignOut(t *testing.T) {
 			t.Errorf("the log carries %q", secret)
 		}
 	}
+}
+
+// A sign-out GitLab did not revoke ends the session and says what is
+// left; one the console could not end at all says so too. Neither claims
+// a revoke.
+func TestSignOutIncomplete(t *testing.T) {
+	ts, _, _, g, browser := signedIn(t)
+	alice := browser("alice")
+	g.mu.Lock()
+	g.noRevoke = true
+	g.mu.Unlock()
+	p := fetch(t, alice, ts, "POST", "/auth/sign-out", map[string]string{"Origin": ts.URL, "Sec-Fetch-Site": "same-origin"})
+	if p.status != 303 || p.header.Get("Location") != "/auth/sign-in?e=out-unrevoked" {
+		t.Errorf("sign-out GitLab did not revoke: %d %q", p.status, p.header.Get("Location"))
+	}
+	if p := fetch(t, alice, ts, "GET", "/", nil); p.status != 302 {
+		t.Error("still signed in after signing out")
+	}
+	page := fetch(t, alice, ts, "GET", "/auth/sign-in?e=out-unrevoked", nil)
+	if !strings.Contains(page.body, "did not confirm") || strings.Contains(page.body, "was revoked") {
+		t.Error("the sign-in page does not say that GitLab did not revoke")
+	}
+
+	// The session could not be ended (the controller did not answer): the
+	// browser's cookie goes, and the page says the session may live on.
+	s := &Server{opt: Options{Auth: failingSignOut{}}, log: testLogger()}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/auth/sign-out", nil)
+	r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: "x"})
+	s.signOut(w, r)
+	if loc := w.Header().Get("Location"); loc != "/auth/sign-in?e=out-incomplete" {
+		t.Errorf("sign-out the console could not end: %q", loc)
+	}
+	if c := w.Result().Cookies(); len(c) != 1 || c[0].MaxAge >= 0 {
+		t.Errorf("cookie not cleared: %+v", c)
+	}
+	page = fetch(t, alice, ts, "GET", "/auth/sign-in?e=out-incomplete", nil)
+	if !strings.Contains(page.body, "could not end the session") || strings.Contains(page.body, "was revoked") {
+		t.Error("the sign-in page does not say that the session was not ended")
+	}
+}
+
+// failingSignOut is a sign-in whose controller does not answer a
+// sign-out.
+type failingSignOut struct{ Signer }
+
+func (failingSignOut) SignOut(w http.ResponseWriter, r *http.Request) error {
+	auth.ClearSessionCookie(w)
+	return errors.New("controller: not reachable")
 }
