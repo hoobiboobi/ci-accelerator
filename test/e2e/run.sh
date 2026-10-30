@@ -1233,11 +1233,12 @@ PY
   }
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
   # A link to the page shared in a chat shows a card: its title, its
-  # sentence and the image, at the address the box gives the console.
+  # sentence and the image, at the address the page was reached by (the
+  # box has no global.console.url yet).
   box_preview() {
     grep -q '<meta property="og:title" content="[^"]' "$LOGS/box-console-page.html" &&
       grep -q '<meta property="og:description" content="[^"]' "$LOGS/box-console-page.html" &&
-      grep -q '<meta property="og:image" content="https://console.e2e.example/static/og.png' "$LOGS/box-console-page.html" &&
+      grep -q "<meta property=\"og:image\" content=\"http://$BOX_REL-web.$BOX_NS.svc:8080/static/og.png" "$LOGS/box-console-page.html" &&
       [ "$(kc -n "$JOBS_NS" exec client-build -- wget -qO- -U "TelegramBot (like TwitterBot)" \
         "http://$BOX_REL-web.$BOX_NS.svc:8080/static/og.png" 2>/dev/null | wc -c)" -gt 10000 ]
   }
@@ -1883,6 +1884,14 @@ box_signin() {
   check "with sign-in, a page sends to sign in" \
     test "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$url/")" = "302 $url/auth/sign-in?to=%2F"
   check "with sign-in, data needs a session" test "$(curl -s -o /dev/null -w '%{http_code}' "$url/search-index")" = 401
+  # A chat app's fetcher stays on the sign-in page: a card without a
+  # project, its image where global.console.url says, whatever the Host.
+  box_signin_preview() {
+    curl -s -A "TelegramBot (like TwitterBot)" -H "Host: elsewhere.example" "$url/auth/sign-in?to=%2F" >"$LOGS/box-signin-preview.html" &&
+      grep -q '<meta property="og:title" content="ci-accelerator console">' "$LOGS/box-signin-preview.html" &&
+      grep -q "<meta property=\"og:image\" content=\"$url/static/og.png" "$LOGS/box-signin-preview.html"
+  }
+  check "with sign-in, a link preview is the sign-in page's card, addressed by global.console.url" box_signin_preview
   # sign_in <person>: the session cookie, after the console's round trip
   # through the stand-in GitLab (code exchange, the person's account).
   sign_in() {
