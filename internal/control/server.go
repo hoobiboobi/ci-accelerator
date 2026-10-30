@@ -243,6 +243,8 @@ func toWire(err error) *wireErr {
 		e.Kind = "signedout"
 	case errors.Is(err, auth.ErrDenied):
 		e.Kind = "denied"
+	case errors.Is(err, auth.ErrOtherSignIn):
+		e.Kind = "othersignin"
 	case errors.Is(err, auth.ErrSignIn):
 		e.Kind = "signin"
 	case errors.Is(err, auth.ErrNotRevoked):

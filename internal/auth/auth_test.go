@@ -880,3 +880,52 @@ func TestMaxAge(t *testing.T) {
 		t.Errorf("pruned %d, %v", n, err)
 	}
 }
+
+// Two tabs sign in at once (a session ended with two tabs open): each
+// start replaces the browser's login cookie, so the first tab's answer
+// does not match it. That tab fails, but the cookie of the second
+// sign-in is kept, and the second tab completes.
+func TestTwoSignInsInOneBrowser(t *testing.T) {
+	e := setup(t)
+	begin := func() (state string, login *http.Cookie) {
+		w := httptest.NewRecorder()
+		if err := e.a.Begin(w, httptest.NewRequest("GET", "/", nil), e.inst, "/"); err != nil {
+			t.Fatal(err)
+		}
+		loc, _ := url.Parse(w.Header().Get("Location"))
+		e.gl.mu.Lock()
+		e.gl.codes["alice:"+loc.Query().Get("state")[:6]] = loc.Query().Get("code_challenge")
+		e.gl.mu.Unlock()
+		return loc.Query().Get("state"), w.Result().Cookies()[0]
+	}
+	stateA, _ := begin()
+	stateB, loginB := begin() // the browser now holds B's login cookie
+	callback := func(state string) (*httptest.ResponseRecorder, error) {
+		r := httptest.NewRequest("GET", "/auth/callback/"+e.inst+"?code="+url.QueryEscape("alice:"+state[:6])+"&state="+url.QueryEscape(state), nil)
+		r.AddCookie(loginB)
+		w := httptest.NewRecorder()
+		_, err := e.a.Finish(w, r, e.inst)
+		return w, err
+	}
+	w, err := callback(stateA)
+	if !errors.Is(err, ErrOtherSignIn) {
+		t.Fatalf("tab A: %v", err)
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == LoginCookie {
+			t.Fatal("tab A's failure cleared the other sign-in's cookie")
+		}
+	}
+	w, err = callback(stateB)
+	if err != nil {
+		t.Fatalf("tab B: %v", err)
+	}
+	cleared, session := false, false
+	for _, c := range w.Result().Cookies() {
+		cleared = cleared || c.Name == LoginCookie && c.MaxAge < 0
+		session = session || c.Name == SessionCookie && c.Value != ""
+	}
+	if !cleared || !session {
+		t.Errorf("tab B: login cookie cleared %v, session %v", cleared, session)
+	}
+}

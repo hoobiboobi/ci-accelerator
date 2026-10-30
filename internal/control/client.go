@@ -231,6 +231,8 @@ func fromWire(e *wireErr) error {
 		base = auth.ErrSignedOut
 	case "denied":
 		base = auth.ErrDenied
+	case "othersignin":
+		base = auth.ErrOtherSignIn
 	case "signin":
 		base = auth.ErrSignIn
 	case "notrevoked":
@@ -550,7 +552,6 @@ func (c *Client) Finish(w http.ResponseWriter, r *http.Request, instance string)
 	if ck, err := r.Cookie(auth.LoginCookie); err == nil {
 		login = ck.Value
 	}
-	auth.ClearLoginCookie(w)
 	if ck, err := r.Cookie(auth.SessionCookie); err == nil {
 		old = ck.Value
 	}
@@ -562,6 +563,9 @@ func (c *Client) Finish(w http.ResponseWriter, r *http.Request, instance string)
 		}
 	}
 	err := c.call(r.Context(), "FinishWith", []any{instance, login, q, old}, &to, &session)
+	if !errors.Is(err, auth.ErrOtherSignIn) {
+		auth.ClearLoginCookie(w)
+	}
 	if err != nil {
 		return to, err
 	}

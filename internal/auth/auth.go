@@ -92,6 +92,10 @@ var (
 	ErrSignedOut = errors.New("auth: signed out")
 	// ErrSignIn: the sign-in could not be completed (state, instance, code).
 	ErrSignIn = errors.New("auth: the sign-in did not complete")
+	// ErrOtherSignIn: GitLab's answer is for another sign-in than the one
+	// this browser started last (two tabs signing in at once). The login
+	// cookie is kept: it belongs to the other sign-in, still under way.
+	ErrOtherSignIn = fmt.Errorf("%w: the answer is not for this sign-in", ErrSignIn)
 	// ErrDenied: the person did not allow the console at GitLab.
 	ErrDenied = errors.New("auth: access was not allowed at GitLab")
 	// ErrNotRevoked: a sign-out ended the session, but GitLab did not
@@ -411,12 +415,14 @@ func (a *Auth) Finish(w http.ResponseWriter, r *http.Request, instance string) (
 	if c, err := r.Cookie(LoginCookie); err == nil {
 		login = c.Value
 	}
-	ClearLoginCookie(w)
 	old := ""
 	if c, err := r.Cookie(SessionCookie); err == nil {
 		old = c.Value
 	}
 	to, session, err := a.FinishWith(r.Context(), instance, login, r.URL.Query(), old)
+	if !errors.Is(err, ErrOtherSignIn) {
+		ClearLoginCookie(w)
+	}
 	if err != nil {
 		return to, err
 	}
@@ -449,7 +455,7 @@ func (a *Auth) FinishWith(ctx context.Context, instance, login string, q url.Val
 	case a.cfg.Now().Unix() > p.Expires:
 		return p.To, "", fmt.Errorf("%w: it took too long", ErrSignIn)
 	case subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(p.State)) != 1:
-		return p.To, "", fmt.Errorf("%w: the answer is not for this sign-in", ErrSignIn)
+		return p.To, "", ErrOtherSignIn
 	case q.Get("error") != "":
 		return p.To, "", ErrDenied
 	case q.Get("code") == "":
