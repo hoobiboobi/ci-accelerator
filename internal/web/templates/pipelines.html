@@ -2,6 +2,7 @@
 {{define "content"}}
 <div class="page">
   <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div><div class="titlerow"><h1 class="t" tabindex="-1">Pipelines</h1></div></header>
+  {{if .NoProjects}}{{template "noprojects" .}}{{else}}
   <form class="filters" method="get" action="/pipelines" data-autosubmit role="search">
     <label class="fq"><span>Search</span><input type="search" name="q" id="pQ" value="{{.Q}}" placeholder="Pipeline #, commit SHA, title, job, author" maxlength="200" autocomplete="off" spellcheck="false" enterkeyhint="search"></label>
     <label><span>Period</span><select name="period" id="pPeriod">{{range .Periods}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
@@ -42,5 +43,6 @@
   {{end}}
   </div>
   <nav class="pager" aria-label="Pages">{{if .Newer}}<a class="btn" href="{{.Newest}}">Newest</a>{{end}}{{with .Older}}<a class="btn" href="{{.}}">Older {{icon "chev" 13}}</a>{{end}}</nav>
+  {{end}}
 </div>
 {{end}}
