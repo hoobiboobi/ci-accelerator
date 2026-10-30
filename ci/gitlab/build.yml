@@ -163,6 +163,7 @@ spec:
       # Dockerfile frontend ignores the option; no cache key sees it.
       [ -z "${TRACEPARENT:-}" ] || set -- "$@" --opt "ci-accelerator.io/traceparent=$TRACEPARENT"
       while IFS= read -r line; do
+        line=${line#"${line%%[![:space:]]*}"}   # an indented line names its key without the indent
         [ -n "$line" ] || continue
         case "$line" in *=*) ;; *) echo "build-args: '$line' is not KEY=VALUE" >&2; exit 1 ;; esac
         set -- "$@" --opt "build-arg:$line"
@@ -170,6 +171,7 @@ spec:
       $CIA_BUILD_ARGS
       EOF
       while IFS= read -r line; do
+        line=$(printf '%s' "$line" | tr -d ' \t')
         [ -n "$line" ] || continue
         id=${line%%=*}; var=${line#*=}
         case "$line" in *=*) ;; *) echo "secrets: '$line' is not id=VARIABLE" >&2; exit 1 ;; esac
