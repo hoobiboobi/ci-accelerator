@@ -9,7 +9,30 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.3.4, `helm upgrade` in place. The controller, the web and the
+  routers restart once (a new image); the daemons and their disk probe
+  stay as they are.
+- To see builds live, jobs need the CI component of this release (or
+  `--opt "ci-accelerator.io/traceparent=$TRACEPARENT"` on a `buildctl
+  build` of their own); its `include` integrity changes. Builds without it
+  show once they complete, as before.
+
+### Added
+
+- **A running build shows live** on its job's page: what runs now, how
+  long the rest likely takes against the last build of the image that ran
+  the same step, the node's CPU and memory, how many builds the daemon
+  runs and how long tasks waited for a core, and every step on a timeline
+  that grows as the build goes. A step opens to its last 8 lines (secrets
+  masked); the running step opens by itself and folds when it is done,
+  while steps the reader opened stay open, and a step's lines can be
+  paused. The page follows the build every 2 seconds and becomes the
+  build's page when BuildKit completes it. On the pipeline's timeline a
+  running job opens into its stages and steps so far, and folds once it
+  is done. ([ADR-0053](docs/adr/0053-running-builds-live.md))
+- The CI component passes the job's `TRACEPARENT` as the build option
+  `ci-accelerator.io/traceparent`, which names the build's job while it
+  runs. The Dockerfile frontend ignores it; cache keys do not change.
 
 ## 0.3.4 - 2026-10-30
 

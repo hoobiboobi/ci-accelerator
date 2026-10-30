@@ -175,6 +175,16 @@ farm, unclear or failed. A build's page starts with one sentence, then:
 - why the build router chose its node. A rebuild on the same node under a
   replaced daemon says so, and whether its cache survived.
 
+**While a build runs**, its job's page follows it: what runs now and,
+against the last build of the image that ran the same step, how long the
+rest likely takes; the node's CPU and memory, the builds on its daemon and
+the CPU pressure; every step on a timeline that grows, each opening to its
+last 8 lines (the running one opens by itself, a finished one folds). The
+pipeline's timeline opens a running job into its stages so far. The job
+names itself to the box through the CI component (the build option
+`ci-accelerator.io/traceparent`); a build without it shows once it is
+done.
+
 **Compare** any two builds of an image side by side
 (`/builds/<id>/compare`): time, commit, node, build arguments, the
 Dockerfiles' differing lines and every step's state and time. The Compare

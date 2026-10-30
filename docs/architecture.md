@@ -329,6 +329,18 @@ What the controller does:
   BuildKit's keep-free floor and the kubelet's eviction thresholds, and
   the load as an hour's chart; the node's memory is total minus available,
   the pod's its working set (the kubelet's measure), so the two add up.
+- **Running builds, while someone looks.** A daemon announces each build
+  as it starts. The CI component passes the job's TRACEPARENT as the build
+  option `ci-accelerator.io/traceparent`, so the controller knows the
+  build's job from its start (a completed build's job comes from its
+  trace, which exists only at the end). When the job's page or its
+  pipeline's page asks, the controller reads the build's progress from the
+  daemon (BuildKit's Status stream, replayed from the build's start) and
+  keeps each step's state and last 8 lines, secrets masked, for a minute
+  after the last ask, at most 32 builds at once; the probe's load of the
+  build's node is read every 10 s meanwhile. The pages compare the build
+  with the last one of the same image that ran the same step, for how
+  long the rest likely takes ([ADR-0053](adr/0053-running-builds-live.md)).
 - **Job data from the job pods.** A Role in the jobs namespace lets it get,
   list and watch pods. The pods' annotations tie each build to its
   pipeline, job, project and commit; the trace id ties the build record to
