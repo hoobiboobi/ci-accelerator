@@ -231,21 +231,29 @@ function shotIndex() {
 async function crawl(s, width) {
   await s.size(width, width < 600 ? 844 : 900);
   const seen = new Set(["/"]), queue = ["/"], pages = [];
+  const never = [];
   let bad = 0, slow = 0, stuck = 0;
   while (queue.length && pages.length < 400) {
     const p = queue.shift();
     const ms = await s.go(p, 150);
     pages.push(p);
-    stuck = ms === Infinity ? stuck + 1 : 0;
-    if (stuck === 3) {
-      check(`${width}px: pages keep loading`, false,
-        `${pages.length - 3} loaded, then three in a row never did (no free connection? live streams of left pages)`);
-      return pages;
+    // A page that never loads is a failure of its own (its links are never
+    // followed either); three in a row end the crawl, as every later page
+    // would wait the same way.
+    if (ms === Infinity) {
+      bad++; never.push(p);
+      check(`${width}px ${p}`, false, ["never loaded in 8 s"].concat(s.take()).join(" | ").slice(0, 400));
+      if (++stuck === 3) {
+        check(`${width}px: pages keep loading`, false,
+          `${pages.length - 3} loaded, then three in a row never did (no free connection? live streams of left pages): ${never.join(" ")}`);
+        return pages;
+      }
+      continue;
     }
-    if (ms === Infinity) continue;
+    stuck = 0;
     const found = (await s.eval(audit)).concat(s.take());
     if (s.main !== 200) found.push("status " + s.main);
-    if (ms > 3000) { slow++; found.push("loaded in " + (ms === Infinity ? "never" : ms + " ms")); }
+    if (ms > 3000) { slow++; found.push("loaded in " + ms + " ms"); }
     if (found.length) { bad++; check(`${width}px ${p}`, false, found.join(" | ").slice(0, 400)); }
     if (args.shots) await shot(s, width, p);
     for (const h of await s.eval(`[...document.querySelectorAll("a[href]")].map(a => a.getAttribute("href"))`)) {
@@ -254,7 +262,8 @@ async function crawl(s, width) {
       if (!seen.has(q)) { seen.add(q); queue.push(q); }
     }
   }
-  check(`${width}px: every page renders cleanly`, bad === 0, `${pages.length} pages, ${bad} with problems, ${slow} slow`);
+  check(`${width}px: every page renders cleanly`, bad === 0,
+    `${pages.length} pages, ${bad} with problems, ${slow} slow, ${never.length} never loaded`);
   return pages;
 }
 
