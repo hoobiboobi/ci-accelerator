@@ -399,3 +399,30 @@ func TestStartAddsCompareDue(t *testing.T) {
 		t.Errorf("due: %v, %v", jobs, err)
 	}
 }
+
+// The time a cached step saved is read from the step's last executed run
+// through an index of executed runs: it used to walk every cached run of
+// the step (a base image's: one per build), seconds per save at scale,
+// under the write lock.
+func TestTimeSavedUsesExecutedRuns(t *testing.T) {
+	s := open(t, t.TempDir(), &clock{time.Now()})
+	rows, err := s.db.Query(`EXPLAIN QUERY PLAN SELECT s.dur_ms FROM steps s JOIN builds b ON b.id = s.build_id
+		WHERE s.identity = ? AND s.state = 1 AND (? IS NULL OR (b.instance = ? AND b.project_id = ?))
+		ORDER BY s.build_id DESC LIMIT 1`, 1, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if !strings.Contains(strings.Join(plan, "; "), "steps_built") {
+		t.Errorf("plan: %q", plan)
+	}
+}

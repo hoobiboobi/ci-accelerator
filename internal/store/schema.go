@@ -332,4 +332,7 @@ var toleratedColumns = []struct{ table, column, def string }{
 // to date without knowing them.
 var toleratedIndexes = `
 CREATE INDEX IF NOT EXISTS builds_compare_due ON builds (instance, job_id) WHERE compare_due = 1;
+-- The last executed run of a step, for the time a cached one saved: without
+-- it every save walked all the step's cached runs, under the write lock.
+CREATE INDEX IF NOT EXISTS steps_built ON steps (identity, build_id) WHERE state = 1;
 `
