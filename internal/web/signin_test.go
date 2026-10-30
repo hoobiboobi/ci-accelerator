@@ -735,3 +735,25 @@ func (failingSignOut) SignOut(w http.ResponseWriter, r *http.Request) error {
 	auth.ClearSessionCookie(w)
 	return errors.New("controller: not reachable")
 }
+
+// Behind an ended session only a navigation is sent on to sign in: a
+// page's script reading the page again (live updates, a step's panel) gets
+// 401, rather than starting a sign-in at GitLab every few seconds.
+func TestSignedOutScriptGets401(t *testing.T) {
+	ts, _, _, _, browser := signedIn(t)
+	anon := browser("")
+	for mode, want := range map[string]int{"navigate": http.StatusFound, "": http.StatusFound, "cors": http.StatusUnauthorized, "same-origin": http.StatusUnauthorized} {
+		req, _ := http.NewRequest("GET", ts.URL+"/pipelines", nil)
+		if mode != "" {
+			req.Header.Set("Sec-Fetch-Mode", mode)
+		}
+		res, err := anon.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != want {
+			t.Errorf("Sec-Fetch-Mode %q: %d, want %d", mode, res.StatusCode, want)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,20 @@ func TestSettleKeepsOpenOnATransientError(t *testing.T) {
 	SettleProject(ctx, f, flaky{&gitlab.StatusError{Code: 404, Status: "404 Not Found"}}, p, testNow, 0, 25)
 	if len(f.settled) != 2 || !strings.HasPrefix(f.settled[0].Via, "unresolved") {
 		t.Errorf("a 404 did not settle them as unresolved: %+v", f.settled)
+	}
+}
+
+// With sign-in GitLab is read with the reader's token: a reader who may
+// not read the repository (401, 403, 404) settles nothing for everyone.
+func TestSettleKeepsOpenOnAReadersRefusal(t *testing.T) {
+	open := []store.Elsewhere{{ID: 1, SHA: "b", PrevSHA: "a", Paths: []string{"api"}}}
+	p := store.ProjectKey{Instance: "abcdef", ID: 42}
+	for _, code := range []int{401, 403, 404} {
+		f := &fakeSettle{open: open}
+		SettleProject(ctx, f, personal{flaky{&gitlab.StatusError{Code: code, Status: fmt.Sprint(code)}}}, p, testNow, 0, 25)
+		if len(f.settled) != 0 {
+			t.Errorf("a reader's %d settled %+v", code, f.settled)
+		}
 	}
 }
 

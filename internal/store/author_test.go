@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -44,5 +45,43 @@ func TestAuthorFilterAnyAlphabet(t *testing.T) {
 	var v int
 	if err := s.db.QueryRow("PRAGMA auto_vacuum").Scan(&v); err != nil || v != 2 {
 		t.Errorf("auto_vacuum %d (%v), want 2 (incremental): the file would never shrink", v, err)
+	}
+}
+
+// Pages of pipelines meet where the previous one ended, by time and then
+// number: pipelines created in the same second (a tag and its branch) are
+// on one page or the next, never on neither.
+func TestPipelinePagesKeepTies(t *testing.T) {
+	s := open(t, t.TempDir(), &clock{time.Now()})
+	key := ProjectKey{Instance: "0a1b2c", ID: 42}
+	at := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
+	for id := uint64(1); id <= 7; id++ {
+		created := at.Add(time.Duration(id) * time.Second)
+		if id >= 3 && id <= 5 {
+			created = at.Add(5 * time.Second) // three in one second
+		}
+		if _, err := s.db.Exec(`INSERT INTO pipelines (instance, pipeline_id, project_id, created_at) VALUES (?, ?, 42, ?)`,
+			nullInstance(key.Instance), id, created.UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen []uint64
+	q := PipeQuery{Project: key, Limit: 2}
+	for page := 0; page < 10; page++ {
+		rows, err := s.PipelineList(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rows {
+			seen = append(seen, r.ID)
+		}
+		if len(rows) < q.Limit {
+			break
+		}
+		last := rows[len(rows)-1]
+		q.Before, q.BeforeID = last.Created, last.ID
+	}
+	if fmt.Sprint(seen) != "[7 6 5 4 3 2 1]" {
+		t.Errorf("pages: %v", seen)
 	}
 }

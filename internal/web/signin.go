@@ -48,7 +48,7 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 		}
 		w.Header().Set("Vary", "Cookie")
 		if v == nil {
-			if r.Method == http.MethodGet && isPage(p) {
+			if r.Method == http.MethodGet && isPage(p) && navigation(r) {
 				http.Redirect(w, r, "/auth/sign-in?to="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
 				return
 			}
@@ -162,6 +162,16 @@ var signInMessages = map[string]struct {
 	"out":            {"You are signed out, and this session's access to your GitLab account was revoked. While you are signed in to GitLab, signing in here again may not ask you again: GitLab asks only when the console holds no access of yours (from another browser, say). To withdraw it everywhere, revoke the application in GitLab under Preferences > Applications.", false},
 	"out-unrevoked":  {"You are signed out and this session has ended, but GitLab did not confirm that it revoked the session's access to your GitLab account. To be sure, revoke the application in GitLab under Preferences > Applications.", true},
 	"out-incomplete": {"You are signed out in this browser, but the console could not end the session: it ends once it goes unused. To end its access to your GitLab account now, revoke the application in GitLab under Preferences > Applications.", true},
+}
+
+// navigation: the browser opens a page (a link, the address bar, a
+// reload), not a page's script reading a part of one. Only a navigation is
+// sent on to sign in: a script's request that followed it would start a
+// sign-in at GitLab every few seconds behind an ended session, each one
+// replacing the login cookie of a sign-in going on in another tab.
+func navigation(r *http.Request) bool {
+	m := r.Header.Get("Sec-Fetch-Mode")
+	return m == "" || m == "navigate"
 }
 
 func (s *Server) signIn(w http.ResponseWriter, r *http.Request) {

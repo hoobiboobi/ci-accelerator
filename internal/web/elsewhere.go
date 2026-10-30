@@ -69,8 +69,18 @@ func (s *Server) settleLater(r *http.Request, p store.ProjectKey) {
 // not 0), asking GitLab at most calls times; it returns how many it
 // settled either way.
 func (s *Server) settle(ctx context.Context, api GitLab, p store.ProjectKey, only int64, calls int) (int, error) {
-	return SettleProject(ctx, s.data, api, p, s.now(), only, calls)
+	var c Changer = api
+	if s.opt.Auth != nil && api != nil {
+		c = personal{api}
+	}
+	return SettleProject(ctx, s.data, c, p, s.now(), only, calls)
 }
+
+// personal is GitLab read with the reader's own token (sign-in): what it
+// may not read is the reader's limit, not the commits'.
+type personal struct{ Changer }
+
+func (personal) personal() {}
 
 // SettleData is what settling reads and writes: the open rebuilds, their
 // answers, and GitLab's comparisons of commits already asked for (they
@@ -149,6 +159,11 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 				// again on a later pass, never stored as unresolved.
 				stop = err
 				continue
+			case err != nil && isPersonal(api) && (se.Code == 401 || se.Code == 403 || se.Code == 404):
+				// The reader may not read the repository: another reader may.
+				// Nothing is stored for everyone.
+				stop = err
+				continue
 			}
 			d = &diff{files, complete, err}
 			diffs[k] = d
@@ -164,6 +179,11 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 		return 0, err
 	}
 	return len(out), stop
+}
+
+func isPersonal(c Changer) bool {
+	_, ok := c.(interface{ personal() })
+	return ok
 }
 
 // asked ties an answer to the question it answers.
