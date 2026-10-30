@@ -286,6 +286,12 @@ func (s *Store) scanBuilds(ctx context.Context, rows *sql.Rows) ([]*Stored, erro
 		out = append(out, &st)
 		reasonSteps = append(reasonSteps, rstep)
 	}
+	// An error part way through (a canceled request) ends the loop as if
+	// the rows ran out: Err says so, Close does not.
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
@@ -392,6 +398,10 @@ func (s *Store) restore(ctx context.Context, st *Stored) error {
 				}
 			}
 			defs[d.Identity] = d
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
 		}
 		if err := rows.Close(); err != nil {
 			return err
