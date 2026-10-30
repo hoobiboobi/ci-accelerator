@@ -34,8 +34,8 @@ spec:
     secrets:
       description: >-
         Build secrets, one per line as id=VARIABLE: the value of the CI/CD
-        variable VARIABLE is mounted for RUN --mount=type=secret,id=id and
-        never stored.
+        variable VARIABLE (of a File-type variable, the file's content) is
+        mounted for RUN --mount=type=secret,id=id and never stored.
       default: ""
     images:
       description: Image references to push, one per line. CI/CD variables are expanded.
@@ -46,10 +46,11 @@ spec:
       default: true
     registry-auth:
       description: >-
-        job-token: log in to this project's registry with the job's token and
-        ignore DOCKER_AUTH_CONFIG (which would override the job's
-        credentials). docker-auth-config: use the DOCKER_AUTH_CONFIG variable
-        as it is. none: no credentials.
+        job-token: log in to GitLab's registry and Dependency Proxy with the
+        job's token and ignore DOCKER_AUTH_CONFIG (which would override the
+        job's credentials); a GitLab without a container registry builds
+        without credentials and cannot push. docker-auth-config: use the
+        DOCKER_AUTH_CONFIG variable as it is. none: no credentials.
       options: [job-token, docker-auth-config, none]
       default: job-token
     labels:
@@ -117,8 +118,24 @@ spec:
       case "$CIA_REGISTRY_AUTH" in
         job-token)
           unset DOCKER_AUTH_CONFIG
-          auth=$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')
-          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$CI_REGISTRY" "$auth" >"$DOCKER_CONFIG/config.json"
+          basic() { printf '%s:%s' "$1" "$2" | base64 | tr -d '\n'; }
+          auths=""
+          # GitLab sets these only when the instance has a container registry.
+          if [ -n "${CI_REGISTRY:-}" ] && [ -n "${CI_REGISTRY_USER:-}" ] && [ -n "${CI_REGISTRY_PASSWORD:-}" ]; then
+            auths="\"$CI_REGISTRY\":{\"auth\":\"$(basic "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD")\"}"
+          elif [ "$CIA_PUSH" = true ]; then
+            echo "registry-auth job-token: this GitLab has no container registry (CI_REGISTRY is not set); push elsewhere with registry-auth: docker-auth-config, or build only with push: false" >&2
+            exit 1
+          else
+            echo "no GitLab container registry: building without registry credentials (registry-auth: none says so)"
+          fi
+          # Base images through GitLab's Dependency Proxy (another host,
+          # always with credentials) get the job's token too.
+          if [ -n "${CI_DEPENDENCY_PROXY_SERVER:-}" ] && [ -n "${CI_DEPENDENCY_PROXY_USER:-}" ] \
+            && [ -n "${CI_DEPENDENCY_PROXY_PASSWORD:-}" ] && [ "$CI_DEPENDENCY_PROXY_SERVER" != "${CI_REGISTRY:-}" ]; then
+            auths="${auths:+$auths,}\"$CI_DEPENDENCY_PROXY_SERVER\":{\"auth\":\"$(basic "$CI_DEPENDENCY_PROXY_USER" "$CI_DEPENDENCY_PROXY_PASSWORD")\"}"
+          fi
+          printf '{"auths":{%s}}\n' "$auths" >"$DOCKER_CONFIG/config.json"
           ;;
         docker-auth-config) ;;
         none) unset DOCKER_AUTH_CONFIG ;;
@@ -155,6 +172,12 @@ spec:
         case "$var" in ''|[0-9]*|*[!A-Za-z0-9_]*) echo "secrets: '$var' is not a variable name" >&2; exit 1 ;; esac
         eval "set=\${$var+x}"
         [ "$set" = x ] || { echo "secrets: the CI/CD variable $var is not set" >&2; exit 1; }
+        # A File-type variable holds the path of a file the runner wrote
+        # under <project dir>.tmp/: mount the file, not the path.
+        eval "val=\$$var"
+        case "$val" in
+          "${CI_PROJECT_DIR:-/nonexistent}.tmp/"*) [ ! -f "$val" ] || { set -- "$@" --secret "id=$id,src=$val"; continue; } ;;
+        esac
         set -- "$@" --secret "id=$id,env=$var"
       done <<EOF
       $CIA_SECRETS
@@ -182,12 +205,17 @@ spec:
       [ "$CIA_PUSH" != true ] || say "pushing $names"
       log=$(mktemp)
       # buildctl has no keepalive: a build node that vanishes without a
-      # reset would leave the job waiting for the job timeout.
-      if timeout -s TERM $((CIA_TIMEOUT_MINUTES * 60)) \
+      # reset would leave the job waiting for the job timeout. On SIGTERM
+      # buildctl cancels the build and exits 1, so the time tells a timeout
+      # from a failure; one that does not stop in a minute is killed. (The
+      # seconds variables are for the script's own test.)
+      limit=${CIA_TIMEOUT_SECONDS:-$((CIA_TIMEOUT_MINUTES * 60))}
+      start=$(date +%s)
+      if timeout -k "${CIA_TIMEOUT_GRACE_SECONDS:-60}" -s TERM "$limit" \
         buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" \
         build "$@" --metadata-file build-metadata.json 2>&1 | tee "$log"; then :; else
         status=$?
-        if [ "$status" = 143 ]; then
+        if [ "$status" = 143 ] || [ "$status" = 137 ] || [ $(($(date +%s) - start)) -ge "$limit" ]; then
           echo "the build did not finish in $CIA_TIMEOUT_MINUTES minutes (timeout-minutes)" >&2
         else
           echo "the build failed (buildctl exit status $status)" >&2

@@ -17,13 +17,19 @@ the job reaches the daemon on its own node.
 
 What the job does for you:
 
-- logs in to the project's registry with the job token, and ignores
-  `DOCKER_AUTH_CONFIG`, which would otherwise override that token for the
-  same registry and break the push;
+- logs in to GitLab's registry and its Dependency Proxy (base images
+  `FROM ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/...`) with the job token,
+  and ignores `DOCKER_AUTH_CONFIG`, which would otherwise override that
+  token for the same registry and break the push. On a GitLab without a
+  container registry it builds without credentials (`push: false`) and
+  refuses to push; other private registries need `registry-auth:
+  docker-auth-config`;
 - passes secrets by the name of a CI/CD variable, never as build arguments;
-- stops the build after `timeout-minutes` (buildctl has no keepalive of
-  its own: a build node that disappears without closing the connection
-  could hold the job until GitLab's job timeout);
+  a File-type variable mounts the file's content;
+- stops the build after `timeout-minutes`, and says so (buildctl has no
+  keepalive of its own: a build node that disappears without closing the
+  connection could hold the job until GitLab's job timeout); a buildctl
+  that has not stopped a minute later is killed;
 - prints how much context it sent and how many Dockerfile steps came from
   the cache;
 - hands the image digest to later jobs (`IMAGE`, `IMAGE_DIGEST`,
@@ -126,10 +132,10 @@ value outside `options` stops the pipeline before it starts.
 | `target` | (last stage) | Dockerfile stage to build |
 | `platform` | (the node's) | Platforms, comma-separated |
 | `build-args` | | `KEY=VALUE` per line; never secrets |
-| `secrets` | | `id=VARIABLE` per line, from CI/CD variables |
+| `secrets` | | `id=VARIABLE` per line, from CI/CD variables (File-type: the file's content) |
 | `images` | `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA` | References to push, one per line |
 | `push` | `true` | `false` only builds |
-| `registry-auth` | `job-token` | `job-token`, `docker-auth-config` or `none` |
+| `registry-auth` | `job-token` | `job-token` (GitLab's registry and Dependency Proxy), `docker-auth-config` or `none` |
 | `labels` | `true` | OCI labels `source` and `revision` |
 | `provenance` | `false` | Attach a SLSA provenance attestation |
 | `timeout-minutes` | `60` | Stop the build after this |
