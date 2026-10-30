@@ -1232,6 +1232,16 @@ PY
       grep -q 'class="dl step st-built' "$LOGS/box-console-page.html"
   }
   check "the console's page for the job explains its build and shows its Dockerfile" quiet box_console_page
+  # A link to the page shared in a chat shows a card: its title, its
+  # sentence and the image, at the address the box gives the console.
+  box_preview() {
+    grep -q '<meta property="og:title" content="[^"]' "$LOGS/box-console-page.html" &&
+      grep -q '<meta property="og:description" content="[^"]' "$LOGS/box-console-page.html" &&
+      grep -q '<meta property="og:image" content="https://console.e2e.example/static/og.png' "$LOGS/box-console-page.html" &&
+      [ "$(kc -n "$JOBS_NS" exec client-build -- wget -qO- -U "TelegramBot (like TwitterBot)" \
+        "http://$BOX_REL-web.$BOX_NS.svc:8080/static/og.png" 2>/dev/null | wc -c)" -gt 10000 ]
+  }
+  check "a link to the console's page shows a preview card (title, sentence, image)" quiet box_preview
   # The build ran steps: its Resources tab lists them by CPU with the
   # node's cores from the probe, and the step's drawer names its memory.
   box_resources() {
