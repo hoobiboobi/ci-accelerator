@@ -5,12 +5,19 @@
 # gitlab.com/ci-accelerator/ci-accelerator. Its runner is a ci-accelerator
 # box: this pipeline builds the ci-accelerator image with the CI component
 # in this repository, through the box's build router and daemons, and the
-# box's console explains each build. The image is built, not pushed:
-# releases are built, signed and published by GitHub Actions.
+# box's console explains each build. The job pushes the image to this
+# mirror's registry with the job's own token, as any project using the
+# component would: :<commit> for every commit, :edge for main. These are
+# unsigned development builds; releases are built, signed and published to
+# ghcr.io by GitHub Actions. The registry keeps the last 10 tags of up to
+# 14 days, and :edge.
 workflow:
   rules:
     - if: $CI_COMMIT_TAG
       when: never
+    - if: ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web") && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        EDGE_IMAGE: $CI_REGISTRY_IMAGE:edge
     - if: $CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web"
 
 stages: [build]
@@ -21,4 +28,7 @@ include:
       runner-tags: [ci-accelerator]
       dockerfile: cmd/ci-accelerator/Dockerfile
       platform: linux/amd64,linux/arm64
-      push: false
+      # An empty line (EDGE_IMAGE off main) names no image.
+      images: |
+        $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+        $EDGE_IMAGE
