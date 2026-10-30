@@ -3,7 +3,7 @@
 # nothing, a Go change runs the control plane's jobs, a chart change the
 # charts' and every e2e group but the component's, a change of the GitLab CI
 # component a real GitLab too, anything unknown everything (a real GitLab
-# only without a list at all).
+# only without a list at all); a rename lists the path it left.
 set -eu
 cd "$(dirname "$0")/.."
 fail=0
@@ -28,7 +28,8 @@ CHARTS="charts=true go=false component=false e2e_matrix=[$ALL]"
 COMPONENT="charts=true go=false component=true e2e_matrix=[$ALL,$COMP]"
 GO="charts=false go=true component=false e2e_matrix=[$CP]"
 NONE='charts=false go=false component=false e2e_matrix=[]'
-want "docs alone" "$NONE" README.md docs/adr/0048-logs.md CHANGELOG.md LICENSE artifacthub/buildkit.yml
+want "docs alone" "$NONE" README.md docs/adr/0048-logs.md CHANGELOG.md artifacthub/buildkit.yml
+want "the license (lint compares the charts' copies with it)" "$CHARTS" LICENSE
 want "go code" "$GO" internal/web/nodes.go cmd/ci-accelerator/main.go go.sum
 want "the browser checks" "$GO" test/ui/ui.mjs
 want "a chart" "$CHARTS" charts/buildkit/values.yaml
@@ -42,7 +43,35 @@ want "go and docs" "$GO" docs/troubleshooting.md internal/store/write.go
 want "the Makefile (everything but a real GitLab)" "$EVERY" Makefile
 want "a workflow" "$EVERY" .github/workflows/checks.yml
 want "the image recipe" "$EVERY" cmd/ci-accelerator/Dockerfile
+want "the image build's context" "$EVERY" .dockerignore
+want "the vulnerability gate (run by the Go job, shellchecked by lint)" "charts=true go=true component=false e2e_matrix=[$ALL]" scripts/vulncheck.sh
+want "the release gate (lint runs it on copies of the tree)" "$CHARTS" scripts/check-release-version.sh scripts/changelog-section.sh
 want "nothing known: everything, a real GitLab too" "charts=true go=true component=true e2e_matrix=[$ALL,$COMP]"
 want "go and a chart" "$EVERY" internal/web/nodes.go charts/control-plane/values.yaml
 want "go and the component" "charts=true go=true component=true e2e_matrix=[$ALL,$COMP]" internal/web/nodes.go ci/gitlab/build.yml
+
+# The list a pull request gets (scripts/ci-changed-paths.sh, as the changes
+# workflow runs it): moving the component's README into docs/ must still
+# run what checks it.
+repo=$(mktemp -d)
+root=$(pwd)
+(
+  cd "$repo"
+  g() { git -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false "$@"; }
+  g init -q
+  mkdir -p ci/gitlab docs
+  echo component >ci/gitlab/README.md
+  g add . && g commit -qm base
+  g mv ci/gitlab/README.md docs/gitlab-component.md
+  g commit -qm move
+  "$root/scripts/ci-changed-paths.sh" HEAD~1
+) >"$repo.paths"
+got=$(scripts/ci-changes.sh <"$repo.paths" | tr '\n' ' ' | sed 's/ $//')
+rm -rf "$repo" "$repo.paths"
+if [ "$got" = "$COMPONENT" ]; then
+  echo "  ok   a file moved out of the component (git's list of a rename)"
+else
+  echo "  FAIL a file moved out of the component (git's list of a rename): got '$got', want '$COMPONENT'"
+  fail=1
+fi
 exit $fail

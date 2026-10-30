@@ -2,10 +2,11 @@
 # Checks that a release tag matches the charts before anything is published:
 # the three charts carry the tag's version, the umbrella depends on exactly
 # those buildkit and control-plane versions, the control plane's appVersion
-# (the ci-accelerator image tag, v<appVersion>) is the same, the README and docs/gitops.md install
-# it, the README's one-node upgrade uses the quickstart's Helm, the box's
-# notes carry the component's integrity, the disk probe's image is a
-# released one, and CHANGELOG.md has an entry with upgrade notes for it.
+# (the ci-accelerator image tag, v<appVersion>) is the same, the README,
+# the runner integration and docs/gitops.md install it and no guide installs
+# another version, the README's one-node upgrade uses the quickstart's Helm,
+# the box's notes carry the component's integrity, the disk probe's image is
+# a released one, and CHANGELOG.md has an entry with upgrade notes for it.
 # Prints the version on success.
 #
 #   scripts/check-release-version.sh v0.1.0
@@ -60,6 +61,17 @@ fi
 for pat in "releases/download/$tag/quickstart.sh" "charts/ci-accelerator --version $version "; do
   grep -qF -- "$pat" "$ROOT/README.md" || { echo "README.md does not mention $pat" >&2; fail=1; }
 done
+# So does the runner integration's way to the box, and no guide installs
+# another version of a chart (placeholders such as <v> are not versions).
+grep -qF -- "charts/ci-accelerator --version $version " "$ROOT/integrations/gitlab-runner/README.md" \
+  || { echo "integrations/gitlab-runner/README.md does not install charts/ci-accelerator --version $version" >&2; fail=1; }
+stale=$(cd "$ROOT" && grep -rnoE --include='*.md' -- 'charts/(ci-accelerator|buildkit|control-plane) --version [0-9][^ ]*' \
+  README.md docs integrations ci charts/*/README.md | grep -vF -- "--version $version" || true)
+if [ -n "$stale" ]; then
+  echo "installs of another version than $version:" >&2
+  printf '  %s\n' "$stale" >&2
+  fail=1
+fi
 # The GitLab CI component is included from this release's tag.
 for f in README.md ci/gitlab/README.md; do
   grep -qF -- "hoobiboobi/ci-accelerator/$tag/ci/gitlab/build.yml" "$ROOT/$f" \

@@ -6,7 +6,7 @@ CHARTS := charts/buildkit
 # The control-plane chart needs its own required values.
 CONTROL_PLANE := charts/control-plane
 CONTROL_PLANE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set controller.api.tls.existingSecret=lint-api --set jobs.namespace=ci-jobs
-CONTROL_PLANE_SIGN_IN_SET := --set router.enabled=true --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["root"]}]'
+CONTROL_PLANE_SIGN_IN_SET := --set router.enabled=true --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["id:1"]}]'
 CONTROL_PLANE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1 --set jobs.namespace=ci-jobs --set router.enabled=true --set networkPolicy.enabled=true
 # Extra values files every chart check also renders with.
 CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
@@ -268,7 +268,7 @@ deps: $(RUNNER_CHART) ## Vendor the umbrella chart's dependencies into charts/ci
 	@cp $(RUNNER_CHART) $(UMBRELLA)/charts/
 
 .PHONY: lint
-lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and example values), chart LICENSE copies, READMEs up to date, shellcheck
+lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and example values), chart LICENSE copies, READMEs up to date, the release check, shellcheck
 	@for c in $(CHARTS); do \
 		echo "==> lint $$c"; \
 		cmp -s LICENSE $$c/LICENSE || { echo "$$c/LICENSE differs from LICENSE (the packaged chart must carry the license text)"; exit 1; }; \
@@ -289,8 +289,12 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 		|| { $(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml; exit 1; }
 	@echo "==> released images"
 	@test/released-images.sh
+	@echo "==> release check"
+	@test/release-check.sh
+	@echo "==> images the weekly scan covers"
+	@test/default-images.sh
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh scripts/vulncheck.sh scripts/ci-changes.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -318,6 +322,10 @@ $(NODE):
 .PHONY: component-test
 component-test: ## The GitLab CI component's job script against a fake buildctl, in its own image (needs docker, ruby)
 	@ci/gitlab/test/run.sh
+
+.PHONY: quickstart-test
+quickstart-test: ## quickstart.sh's own decisions (cache path, disk check, uninstall) with stand-ins for k3s and Helm (needs docker)
+	@test/quickstart/offline.sh
 
 .PHONY: component-gitlab-test
 component-gitlab-test: ## The component through a real GitLab CE (GITLAB=min|current|all, default all): lint and pipeline simulation with every kind of input (needs docker, ruby)

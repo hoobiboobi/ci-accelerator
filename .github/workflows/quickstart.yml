@@ -59,6 +59,10 @@ jobs:
           docker build -f cmd/ci-accelerator/Dockerfile -t ci-accelerator:quickstart .
           docker save -o "$RUNNER_TEMP/image.tar" ci-accelerator:quickstart
 
+      - name: The script's own decisions, with stand-ins for k3s and Helm
+        if: ${{ !inputs.release }}
+        run: make quickstart-test
+
       # The installer expects a machine without Docker (its iptables rules
       # can break the pods' network).
       - name: Stop Docker
