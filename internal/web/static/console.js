@@ -382,12 +382,15 @@
       if (ev.key === "Home") { ev.preventDefault(); setDW(null, true); }
     });
 
-    // A click outside the panel closes it, unless it opens another step
-    // (the panel moves there), did something of its own (a tab, a fold),
-    // ended selecting text, or landed in a dialog over the page.
+    // A click on the page's free space closes the panel: not one that opens
+    // another step (the panel moves there), works a control (a tab, a fold,
+    // a filter, a link), ends selecting text, or lands in a dialog.
+    const controls = "a, button, summary, input, select, textarea, label, [role=button], [role=tab], [role=treeitem], " +
+      "[role=option], [role=menuitem], [role=separator], [aria-expanded], [tabindex]:not([tabindex='-1'])";
     document.addEventListener("click", ev => {
       if (drawer.hidden || ev.defaultPrevented || drawer.contains(ev.target)) return;
       if (ev.target.closest("[data-step], [data-wstep], #pal, #help, #scrim, #pop, #toast")) return;
+      if (ev.target.closest(controls)) return;
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed && sel.toString().trim()) return;
       closePanel();

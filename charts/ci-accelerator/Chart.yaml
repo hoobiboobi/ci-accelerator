@@ -47,6 +47,8 @@ annotations:
   artifacthub.io/changes: |
     - kind: added
       description: Console links shared in Telegram, Slack or another chat show a preview card with the page's title, its project and the sentence it leads with; behind sign-in the card shows no project
+    - kind: fixed
+      description: Folding a stage or a timeline row no longer closes a step's panel
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi

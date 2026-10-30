@@ -30,6 +30,12 @@ None.
   `signIn.url`) so the cards' addresses are where people reach the
   console; without it the request's host is used.
 
+### Fixed
+
+- A step's panel closed when a stage was folded on a build page, or a row
+  of a pipeline's timeline (or its depth and filter buttons) was used
+  (0.3.7). Only a click on the page's free space closes it now.
+
 ## 0.3.7 - 2026-10-30
 
 ### Upgrade notes
