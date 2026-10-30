@@ -336,6 +336,11 @@ async function buildPage(s, pages) {
   await s.key("Escape");
   check(`${b} Esc closes the panel`, !(await s.visible("#drawer")));
   await s.click(sel, 900);
+  if (await s.eval(`!!document.querySelector(".grpbtn")`)) {
+    await s.click(".grpbtn", 300);
+    check(`${b} folding a stage keeps the panel open`, await s.visible("#drawer"));
+    await s.click(".grpbtn", 300);
+  }
   await s.click("h1", 300);
   check(`${b} a click outside the panel closes it`, !(await s.visible("#drawer")));
   if (await s.eval(`!!document.querySelector('[data-act="toggleall"]')`)) {
@@ -388,6 +393,12 @@ async function pipelinePage(s, pages) {
   if (row) {
     await s.click(`[data-wf] .row[data-id="${row}"]`, 900);
     check(`${p} a timeline step opens the panel`, await s.visible("#drawer"));
+    const parent = await s.eval(`(() => { const r = [...document.querySelectorAll("[data-wf] .row[aria-expanded]")].find(r => !r.hidden); return r && r.dataset.id; })()`);
+    if (parent) {
+      await s.click(`[data-wf] .row[data-id="${parent}"]`, 300);
+      check(`${p} folding a row of the timeline keeps the panel open`, await s.visible("#drawer"));
+      await s.click(`[data-wf] .row[data-id="${parent}"]`, 300);
+    }
     await s.key("Escape");
   }
   const href = await s.eval(`(() => { const a = document.querySelector('[data-wf] .row.k-job a.nm[href^="/builds/"]'); return a && a.getAttribute("href"); })()`);
