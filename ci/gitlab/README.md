@@ -34,6 +34,12 @@ What the job does for you:
   the cache;
 - hands the image digest to later jobs (`IMAGE`, `IMAGE_DIGEST`,
   `IMAGE_REF` as a dotenv report).
+- names its job to the box (the job's `TRACEPARENT`, which the box's
+  runner sets, as the build option `ci-accelerator.io/traceparent`): the
+  console shows the build live on the job's page while it runs. BuildKit's
+  Dockerfile frontend ignores the option; no cache key sees it. A
+  `buildctl build` of your own shows live with the same
+  `--opt "ci-accelerator.io/traceparent=$TRACEPARENT"`.
 
 ## Use it
 

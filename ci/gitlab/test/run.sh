@@ -136,6 +136,9 @@ run_case "docker-auth-config keeps DOCKER_AUTH_CONFIG" 0 CIA_REGISTRY_AUTH=docke
   'env:^DOCKER_AUTH_CONFIG=' 'config.json:!.'
 run_case "labels and provenance switches" 0 CIA_LABELS=false CIA_PROVENANCE=true -- \
   'argv:!^label:' 'argv:^attest:provenance=mode=min$'
+run_case "the job's trace names the build's job while it runs" 0 TRACEPARENT=00-01abcdef0000b33b2ec9000419350c4d-0000000419350c4d-01 -- \
+  'argv:^ci-accelerator\.io/traceparent=00-01abcdef0000b33b2ec9000419350c4d-0000000419350c4d-01$'
+run_case "without a trace, no option" 0 UNSET=TRACEPARENT -- 'argv:!traceparent'
 run_case "extra buildctl arguments, one per line" 0 "CIA_BUILDCTL_ARGS=$(printf -- '--no-cache\n')" -- 'argv:^--no-cache$'
 run_case "a failing build fails the job" 1 FAKE=fail -- 'stdout:buildctl exit status 1'
 [ -f "$WORK/repo/build.env" ] && [ -f "$WORK/repo/build-metadata.json" ] && echo "  ok    the artifact files exist after a failure" && pass=$((pass + 1)) \

@@ -158,6 +158,10 @@ spec:
           --opt "label:org.opencontainers.image.revision=$CI_COMMIT_SHA"
       fi
       [ "$CIA_PROVENANCE" != true ] || set -- "$@" --opt "attest:provenance=mode=min"
+      # The job's trace, which the box's runner sets: the console shows the
+      # build's progress on the job's page while it runs. BuildKit's
+      # Dockerfile frontend ignores the option; no cache key sees it.
+      [ -z "${TRACEPARENT:-}" ] || set -- "$@" --opt "ci-accelerator.io/traceparent=$TRACEPARENT"
       while IFS= read -r line; do
         [ -n "$line" ] || continue
         case "$line" in *=*) ;; *) echo "build-args: '$line' is not KEY=VALUE" >&2; exit 1 ;; esac
