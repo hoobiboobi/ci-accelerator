@@ -276,6 +276,36 @@ tests:
           path: spec.template.spec.containers[0].env
           count: 4
 
+  # Container env is a map keyed by name: server-side apply refuses a
+  # name given twice, so the user's entry takes the chart's place.
+  - it: lets an extraEnv entry replace a variable the chart sets
+    template: daemonset.yaml
+    set:
+      otel.tracesEndpoint: http://c:4318/v1/traces
+      extraEnv:
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: a=b
+        - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+          value: grpc
+        - name: OTEL_TRACES_EXPORTER
+          value: otlp
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.containers[0].env
+          count: 6
+      - equal:
+          path: spec.template.spec.containers[0].env[2]
+          value: { name: OTEL_RESOURCE_ATTRIBUTES, value: a=b }
+      - equal:
+          path: spec.template.spec.containers[0].env[4]
+          value: { name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, value: grpc }
+      - equal:
+          path: spec.template.spec.containers[0].env[5]
+          value: { name: OTEL_TRACES_EXPORTER, value: otlp }
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: { name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL, value: http/protobuf }
+
   # Mounting over /etc/buildkit hid the image's own files (cdi, cni.json).
   - it: mounts the config outside /etc/buildkit, the state at /var/lib/buildkit and the TLS Secret read-only
     template: daemonset.yaml

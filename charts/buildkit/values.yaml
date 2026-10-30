@@ -210,8 +210,9 @@ storage:
   emptyDir:
     # -- Kubernetes quantity, e.g. "50Gi"; empty means no limit. Exceeding it
     # gets the pod evicted with ~1 s grace (running builds fail, cache lost),
-    # so the chart requires an absolute config.gc.maxUsedSpace of at most 80%
-    # of it whenever it is set.
+    # so the chart requires an absolute config.gc.maxUsedSpace (with
+    # config.gcPolicy: one entry without filters with an absolute
+    # maxUsedSpace) of at most 80% of it whenever it is set.
     sizeLimit: ""
   hostPath:
     # -- Required with storage.type=hostPath. A directory created in advance
@@ -255,11 +256,14 @@ config:
     cacheMounts:
       # -- Keep RUN --mount=type=cache contents this long after last use
       # (buildkit's default is 48h, which makes package caches cold after a
-      # weekend). Must be non-zero.
+      # weekend). Must be non-zero unless maxUsedSpace is set.
       keepDuration: "336h"
-      # -- Expire cache mounts (whatever their age) only while the WHOLE
-      # cache is above this size: buildkit compares policy caps with the total
-      # usage, not with the filtered records. Empty: expire by age only.
+      # -- With a size here, cache mounts unused for keepDuration expire
+      # only while the WHOLE cache is above it (buildkit compares policy
+      # caps with the total usage, not with the filtered records), so it
+      # keeps them longer, not shorter. To expire them by size alone, least
+      # recently used first, set keepDuration "0" with it. Empty: every
+      # mount unused for keepDuration expires.
       maxUsedSpace: ""
 
   # -- Replace the chart's GC policies entirely. Each item: filters, all,
@@ -302,7 +306,10 @@ config:
 
   # -- Extra keys for the [worker.oci] table, e.g. {snapshotter: native}.
   # Values: strings, numbers, booleans or lists. The keys the chart sets
-  # (enabled, gc, max-parallelism, gcpolicy) are rejected.
+  # (enabled, gc, max-parallelism, gcpolicy) are rejected, and so are the
+  # worker-level GC caps (reservedSpace, maxUsedSpace, minFreeSpace,
+  # gckeepstorage), which buildkitd ignores next to the chart's policies:
+  # use config.gc.
   workerOCI: {}
 
   # -- Raw TOML inserted after the top-level keys and before the chart's
@@ -430,9 +437,11 @@ priorityClass:
   # -- Create the PriorityClass. false: no class (or priorityClassName's).
   create: true
   # -- Above CI jobs (0), below Kubernetes' own system classes (2000000000).
+  # Install-time only: Kubernetes refuses to change it on the existing class
+  # (delete the class first; the chart says so on upgrade).
   value: 1000000
   # -- Never: the daemon does not evict running CI jobs to get scheduled;
-  # PreemptLowerPriority lets it.
+  # PreemptLowerPriority lets it. Install-time only, like value.
   preemptionPolicy: Never
 
 # A small container next to the daemon that reports the free space of the
@@ -474,5 +483,7 @@ diskProbe:
 podLabels: {}
 podAnnotations: {}
 
-# -- Extra environment variables for the daemon container.
+# -- Extra environment variables for the daemon container. An entry named
+# like one the chart sets (CI_ACCELERATOR_POD_NAME, CI_ACCELERATOR_NODE_NAME,
+# OTEL_RESOURCE_ATTRIBUTES and the otel.* endpoint variables) replaces it.
 extraEnv: []

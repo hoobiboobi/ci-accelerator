@@ -75,6 +75,11 @@ spec:
             {{- range .Values.gitlab.urls }}
             - -gitlab-url={{ . }}
             {{- end }}
+            {{- if $urlsFrom }}
+            # A file, not an environment variable: the controller starts
+            # again when the URLs change, which the pod template does not show.
+            - -gitlab-urls-file=/gitlab-urls/urls
+            {{- end }}
             {{- with $jobs }}
             - -jobs-namespace={{ . }}
             {{- end }}
@@ -92,22 +97,13 @@ spec:
             - -caches=/caches/{{ .Values.caches.key }}
             - -cache-every={{ default "10m" .Values.caches.every }}
             {{- end }}
-          {{- if or $urlsFrom $caches }}
+          {{- if $caches }}
           env:
-            {{- with $urlsFrom }}
-            - name: GITLAB_URLS
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ . }}
-                  key: {{ $.Values.gitlab.urlsFrom.key }}
-            {{- end }}
-            {{- if $caches }}
             # Where the Secrets with the caches' keys are.
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            {{- end }}
           {{- end }}
           ports:
             - name: api
@@ -158,6 +154,11 @@ spec:
               mountPath: /caches
               readOnly: true
             {{- end }}
+            {{- if $urlsFrom }}
+            - name: gitlab-urls
+              mountPath: /gitlab-urls
+              readOnly: true
+            {{- end }}
             {{- if $signIn }}
             - name: sign-in
               mountPath: /sign-in/config
@@ -203,6 +204,14 @@ spec:
         - name: caches
           configMap:
             name: {{ $caches }}
+        {{- end }}
+        {{- if $urlsFrom }}
+        - name: gitlab-urls
+          configMap:
+            name: {{ $urlsFrom }}
+            items:
+              - key: {{ .Values.gitlab.urlsFrom.key }}
+                path: urls
         {{- end }}
         {{- if $signIn }}
         - name: sign-in

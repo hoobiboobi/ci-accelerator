@@ -131,9 +131,16 @@ tests:
       - equal: { path: spec.template.spec.priorityClassName, value: builds }
       - equal: { path: spec.template.spec.nodeSelector, value: { ci-accelerator.io/node-role: build, kubernetes.io/os: linux, pool: ci } }
       - lengthEqual: { path: spec.template.spec.tolerations, count: 2 }
-      - contains:
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-gitlab-urls-file=/gitlab-urls/urls" }
+      - notContains:
           path: spec.template.spec.containers[0].env
           content: { name: GITLAB_URLS, valueFrom: { configMapKeyRef: { name: urls, key: urls } } }
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content: { name: gitlab-urls, mountPath: /gitlab-urls, readOnly: true }
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: gitlab-urls, configMap: { name: urls, items: [{ key: urls, path: urls }] } }
   - it: runs on any Linux node when the build nodes are off
     template: router.yaml
     documentSelector: { path: kind, value: DaemonSet }

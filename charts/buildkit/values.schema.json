@@ -315,7 +315,7 @@
         },
         "maxRegistryConcurrency": { "type": "integer", "minimum": 0 },
         "workerOCI": {
-          "description": "Extra [worker.oci] keys (bare TOML keys). Checked at render time: the chart's own keys and invalid key names are rejected.",
+          "description": "Extra [worker.oci] keys (bare TOML keys). Checked at render time: the chart's own keys, the worker-level GC caps (use config.gc) and invalid key names are rejected.",
           "type": "object",
           "additionalProperties": {
             "oneOf": [

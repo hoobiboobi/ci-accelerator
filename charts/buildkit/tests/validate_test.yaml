@@ -183,6 +183,42 @@ tests:
       - failedTemplate:
           errorPattern: 'config.gcPolicy\[0\].maxUsedSpace is 80%'
 
+  # Custom policies need the same absolute cap as the chart's own: age and
+  # free node disk do not stop the emptyDir from passing its limit.
+  - it: refuses custom policies without an absolute cap together with a sizeLimit
+    set:
+      storage.emptyDir.sizeLimit: 20Gi
+      config.gcPolicy:
+        - keepDuration: 168h
+        - all: true
+          minFreeSpace: "10%"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'one config.gcPolicy entry without filters needs an absolute maxUsedSpace'
+  # buildkit compares a filtered policy's cap with the whole cache but
+  # removes only the records it matches.
+  - it: does not count a filtered policy's cap against the sizeLimit
+    set:
+      storage.emptyDir.sizeLimit: 20Gi
+      config.gcPolicy:
+        - filters: ["type==exec.cachemount"]
+          maxUsedSpace: 10GB
+        - all: true
+          minFreeSpace: "10%"
+    asserts:
+      - failedTemplate:
+          errorPattern: 'one config.gcPolicy entry without filters needs an absolute maxUsedSpace'
+  - it: accepts a custom unfiltered cap within the sizeLimit budget
+    set:
+      storage.emptyDir.sizeLimit: 20Gi
+      config.gcPolicy:
+        - all: true
+          maxUsedSpace: 16GB
+          minFreeSpace: "10%"
+    asserts:
+      - isKind:
+          of: DaemonSet
+
   - it: accepts absolute caps within the sizeLimit budget
     set:
       storage.emptyDir.sizeLimit: 50Gi
@@ -276,6 +312,51 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: 'config.workerOCI.max-parallelism: the chart sets this \[worker.oci\] key itself \(use config.maxParallelism\)'
+
+  # buildkitd reads them only to make its default policies, and the chart
+  # always renders its own.
+  - it: refuses the worker-level GC cap maxUsedSpace in workerOCI
+    set:
+      config.workerOCI:
+        maxUsedSpace: 2TB
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.workerOCI.maxUsedSpace: buildkitd ignores worker-level GC caps .*config.gc'
+  - it: refuses the worker-level GC cap reservedSpace in workerOCI
+    set:
+      config.workerOCI:
+        reservedSpace: 100GB
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.workerOCI.reservedSpace: buildkitd ignores worker-level GC caps .*config.gc'
+  - it: refuses the worker-level GC cap minFreeSpace in workerOCI
+    set:
+      config.workerOCI:
+        minFreeSpace: 400GB
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.workerOCI.minFreeSpace: buildkitd ignores worker-level GC caps .*config.gc'
+  - it: refuses the worker-level GC cap gckeepstorage in workerOCI
+    set:
+      config.workerOCI:
+        gckeepstorage: 1TB
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.workerOCI.gckeepstorage: buildkitd ignores worker-level GC caps .*config.gc'
+  - it: refuses the worker-level GC cap MaxUsedSpace in workerOCI
+    set:
+      config.workerOCI:
+        MaxUsedSpace: 2TB
+    asserts:
+      - failedTemplate:
+          errorPattern: 'config.workerOCI.MaxUsedSpace: buildkitd ignores worker-level GC caps .*config.gc'
+  - it: accepts other workerOCI keys
+    set:
+      config.workerOCI:
+        snapshotter: native
+    asserts:
+      - isKind:
+          of: DaemonSet
 
   - it: refuses workerOCI keys that are not bare TOML keys
     set:

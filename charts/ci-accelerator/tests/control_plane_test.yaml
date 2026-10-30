@@ -48,9 +48,10 @@ tests:
     asserts:
       - contains: { path: "spec.template.spec.containers[0].args", content: -discover=box-buildkit-headless.ci-accelerator.svc:1234 }
       - contains: { path: "spec.template.spec.containers[0].args", content: -jobs-namespace=ci-accelerator-jobs }
-      - equal:
-          path: "spec.template.spec.containers[0].env[0].valueFrom.configMapKeyRef"
-          value: { name: box-runner-gitlab, key: urls }
+      - contains: { path: "spec.template.spec.containers[0].args", content: "-gitlab-urls-file=/gitlab-urls/urls" }
+      - contains:
+          path: spec.template.spec.volumes
+          content: { name: gitlab-urls, configMap: { name: box-runner-gitlab, items: [{ key: urls, path: urls }] } }
   - it: lets the controller read pods in the jobs namespace
     template: charts/control-plane/templates/rbac.yaml
     set:
@@ -91,7 +92,7 @@ tests:
     set:
       control-plane.enabled: true
       global.console.url: https://ci.example.com
-      control-plane.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o, admins: [alice] }] }
+      control-plane.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o, admins: ["id:7"] }] }
     asserts:
       - contains: { path: 'spec.template.spec.containers[0].args', content: "-sign-in=/sign-in/config/sign-in.json" }
       - notContains: { path: 'spec.template.spec.containers[0].args', content: "-gitlab-token-file=/gitlab/token" }

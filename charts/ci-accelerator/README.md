@@ -97,7 +97,7 @@ Kubernetes: `>=1.34.0-0`
 | global.router.enabled | bool | `true` | CI jobs connect to the build router (part of the control plane), which sends each job to the daemon where its project's cache is; the daemons then admit only the router and name it in their certificate. false: jobs connect to the daemons' Service (their own node's daemon). |
 | global.router.service | string | `"{{ .Release.Name | trunc 40 | trimSuffix \"-\" }}-router"` |  |
 | global.tls.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | cert-manager issuer for daemon and client certificates. Empty name: a CA dedicated to this release is created (see buildkit.tls). |
-| jobsNamespace.create | bool | `true` | false: the namespace exists already (or GitOps creates it); it needs the client certificate (issued here) and Pod Security "baseline". |
+| jobsNamespace.create | bool | `true` | false: the namespace exists already (or GitOps creates it); it needs the client certificate (issued here) and Pod Security "baseline". Switching an installed release to false deletes the namespace it created, unless it is annotated helm.sh/resource-policy=keep first (the chart refuses the upgrade until then). |
 | jobsNamespace.podSecurity | string | `"baseline"` | Pod Security level enforced for the job pods. |
 | preflight.runnerSecret | bool | `true` | Fail if gitlab-runner.runners.secret exists but lacks a key the runner chart mounts (runner-token, and runner-registration-token, which may be empty), or if runner-token does not look like a token (e.g. a copied placeholder). A Secret that does not exist yet is not an error. Needs read access to Secrets in the release namespace. |
 | runnerTiers | object | `{}` |  |

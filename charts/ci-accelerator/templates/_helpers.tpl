@@ -121,7 +121,7 @@ subcharts must agree on.
 {{- end }}
 {{- if $runner.enabled }}
 {{- if not $runner.gitlabUrl }}
-{{- fail "gitlab-runner.gitlabUrl is required: the URL of your GitLab, e.g. https://gitlab.example.com/ (or set gitlab-runner.enabled=false to use your own runner with integrations/gitlab-runner/values.yaml)." }}
+{{- fail "gitlab-runner.gitlabUrl is required: the URL of your GitLab, e.g. https://gitlab.example.com/ (to use your own runner with integrations/gitlab-runner/values.yaml, set gitlab-runner.enabled=false and this to the URL it uses)." }}
 {{- end }}
 {{- if not $runner.runners.secret }}
 {{- fail (printf "gitlab-runner.runners.secret is required: a Secret in namespace %s with the runner authentication token, e.g. kubectl -n %s create secret generic gitlab-runner-token --from-literal=runner-token=glrt-... --from-literal=runner-registration-token=" .Release.Namespace .Release.Namespace) }}
@@ -143,6 +143,14 @@ running with no [[runners]] and takes no jobs). */}}
 {{- fail (printf "gitlab-runner.runners.config does not render to valid TOML: %s" (get $parsed "Error")) }}
 {{- end }}
 {{- end }}
+{{- /* The controller and the routers tell jobs by a hash of the runner's
+URL (the box hands it to them in <release>-runner-gitlab) and do not
+start without one. URLs given directly or in a ConfigMap of the user's own
+do not need it. */}}
+{{- $urlsFrom := tpl (toString (dig "control-plane" "gitlab" "urlsFrom" "configMap" "" .Values.AsMap)) . }}
+{{- if and (dig "control-plane" "enabled" false .Values.AsMap) (not $runner.gitlabUrl) (not (dig "control-plane" "gitlab" "urls" nil .Values.AsMap)) (eq $urlsFrom (printf "%s-runner-gitlab" .Release.Name)) }}
+{{- fail "gitlab-runner.gitlabUrl is required while the control plane is on, also with gitlab-runner.enabled=false: the URL of the GitLab your runner uses, exactly as the runner has it (the console and the router tell jobs by a hash of it). Or set control-plane.gitlab.urls, or control-plane.gitlab.urlsFrom.configMap to a ConfigMap of your own." }}
+{{- end }}
 {{- include "ci-accelerator.checkTiers" . }}
 {{- include "ci-accelerator.preflightJobsNamespace" . }}
 {{- if and (dig "control-plane" "enabled" false .Values.AsMap) (eq (toString .Values.buildkit.tls.source) "existingSecret") (not (dig "control-plane" "tls" "existingSecret" "" .Values.AsMap)) }}
@@ -152,6 +160,13 @@ running with no [[runners]] and takes no jobs). */}}
 {{- $router := eq (toString (dig "router" "enabled" false .Values.global)) "true" }}
 {{- if and $router (not $cp.enabled) }}
 {{- fail "the build router is part of the control plane: with control-plane.enabled=false set global.router.enabled=false too (the CI jobs then connect to the daemons' Service)." }}
+{{- end }}
+{{- /* The control plane reads its own router.enabled first; the runners'
+address and the daemons' NetworkPolicy and certificate follow only the
+global switch. */}}
+{{- $cpRouter := dig "router" "enabled" nil $cp }}
+{{- if and (not (kindIs "invalid" $cpRouter)) (ne (eq (toString $cpRouter) "true") $router) }}
+{{- fail "control-plane.router.enabled must be left unset or equal global.router.enabled: global.router.enabled switches the router, the runners' address and the daemons' NetworkPolicy and certificate together." }}
 {{- end }}
 {{- if and $router (or $cp.fullnameOverride $cp.nameOverride) }}
 {{- fail "control-plane.fullnameOverride and nameOverride are not supported with the router: the runner configuration derives the router's address from the release name." }}
@@ -170,11 +185,20 @@ running with no [[runners]] and takes no jobs). */}}
 The jobs namespace, when this release creates it: Helm refuses to adopt a
 namespace it did not create ("cannot be imported into the current
 release"), and one that is still being deleted (a reinstall right after
-uninstall) fails the install half-way. lookup is empty offline.
+uninstall) fails the install half-way. When it no longer creates it, but
+did: Helm deletes the namespace, with every job pod, the client
+certificate and the runners' roles in it, unless the live object says
+helm.sh/resource-policy: keep. lookup is empty offline.
 */}}
 {{- define "ci-accelerator.preflightJobsNamespace" -}}
-{{- if .Values.jobsNamespace.create }}
 {{- $name := .Values.global.jobs.namespace }}
+{{- if not .Values.jobsNamespace.create }}
+{{- $ns := lookup "v1" "Namespace" "" $name }}
+{{- $annotations := default (dict) (dig "metadata" "annotations" (dict) $ns) }}
+{{- if and $ns (eq (toString (index $annotations "meta.helm.sh/release-name")) .Release.Name) (eq (toString (index $annotations "meta.helm.sh/release-namespace")) .Release.Namespace) (ne (toString (index $annotations "helm.sh/resource-policy")) "keep") }}
+{{- fail (printf "jobsNamespace.create=false would make Helm delete Namespace %s (global.jobs.namespace), which this release created, together with the running CI jobs and everything else in it. Keep jobsNamespace.create=true, or first tell Helm to keep the namespace: kubectl annotate namespace %s helm.sh/resource-policy=keep (it then also stays after helm uninstall)." $name $name) }}
+{{- end }}
+{{- else }}
 {{- $ns := lookup "v1" "Namespace" "" $name }}
 {{- if $ns }}
 {{- $owner := index (default (dict) $ns.metadata.annotations) "meta.helm.sh/release-name" }}
@@ -250,5 +274,5 @@ at the tag v<chart version>): its integrity is the sha256 of that file, kept
 equal to it by the component's tests and the release check.
 */}}
 {{- define "ci-accelerator.componentIntegrity" -}}
-sha256-STsZ7pnPREbwJNdpCo69UlOCFOtgORUuEb9xJBT/xnY=
+sha256-utebAOE9RqUh3Hh/aF8rOX0x1N2LESl7XKyQqQ/pZkU=
 {{- end }}

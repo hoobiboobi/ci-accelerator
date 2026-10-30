@@ -21,7 +21,7 @@ every tier's, each once, and read access to the Secrets with their keys
 {{- $secret := default .secretName .controllerSecretName }}
 {{- $s := dict "server" $s3.server "bucket" $s3.bucket "region" (toString $s3.region) "path" $path "instance" $instance "secret" $secret }}
 {{- if $s3.insecure }}{{ $_ := set $s "insecure" true }}{{ end }}
-{{- if ne (toString (default "" $s3.pathStyle)) "" }}{{ $_ := set $s "pathStyle" (eq (toString $s3.pathStyle) "true") }}{{ end }}
+{{- if not (has (toString $s3.pathStyle) (list "" "<nil>")) }}{{ $_ := set $s "pathStyle" (eq (toString $s3.pathStyle) "true") }}{{ end }}
 {{- $stores = append $stores $s }}
 {{- $secrets = append $secrets $secret }}
 {{- end }}

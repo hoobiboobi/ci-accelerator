@@ -104,7 +104,7 @@
               "existingSecret": { "type": "string" },
               "admins": {
                 "type": "array",
-                "items": { "type": "string", "pattern": "^[A-Za-z0-9_.][A-Za-z0-9_.-]*$" }
+                "items": { "type": "string", "pattern": "^id:[1-9][0-9]*$" }
               }
             }
           }

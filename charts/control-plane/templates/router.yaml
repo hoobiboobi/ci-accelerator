@@ -66,6 +66,11 @@ spec:
             {{- range .Values.gitlab.urls }}
             - -gitlab-url={{ . }}
             {{- end }}
+            {{- if include "control-plane.urlsConfigMap" . }}
+            # A file, not an environment variable: the router takes new URLs
+            # while it runs, which the pod template does not show.
+            - -gitlab-urls-file=/gitlab-urls/urls
+            {{- end }}
             - -controller=https://{{ include "control-plane.controllerName" . }}.{{ .Release.Namespace }}.svc:{{ int .Values.controller.api.port }}
             - -controller-ca=/api-tls/ca.crt
             - -token-file=/var/run/secrets/ci-accelerator/token
@@ -79,13 +84,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            {{- with include "control-plane.urlsConfigMap" . }}
-            - name: GITLAB_URLS
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ . }}
-                  key: {{ $.Values.gitlab.urlsFrom.key }}
-            {{- end }}
           ports:
             - name: tcp
               containerPort: 1234
@@ -127,6 +125,11 @@ spec:
             - name: token
               mountPath: /var/run/secrets/ci-accelerator
               readOnly: true
+            {{- if include "control-plane.urlsConfigMap" . }}
+            - name: gitlab-urls
+              mountPath: /gitlab-urls
+              readOnly: true
+            {{- end }}
       volumes:
         - name: api-ca
           secret:
@@ -143,6 +146,14 @@ spec:
                   audience: ci-accelerator-controller
                   expirationSeconds: 3600
                   path: token
+        {{- with include "control-plane.urlsConfigMap" . }}
+        - name: gitlab-urls
+          configMap:
+            name: {{ . }}
+            items:
+              - key: {{ $.Values.gitlab.urlsFrom.key }}
+                path: urls
+        {{- end }}
       nodeSelector:
         {{- include "control-plane.routerNodeSelector" . | nindent 8 }}
       {{- with include "control-plane.routerTolerations" . }}

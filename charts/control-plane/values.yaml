@@ -37,6 +37,8 @@ gitlab:
   # carries a hash of that string.
   urls: []
   # -- Or read them from a ConfigMap key (comma-separated). Rendered with tpl.
+  # Mounted as a file: when the key changes, the routers take the new URLs
+  # in place and the controller starts again (within about two minutes).
   urlsFrom:
     configMap: ""
     key: urls
@@ -102,12 +104,14 @@ signIn:
   #   url: exactly as the runners have it; may be left empty when the
   #        console serves one GitLab
   #   existingSecret: a Secret with the keys client-id and client-secret
-  #   admins: GitLab usernames who see everything (builds of no known
-  #        project, the JSON API)
+  #   admins: who sees everything (builds of no known project, the JSON
+  #        API): "id:<GitLab user id>" (on the person's GitLab profile
+  #        page). Usernames are refused: GitLab gives one that was renamed
+  #        or deleted to the next account that takes it
   gitlab: []
   # - url: https://gitlab.com/
   #   existingSecret: console-gitlab-oauth
-  #   admins: [alice]
+  #   admins: ["id:1234567"]
 
 daemons:
   # -- host:port of the BuildKit chart's headless Service; every address it
@@ -230,7 +234,8 @@ web:
 # holds no key. It knows a job by its pod's address; a connection from
 # another pod goes to its own node's daemon.
 router:
-  # -- Run the router; default: global.router.enabled (the box sets it).
+  # -- Run the router; default: global.router.enabled (the box sets it;
+  # in the box leave this unset and switch global.router.enabled).
   # The runners then use tcp://<release>-router.<namespace>.svc:1234, and
   # the daemons' certificate must name that Service (the buildkit chart
   # does with global.router.service).
@@ -246,7 +251,8 @@ router:
   # nothing, or one zone label per node).
   zones: true
   # -- When no daemon of the job's zone is ready: true sends the job to
-  # another zone's daemon, false refuses the connection.
+  # another zone's daemon, false refuses the connection. A job on a node
+  # that never had a daemon has no known zone: every daemon is its zone.
   crossZone: true
   # -- Skip a daemon running this many builds when another one is free; 0:
   # never (a busy warm daemon is usually still faster than a cold one).

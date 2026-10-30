@@ -9,6 +9,21 @@ values:
 release:
   name: bk
   namespace: ci-accelerator
+# PriorityClass and Namespace are cluster-scoped; the fake client needs
+# their mapping.
+kubernetesProvider:
+  scheme:
+    "v1/Namespace":
+      gvr:
+        version: v1
+        resource: namespaces
+      namespaced: false
+    "scheduling.k8s.io/v1/PriorityClass":
+      gvr:
+        group: scheduling.k8s.io
+        version: v1
+        resource: priorityclasses
+      namespaced: false
 tests:
   - it: creates its own PriorityClass above CI jobs that never preempts them
     template: priorityclass.yaml
@@ -27,6 +42,123 @@ tests:
       - equal:
           path: globalDefault
           value: false
+
+  # Kubernetes refuses to change either field of an existing class: every
+  # upgrade would fail on the API's error, which does not say what to do.
+  # (The daemons' own preflights are off here: they would look up objects
+  # the fake cluster does not map.)
+  - it: refuses a new value for an existing PriorityClass on upgrade
+    template: daemonset.yaml
+    release:
+      upgrade: true
+    set:
+      priorityClass.value: 2000000
+      preflight.podSecurity: false
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: scheduling.k8s.io/v1
+          kind: PriorityClass
+          metadata:
+            name: ci-accelerator-bk-buildkit
+          value: !!float 1000000
+          preemptionPolicy: Never
+    asserts:
+      - failedTemplate:
+          errorPattern: 'priorityClass.value and priorityClass.preemptionPolicy cannot change.*value 1000000.*kubectl delete priorityclass ci-accelerator-bk-buildkit'
+  - it: refuses a new preemption policy for an existing PriorityClass on upgrade
+    template: daemonset.yaml
+    release:
+      upgrade: true
+    set:
+      priorityClass.preemptionPolicy: PreemptLowerPriority
+      preflight.podSecurity: false
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: scheduling.k8s.io/v1
+          kind: PriorityClass
+          metadata:
+            name: ci-accelerator-bk-buildkit
+          value: !!float 1000000
+          preemptionPolicy: Never
+    asserts:
+      - failedTemplate:
+          errorPattern: 'priorityClass.value and priorityClass.preemptionPolicy cannot change'
+  - it: upgrades an existing PriorityClass with the same settings
+    release:
+      upgrade: true
+    set:
+      preflight.podSecurity: false
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: scheduling.k8s.io/v1
+          kind: PriorityClass
+          metadata:
+            name: ci-accelerator-bk-buildkit
+          value: !!float 1000000
+          preemptionPolicy: Never
+    asserts:
+      - isKind:
+          of: PriorityClass
+        template: priorityclass.yaml
+      - isKind:
+          of: DaemonSet
+        template: daemonset.yaml
+
+  # A namespace admin may not read cluster-scoped PriorityClasses, and the
+  # lookup fails on Forbidden. The class belongs to the release and goes
+  # with it on uninstall, so an install never looks it up, and on upgrade
+  # the daemons' own preflights answer first.
+  - it: does not look up the PriorityClass on install
+    set:
+      priorityClass.value: 2000000
+      preflight.podSecurity: false
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: scheduling.k8s.io/v1
+          kind: PriorityClass
+          metadata:
+            name: ci-accelerator-bk-buildkit
+          value: !!float 1000000
+          preemptionPolicy: Never
+    asserts:
+      - equal:
+          path: value
+          value: 2000000
+        template: priorityclass.yaml
+      - isKind:
+          of: DaemonSet
+        template: daemonset.yaml
+  - it: runs the Pod Security preflight before the PriorityClass check
+    templates:
+      - priorityclass.yaml
+      - daemonset.yaml
+    release:
+      upgrade: true
+    set:
+      priorityClass.value: 2000000
+      preflight.buildNodes: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ci-accelerator
+            labels:
+              pod-security.kubernetes.io/enforce: baseline
+        - apiVersion: scheduling.k8s.io/v1
+          kind: PriorityClass
+          metadata:
+            name: ci-accelerator-bk-buildkit
+          value: !!float 1000000
+          preemptionPolicy: Never
+    asserts:
+      - failedTemplate:
+          errorPattern: 'enforces Pod Security level "baseline"'
+        template: daemonset.yaml
 
   - it: gives the daemons that class and small requests, no limits
     template: daemonset.yaml

@@ -164,6 +164,46 @@ tests:
       - failedTemplate:
           errorPattern: 'is still being deleted'
 
+  # Helm deletes an object that leaves the manifest, unless the live object
+  # says helm.sh/resource-policy: keep: the namespace with every job pod,
+  # the client certificate and the runners' roles in it.
+  - it: refuses to stop creating the jobs namespace it created
+    set:
+      jobsNamespace.create: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ci-accelerator-jobs
+            annotations: {meta.helm.sh/release-name: box, meta.helm.sh/release-namespace: ci-accelerator}
+    asserts:
+      - failedTemplate:
+          errorPattern: 'jobsNamespace.create=false would make Helm delete Namespace ci-accelerator-jobs.*kubectl annotate namespace ci-accelerator-jobs helm.sh/resource-policy=keep'
+  - it: stops creating its jobs namespace once Helm keeps it
+    set:
+      jobsNamespace.create: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ci-accelerator-jobs
+            annotations: {meta.helm.sh/release-name: box, meta.helm.sh/release-namespace: ci-accelerator, helm.sh/resource-policy: keep}
+    asserts:
+      - notFailedTemplate: {}
+  - it: uses a jobs namespace someone else created
+    set:
+      jobsNamespace.create: false
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: ci-accelerator-jobs
+    asserts:
+      - notFailedTemplate: {}
+
   - it: accepts its own jobs namespace on upgrade
     kubernetesProvider:
       objects:
