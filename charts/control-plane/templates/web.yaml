@@ -55,6 +55,14 @@ spec:
             - -controller-ca=/api-tls/ca.crt
             - -token-file=/var/run/secrets/ci-accelerator/token
             {{- include "control-plane.logArgs" (dict "root" $ "role" $v) | nindent 12 }}
+          {{- with include "control-plane.signInURL" . }}
+          env:
+            # Where browsers reach the console: the absolute addresses of
+            # the pages' link previews (in the environment, so an older
+            # image that knows no such setting still starts).
+            - name: CI_ACCELERATOR_PUBLIC_URL
+              value: {{ . | quote }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ int $v.port }}

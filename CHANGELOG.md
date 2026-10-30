@@ -9,7 +9,20 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.3.7, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the web also gets
+  `CI_ACCELERATOR_PUBLIC_URL` (from `signIn.url` or `global.console.url`).
+  The daemons, their disk probe and the runner stay as they are.
+
+### Added
+
+- **Link previews:** a console link shared in Telegram, Slack or another
+  chat shows a card with the page's title, its project, the sentence the
+  page leads with (a build's verdict, a pipeline's summary, the insights'
+  figures) and the console's image. With sign-in no card shows a project:
+  chat apps get the sign-in page's card. Set `global.console.url` (or
+  `signIn.url`) so the cards' addresses are where people reach the
+  console; without it the request's host is used.
 
 ## 0.3.7 - 2026-10-30
 

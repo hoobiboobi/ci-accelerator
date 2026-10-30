@@ -26,6 +26,29 @@ tests:
             - -log-level=info
             - -log-format=json
 
+  # Link previews need where browsers reach the console; without it the web
+  # uses the request's host, so no variable is set.
+  - it: tells the web where browsers reach the console, from global.console.url
+    template: web.yaml
+    documentIndex: 0
+    set:
+      global.console.url: https://console.example.com/
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].env", value: [{ name: CI_ACCELERATOR_PUBLIC_URL, value: "https://console.example.com" }] }
+  - it: prefers signIn.url for where browsers reach the console
+    template: web.yaml
+    documentIndex: 0
+    set:
+      global.console.url: https://console.example.com
+      signIn.url: https://builds.example.com
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].env[0].value", value: "https://builds.example.com" }
+  - it: sets no public URL when none is known
+    template: web.yaml
+    documentIndex: 0
+    asserts:
+      - isNull: { path: "spec.template.spec.containers[0].env" }
+
   # Every role logs at log.level unless its own logLevel says otherwise.
   - it: takes the log level of the role over the common one
     template: web.yaml

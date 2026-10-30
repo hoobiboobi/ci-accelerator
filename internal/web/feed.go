@@ -821,6 +821,12 @@ func (s *Server) insights(w http.ResponseWriter, r *http.Request) {
 	if len(all) > 6 {
 		v.Reasons, v.MoreReasons = all[:6], fmt.Sprintf("%d more reasons", len(all)-6)
 	}
+	if !v.Empty && !sh.NoProjects {
+		sh.Desc = fmt.Sprintf("%d image build%s in %s, %d%% fully from the cache.", v.Builds, plural(v.Builds), v.WindowLabel, v.Cached)
+		if v.Lost != "" && v.Cached != 100 {
+			sh.Desc += " Rebuilds took " + v.Lost + " of build time."
+		}
+	}
 	v.Shell = sh
 	s.render(w, "insights", http.StatusOK, v)
 }

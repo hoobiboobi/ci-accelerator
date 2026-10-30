@@ -103,7 +103,7 @@ func webMain(args []string) error {
 		log.Warn("the web and the controller are of different versions", "web", versionString(), "controller", cfg.Version)
 	}
 	go client.Run(ctx)
-	opt := web.Options{Release: cfg.Release, Version: versionString(), InstallToken: cfg.InstallToken}
+	opt := web.Options{Release: cfg.Release, Version: versionString(), InstallToken: cfg.InstallToken, PublicURL: publicURL(log)}
 	if *devAssets != "" {
 		opt.Assets = os.DirFS(*devAssets)
 	}

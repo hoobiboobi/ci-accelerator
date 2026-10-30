@@ -85,6 +85,21 @@ func versionString() string {
 	return version
 }
 
+// publicURL is where browsers reach the console, from the environment
+// (the chart sets it from global.console.url), for the pages' link
+// previews; "" when unset or not an http(s) URL.
+func publicURL(log *slog.Logger) string {
+	u := os.Getenv(web.PublicURLEnv)
+	if u == "" {
+		return ""
+	}
+	o := web.Origin(u)
+	if o == "" {
+		log.Warn("not an http(s) URL with a host; link previews use the request's host", "env", web.PublicURLEnv, "value", u)
+	}
+	return o
+}
+
 // One binary with roles:
 //
 //	ci-accelerator [all] [flags]        controller and web in one process (development)
@@ -399,7 +414,7 @@ func run(c config, log *slog.Logger) error {
 		}()
 		log.Info("ready", "api_listen", ln.Addr().String())
 	} else {
-		opt := web.Options{Release: c.release, Version: versionString()}
+		opt := web.Options{Release: c.release, Version: versionString(), PublicURL: publicURL(log)}
 		if c.devAssets != "" {
 			opt.Assets = os.DirFS(c.devAssets)
 		}

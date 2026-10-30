@@ -12,6 +12,20 @@
 {{end}}
 
 {{/* A status: shape, colour and words together. */}}
+{{/* The link preview of a page (Open Graph): chat apps and social sites
+   show a shared link as a card of these. */}}
+{{define "preview"}}<meta name="description" content="{{.PreviewDesc}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ci-accelerator">
+<meta property="og:title" content="{{.PreviewTitle}}">
+<meta property="og:description" content="{{.PreviewDesc}}">
+{{with .Origin}}<meta property="og:url" content="{{.}}{{$.Path}}">
+<meta property="og:image" content="{{.}}{{asset "og.png"}}">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ci-accelerator: why an image build was slow or not cached">
+{{end}}<meta name="twitter:card" content="summary_large_image">{{end}}
 {{/* Why a signed-in person sees no project, on the pages a visit starts from. */}}
 {{define "noprojects"}}{{if .Unanswered}}
   <div class="callout neutral">{{icon "info" 16}}<div><b class="k">GitLab did not answer which projects you can read</b>GitLab is down or is limiting your requests. Your projects show again once it answers.</div></div>

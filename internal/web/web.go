@@ -42,6 +42,10 @@ type Options struct {
 	Release string
 	// Version of the console, shown at the bottom of the sidebar.
 	Version string
+	// PublicURL is where browsers reach the console ("https://host", see
+	// Origin), for the absolute addresses of link previews; "": the
+	// request's host.
+	PublicURL string
 	// Assets replaces the built-in templates and static files (a directory
 	// with templates/ and static/), read again for every page: for working
 	// on the pages without rebuilding the console.
@@ -277,9 +281,15 @@ type Shell struct {
 	// inspections, running builds) and updates when it changes.
 	LiveNodes bool
 	Title     string
-	Project   store.Project
-	Projects  []store.Project
-	Warn      string // a warning dot on Nodes
+	// Preview is the title of the page's link preview when it differs
+	// from Title; Desc its sentence (see preview.go).
+	Preview, Desc string
+	// Origin ("https://host") and Path of the page, for the previews'
+	// absolute addresses; Origin "" leaves them out.
+	Origin, Path string
+	Project      store.Project
+	Projects     []store.Project
+	Warn         string // a warning dot on Nodes
 	// Version of the console, at the bottom of the sidebar.
 	Version string
 	// Viewer is the person signed in; nil without sign-in.
@@ -319,7 +329,8 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {
 // shell resolves the project the pages show: the request's, the one chosen
 // before, or the most recently built.
 func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
-	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r), Version: s.opt.Version, Zone: zone(r).String()}
+	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r), Version: s.opt.Version, Zone: zone(r).String(),
+		Origin: s.origin(r), Path: r.URL.EscapedPath()}
 	ps, err := s.data.Projects(r.Context())
 	if err != nil {
 		return sh, err
