@@ -146,6 +146,8 @@ type SignIn struct {
 	Choices []SignInChoice
 	Message string
 	Bad     bool // the message reports a failure
+	// Origin and Path, for the link preview.
+	Origin, Path string
 }
 
 // SignInChoice is a GitLab to sign in with.
@@ -167,13 +169,14 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request) {
 	to := auth.SafePath(r.URL.Query().Get("to"))
 	msg, hasMsg := signInMessages[r.URL.Query().Get("e")]
 	choices := a.Instances()
-	if len(choices) == 1 && !hasMsg {
+	if len(choices) == 1 && !hasMsg && !previewFetcher(r) {
 		// One GitLab: straight there. With a valid grant GitLab sends the
-		// person back at once.
+		// person back at once. A chat app fetching a link's preview stays
+		// on this page and shows its card, not GitLab's sign-in.
 		http.Redirect(w, r, "/auth/sign-in/"+choices[0].Instance+"?to="+url.QueryEscape(to), http.StatusFound)
 		return
 	}
-	v := SignIn{Title: "Sign in", Message: msg.text, Bad: msg.bad}
+	v := SignIn{Title: "Sign in", Message: msg.text, Bad: msg.bad, Origin: s.origin(r), Path: "/"}
 	for _, c := range choices {
 		v.Choices = append(v.Choices, SignInChoice{Host: c.Host, URL: "/auth/sign-in/" + c.Instance + "?to=" + url.QueryEscape(to)})
 	}

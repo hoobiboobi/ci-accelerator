@@ -447,6 +447,13 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 				Dur: duration(ob.Completed.Sub(ob.Started)), Status: statusOf(o.Page.Reason.Kind, ob.Error, o.Built, ob.Completed.IsZero())})
 		}
 	}
+	if v.PipeLabel != "" {
+		sh.Preview = v.Name + " · pipeline " + v.PipeLabel
+	}
+	sh.Desc = plain(v.Verdict.Title)
+	if v.Dur != "" && !running {
+		sh.Desc = strings.TrimSpace(sh.Desc + " The build took " + v.Dur + ".")
+	}
 	v.Shell = sh
 	if !running {
 		v.Resources = resources(b, d.Views, cores, b.Completed.Sub(b.Started))

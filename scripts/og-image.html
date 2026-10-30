@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- The console's link-preview card (internal/web/static/og.png, 1200x630).
+     Render it again after a change:
+       "Google Chrome" --headless=new --hide-scrollbars --force-device-scale-factor=1 \
+         --window-size=1200,630 --screenshot=internal/web/static/og.png scripts/og-image.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg: #161514; --panel: #1c1b19; --raised: #222120; --line: #2a2826; --line-2: #3a3734;
+    --ink: #ece9e4; --ink-2: #bab5ad; --ink-3: #9a948b; --accent: #9a9fff;
+    --built: #ee8f60; --cached: #74abef; --received: #63c497;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font); padding: 64px 72px; display: grid; grid-template-columns: 1fr 470px; gap: 56px; align-items: center;
+    background-image: radial-gradient(circle at 92% 8%, rgb(154 159 255 / .10), transparent 46%), radial-gradient(circle at 4% 100%, rgb(238 143 96 / .07), transparent 40%); }
+  .brand { display: flex; align-items: center; gap: 14px; font-size: 26px; font-weight: 600; letter-spacing: -.01em; }
+  .mark { width: 44px; height: 44px; border-radius: 11px; background: #f4f2ee; color: #161514; display: grid; place-items: center; }
+  h1 { font-size: 54px; line-height: 1.08; letter-spacing: -.025em; margin: 40px 0 22px; font-weight: 700; }
+  h1 em { font-style: normal; color: var(--built); }
+  p { font-size: 24px; line-height: 1.4; color: var(--ink-2); margin: 0; }
+  .url { margin-top: 40px; font-size: 20px; color: var(--ink-3); font-family: var(--mono); }
+  .card { background: var(--panel); border: 1px solid var(--line-2); border-radius: 16px; padding: 22px 0 10px; box-shadow: 0 24px 60px rgb(0 0 0 / .45); }
+  .ch { padding: 0 22px 16px; border-bottom: 1px solid var(--line); }
+  .ch b { display: block; font-size: 22px; font-family: var(--mono); }
+  .ch span { font-size: 16px; color: var(--built); }
+  .row { display: grid; grid-template-columns: 30px 1fr auto; gap: 12px; align-items: center; padding: 13px 22px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 16.5px; }
+  .row:last-child { border-bottom: 0; }
+  .row .n { color: var(--ink-3); }
+  .row .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+  .chip { font-family: var(--font); font-size: 14.5px; font-weight: 600; padding: 4px 10px; border-radius: 7px; white-space: nowrap; }
+  .c { color: var(--cached); background: rgb(116 171 239 / .13); }
+  .r { color: var(--received); background: rgb(99 196 151 / .13); }
+  .b { color: var(--built); background: rgb(238 143 96 / .14); }
+  .first { background: rgb(238 143 96 / .06); box-shadow: inset 3px 0 0 var(--built); }
+</style>
+</head>
+<body>
+  <div>
+    <div class="brand"><span class="mark"><svg width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 7 4l2.5 5L13 4.5"/></svg></span>ci-accelerator</div>
+    <h1>Why was this image build <em>slow</em>, or not cached?</h1>
+    <p>A self-hosted BuildKit build farm for GitLab: a shared cache, every rebuild explained, builds live.</p>
+    <div class="url">ci-accelerator.io</div>
+  </div>
+  <div class="card">
+    <div class="ch"><b>go-test</b><span>Rebuilt · your change</span></div>
+    <div class="row"><span class="n">10</span><span class="t">COPY go.mod go.sum ./</span><span class="chip c">✓ from cache</span></div>
+    <div class="row"><span class="n">11</span><span class="t">RUN go mod download</span><span class="chip r">⇣ from go-vet</span></div>
+    <div class="row"><span class="n">12</span><span class="t">COPY cmd cmd</span><span class="chip c">✓ from cache</span></div>
+    <div class="row first"><span class="n">13</span><span class="t">COPY internal internal</span><span class="chip b">● built</span></div>
+    <div class="row"><span class="n">16</span><span class="t">RUN go test ./...</span><span class="chip b">● built</span></div>
+  </div>
+</body>
+</html>

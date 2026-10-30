@@ -292,6 +292,11 @@ func (s *Server) pipeline(w http.ResponseWriter, r *http.Request) {
 		v.CritWait, v.CritRun = duration(cp.Waited), duration(cp.Ran)
 	}
 	sh.Title = v.Title
+	sh.Preview = fmt.Sprintf("Pipeline #%d", v.ID)
+	if v.Title != "" && v.Title != sh.Preview {
+		sh.Preview += ": " + v.Title
+	}
+	sh.Desc = v.Sentence
 	v.Shell = sh
 	s.render(w, "pipeline", http.StatusOK, v)
 }
@@ -668,6 +673,9 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sh.Title = v.Name
+	if v.PipeLabel != "" {
+		sh.Preview = v.Name + " · pipeline " + v.PipeLabel
+	}
 	v.Shell = sh
 	s.render(w, "job", http.StatusOK, v)
 }
