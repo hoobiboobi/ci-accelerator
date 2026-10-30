@@ -65,7 +65,7 @@ that for you.
    included):
 
    ```sh
-   helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.7 \
+   helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.8 \
      -n ci-accelerator \
      --set gitlab-runner.enabled=false \
      --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \

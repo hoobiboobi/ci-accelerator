@@ -9,6 +9,12 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 0.3.8 - 2026-10-31
+
+### Upgrade notes
+
 - From 0.3.7, `helm upgrade` in place. The controller, the web and the
   routers restart once for the new image; the web also gets
   `CI_ACCELERATOR_PUBLIC_URL` (from `signIn.url` or `global.console.url`).

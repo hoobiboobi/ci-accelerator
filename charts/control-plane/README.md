@@ -1,6 +1,6 @@
 # control-plane
 
-![Version: 0.3.7](https://img.shields.io/badge/Version-0.3.7-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.3.7](https://img.shields.io/badge/AppVersion-0.3.7-informational?style=flat-square)
+![Version: 0.3.8](https://img.shields.io/badge/Version-0.3.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.3.8](https://img.shields.io/badge/AppVersion-0.3.8-informational?style=flat-square)
 
 The ci-accelerator control plane: a controller that collects the build history of BuildKit daemons and the CI jobs around it, and a web that serves the console, which explains every build: what came from cache, what came from another job, and why a step was rebuilt.
 
@@ -15,7 +15,7 @@ The console answers one question: why an image build was slow or not cached - th
 The box ([charts/ci-accelerator](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/ci-accelerator)) installs this chart on by default, router included. On its own it needs the daemons of the [buildkit chart](https://github.com/hoobiboobi/ci-accelerator/tree/main/charts/buildkit): their headless Service (`daemons.discover`), their CA for the controller's client and API certificates (`global.tls.issuerRef` with cert-manager, or `tls.existingSecret` and `controller.api.tls.existingSecret`), the runners' GitLab URL (`gitlab.urls`) and the jobs' namespace (`jobs.namespace`). For a buildkit release `buildkit` with its own CA in the namespace `ci-accelerator`:
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/control-plane --version 0.3.7 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/control-plane --version 0.3.8 \
   -n ci-accelerator \
   --set 'gitlab.urls={https://gitlab.example.com/}' \
   --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 \
