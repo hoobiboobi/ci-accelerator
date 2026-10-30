@@ -9,8 +9,19 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-- The controller and the routers restart once (their pod templates read
-  the GitLab URLs from a file now); the daemons do not.
+None.
+
+## 0.3.4 - 2026-10-30
+
+### Upgrade notes
+
+- From 0.3.3, `helm upgrade` in place. The controller and the routers
+  restart once (a new image, and their pod templates read the GitLab URLs
+  from a file now); the daemons and their disk probe stay as they are
+  (the probe keeps the v0.3.3 image).
+- Images pinned by digest: set `control-plane.image.digest` to the v0.3.4
+  digest from the release notes; `buildkit.diskProbe.image.digest` keeps
+  the v0.3.3 one.
 - The charts now refuse a few settings that never worked, at render time
   instead of failing later. Each message says what to change:
   - `control-plane.router.enabled` different from `global.router.enabled`
