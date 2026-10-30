@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containerd/containerd/v2/core/content"
@@ -37,8 +38,15 @@ type Daemon struct {
 	c    *client.Client
 	addr string
 	// probe is the base URL of the disk probe next to the daemon; empty:
-	// none.
+	// none. Set by Inspect, read by ReadLoad too.
+	mu    sync.Mutex
 	probe string
+}
+
+func (d *Daemon) probeURL() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.probe
 }
 
 // Dial connects to the daemon at addr (tcp://host:port). Its name is the
@@ -75,7 +83,9 @@ func (d *Daemon) DiskProbe(port int) {
 	if err != nil || u.Hostname() == "" || port <= 0 {
 		return
 	}
+	d.mu.Lock()
 	d.probe = "http://" + net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
+	d.mu.Unlock()
 }
 
 // probeClient reads disk probes: plain HTTP inside the cluster, numbers
@@ -110,6 +120,39 @@ func (d *Daemon) Listen(ctx context.Context, fn func(controlapi.BuildHistoryEven
 			return err
 		}
 	}
+}
+
+// Status streams a running build's progress, from its first update on,
+// until the build ends.
+func (d *Daemon) Status(ctx context.Context, ref string, fn func(*client.SolveStatus)) error {
+	stream, err := d.c.ControlClient().Status(ctx, &controlapi.StatusRequest{Ref: ref})
+	if err != nil {
+		return err
+	}
+	for {
+		resp, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		fn(client.NewSolveStatus(resp))
+	}
+}
+
+// ReadLoad reads the load of the daemon's node from its probe; nil
+// without one.
+func (d *Daemon) ReadLoad(ctx context.Context) (*diskprobe.Load, error) {
+	probe := d.probeURL()
+	if probe == "" {
+		return nil, nil
+	}
+	l, err := diskprobe.FetchLoad(ctx, probeClient, probe)
+	if err != nil {
+		return nil, err
+	}
+	return &l, nil
 }
 
 // Open reads a record's blob through the daemon's content API.
@@ -154,7 +197,7 @@ func (d *Daemon) Inspect(ctx context.Context) (Inspection, error) {
 		if w.Labels[PersistsLabel] == "true" {
 			in.Persists = true
 		}
-		if port, err := strconv.Atoi(w.Labels[DiskProbePortLabel]); err == nil && d.probe == "" {
+		if port, err := strconv.Atoi(w.Labels[DiskProbePortLabel]); err == nil && d.probeURL() == "" {
 			d.DiskProbe(port)
 		}
 		if in.Version == "" {
@@ -174,15 +217,15 @@ func (d *Daemon) Inspect(ctx context.Context) (Inspection, error) {
 		records[i] = Record{Type: string(r.RecordType), Description: r.Description, Size: r.Size, LastUsed: r.LastUsedAt}
 	}
 	in.Usage = Classify(records)
-	if d.probe != "" {
+	if probe := d.probeURL(); probe != "" {
 		// The daemon answered: a probe that does not is noted, not fatal.
-		if disk, err := diskprobe.Fetch(ctx, probeClient, d.probe); err != nil {
+		if disk, err := diskprobe.Fetch(ctx, probeClient, probe); err != nil {
 			in.DiskErr = err.Error()
 		} else {
 			in.Disk = &disk
 		}
 		// A probe of a release before /load answers 404: noted the same way.
-		if load, err := diskprobe.FetchLoad(ctx, probeClient, d.probe); err != nil {
+		if load, err := diskprobe.FetchLoad(ctx, probeClient, probe); err != nil {
 			in.LoadErr = err.Error()
 		} else {
 			in.Load = &load
