@@ -20,7 +20,10 @@ env >/out/env
 [ -n "${DOCKER_CONFIG:-}" ] && cat "$DOCKER_CONFIG/config.json" >/out/config.json 2>/dev/null
 case "${FAKE:-ok}" in
   fail) echo "error: failed to solve: process did not complete successfully" >&2; exit 1 ;;
-  timeout) exit 143 ;;
+  # Like buildctl: SIGTERM cancels the build and it exits 1; or a client
+  # that does not stop on SIGTERM at all.
+  timeout) trap 'echo "error: failed to solve: Canceled: context canceled" >&2; exit 1' TERM; sleep 600 >/dev/null 2>&1 & wait; exit 1 ;;
+  hang) trap "" TERM; sleep 20 >/dev/null 2>&1; echo not killed >/out/hang; exit 1 ;;
 esac
 echo "#1 [internal] load build definition from Dockerfile"
 echo "#1 DONE 0.0s"
@@ -41,8 +44,12 @@ while [ $# -gt 0 ]; do case "$1" in --metadata-file) meta=$2 ;; --output) out=$2
 EOF
 chmod +x "$WORK/buildctl"
 mkdir -p "$WORK/repo/app" && printf 'FROM alpine\n' >"$WORK/repo/Dockerfile" && printf 'FROM alpine\n' >"$WORK/repo/app/Containerfile"
+# A File-type CI/CD variable: GitLab writes the value to <project dir>.tmp/
+# and the variable holds that path.
+mkdir -p "$WORK/repo/p.tmp" && printf '//npm.example.com/:_authToken=x\n' >"$WORK/repo/p.tmp/NPMRC"
 
 # case <name> <expected exit 0|1> [VAR=value ...] -- checks via grep on /out files
+# (UNSET="A B" removes those variables from the job's environment)
 run_case() {
   local name=$1 want=$2; shift 2
   rm -rf "$WORK/out" && mkdir -p "$WORK/out"
@@ -58,7 +65,7 @@ run_case() {
   shift
   local status=0
   docker run --rm --entrypoint sh "${env[@]}" -v "$WORK/job.sh:/job.sh:ro" -v "$WORK/buildctl:/usr/local/bin/buildctl:ro" \
-    -v "$WORK/out:/out" -v "$WORK/repo:/repo" -w /repo "$IMAGE" -c 'PATH=/usr/local/bin:$PATH; sh /job.sh' \
+    -v "$WORK/out:/out" -v "$WORK/repo:/repo" -w /repo "$IMAGE" -c 'PATH=/usr/local/bin:$PATH; [ -z "${UNSET:-}" ] || unset $UNSET UNSET; sh /job.sh' \
     >"$WORK/out/stdout" 2>&1 || status=$?
   [ "$status" = 0 ] && got=0 || got=1
   local ok=1
@@ -114,6 +121,10 @@ grep -q '^IMAGE_REF=r.example.com:5000/g/p@sha256:' "$WORK/out/build.env" && ech
   || { echo "  FAIL  build.env with a port: $(cat "$WORK/out/build.env" 2>/dev/null)"; failn=$((failn + 1)); }
 run_case "a secret from a CI/CD variable, by name only" 0 "CIA_SECRETS=npmrc=NPM_TOKEN" NPM_TOKEN=s3cr3t -- \
   'argv:^id=npmrc,env=NPM_TOKEN$' 'argv:!s3cr3t'
+run_case "a secret from a File-type variable mounts the file, not its path" 0 "CIA_SECRETS=npmrc=NPMRC" \
+  CI_PROJECT_DIR=/repo/p NPMRC=/repo/p.tmp/NPMRC -- 'argv:^id=npmrc,src=/repo/p\.tmp/NPMRC$' 'argv:!env=NPMRC'
+run_case "a variable that only looks like a file path stays a value" 0 "CIA_SECRETS=npmrc=NPMRC" \
+  CI_PROJECT_DIR=/repo/p NPMRC=/repo/p.tmp/MISSING -- 'argv:^id=npmrc,env=NPMRC$'
 run_case "a secret whose variable is not set" 1 "CIA_SECRETS=npmrc=NOT_SET" -- \
   'stdout:the CI/CD variable NOT_SET is not set' 'argv:!.'
 run_case "a secret name that is not a variable name is refused, not evaluated" 1 'CIA_SECRETS=x=A;touch /out/pwned' -- \
@@ -129,7 +140,23 @@ run_case "extra buildctl arguments, one per line" 0 "CIA_BUILDCTL_ARGS=$(printf 
 run_case "a failing build fails the job" 1 FAKE=fail -- 'stdout:buildctl exit status 1'
 [ -f "$WORK/repo/build.env" ] && [ -f "$WORK/repo/build-metadata.json" ] && echo "  ok    the artifact files exist after a failure" && pass=$((pass + 1)) \
   || { echo "  FAIL  no artifact files after a failure"; failn=$((failn + 1)); }
-run_case "a build cut by the timeout says so" 1 FAKE=timeout -- 'stdout:did not finish in 60 minutes'
+run_case "a build cut by the timeout says so (buildctl exits 1 on SIGTERM)" 1 FAKE=timeout CIA_TIMEOUT_SECONDS=2 -- \
+  'stdout:did not finish in 60 minutes' 'stdout:!buildctl exit status'
+run_case "a buildctl that ignores SIGTERM is killed after the grace period" 1 FAKE=hang CIA_TIMEOUT_SECONDS=1 CIA_TIMEOUT_GRACE_SECONDS=2 -- \
+  'stdout:did not finish in 60 minutes' 'hang:!.'
+run_case "without a GitLab registry, push=false builds without credentials" 0 CIA_PUSH=false \
+  UNSET="CI_REGISTRY CI_REGISTRY_USER CI_REGISTRY_PASSWORD" -- \
+  'argv:!^--output$' 'config.json:!"auth"' 'stdout:no GitLab container registry' 'stdout:!parameter not set'
+run_case "without a GitLab registry, push with the job token says what to do" 1 \
+  UNSET="CI_REGISTRY CI_REGISTRY_USER CI_REGISTRY_PASSWORD" -- \
+  'stdout:registry-auth' 'stdout:!parameter not set' 'argv:!.'
+run_case "the Dependency Proxy gets the job's credentials too" 0 CI_DEPENDENCY_PROXY_SERVER=gitlab.example.com:443 \
+  CI_DEPENDENCY_PROXY_USER=gitlab-ci-token CI_DEPENDENCY_PROXY_PASSWORD=dp-token -- \
+  'config.json:"gitlab\.example\.com:443":\{"auth":"Z2l0bGFiLWNpLXRva2VuOmRwLXRva2Vu"\}' \
+  'config.json:"registry\.example\.com":\{"auth":"Z2l0bGFiLWNpLXRva2VuOmpvYi10b2tlbi12YWx1ZQ=="\}'
+run_case "a Dependency Proxy on the registry's host is one entry" 0 CI_DEPENDENCY_PROXY_SERVER=registry.example.com \
+  CI_DEPENDENCY_PROXY_USER=gitlab-ci-token CI_DEPENDENCY_PROXY_PASSWORD=dp-token -- \
+  'config.json:^\{"auths":\{"registry\.example\.com":\{"auth":"[^"]*"\}\}\}$'
 run_case "not on a ci-accelerator runner" 1 BUILDKIT_REMOTE_ADDR= -- 'stdout:must run on a ci-accelerator runner' 'argv:!.'
 run_case "a missing Dockerfile" 1 CIA_DOCKERFILE=nope/Dockerfile -- 'stdout:no Dockerfile at nope/Dockerfile'
 
