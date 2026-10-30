@@ -48,7 +48,7 @@ func seedRunning(t *testing.T, st *store.Store) uiRunning {
 		t.Fatal(err)
 	}
 	// GitLab's word: running; the deploy job waits for the build.
-	if err := st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: inst, ID: pid, ProjectID: 42, Status: "running", Read: testNow,
+	if _, err := st.SaveAPIPipeline(ctx, store.APIPipeline{Instance: inst, ID: pid, ProjectID: 42, Status: "running", Read: testNow,
 		WebURL: "https://gitlab.example.com/example/app/-/pipelines/" + strconv.FormatUint(pid, 10),
 		Jobs: []store.APIJob{
 			{ID: uiRunningJob - 1, Name: "lint", Stage: "test", Status: "success", Queued: created, Started: created.Add(10 * time.Second),

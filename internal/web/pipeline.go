@@ -581,6 +581,24 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if j == nil && len(ids) > 1 {
+		// Not known yet: any trace can name the job, with any pipeline.
+		// Builds naming it with different pipelines leave open which are
+		// its own: none is opened as the job's.
+		var pipeline uint64
+		for i, bid := range ids {
+			p, err := s.data.BuildPage(ctx, bid)
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			if i > 0 && p.Build.Attribution.Pipeline != pipeline {
+				ids = nil
+				break
+			}
+			pipeline = p.Build.Attribution.Pipeline
+		}
+	}
 	if len(ids) > 0 {
 		// A job with several builds opens its last; the page lists the others.
 		// The link in a job's log comes here: the page says so. (The build
@@ -664,7 +682,7 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 	q, ok := logQuery(r.URL.Query())
 	if !ok {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, "lines, before and after must be numbers.")
+		fmt.Fprint(w, "before and after must be numbers.")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -692,11 +710,13 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, history.MaskSecrets(part.Text))
 }
 
-// logLines is how many lines of a job's log one part holds at most.
+// logLines is how many lines of a job's log one part holds at most. It is
+// not the reader's to choose: secrets are masked per part, and a part of a
+// few lines could sit inside a printed key, away from its BEGIN and END.
 const logLines = 500
 
-// logQuery reads what part of a job's log a page asks for: ?lines=N (at
-// most logLines), ?before=<a part's start>, ?after=<a part's end>.
+// logQuery reads what part of a job's log a page asks for: ?before=<a
+// part's start>, ?after=<a part's end>.
 func logQuery(v url.Values) (gitlab.LogQuery, bool) {
 	q := gitlab.LogQuery{Lines: logLines}
 	num := func(k string) (int64, bool) {
@@ -706,15 +726,11 @@ func logQuery(v url.Values) (gitlab.LogQuery, bool) {
 		n, err := strconv.ParseInt(v.Get(k), 10, 64)
 		return n, err == nil && n >= 0
 	}
-	n, ok1 := num("lines")
-	b, ok2 := num("before")
-	a, ok3 := num("after")
-	if n > 0 && n < logLines {
-		q.Lines = int(n)
-	}
+	b, ok1 := num("before")
+	a, ok2 := num("after")
 	q.Before = b
 	if v.Get("after") != "" {
 		q.After, q.Since = a, true
 	}
-	return q, ok1 && ok2 && ok3
+	return q, ok1 && ok2
 }

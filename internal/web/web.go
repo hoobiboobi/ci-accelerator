@@ -282,6 +282,9 @@ type Shell struct {
 	Viewer *auth.Viewer
 	// NoProjects: the person signed in may see no project here.
 	NoProjects bool
+	// Unanswered: GitLab did not say whether the person may see some of
+	// the projects (down, or limiting their requests); those are hidden.
+	Unanswered bool
 	// Zone is the time zone the page shows times in (theme.js compares it
 	// with the browser's).
 	Zone string
@@ -317,7 +320,7 @@ func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 	if err != nil {
 		return sh, err
 	}
-	ps = s.readable(r, ps)
+	ps, sh.Unanswered = s.readable(r, ps)
 	sh.Projects = ps
 	want := r.URL.Query().Get("project")
 	if want == "" {
@@ -440,6 +443,38 @@ func (s *Server) ensureAPI(r *http.Request, p *store.Pipeline) bool {
 	api.Ensure(r.Context(), p.Instance, p.ProjectID, p.ID, status, p.APIAt, s.APIWait)
 	return true
 }
+
+// askOwner asks GitLab whose a build's pipeline is when GitLab has not
+// said yet and the build's page needs it: with the job's project when the
+// job is of another project than the one the pipeline was first seen in
+// (a job may name a pipeline before it exists), with the pipeline's when
+// the job is not known (GitLab's answer lists it). GitLab answers only
+// for the pipeline's own project, and only to someone who may read it. It
+// says whether it asked.
+func (s *Server) askOwner(r *http.Request, p *store.BuildPage) bool {
+	if p.Pipeline == nil || p.Pipeline.ProjectID == 0 || !p.Pipeline.APIAt.IsZero() {
+		return false
+	}
+	project := p.Pipeline.ProjectID
+	if p.Job != nil && p.Job.ProjectID != 0 {
+		if p.Job.ProjectID == project {
+			return false
+		}
+		project = p.Job.ProjectID
+	}
+	api := s.api(r)
+	if api == nil {
+		return false
+	}
+	// This read decides whether the page may be shown at all: wait for it
+	// longer than for figures, or the first click on a build answers "not
+	// found" while GitLab is still answering.
+	api.Ensure(r.Context(), p.Pipeline.Instance, project, p.Pipeline.ID, "", time.Time{}, max(s.APIWait, ownerWait))
+	return true
+}
+
+// ownerWait is how long a page waits for GitLab to say whose a pipeline is.
+const ownerWait = 5 * time.Second
 
 // projName is a project's name, the last part of its path.
 func projName(path string, id uint64) string {

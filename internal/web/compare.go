@@ -218,14 +218,28 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "compare", http.StatusOK, v)
 }
 
+// projectOf is a build's project: its job's, else its pipeline's as
+// GitLab confirmed it; 0 for none. The trace id naming both is the job's
+// own choice, and the build's page shows the pipeline's commit and lists
+// the job's other builds: a job of another project than the pipeline's
+// makes the build no project's (admins only). So does a job not known
+// yet in a pipeline only a job's pod named: that job may be of another
+// project, which named the pipeline before it existed.
 func projectOf(p *store.BuildPage) uint64 {
-	switch {
-	case p.Pipeline != nil && p.Pipeline.ProjectID != 0:
-		return p.Pipeline.ProjectID
-	case p.Job != nil:
-		return p.Job.ProjectID
+	project := uint64(0)
+	if p.Pipeline != nil {
+		project = p.Pipeline.ProjectID
 	}
-	return 0
+	if p.Job == nil || p.Job.ProjectID == 0 {
+		if p.Pipeline == nil || p.Pipeline.APIAt.IsZero() {
+			return 0
+		}
+		return project
+	}
+	if project != 0 && project != p.Job.ProjectID {
+		return 0
+	}
+	return p.Job.ProjectID
 }
 
 func pipeLabel(id uint64) string {

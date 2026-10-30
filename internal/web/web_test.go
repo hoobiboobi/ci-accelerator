@@ -89,7 +89,7 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := history.NewBuild(rec, progress, read(d, "provenance.json"), read(d, "trace.json"), read(d, "error.bin"), cfg)
+		b, err := history.NewBuild(rec, progress, [][]byte{read(d, "provenance.json")}, read(d, "trace.json"), read(d, "error.bin"), cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -616,6 +616,38 @@ func TestPipelinePage(t *testing.T) {
 	}
 }
 
+// The link in a job's log leads to the job's last build. While the job
+// is not known, any trace can name it, with any pipeline: when its builds
+// name different pipelines, none is taken for its own.
+func TestJobNotKnownYet(t *testing.T) {
+	ts, st, ids := console(t)
+	known, _ := buildsByProject(t, st, ids)
+	bp, err := st.BuildPage(ctx, known[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := bp.Build.Attribution
+	save := func(ref string, pipeline, job uint64, later time.Duration) int64 {
+		t.Helper()
+		b := *bp.Build
+		b.Ref, b.Attribution.Pipeline, b.Attribution.Job = ref, pipeline, job
+		b.Started, b.Completed = b.Started.Add(later), b.Completed.Add(later)
+		id, err := st.SaveBuild(ctx, store.Build{Build: &b, Generation: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	_, second := save("buildofajobnotknownyet001", a.Pipeline, 9_200_001, time.Hour), save("buildofajobnotknownyet002", a.Pipeline, 9_200_001, 2*time.Hour)
+	if p := get(t, ts, fmt.Sprintf("/jobs/%s/9200001", a.Instance)); p.status != http.StatusFound || p.header.Get("Location") != fmt.Sprintf("/builds/%d?via=log", second) {
+		t.Errorf("a job not known yet, its builds of one pipeline: %d to %q, want its last build", p.status, p.header.Get("Location"))
+	}
+	forged := save("thesamejobinanotherpipe01", 9_200_000, 9_200_001, 3*time.Hour)
+	if p := get(t, ts, fmt.Sprintf("/jobs/%s/9200001", a.Instance)); p.status == http.StatusFound {
+		t.Errorf("a job not known yet, its builds of two pipelines: sent to %q (build %d names the other pipeline)", p.header.Get("Location"), forged)
+	}
+}
+
 // A job's address leads to its last build; a job that built nothing gets
 // a short page that says so.
 func TestJobPages(t *testing.T) {
@@ -664,9 +696,6 @@ func TestJobPages(t *testing.T) {
 	if again := get(t, ts, fmt.Sprintf("/jobs/%s/9100002/log?after=%s", inst, size)); again.status != 200 || again.body != "" || again.header.Get("X-Log-End") != size {
 		t.Errorf("nothing new after the end: %d %q %v", again.status, again.body, again.header)
 	}
-	if two := get(t, ts, fmt.Sprintf("/jobs/%s/9100002/log?lines=2", inst)); two.body != "token [masked] used\nok\n" || two.header.Get("X-Log-Start") == "0" {
-		t.Errorf("the last 2 lines: %q from %s", two.body, two.header.Get("X-Log-Start"))
-	}
 	if bad := get(t, ts, fmt.Sprintf("/jobs/%s/9100002/log?before=x", inst)); bad.status != http.StatusBadRequest {
 		t.Errorf("a bad part: %d", bad.status)
 	}
@@ -685,6 +714,49 @@ func TestJobPages(t *testing.T) {
 	pp := get(t, ts, "/pipelines/"+keys[0])
 	if !strings.Contains(pp.body, `href="/jobs/`+inst+`/9100003"`) || strings.Contains(pp.body, `href="https://gitlab.example.com/p/-/jobs/9100003"`) {
 		t.Error("the timeline should link a job without a build to its console page, not to GitLab")
+	}
+}
+
+// A printed private key across the start of the log's last part: the part
+// holds its end, the part before it its start, and neither shows the key.
+func TestJobLogKeyAcrossParts(t *testing.T) {
+	var b strings.Builder
+	for i := 1; i <= 600; i++ {
+		fmt.Fprintf(&b, "line %04d\n", i)
+	}
+	b.WriteString("$ cat deploy.key\n-----BEGIN RSA PRIVATE KEY-----\n")
+	for i := 1; i <= 8; i++ {
+		fmt.Fprintf(&b, "MIIEpAIBAAKCAQEA%02dKEYBODYLINE\n", i)
+	}
+	b.WriteString("-----END RSA PRIVATE KEY-----\n")
+	for i := 1; i <= 495; i++ {
+		fmt.Fprintf(&b, "after %04d\n", i)
+	}
+	f, _ := fakeGitLab(t, b.String())
+	ts, st, _, _ := consoleWith(t, testOpts{API: f, Token: gitlab.Token("t")})
+	keys, _ := pipelines(t, st)
+	inst, id, _ := strings.Cut(keys[0], "/")
+	pid, _ := strconv.ParseUint(id, 10, 64)
+	if err := st.SaveJob(ctx, store.Job{Instance: inst, JobID: 9_100_004, PipelineID: pid, ProjectID: 42, Name: "deploy"}); err != nil {
+		t.Fatal(err)
+	}
+	tail := get(t, ts, fmt.Sprintf("/jobs/%s/9100004/log", inst))
+	start := tail.header.Get("X-Log-Start")
+	if tail.status != 200 || !strings.Contains(tail.body, "after 0495") || start == "0" {
+		t.Fatalf("the last part: %d from %s", tail.status, start)
+	}
+	head := get(t, ts, fmt.Sprintf("/jobs/%s/9100004/log?before=%s", inst, start))
+	if head.status != 200 || !strings.Contains(head.body, "line 0600") {
+		t.Fatalf("the part before: %d", head.status)
+	}
+	// A part is always a page's worth of lines: asking for one line at a
+	// time inside the key does not read it without its BEGIN and END.
+	end := strings.Index(b.String(), "-----END")
+	one := get(t, ts, fmt.Sprintf("/jobs/%s/9100004/log?lines=1&before=%d", inst, end))
+	for _, l := range strings.Split(head.body+tail.body+one.body, "\n") {
+		if strings.Contains(l, "KEYBODY") {
+			t.Errorf("a line of the key shows: %q", l)
+		}
 	}
 }
 

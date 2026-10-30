@@ -1,6 +1,7 @@
 package web
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -382,6 +383,37 @@ func TestBytesText(t *testing.T) {
 		if got := bytesText(n); got != want {
 			t.Errorf("%d: %q, want %q", n, got, want)
 		}
+	}
+}
+
+// Two Dockerfiles without a target in one project (api and worker, each
+// pushing its own repository) are two images: each has its own usual time
+// and its own slow mark, as the build pages name one image.
+func TestUsualTimesWithoutTargetByImage(t *testing.T) {
+	at := time.Date(2026, 10, 28, 3, 0, 0, 0, time.UTC)
+	row := func(image string, d time.Duration) store.BuildRow {
+		return store.BuildRow{Images: []string{image}, Built: 2, Started: at, Completed: at.Add(d)}
+	}
+	var bs []store.BuildRow
+	for i := 0; i < 20; i++ {
+		bs = append(bs, row("registry.example.com/g/api:"+strconv.Itoa(i), 40*time.Second+time.Duration(i)*time.Second))
+	}
+	for i := 0; i < 6; i++ {
+		bs = append(bs, row("registry.example.com/g/worker:"+strconv.Itoa(i), 6*time.Minute))
+	}
+	u := usualTimes(bs)
+	if a := u[store.ImageKey("", []string{"registry.example.com/g/api:x"})]; a.RebuiltN != 20 || a.RebuiltP95 != 58*time.Second {
+		t.Errorf("api: %+v", a)
+	}
+	if w := u[store.ImageKey("", []string{"registry.example.com/g/worker:x"})]; w.Rebuilt != 6*time.Minute || w.RebuiltN != 6 || w.RebuiltP95 != 0 {
+		t.Errorf("worker: %+v", w)
+	}
+	s := &Server{now: func() time.Time { return at }}
+	if it := s.item(row("registry.example.com/g/api:new", 2*time.Minute), u, time.UTC); !it.Slower {
+		t.Error("an api build three times its usual time not marked slower (the worker's times hid it)")
+	}
+	if it := s.item(row("registry.example.com/g/worker:new", 6*time.Minute+10*time.Second), u, time.UTC); it.Slower {
+		t.Error("a worker build marked slower without 20 worker rebuilds")
 	}
 }
 

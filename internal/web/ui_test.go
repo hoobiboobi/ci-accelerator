@@ -48,7 +48,7 @@ func TestUI(t *testing.T) {
 	for i := 1; i <= 1200; i++ {
 		fmt.Fprintf(&long, "test %04d passed\n", i)
 	}
-	long.WriteString("$ helm upgrade app\ndeployed " + evil + "\n")
+	long.WriteString("$ helm upgrade app --password glpat-AbCdEfGhIjKlMnOpQrSt12\ndeployed " + evil + "\n")
 	f, _ := fakeGitLab(t, long.String())
 	ts, st, _, _ := consoleWith(t, testOpts{Live: daemons, Release: "box", API: f, Token: gitlab.Token("t")})
 	f.Store = st
