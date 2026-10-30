@@ -39,9 +39,13 @@ func (s *Store) ReplaceCacheScan(ctx context.Context, store, instance string, at
 		if _, err := tx.ExecContext(ctx, `DELETE FROM cache_objects WHERE store = ?`, store); err != nil {
 			return err
 		}
+		// One key may come several times: runners with Shared = false each
+		// keep their own archive of it. Every one takes room, so the key
+		// counts them all and is as new as the newest.
 		for _, o := range objects {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO cache_objects (store, instance, project_id, key, bytes, modified_at) VALUES (?, ?, ?, ?, ?, ?)
-				ON CONFLICT (store, project_id, key) DO UPDATE SET bytes = excluded.bytes, modified_at = excluded.modified_at`,
+				ON CONFLICT (store, project_id, key) DO UPDATE SET bytes = cache_objects.bytes + excluded.bytes,
+				modified_at = CASE WHEN excluded.modified_at > cache_objects.modified_at THEN excluded.modified_at ELSE cache_objects.modified_at END`,
 				store, nullInstance(instance), o.ProjectID, o.Key, o.Bytes, o.Modified.UnixMilli()); err != nil {
 				return err
 			}

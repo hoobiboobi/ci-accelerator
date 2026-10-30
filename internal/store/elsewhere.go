@@ -75,15 +75,13 @@ func (s *Store) ElsewhereProjects(ctx context.Context, since time.Time) ([]Proje
 }
 
 // Elsewhere returns a project's builds since t whose reason is
-// CacheElsewhere and that nothing has settled yet, newest first.
+// CacheElsewhere and that nothing has settled yet, newest first. PrevSHA is
+// the commit of the build the reason compared it with (Previous): for an
+// image without a target, its own repository's previous build, not the
+// latest of the project's other Dockerfiles.
 func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, limit int) ([]Elsewhere, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.started_at, COALESCE(p.sha, ''), b.reason_paths, b.reason_old,
-			COALESCE((SELECT p2.sha FROM builds b2 INDEXED BY builds_target
-				JOIN pipelines p2 ON p2.instance = b2.instance AND p2.pipeline_id = b2.pipeline_id
-				WHERE b2.instance = b.instance AND b2.project_id = b.project_id AND b2.target = b.target
-					AND b2.started_at < b.started_at AND b2.completed_at IS NOT NULL
-					AND b2.pipeline_id IS NOT b.pipeline_id
-				ORDER BY b2.started_at DESC LIMIT 1), '')
+			b.ref, b.target, b.images, b.pipeline_id
 		FROM builds b INDEXED BY builds_elsewhere
 		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
 		WHERE b.instance = ? AND b.project_id = ? AND b.started_at >= ?
@@ -93,22 +91,47 @@ func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, li
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Elsewhere
+	var (
+		out    []Elsewhere
+		builds []history.Build
+	)
 	for rows.Next() {
 		var (
-			e       Elsewhere
-			started int64
-			paths   string
+			e             Elsewhere
+			b             history.Build
+			started       int64
+			paths, images string
+			pipeline      sql.NullInt64
 		)
-		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.Old, &e.PrevSHA); err != nil {
+		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.Old, &b.Ref, &b.Target, &images, &pipeline); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		e.Started = time.UnixMilli(started).UTC()
 		_ = json.Unmarshal([]byte(paths), &e.Paths)
+		b.Started, b.Attribution.Pipeline = e.Started, uint64(pipeline.Int64)
+		_ = json.Unmarshal([]byte(images), &b.Images)
 		out = append(out, e)
+		builds = append(builds, b)
 	}
-	return out, rows.Err()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		prev, err := s.sameImage(ctx, nullInstance(p.Instance), nullUint(p.ID), &builds[i], false)
+		if err != nil {
+			return nil, err
+		}
+		if prev == 0 {
+			continue
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(p.sha, '') FROM builds b
+			LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
+			WHERE b.id = ?`, prev).Scan(&out[i].PrevSHA); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // Settled is what became of an Elsewhere build: FilesChanged (Paths are

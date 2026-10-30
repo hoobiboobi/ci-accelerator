@@ -134,7 +134,7 @@ func (s *Store) PipelineInfo(ctx context.Context, instance string, id uint64) (*
 	}
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*), max(project_id), min(COALESCE(started_at, queued_at)), max(finished_at),
 			max(max(COALESCE(started_at, 0), COALESCE(finished_at, 0)))
-		FROM jobs INDEXED BY jobs_pipeline WHERE instance = ? AND pipeline_id = ?`, inst, pid).
+		FROM jobs INDEXED BY jobs_pipeline WHERE instance = ? AND pipeline_id = ? AND `+pipelinesOwn, inst, pid).
 		Scan(&nJobs, &jProject, &jStart, &jEnd, &jAct); err != nil {
 		return nil, err
 	}
@@ -240,13 +240,15 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.DockerfileName, p.Dockerfile, p.Saved = dfName.String, dfText.String, time.Duration(saved)*time.Millisecond
+	// Masked again on the way out: Dockerfiles stored before their
+	// secrets were masked are still in the store.
+	p.DockerfileName, p.Dockerfile, p.Saved = dfName.String, history.MaskDockerfile(dfText.String), time.Duration(saved)*time.Millisecond
 	if outDay.Valid {
 		_, err := s.output(ctx, int(outDay.Int64), false)
 		p.OutputKept = err == nil
 	}
 	p.Printed = map[int]bool{}
-	rows, err := s.db.QueryContext(ctx, "SELECT idx FROM steps WHERE build_id = ? AND output_len > 0", id)
+	rows, err := s.db.QueryContext(ctx, "SELECT idx FROM steps WHERE build_id = ? AND output_len > 0 AND idx < ?", id, MaxSteps)
 	if err != nil {
 		return nil, err
 	}
@@ -305,17 +307,25 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 }
 
 // StepHistory returns the latest runs of a step's identity in the build's
-// project (all builds when the project is not known), newest first.
+// project, newest first, the build's own among them. A build whose job is
+// not known keeps to its pipeline's project, or to its pipeline when that
+// has none: the console shows the build to whoever may see its pipeline,
+// and to them only. A build of no CI job (only admins see it) has every
+// build's runs.
 func (s *Store) StepHistory(ctx context.Context, buildID int64, step int, limit int) ([]StepRun, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		WITH me AS (
-			SELECT s.identity, b.instance, b.project_id FROM steps s JOIN builds b ON b.id = s.build_id
+			SELECT s.build_id, s.identity, b.instance, b.pipeline_id, COALESCE(b.project_id, p.project_id) AS project_id
+			FROM steps s JOIN builds b ON b.id = s.build_id
+			LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
 			WHERE s.build_id = ? AND s.idx = ? AND s.identity IS NOT NULL)
 		SELECT b.id, s.idx, COALESCE(b.pipeline_id, 0), COALESCE(p.sha, ''), d.name, s.state, s.dur_ms, b.started_at + s.start_ms
 		FROM me JOIN steps s ON s.identity = me.identity
 		JOIN builds b ON b.id = s.build_id JOIN daemons d ON d.id = b.daemon_id
 		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
-		WHERE me.project_id IS NULL OR (b.instance = me.instance AND b.project_id = me.project_id)
+		WHERE b.id = me.build_id OR CASE WHEN me.project_id IS NOT NULL THEN b.instance = me.instance AND b.project_id = me.project_id
+			WHEN me.pipeline_id IS NOT NULL THEN b.instance = me.instance AND b.pipeline_id = me.pipeline_id
+			ELSE 1 END
 		ORDER BY b.started_at DESC LIMIT ?`, buildID, step, limit)
 	if err != nil {
 		return nil, err

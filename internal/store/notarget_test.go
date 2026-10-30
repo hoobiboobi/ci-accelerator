@@ -73,7 +73,7 @@ func TestPreviousWithoutTargetJoinedNames(t *testing.T) {
 			t.Errorf("previous of %s (%v): %q, want %q", c.b.Ref, c.b.Images, got, c.want)
 		}
 	}
-	if next, err := s.Next(ctx, bs[0]); err != nil || next == nil || next.Build.Ref != "img-3" {
+	if next, err := s.Next(ctx, bs[0]); err != nil || len(next) != 1 || next[0].Build.Ref != "img-3" {
 		t.Errorf("next of img-1: %v, %v (want img-3)", next, err)
 	}
 }
