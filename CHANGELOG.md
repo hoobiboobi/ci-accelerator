@@ -9,8 +9,14 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-- `helm upgrade` in place. The controller, the web and the routers restart
-  once for the new image; the routers' DaemonSet now rolls with
+None.
+
+## 0.3.9 - 2026-10-31
+
+### Upgrade notes
+
+- From 0.3.8, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the routers' DaemonSet now rolls with
   `maxSurge: 1, maxUnavailable: 0` (no pod restarts for that alone). The
   controller adds an index of executed steps at its first start (no
   schema change: a rollback keeps working).
