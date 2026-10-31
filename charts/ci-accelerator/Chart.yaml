@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.3.9
+version: 0.3.10
 # The box's own version (its control plane's image); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.3.9"
+appVersion: "0.3.10"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -26,7 +26,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.34.1
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.9
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.10
       platforms:
         - linux/amd64
         - linux/arm64
@@ -45,18 +45,8 @@ annotations:
       url: https://github.com/hoobiboobi/ci-accelerator/issues
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
-    - kind: fixed
-      description: The router passes over a daemon it cannot reach (a lost node) instead of failing the jobs sent to it, and starts a node's new router before the old one drains
-    - kind: security
-      description: A step's live output no longer shows part of a secret in a redrawn line; multi-line secret build arguments and PGP private keys are masked
-    - kind: security
-      description: The standalone control plane refuses one GitLab token for several GitLab instances (it was sent to each of them)
-    - kind: fixed
-      description: Saving a build no longer walks every cached run of its steps under the store's write lock (1.4 s per save at 60,000 builds)
-    - kind: fixed
-      description: Two sign-ins in one browser at once, and live pages behind an ended session starting sign-ins at GitLab
-    - kind: fixed
-      description: Pipelines skipped at a page's edge, the CI component failing a job after a successful build with a git context, and more (see the changelog)
+    - kind: changed
+      description: The console compresses its pages, JSON and text (gzip or zstd) - a pipeline's page goes as 8.7 KB instead of 87 KB, which counts behind a tunnel, a VPN or a slow proxy
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -64,10 +54,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.3.9
+    version: 0.3.10
     repository: file://../buildkit
   - name: control-plane
-    version: 0.3.9
+    version: 0.3.10
     repository: file://../control-plane
     condition: control-plane.enabled
   - name: gitlab-runner
