@@ -58,3 +58,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0052](0052-resources-and-node-load.md) | What a build's steps used and what a node carries: BuildKit's readings and the probe's, nothing estimated |
 | [0053](0053-running-builds-live.md) | A running build shows live on its job's page: its job from the build's options, its progress while someone looks |
 | [0054](0054-link-previews.md) | Shared console links show a preview card: the page's title and sentence, one static image, no project behind sign-in |
+| [0055](0055-renovate.md) | Renovate, self-hosted as a GitHub App, keeps the pins current; the checksums are recomputed from upstream |

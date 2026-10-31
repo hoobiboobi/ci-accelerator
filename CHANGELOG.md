@@ -11,6 +11,20 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Added
+
+- **Renovate keeps the pins current** (docs/dependencies.md): a weekly
+  run from the repository's own workflow, as a GitHub App, opens one pull
+  request per subject (the Go toolchain, BuildKit, the gitlab-runner chart
+  with its image, cert-manager, k3s, Helm, kind and kubectl, the test
+  tools, Node, the Go modules, the GitHub Actions) for versions at least
+  two weeks old, with the checksums next to the versions recomputed from
+  where each project publishes them (`scripts/update-pins.sh`, also for
+  bumps by hand). `make renovate-check` shows every pin is found, `make
+  pins-check` compares every sum with upstream's. The CI component's
+  `build.yml` gained one comment line, so its integrity hash changes with
+  the next release.
+
 ## 0.3.10 - 2026-10-31
 
 ### Upgrade notes
