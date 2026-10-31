@@ -32,6 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # renovate: datasource=github-releases depName=helm/helm
         helm: [v3.22.1, v4.3.1]
     env:
       CI_HELM_VERSION: ${{ matrix.helm }}
@@ -170,11 +171,31 @@ jobs:
       - name: Browser checks of the console's pages
         run: make ui-test
 
+  # Renovate's configs are valid and see every pin (a dry run of its own
+  # image over the tree), and the checksums next to the pins are the ones
+  # their projects publish.
+  renovate:
+    name: Renovate config and pins
+    needs: changes
+    if: needs.changes.outputs.renovate == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Renovate's view of the tree
+        run: make renovate-check
+
+      - name: The checksums against upstream
+        run: make pins-check
+
   # One result for branch protection, whatever ran: red when a job failed
   # or when it could not be told what to run.
   passed:
     name: checks passed
-    needs: [changes, checks, go, image, component, component-gitlab, ui]
+    needs: [changes, checks, go, image, component, component-gitlab, ui, renovate]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

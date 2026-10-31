@@ -23,11 +23,11 @@ CP='{"group":"upgrade","scenarios":"upgrade"},{"group":"box","scenarios":"box"}'
 CHART_GROUPS='{"group":"tls-runner","scenarios":"preflight tls certmanager existing runner"},{"group":"daemons","scenarios":"netpol otel cache dedup routing local bump graceful persist sigkill badconfig gc debug probes"}'
 COMP='{"group":"component","scenarios":"component"}'
 ALL="$CP,$CHART_GROUPS"
-EVERY="charts=true go=true component=false e2e_matrix=[$ALL]"
-CHARTS="charts=true go=false component=false e2e_matrix=[$ALL]"
-COMPONENT="charts=true go=false component=true e2e_matrix=[$ALL,$COMP]"
-GO="charts=false go=true component=false e2e_matrix=[$CP]"
-NONE='charts=false go=false component=false e2e_matrix=[]'
+EVERY="charts=true go=true component=false renovate=true e2e_matrix=[$ALL]"
+CHARTS="charts=true go=false component=false renovate=false e2e_matrix=[$ALL]"
+COMPONENT="charts=true go=false component=true renovate=false e2e_matrix=[$ALL,$COMP]"
+GO="charts=false go=true component=false renovate=false e2e_matrix=[$CP]"
+NONE='charts=false go=false component=false renovate=false e2e_matrix=[]'
 want "docs alone" "$NONE" README.md docs/adr/0048-logs.md CHANGELOG.md artifacthub/buildkit.yml
 want "the license (lint compares the charts' copies with it)" "$CHARTS" LICENSE
 want "go code" "$GO" internal/web/nodes.go cmd/ci-accelerator/main.go go.sum
@@ -45,11 +45,14 @@ want "a workflow" "$EVERY" .github/workflows/checks.yml
 want "the mirror's pipeline (GitLab runs it)" "$NONE" .gitlab-ci.yml ci/showcase/test.Dockerfile ci/showcase/test.Dockerfile.dockerignore
 want "the image recipe" "$EVERY" cmd/ci-accelerator/Dockerfile
 want "the image build's context" "$EVERY" .dockerignore
-want "the vulnerability gate (run by the Go job, shellchecked by lint)" "charts=true go=true component=false e2e_matrix=[$ALL]" scripts/vulncheck.sh
+want "the vulnerability gate (run by the Go job, shellchecked by lint)" "charts=true go=true component=false renovate=false e2e_matrix=[$ALL]" scripts/vulncheck.sh
 want "the release gate (lint runs it on copies of the tree)" "$CHARTS" scripts/check-release-version.sh scripts/changelog-section.sh
-want "nothing known: everything, a real GitLab too" "charts=true go=true component=true e2e_matrix=[$ALL,$COMP]"
-want "go and a chart" "$EVERY" internal/web/nodes.go charts/control-plane/values.yaml
-want "go and the component" "charts=true go=true component=true e2e_matrix=[$ALL,$COMP]" internal/web/nodes.go ci/gitlab/build.yml
+want "nothing known: everything, a real GitLab too" "charts=true go=true component=true renovate=true e2e_matrix=[$ALL,$COMP]"
+want "go and a chart" "charts=true go=true component=false renovate=false e2e_matrix=[$ALL]" internal/web/nodes.go charts/control-plane/values.yaml
+want "Renovate's config (its check alone)" "charts=false go=false component=false renovate=true e2e_matrix=[]" renovate.json5 .github/renovate-global.js test/renovate-deps.txt
+want "Renovate's workflow (its check alone, not every job)" "charts=false go=false component=false renovate=true e2e_matrix=[]" .github/workflows/renovate.yml
+want "the pins script (shellchecked by lint, run by the Renovate check)" "charts=true go=false component=false renovate=true e2e_matrix=[$ALL]" scripts/update-pins.sh test/renovate-check.sh
+want "go and the component" "charts=true go=true component=true renovate=false e2e_matrix=[$ALL,$COMP]" internal/web/nodes.go ci/gitlab/build.yml
 
 # The list a pull request gets (scripts/ci-changed-paths.sh, as the changes
 # workflow runs it): moving the component's README into docs/ must still
