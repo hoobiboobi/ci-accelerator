@@ -39,20 +39,23 @@ CHARTS=oci://ghcr.io/hoobiboobi/charts
 RELEASES=https://github.com/hoobiboobi/ci-accelerator/releases/download
 
 # Pinned components (bump together with their checksums).
+# renovate: datasource=custom.k3s depName=k3s versioning=semver-coerced
 K3S_VERSION=v1.36.5+k3s1
 K3S_SHA256_amd64=d73847bcd3c5fccef0115b372e2f9a91f3032dc84bbf71518a4617565294d313
 K3S_SHA256_arm64=135e34cb9e8a1cfae3cb55577789e93501efe7edc080a8b2630458a85b07721e
 K3S_INSTALL_SHA256=46177d4c99440b4c0311b67233823a8e8a2fc09693f6c89af1a7161e152fbfad
+# renovate: datasource=github-releases depName=helm/helm
 HELM_VERSION=v4.3.1
 HELM_SHA256_amd64=0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
 HELM_SHA256_arm64=8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88
+# renovate: datasource=docker depName=quay.io/jetstack/charts/cert-manager
 CERT_MANAGER_VERSION=v1.21.3
 CERT_MANAGER_SHA256=9ec67938b2981d8b333af61b3fcf53e26b4f6f5deb7ccda3de4ea116bb373a17
 CERT_MANAGER_DIGESTS=(
-  image.digest=sha256:9f4f96a33c7774cef24466fcd85031997531a03a8d117f151126baa8d1290dcc
-  webhook.image.digest=sha256:055ac8e9de6a0ba6763794838fe38944acc650f68ebe1b01dd8be079e580f458
-  cainjector.image.digest=sha256:083d0e906f8eb44e255fe4ff817ae54e49f9ed82e22f1011bb4e9e4f4b8a641f
-  startupapicheck.image.digest=sha256:1c519d4afca1413d1e4ccd78bdc756184418ab55a34569a3b3de39d32f9974e1
+  image.digest=sha256:9f4f96a33c7774cef24466fcd85031997531a03a8d117f151126baa8d1290dcc # quay.io/jetstack/cert-manager-controller:v1.21.3
+  webhook.image.digest=sha256:055ac8e9de6a0ba6763794838fe38944acc650f68ebe1b01dd8be079e580f458 # quay.io/jetstack/cert-manager-webhook:v1.21.3
+  cainjector.image.digest=sha256:083d0e906f8eb44e255fe4ff817ae54e49f9ed82e22f1011bb4e9e4f4b8a641f # quay.io/jetstack/cert-manager-cainjector:v1.21.3
+  startupapicheck.image.digest=sha256:1c519d4afca1413d1e4ccd78bdc756184418ab55a34569a3b3de39d32f9974e1 # quay.io/jetstack/cert-manager-startupapicheck:v1.21.3
 )
 
 NS=ci-accelerator

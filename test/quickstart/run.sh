@@ -26,6 +26,7 @@ SCRIPT=$ROOT/scripts/quickstart.sh
 LOGS=${QUICKSTART_LOGS:-$(mktemp -d)}
 mkdir -p "$LOGS"
 NS=ci-accelerator
+# renovate: datasource=docker depName=moby/buildkit
 BUILD_IMAGE=moby/buildkit:v0.34.1
 PASSED=0 FAILED=0
 
