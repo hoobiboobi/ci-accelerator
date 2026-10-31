@@ -148,7 +148,7 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /livez", ok)
 	mux.HandleFunc("GET /api/v1/builds", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "[]") })
-	ts := start(AccessLog(testLogger(), Secure(srv.Gate(mux))))
+	ts := start(AccessLog(testLogger(), Secure(Compress(srv.Gate(mux)))))
 	t.Cleanup(ts.Close)
 	return ts, st, ids, srv
 }
