@@ -9,7 +9,18 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.3.9, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the daemons, their disk probe
+  and the runner stay as they are.
+
+### Changed
+
+- **The console compresses its responses** (gzip or zstd, whichever the
+  browser accepts) for pages, JSON, text, the search index and its
+  stylesheet and script: a pipeline's page goes as 8.7 KB instead of
+  87 KB, the home page as 7 KB instead of 46 KB. That counts wherever the
+  console is reached through a tunnel, a VPN or a slow proxy; the live
+  updates' event stream, images and responses under 1 KB go as they are.
 
 ## 0.3.9 - 2026-10-31
 

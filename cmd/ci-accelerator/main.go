@@ -438,7 +438,7 @@ func run(c config, log *slog.Logger) error {
 		mux.Handle("GET /healthz", apiRoutes)
 		mux.Handle("GET /api/", apiRoutes)
 		pages.Register(mux)
-		srv = &http.Server{Addr: c.listen, Handler: web.AccessLog(log, web.Secure(pages.Gate(mux))), ReadHeaderTimeout: 10 * time.Second,
+		srv = &http.Server{Addr: c.listen, Handler: web.AccessLog(log, web.Secure(web.Compress(pages.Gate(mux)))), ReadHeaderTimeout: 10 * time.Second,
 			ErrorLog: logging.ErrorLog(log)}
 		ln, err := net.Listen("tcp", c.listen)
 		if err != nil {

@@ -125,7 +125,7 @@ func webMain(args []string) error {
 	mux.HandleFunc("GET /livez", ok)
 	mux.Handle("GET /api/", api.Handler(client))
 	pages.Register(mux)
-	ready := web.Secure(pages.Gate(mux))
+	ready := web.Secure(web.Compress(pages.Gate(mux)))
 	handler.Store(&ready)
 	log.Info("ready", "listen", ln.Addr().String(), "controller_version", cfg.Version, "sign_in", cfg.SignIn, "gitlab", cfg.GitLab)
 	var err2 error
