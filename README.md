@@ -832,6 +832,7 @@ make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kub
 make go-test ui-test          # Go tests; the console's pages in headless Chrome
 make kind-up                  # local kind cluster (examples/kind)
 make e2e                      # end-to-end on kind
+make renovate-check pins-check # Renovate sees every pin (docker); every pinned sha256 against upstream
 ```
 
 - **The e2e** installs releases of its own and covers:
@@ -881,6 +882,11 @@ make e2e                      # end-to-end on kind
 - **Mutation testing:** the checks are broken on purpose (the code they
   guard is changed or removed) to make sure each one can actually fail.
 - **Helm versions:** the checks pass on Helm 3 and Helm 4.
+- **Dependencies:** every version is pinned with a checksum or a digest,
+  and taken only once it is two weeks old. Renovate opens one pull
+  request per subject from this repository's own weekly workflow, with
+  the sums recomputed from where each project publishes them
+  ([docs/dependencies.md](docs/dependencies.md)).
 
 ## Repository
 
