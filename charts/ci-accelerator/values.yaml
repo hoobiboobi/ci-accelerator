@@ -109,6 +109,7 @@ gitlab-runner:
   # overloaded API servers; 19.4.1 fixes that, and 19.4.2 is the same
   # runner rebuilt on Go 1.26.10.
   image:
+    # renovate: datasource=docker depName=registry.gitlab.com/gitlab-org/gitlab-runner
     tag: alpine-v19.4.2
   # -- Required: your GitLab, e.g. https://gitlab.example.com/
   gitlabUrl: ""

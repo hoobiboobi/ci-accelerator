@@ -72,17 +72,21 @@ CLIENT_SECRET=$REL-buildkit-client
 OWN_SECRET=$REL-own-tls
 CM_NS=cert-manager
 CA_NAME=$NS-$REL-buildkit-ca
+# renovate: datasource=docker depName=quay.io/jetstack/charts/cert-manager
 CERT_MANAGER_VERSION=v1.21.3
 # sha256 of the chart archive pulled from oci://quay.io/jetstack/charts.
 CERT_MANAGER_SHA256=9ec67938b2981d8b333af61b3fcf53e26b4f6f5deb7ccda3de4ea116bb373a17
 # OTLP backends for the otel scenario, from the VictoriaMetrics Helm repo.
 VICTORIA_REPO=https://victoriametrics.github.io/helm-charts/
+# renovate: datasource=helm depName=victoria-metrics-single registryUrl=https://victoriametrics.github.io/helm-charts/
 VM_CHART_VERSION=0.48.0
 VM_CHART_SHA256=51d26125182388a734f5d9dc65086811436a67d5aede08fde5f2a4247b532381
+# renovate: datasource=helm depName=victoria-traces-single registryUrl=https://victoriametrics.github.io/helm-charts/
 VT_CHART_VERSION=0.1.11
 VT_CHART_SHA256=59471db9c6e053fc740b1ad0eb6365dc872bba3f0c9e06f5780ddde9655c9e88
 # The official gitlab-runner chart the integration fragment is written for.
 RUNNER_REPO=https://charts.gitlab.io
+# renovate: datasource=helm depName=gitlab-runner registryUrl=https://charts.gitlab.io
 RUNNER_CHART_VERSION=0.93.0
 RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 # The last published release, which the upgrade scenario installs from the
@@ -100,9 +104,11 @@ UPGRADE_FROM_VALUES=${UPGRADE_FROM_VALUES:-$ROOT/test/e2e/box-values-old.yaml}
 # then restarts every daemon; say so in the upgrade notes).
 UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
 # The stand-in GitLab API runs on this image (python stdlib only).
+# renovate: datasource=docker depName=python
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5
 # An S3 store for the runner cache (MinIO publishes no images any more):
 # SeaweedFS 4.48 (2026-09-28), keys and bucket from env, no setup.
+# renovate: datasource=docker depName=docker.io/chrislusf/seaweedfs
 S3_IMAGE=docker.io/chrislusf/seaweedfs:4.48@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
 # Every client call: the client certificate, and the Service name for the
 # server certificate check also when a call goes to a pod IP.

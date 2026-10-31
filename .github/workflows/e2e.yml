@@ -37,6 +37,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.changes.outputs.e2e_matrix) }}
     env:
+      # renovate: datasource=github-releases depName=helm/helm
       CI_HELM_VERSION: v4.3.1
       # A step's own env is not visible in its `if`.
       DOCKERHUB_LOGIN: ${{ secrets.DOCKERHUB_TOKEN != '' }}
@@ -48,7 +49,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.1-${{ hashFiles('Makefile') }}
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ env.CI_HELM_VERSION }}-${{ hashFiles('Makefile') }}
 
       # 14 GB of disk hold four kind nodes and every image the e2e pulls only
       # without the runner's preinstalled toolchains.

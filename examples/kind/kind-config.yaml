@@ -33,9 +33,11 @@ networking:
 
 nodes:
   - role: control-plane
+    # renovate: datasource=docker depName=kindest/node
     image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
 
   - role: worker
+    # renovate: datasource=docker depName=kindest/node
     image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
     labels:
       ci-accelerator.io/node-role: build
@@ -51,12 +53,14 @@ nodes:
         protocol: TCP
 
   - role: worker
+    # renovate: datasource=docker depName=kindest/node
     image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
     labels:
       ci-accelerator.io/node-role: build
       topology.kubernetes.io/zone: zone-b
 
   - role: worker
+    # renovate: datasource=docker depName=kindest/node
     image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
     labels:
       ci-accelerator.io/node-role: build
