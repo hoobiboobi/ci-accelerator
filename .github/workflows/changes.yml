@@ -20,6 +20,9 @@ on:
       e2e_matrix:
         description: "the e2e groups to run, as the JSON of the e2e matrix ([] for none)"
         value: ${{ jobs.changes.outputs.e2e_matrix }}
+      renovate:
+        description: "true when Renovate's checks run (its configs, every pin found, the checksums against upstream)"
+        value: ${{ jobs.changes.outputs.renovate }}
 
 permissions:
   contents: read
@@ -34,6 +37,7 @@ jobs:
       go: ${{ steps.what.outputs.go }}
       component: ${{ steps.what.outputs.component }}
       e2e_matrix: ${{ steps.what.outputs.e2e_matrix }}
+      renovate: ${{ steps.what.outputs.renovate }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

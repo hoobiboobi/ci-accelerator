@@ -1,0 +1,262 @@
+// Renovate keeps the pinned versions current: docs/dependencies.md says
+// what it updates, what stays by hand, and how the checksums next to the
+// versions follow (scripts/update-pins.sh, run after each bump). It runs
+// from .github/workflows/renovate.yml, weekly; .github/renovate-global.js
+// holds what only the runner may set (repositories, allowed commands).
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
+  // config:recommended ignores test directories; the e2e and the
+  // quickstart test carry pins of their own. The Dockerfile guide's examples
+  // and the e2e's fixture Dockerfiles are not pins.
+  ignorePaths: ["**/node_modules/**", "**/vendor/**", "docs/**", "test/e2e/fixtures/**"],
+  // The GitLab CI files are the component and the mirror's pipeline, not
+  // images to bump; the charts' values hold no image:tag pairs of the shape
+  // helm-values knows (the tag follows appVersion, the digest is written
+  // with its image after it).
+  gitlabci: { enabled: false },
+  "gitlabci-include": { enabled: false },
+  "helm-values": { enabled: false },
+  timezone: "Europe/Nicosia",
+  // Branches are made on Monday mornings (the workflow runs then); PRs
+  // already open are rebased whenever main moves, on any day.
+  schedule: ["* 0-9 * * 1"],
+  // A version is taken only once it is two weeks old (a security patch of
+  // a pinned line is taken by hand at once: the changelog says so).
+  minimumReleaseAge: "14 days",
+  internalChecksFilter: "strict",
+  // GitHub's Dependabot security updates are on for this repository;
+  // Renovate raising the same fixes would double them.
+  vulnerabilityAlerts: { enabled: false },
+  osvVulnerabilityAlerts: false,
+  prConcurrentLimit: 3,
+  prHourlyLimit: 0,
+  rebaseWhen: "behind-base-branch",
+  // "deps: bump <name> to <version>", as the repository's commits read.
+  semanticCommits: "disabled",
+  commitMessagePrefix: "deps:",
+  commitMessageAction: "bump",
+  commitMessageTopic: "{{depName}}",
+  labels: ["dependencies"],
+  dependencyDashboardTitle: "Dependencies: what Renovate holds back, and why",
+  prBodyNotes: [
+    "Every version in this repository is pinned with a reason and a date: say in the changelog (Unreleased) what this bump changes for a user, or that nothing does.",
+  ],
+  postUpdateOptions: ["gomodTidy"],
+  // Go: one PR for the toolchain in go.mod, the image's base and the
+  // Makefile's download.
+  packageRules: [
+    {
+      description: "The Go toolchain: go.mod's toolchain line, the image's golang base and the Makefile's download (its sums follow).",
+      matchPackageNames: ["go", "golang", "docker.io/library/golang"],
+      groupName: "Go toolchain",
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh go"], fileFilters: ["Makefile"], executionMode: "branch" },
+      prBodyNotes: ["Check: `make go-test`, the image build, and the Go version the release notes name."],
+    },
+    {
+      description: "Go modules, minor and patch together; a major gets its own PR.",
+      matchManagers: ["gomod"],
+      matchDepTypes: ["require"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "Go modules",
+    },
+    {
+      description: "The go directive (the minimum Go) stays by hand: it is a compatibility promise.",
+      matchManagers: ["gomod"],
+      matchDepTypes: ["golang"],
+      enabled: false,
+    },
+    {
+      description: "GitHub Actions, by commit SHA with the tag beside it.",
+      matchManagers: ["github-actions"],
+      matchDatasources: ["github-tags", "github-releases"],
+      groupName: "GitHub Actions",
+    },
+    {
+      description: "The Renovate image in its workflow is a pin of the regex manager (annotated); the github-actions manager sees it too.",
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["ghcr.io/renovatebot/renovate"],
+      enabled: false,
+    },
+    {
+      description: "The runners' Ubuntu: a major, decided by hand with the tools' versions on it.",
+      matchDatasources: ["github-runners"],
+      groupName: "GitHub runners",
+    },
+    {
+      description: "BuildKit: the chart's appVersion and default digest, the CI component's client image, the quickstart test's. The component's integrity and the chart's list of earlier defaults follow.",
+      matchPackageNames: ["moby/buildkit", "docker.io/moby/buildkit"],
+      groupName: "BuildKit",
+      // Once the branch has every BuildKit pin bumped: the previous default
+      // digest is the one HEAD (the base) has.
+      postUpgradeTasks: {
+        commands: ["scripts/update-pins.sh buildkit"],
+        fileFilters: ["charts/**"],
+        executionMode: "branch",
+      },
+      prBodyNotes: [
+        "Check: the upstream issues docs/troubleshooting.md lists against the old release, and the version the README and the troubleshooting guide name (prose, by hand); `make e2e` (every daemon restarts on upgrade: say so in the changelog's upgrade notes). scripts/update-pins.sh already moved the chart's default digest, its list of earlier defaults, the unit tests' expectations, the chart README and the component's integrity.",
+      ],
+    },
+    {
+      description: "The gitlab-runner chart and the runner image it runs, together (a chart minor goes with a runner minor); the chart archive's sum follows.",
+      matchPackageNames: ["gitlab-runner", "registry.gitlab.com/gitlab-org/gitlab-runner"],
+      groupName: "gitlab-runner",
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh gitlab-runner"], fileFilters: ["Makefile", "test/e2e/run.sh", "charts/ci-accelerator/tests/**"], executionMode: "branch" },
+      prBodyNotes: ["Check: the chart's default runner version against the image tag (one minor), `make validate` (the fragment renders with the chart), the e2e runner and box scenarios."],
+    },
+    {
+      description: "The runner image's tags are alpine-v<version>.",
+      matchPackageNames: ["registry.gitlab.com/gitlab-org/gitlab-runner"],
+      versioning: "regex:^alpine-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+    },
+    {
+      description: "cert-manager: the chart (e2e, quickstart) and its four images (quickstart); the chart archive's sum follows.",
+      matchPackageNames: ["quay.io/jetstack/charts/cert-manager", "/^quay\\.io/jetstack/cert-manager-/"],
+      groupName: "cert-manager",
+      postUpgradeTasks: {
+        commands: ["scripts/update-pins.sh cert-manager"],
+        fileFilters: ["test/e2e/**", "scripts/quickstart.sh", "README.md", "docs/gitops.md", "charts/buildkit/templates/_validate.tpl", "charts/buildkit/tests/**"],
+        executionMode: "branch",
+      },
+      prBodyNotes: ["Check: the Kubernetes versions this cert-manager is tested on include the quickstart's k3s and the e2e's kind; the e2e certmanager scenario; the error message in charts/buildkit names the install command."],
+    },
+    {
+      description: "k3s for the quickstart: the stable channel, as the quickstart chose it; its sums follow.",
+      matchPackageNames: ["k3s"],
+      groupName: "k3s",
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh k3s"], fileFilters: ["scripts/quickstart.sh", "README.md"], executionMode: "branch" },
+      prBodyNotes: ["Check: cert-manager's tested Kubernetes range includes this k3s; the quickstart workflow."],
+    },
+    {
+      description: "Helm 4 (CI, the quickstart, the release's packaging); the Makefile's keyed sums are renamed. Helm 3 stays by hand until its end of life.",
+      matchPackageNames: ["helm/helm"],
+      groupName: "Helm",
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh helm"], fileFilters: ["Makefile", "scripts/quickstart.sh", "README.md"], executionMode: "branch" },
+      prBodyNotes: ["Check: `make lint unittest` on both Helm lines; the release's reproducible packaging (the release workflow packages with this Helm). scripts/update-pins.sh moved the sums and the README's Helm path."],
+    },
+    {
+      description: "kind and kubectl for the e2e. kind's node images (examples/kind) stay by hand: each kind release lists the images it supports, with their digests.",
+      matchPackageNames: ["kubernetes-sigs/kind", "kubernetes/kubernetes"],
+      groupName: "kind and kubectl",
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh kind", "scripts/update-pins.sh kubectl"], fileFilters: ["Makefile"], executionMode: "branch" },
+      prBodyNotes: ["Check: the node images in examples/kind/kind-config.yaml against the kind release's list (bump them by hand, with their digests); KUBE_VERSIONS in the Makefile (the newest tested Kubernetes)."],
+    },
+    {
+      description: "kind's node images: by hand, from the kind release notes (see the kind rule).",
+      matchPackageNames: ["kindest/node"],
+      enabled: false,
+    },
+    {
+      description: "The test tools of the Makefile; their sums follow (ShellCheck publishes none: computed from the download).",
+      matchPackageNames: ["helm-unittest/helm-unittest", "yannh/kubeconform", "koalaman/shellcheck", "norwoodj/helm-docs", "golang.org/x/vuln", "oras-project/oras", "aquasecurity/trivy"],
+      groupName: "test tools",
+      postUpgradeTasks: {
+        commands: ["scripts/update-pins.sh helm-unittest kubeconform shellcheck oras trivy"],
+        fileFilters: ["Makefile"],
+        executionMode: "branch",
+      },
+      prBodyNotes: ["Check: `make lint unittest validate vulncheck image-scan`; trivy's findings against the image."],
+    },
+    {
+      description: "Node for the browser checks: the LTS line in use, newest release; its sums follow.",
+      matchPackageNames: ["node"],
+      allowedVersions: "<25",
+      groupName: "Node",
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh node"], fileFilters: ["Makefile"], executionMode: "branch" },
+      prBodyNotes: ["Check: `make ui-test`."],
+    },
+    {
+      description: "Images the e2e runs beside the box (a stand-in GitLab API, an S3 store), by tag and digest.",
+      matchPackageNames: ["python", "docker.io/chrislusf/seaweedfs"],
+      groupName: "e2e images",
+    },
+    {
+      description: "The throwaway OTLP receivers of the e2e otel scenario; the chart archives' sums follow.",
+      matchPackageNames: ["victoria-metrics-single", "victoria-traces-single"],
+      groupName: "e2e OTLP receivers",
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh victoria-metrics-single victoria-traces-single"], fileFilters: ["test/e2e/**"], executionMode: "branch" },
+    },
+    {
+      description: "The image's distroless base, by digest.",
+      matchPackageNames: ["gcr.io/distroless/static-debian13"],
+      groupName: "distroless base",
+    },
+    {
+      description: "Renovate itself: the image the workflow and the local check run, and the action.",
+      matchPackageNames: ["ghcr.io/renovatebot/renovate", "renovatebot/github-action"],
+      groupName: "Renovate",
+    },
+    {
+      description: "Registries that publish no release dates (ghcr, quay, gcr, registry.gitlab.com): the two weeks cannot be checked, the PR says so with a label; check the release date by hand.",
+      matchDatasources: ["docker"],
+      matchPackageNames: ["/^ghcr\\.io//", "/^quay\\.io//", "/^gcr\\.io//", "/^registry\\.gitlab\\.com//"],
+      minimumReleaseAgeBehaviour: "timestamp-optional",
+      addLabels: ["age-unverified"],
+    },
+    {
+      description: "This project's own images are released by its own workflow, never bumped here.",
+      matchPackageNames: ["/^ghcr\\.io/hoobiboobi//"],
+      enabled: false,
+    },
+  ],
+  customDatasources: {
+    // k3s's stable channel, as https://update.k3s.io serves it; the
+    // quickstart runs what the channel points at, not the newest tag.
+    k3s: {
+      defaultRegistryUrlTemplate: "https://update.k3s.io/v1-release/channels",
+      transformTemplates: [
+        '{"releases": [{"version": $$.(data[id = \'stable\'].latest), "sourceUrl": "https://github.com/k3s-io/k3s", "changelogUrl": $join(["https://github.com/k3s-io/k3s/releases/tag/", data[id = \'stable\'].latest])}], "sourceUrl": "https://github.com/k3s-io/k3s", "homepage": "https://k3s.io/"}',
+      ],
+    },
+  },
+  customManagers: [
+    {
+      // A pin in a Makefile or a shell script: the line above names the
+      // datasource and the dependency, the assignment holds the version
+      // (an image reference may carry its digest).
+      customType: "regex",
+      description: "Annotated assignments: NAME := value, NAME ?= value, NAME=value",
+      managerFilePatterns: ["/^Makefile$/", "/^test/e2e/run\\.sh$/", "/^scripts/quickstart\\.sh$/", "/^test/quickstart/run\\.sh$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>[a-z0-9.-]+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?(?: registryUrl=(?<registryUrl>\\S+))?(?: extractVersion=(?<extractVersion>\\S+))?\\n[A-Z0-9_]+ *[:?]?= *(?:[a-z0-9./-]+:)?(?<currentValue>[^\\s@\"]+)(?:@(?<currentDigest>sha256:[0-9a-f]{64}))?",
+      ],
+    },
+    {
+      // The same in YAML: a chart's appVersion or image tag, a workflow's
+      // Helm version, the CI component's client image.
+      customType: "regex",
+      description: "Annotated YAML scalars: key: value",
+      managerFilePatterns: ["/(^|/)Chart\\.yaml$/", "/(^|/)values\\.yaml$/", "/^\\.github/workflows/[^/]+\\.yml$/", "/^ci/gitlab/build\\.yml$/", "/^examples/kind/kind-config\\.yaml$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>[a-z0-9.-]+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?(?: registryUrl=(?<registryUrl>\\S+))?(?: extractVersion=(?<extractVersion>\\S+))?\\n\\s*[A-Za-z0-9_-]+: *\"?(?:[a-z0-9./-]+:)?(?<currentValue>[^\\s@\"\\[]+)(?:@(?<currentDigest>sha256:[0-9a-f]{64}))?",
+      ],
+    },
+    {
+      // A digest with the image it came from written after it: the chart's
+      // default BuildKit digest, the quickstart's cert-manager digests.
+      customType: "regex",
+      description: "Digests with their image:tag in a comment after them",
+      managerFilePatterns: ["/^charts/buildkit/values\\.yaml$/", "/^scripts/quickstart\\.sh$/", "/^test/e2e/cert-manager-values\\.yaml$/"],
+      matchStrings: ["(?<currentDigest>sha256:[0-9a-f]{64})\"? *# (?<depName>[a-z0-9./-]+):(?<currentValue>[A-Za-z0-9._-]+)"],
+      datasourceTemplate: "docker",
+    },
+    {
+      // The images Artifact Hub is told about, in the charts' annotations.
+      customType: "regex",
+      description: "artifacthub.io/images entries of upstream images",
+      managerFilePatterns: ["/^charts/[^/]+/Chart\\.yaml$/"],
+      matchStrings: ["image: (?<depName>moby/buildkit|registry\\.gitlab\\.com/gitlab-org/gitlab-runner):(?<currentValue>[A-Za-z0-9._-]+)\\n"],
+      datasourceTemplate: "docker",
+    },
+    {
+      // The checks' Helm matrix: Helm 3 by hand, Helm 4 here.
+      customType: "regex",
+      description: "The checks workflow's Helm matrix (the v4 entry)",
+      managerFilePatterns: ["/^\\.github/workflows/checks\\.yml$/"],
+      matchStrings: ["# renovate: datasource=github-releases depName=helm/helm\\n\\s*helm: \\[v3\\.[0-9.]+, (?<currentValue>v4\\.[0-9.]+)\\]"],
+      depNameTemplate: "helm/helm",
+      datasourceTemplate: "github-releases",
+    },
+  ],
+}

@@ -23,15 +23,18 @@ CERT_MANAGER_KINDS := Certificate,Issuer,ClusterIssuer
 KUBE_VERSIONS := 1.34.0 1.37.0
 
 # Pinned tools. Bump the version and its checksums together.
+# renovate: datasource=github-releases depName=helm-unittest/helm-unittest extractVersion=^v(?<version>.+)$
 HELM_UNITTEST_VERSION := 1.2.1
 # sha256 of unittest-<version>.tgz, as listed in the release's signed .prov.
 HELM_UNITTEST_SHA256 := bbcebd42631dff9fc595462fad839c49a1b06f9635e952e7e837d7e5fe82865f
+# renovate: datasource=github-releases depName=yannh/kubeconform extractVersion=^v(?<version>.+)$
 KUBECONFORM_VERSION := 0.8.0
 # sha256 per platform, from the release's CHECKSUMS file.
 KUBECONFORM_SHA256_darwin_arm64 := f84f4dfbebf4a6b0b230385fa065a39ea35e02608c2b50d025dcf64775a69d67
 KUBECONFORM_SHA256_darwin_amd64 := 71dbc87ac9f24099a62b93570e65aa06312ba6ac8aea63b7f86e9d999edf5a92
 KUBECONFORM_SHA256_linux_arm64  := 1f53fc8e81258197a35e8603054162a5af1de8c5af13746c71ab680d9534ed87
 KUBECONFORM_SHA256_linux_amd64  := 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+# renovate: datasource=github-releases depName=koalaman/shellcheck extractVersion=^v(?<version>.+)$
 SHELLCHECK_VERSION := 0.11.0
 # sha256 per platform; the release publishes none, these were recorded at the
 # first download (2026-10-18).
@@ -42,34 +45,42 @@ SHELLCHECK_SHA256_linux_amd64  := b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e
 
 # The official gitlab-runner chart integrations/gitlab-runner/values.yaml is
 # written for; make validate renders it with the fragment.
+# renovate: datasource=helm depName=gitlab-runner registryUrl=https://charts.gitlab.io
 RUNNER_CHART_VERSION := 0.93.0
 RUNNER_CHART_SHA256  := a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
 
 # Helm, kind and kubectl for CI runners (Linux), where nothing is installed:
 # `make ci-tools CI_HELM_VERSION=v3.22.1` puts them into .tools/bin.
 # Locally, the installed helm/kind/kubectl are used.
+# renovate: datasource=github-releases depName=helm/helm
 CI_HELM_VERSION ?= v4.3.1
 HELM_SHA256_v3.22.1_linux_amd64 := 896cf63684a42a723d61c980369d6e588330927deb13676ca0d85006dd6da0ea
 HELM_SHA256_v3.22.1_linux_arm64 := 4c29e286b279d170fa048ddfc3e4e83dcd069ca9c52102766ba672d7149e694d
 HELM_SHA256_v4.3.1_linux_amd64  := 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
 HELM_SHA256_v4.3.1_linux_arm64  := 8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88
+# renovate: datasource=github-releases depName=kubernetes-sigs/kind
 KIND_VERSION := v0.33.0
 KIND_SHA256_linux_amd64 := aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
 KIND_SHA256_linux_arm64 := 20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2
+# renovate: datasource=github-tags depName=kubernetes/kubernetes
 KUBECTL_VERSION := v1.37.1
 KUBECTL_SHA256_linux_amd64 := 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
 KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7
 # Vulnerability scanners: govulncheck (golang.org/x/vuln, installed with Go,
 # verified by the Go checksum database) for the Go code, trivy for
 # its image. Checksums from trivy's <version>_checksums.txt release asset.
+# renovate: datasource=go depName=golang.org/x/vuln extractVersion=^v(?<version>.+)$
 GOVULNCHECK_VERSION := 1.8.0
 # Chart READMEs from values comments (helm-docs, installed with Go) and the
 # Artifact Hub metadata push (oras; checksums from its release's checksums file).
+# renovate: datasource=github-releases depName=norwoodj/helm-docs extractVersion=^v(?<version>.+)$
 HELM_DOCS_VERSION := 1.14.2
+# renovate: datasource=github-releases depName=oras-project/oras extractVersion=^v(?<version>.+)$
 ORAS_VERSION := 1.3.4
 ORAS_SHA256_linux_amd64  := f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454
 ORAS_SHA256_linux_arm64  := 15702c6e3a4a56a8bd8ac5c17efdbcab56d9bada661ccbcf017f5b10c1d89399
 ORAS_SHA256_darwin_arm64 := 217761a9500242ff473de8656b5aca21136ff39e17e9e61fd8936bbfd902704c
+# renovate: datasource=github-releases depName=aquasecurity/trivy extractVersion=^v(?<version>.+)$
 TRIVY_VERSION := 0.75.0
 TRIVY_SHA256_linux_amd64  := c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
 TRIVY_SHA256_linux_arm64  := a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a132956751a13b3
@@ -79,16 +90,22 @@ TRIVY_ARCH = $(subst amd64,64bit,$(subst arm64,ARM64,$(ARCH)))
 # Go for the control plane (internal/, cmd/). Locally any Go >= 1.21 fetches this
 # toolchain itself (GOTOOLCHAIN, verified against the Go checksum database);
 # CI downloads the archive below. Checksums from https://go.dev/dl/?mode=json.
+# renovate: datasource=golang-version depName=go
 GO_VERSION := 1.27.3
 GO_SHA256_linux_amd64 := 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
 GO_SHA256_linux_arm64 := a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
 # Node for the browser checks (test/ui): LTS line 24, the newest release at
 # least two weeks old; sums from nodejs.org SHASUMS256.txt.
+# renovate: datasource=node-version depName=node versioning=node
 NODE_VERSION := 24.22.1
 NODE_SHA256_linux_amd64  := 6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6
 NODE_SHA256_linux_arm64  := dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e
 NODE_SHA256_darwin_arm64 := 654ba79de6155647e22321932b45f2a1ccb705976cc337c9b8e278beb085a628
 NODE_SHA256_darwin_amd64 := 65e450f90a6eaacd5000f611861c4ce65fadc87f813795dc4ed0c0e5f2fca2d4
+
+# Renovate, for `make renovate-check` (the workflow pins the same image).
+# renovate: datasource=docker depName=ghcr.io/renovatebot/renovate
+RENOVATE_IMAGE := ghcr.io/renovatebot/renovate:44.166.0@sha256:510b885a90cd70437816c5c2da1d0c3beff513d3979497b2db1d37c84adfbc2b
 
 OS   := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
@@ -294,7 +311,7 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 	@echo "==> images the weekly scan covers"
 	@test/default-images.sh
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/update-pins.sh test/renovate-check.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -355,6 +372,14 @@ go-test: ## Go: gofmt, go vet and the tests (the pages twice: with the controlle
 	@WEB_TEST_SPLIT=1 $(GO_RUN) test -count=1 ./internal/web/
 
 .PHONY: quick
+.PHONY: pins-check
+pins-check: ## Every pinned checksum against where its project publishes it (network)
+	@scripts/update-pins.sh --check all
+
+.PHONY: renovate-check
+renovate-check: ## Renovate's view of the tree (docker): the configs are valid, every pin is found (test/renovate-deps.txt)
+	@test/renovate-check.sh $(RENOVATE_IMAGE)
+
 quick: lint unittest go-test ## The checks to run before every push (validate, e2e and the browser checks run in CI)
 
 .PHONY: validate

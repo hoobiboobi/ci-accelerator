@@ -1,0 +1,81 @@
+# Renovate, self-hosted: once a week it opens pull requests for the pinned
+# versions that are at least two weeks old (renovate.json5 says which, in
+# which groups; docs/dependencies.md explains). It runs as a GitHub App of
+# this repository, so its pull requests get the checks like anyone's: the
+# App's client id and private key are the repository secrets
+# RENOVATE_APP_CLIENT_ID and RENOVATE_APP_PRIVATE_KEY. Renovate itself is
+# pinned (image by digest) and updates these pins through its own rules.
+#
+# By hand: a dry run (no branch, the log says what it would do), or a run
+# outside the Monday window.
+name: renovate
+
+on:
+  schedule:
+    # Monday 03:00 UTC: inside the window renovate.json5 allows (Monday
+    # mornings, Europe/Nicosia), whatever the daylight saving.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry run: extract (what is pinned), lookup (what would be bumped), full (everything but creating branches); none runs for real"
+        type: choice
+        options: ["none", "extract", "lookup", "full"]
+        default: "none"
+      ignore-schedule:
+        description: "Open branches now, outside the Monday window"
+        type: boolean
+        default: false
+      log-level:
+        description: "Renovate's log level"
+        type: choice
+        options: [info, debug]
+        default: info
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: renovate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # The installation token lasts an hour and is revoked when the job
+      # ends; it carries only what Renovate needs.
+      - name: Token of the Renovate App
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RENOVATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-workflows: write
+          permission-statuses: write
+          permission-metadata: read
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Renovate
+        uses: renovatebot/github-action@f0f41e5f2e706165f6814b1d0f0d0e319de7d1d9 # v46.3.8
+        with:
+          configurationFile: .github/renovate-global.js
+          token: ${{ steps.app.outputs.token }}
+          # Not RENOVATE_*: Renovate reads those as its own options.
+          additional-env-list: |
+            RUN_DRY_RUN
+            RUN_IGNORE_SCHEDULE
+          # renovate: datasource=docker depName=ghcr.io/renovatebot/renovate
+          renovate-image: ghcr.io/renovatebot/renovate:44.166.0@sha256:510b885a90cd70437816c5c2da1d0c3beff513d3979497b2db1d37c84adfbc2b
+        env:
+          LOG_LEVEL: ${{ inputs.log-level || 'info' }}
+          RUN_DRY_RUN: ${{ inputs.dry-run != 'none' && inputs.dry-run || '' }}
+          RUN_IGNORE_SCHEDULE: ${{ inputs.ignore-schedule && 'true' || 'false' }}

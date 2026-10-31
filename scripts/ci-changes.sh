@@ -12,6 +12,9 @@
 #                       in Docker: lint at two versions, the e2e group
 #                       component); only for a change under ci/gitlab/ (or
 #                       no list at all), since each GitLab takes minutes
+#   renovate=true|false Renovate's configs validated and every pin found
+#                       (make renovate-check), the pinned checksums against
+#                       upstream (make pins-check)
 #   e2e_matrix=[...]    the e2e groups to run with their scenarios, as the
 #                       JSON of the e2e workflow's matrix (empty: none)
 #
@@ -25,6 +28,7 @@ set -eu
 charts=false
 go=false
 component=false
+renovate=false
 all=false
 any=false
 while IFS= read -r f; do
@@ -44,6 +48,10 @@ while IFS= read -r f; do
     docs/* | *.md | artifacthub/* | .github/ISSUE_TEMPLATE/* | .gitignore | .editorconfig | .gitlab-ci.yml | ci/showcase/*) ;;
     # The Go job runs the vulnerability gate, lint shellchecks it.
     scripts/vulncheck.sh) charts=true; go=true ;;
+    # Renovate's configs and its checks (lint shellchecks the scripts); its
+    # workflow runs nothing else.
+    scripts/update-pins.sh | test/renovate-check.sh) charts=true; renovate=true ;;
+    renovate.json5 | .github/renovate-global.js | .github/workflows/renovate.yml | test/renovate-deps.txt) renovate=true ;;
     cmd/* | internal/* | go.mod | go.sum | test/ui/* | .govulncheck-allow | .trivyignore.yaml) go=true ;;
     charts/* | integrations/* | examples/* | scripts/*.sh | test/e2e/* | test/quickstart/* | test/*.sh) charts=true ;;
     *) all=true ;;
@@ -52,11 +60,13 @@ done
 if [ "$any" = false ] || [ "$all" = true ]; then
   charts=true
   go=true
+  renovate=true
 fi
 [ "$any" = true ] || component=true
 echo "charts=$charts"
 echo "go=$go"
 echo "component=$component"
+echo "renovate=$renovate"
 # The e2e groups: scenario times from a full local run, upgrade 401 s,
 # box 350 s, existing 181 s, runner 101 s, the rest about 360 s together;
 # component (a real GitLab boots first) on its own.
