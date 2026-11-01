@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -190,8 +191,8 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		INSERT INTO builds (daemon_id, ref, generation, attribution, instance, pipeline_id, job_id, project_id,
 			target, dockerfile_id, build_args, started_at, completed_at, error, context_bytes, images,
 			reason_kind, reason_step, reason_old, reason_new, reason_arg, reason_paths, reason_by, saved_ms, output_day, built, built_ms,
-			warnings)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			warnings, no_cache, truncated, context)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (ref) DO UPDATE SET generation = excluded.generation,
 			attribution = excluded.attribution, instance = excluded.instance, pipeline_id = excluded.pipeline_id,
 			job_id = excluded.job_id, project_id = COALESCE(excluded.project_id, builds.project_id),
@@ -202,13 +203,14 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			reason_new = excluded.reason_new, reason_arg = excluded.reason_arg, reason_paths = excluded.reason_paths,
 			reason_by = excluded.reason_by, reason_via = '', saved_ms = excluded.saved_ms,
 			output_day = COALESCE(excluded.output_day, builds.output_day),
-			built = excluded.built, built_ms = excluded.built_ms, warnings = excluded.warnings
+			built = excluded.built, built_ms = excluded.built_ms, warnings = excluded.warnings,
+			no_cache = excluded.no_cache, truncated = excluded.truncated, context = excluded.context
 		WHERE excluded.generation >= builds.generation
 		RETURNING id`,
 		daemon, b.Ref, b.Generation, attributions[a.State], instance, pipeline, job, project,
 		b.Target, dockerfile, string(argsJSON), b.Started.UnixMilli(), nullTime(b.Completed), b.Error, b.ContextBytes, string(images),
 		string(r.Kind), reasonStep, r.Old, r.New, r.Arg, string(paths), reasonBy, saved.Milliseconds(), outDay, built, builtMs,
-		string(warnings),
+		string(warnings), b.NoCache, b.Truncated, b.Context,
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A newer generation is stored already.
@@ -534,8 +536,10 @@ func nullInstance(h string) sql.NullInt64 {
 	return sql.NullInt64{Int64: int64(v), Valid: true}
 }
 
+// nullUint stores an id; 0 and values a signed column cannot hold are
+// NULL (ids come from annotations a job can set).
 func nullUint(v uint64) sql.NullInt64 {
-	return sql.NullInt64{Int64: int64(v), Valid: v != 0}
+	return sql.NullInt64{Int64: int64(v), Valid: v != 0 && v <= math.MaxInt64}
 }
 
 func nullTime(t time.Time) sql.NullInt64 {

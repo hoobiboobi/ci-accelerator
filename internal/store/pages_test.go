@@ -133,3 +133,35 @@ func byRef(bs []*history.Build, target string, job uint64) *history.Build {
 	}
 	return nil
 }
+
+// A job that builds two images: the second build's page knows when the
+// first one ended, the first's knows of nothing before it.
+func TestBuildPagePrevInJob(t *testing.T) {
+	c := &clock{time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
+	s := open(t, t.TempDir(), c)
+	bs := fixtures(t, s.SecretKey())
+	first, second := *bs[0], *bs[1]
+	if first.Attribution.State != history.Attributed {
+		t.Skip("fixture not attributed")
+	}
+	second.Attribution = first.Attribution
+	second.Started = first.Completed.Add(5 * time.Second)
+	second.Completed = second.Started.Add(time.Minute)
+	saveJobs(t, s, []*history.Build{&first})
+	var ids []int64
+	for _, b := range []*history.Build{&first, &second} {
+		id, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	p1, err := s.BuildPage(ctx, ids[0])
+	if err != nil || !p1.PrevInJob.IsZero() {
+		t.Fatalf("first build: prev %v, %v", p1.PrevInJob, err)
+	}
+	p2, err := s.BuildPage(ctx, ids[1])
+	if err != nil || !p2.PrevInJob.Equal(first.Completed.Truncate(time.Millisecond)) {
+		t.Fatalf("second build: prev %v, want %v (%v)", p2.PrevInJob, first.Completed, err)
+	}
+}

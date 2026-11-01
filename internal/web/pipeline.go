@@ -315,8 +315,16 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, created ti
 	for _, j := range jobs {
 		byID[j.ID] = j
 	}
+	// The end of each build's previous build in the same job: the time
+	// before a later build is the job's script, not the runner's.
+	prevEnd := map[int64]time.Time{}
 	for _, b := range rows {
 		perJob[b.Job]++
+		for _, o := range rows {
+			if b.Job != 0 && o.Job == b.Job && o.ID != b.ID && o.Started.Before(b.Started) && o.Completed.After(prevEnd[b.ID]) {
+				prevEnd[b.ID] = o.Completed
+			}
+		}
 	}
 	var wjobs []wfJob
 	for i := len(rows) - 1; i >= 0; i-- {
@@ -345,7 +353,9 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, created ti
 			end = s.now()
 		}
 		st := rowStatus(rows[i])
-		wjobs = append(wjobs, wfJob{Name: name, Status: &st, Times: timesOf(j, b.Started, end), Build: b, BuildID: rows[i].ID,
+		jt := timesOf(j, b.Started, end)
+		jt.Prev = prevEnd[rows[i].ID]
+		wjobs = append(wjobs, wfJob{Name: name, Status: &st, Times: jt, Build: b, BuildID: rows[i].ID,
 			Views: d.Views, Link: fmt.Sprintf("/builds/%d", rows[i].ID), Stage: j.Stage})
 	}
 	with := jobsWithBuilds(rows)

@@ -217,6 +217,20 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s.", code(r.Step.Name), at)),
 			Detail: template.HTML(detail),
 			Hint:   "<b>Why it is unclear:</b> BuildKit's build records do not keep a fingerprint of the copied files."}
+	case history.NoCache:
+		return Verdict{Tone: "built", Kicker: "Cache switched off",
+			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: the job built without the cache.", code(r.Step.Name), at)),
+			Detail: "The job asked BuildKit not to use the cache (<code>--no-cache</code>, or <code>--opt no-cache=</code> naming this step's stage), so this step and the steps after it ran whatever the cache held."}
+	case history.RemoteSource:
+		detail := fmt.Sprintf("It builds on %s, fetched from the network without a checksum: what it fetched may have changed upstream, or this node's cache no longer had the step.", paths(r.Paths))
+		if r.Old != "" {
+			detail = fmt.Sprintf("It builds on %s, fetched from the network without a checksum: what it fetched may have changed upstream, or the cache is on node <b>%s</b>, where %s was built last time (this job ran on <b>%s</b>).",
+				paths(r.Paths), e(shortDaemon(r.Old)), thisImage(b), e(shortDaemon(r.New)))
+		}
+		return Verdict{Tone: "unknown", Kicker: "Download or node",
+			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s.", code(r.Step.Name), at)),
+			Detail: template.HTML(detail),
+			Hint:   "<b>To make it clear and cacheable:</b> pin the download (<code>ADD --checksum=sha256:…</code> for a URL, a commit instead of a branch for a git repository)."}
 	case history.NotInCache:
 		v := Verdict{Tone: "unknown", Kicker: "Not in the cache",
 			Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: it was not found in the cache.", code(r.Step.Name), at)),
@@ -243,6 +257,12 @@ func withVia(v Verdict, r history.Reason, via string) Verdict {
 	if cmp != "" {
 		source = fmt.Sprintf("GitLab's comparison of the commits of the previous build and this one (<code>%s</code>)", e(cmp))
 	}
+	if r.Kind == history.CacheElsewhere {
+		source = "GitLab's comparison of the commits"
+		if cmp != "" {
+			source += fmt.Sprintf(" (<code>%s</code>)", e(cmp))
+		}
+	}
 	switch r.Kind {
 	case history.OtherNode:
 		v.Detail = template.HTML(fmt.Sprintf("%s copies %s, and %s shows no change there. Its cache is on node <b>%s</b>, where the previous build ran; this job ran on <b>%s</b>.",
@@ -264,6 +284,20 @@ func withVia(v Verdict, r history.Reason, via string) Verdict {
 		} else {
 			v.Detail = template.HTML(fmt.Sprintf("Steps after it were rebuilt because their input changed. %s lists them.", source))
 		}
+	case history.CacheElsewhere:
+		// GitLab showed no change in the repository; files outside it are
+		// not seen by any comparison, so the console concludes nothing
+		// (the trustGitComparison value lets an installation conclude).
+		known := fmt.Sprintf("<b>Not in the repository:</b> %s shows no change in the files %s copies.", source, code(r.Step.Name))
+		if cmp == "" {
+			known = "<b>Not in the repository:</b> the previous build of this image built the same commit."
+		}
+		where := " The previous build ran on this node: its cache may have been cleaned up."
+		if r.Old != "" {
+			where = fmt.Sprintf(" The cache is on node <b>%s</b>, where the previous build ran; this job ran on <b>%s</b>.", e(shortDaemon(r.Old)), e(shortDaemon(r.New)))
+		}
+		v.Detail = template.HTML(known + where + "<br><b>Not known:</b> files outside the repository: artifacts of earlier jobs, files generated in the job, a <code>.dockerignore</code> edit. BuildKit does not record them.")
+		v.Hint = "<b>If your build contexts hold only repository files</b> (no artifacts of earlier jobs, nothing generated in the job), the console can count these as build farm: <code>reasons.trustGitComparison: true</code> in the control-plane chart's values."
 	case history.NotInCache:
 		if cmp != "" {
 			v.Detail = template.HTML(fmt.Sprintf("%s shows no change in what feeds this step. This node's cache no longer had it — cleaned up, or never built here.", source))

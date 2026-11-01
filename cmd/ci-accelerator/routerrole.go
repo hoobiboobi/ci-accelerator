@@ -110,8 +110,7 @@ func routerMain(args []string) error {
 		if !pool.AppendCertsFromPEM(ca) {
 			return fmt.Errorf("-controller-ca %s: no certificate", *caFile)
 		}
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+		tr := control.Transport(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
 		rc := &control.RouterClient{URL: *controller, HTTP: &http.Client{Transport: tr, Timeout: 30 * time.Second},
 			Token: control.FileToken(*tokenFile)}
 		rep = &router.Reporter{Send: rc.Report, Log: log}

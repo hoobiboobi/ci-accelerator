@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,7 +26,7 @@ import (
 func (s *Server) Gate(h http.Handler) http.Handler {
 	a := s.opt.Auth
 	if a == nil {
-		return h
+		return s.hostGate(h)
 	}
 	csrf := http.NewCrossOriginProtection()
 	if err := csrf.AddTrustedOrigin(a.PublicURL()); err != nil {
@@ -229,4 +230,49 @@ func (s *Server) signOut(w http.ResponseWriter, r *http.Request) {
 		e = "out-incomplete"
 	}
 	http.Redirect(w, r, "/auth/sign-in?e="+e, http.StatusSeeOther)
+}
+
+// hostGate answers only requests for the console's own names when no one
+// signs in: a page on another site can point its own host name at the
+// console's address (DNS rebinding) and read whatever the console shows,
+// job logs read with the installation's token included. Allowed: the host
+// of the console's address (PublicURL), localhost (a port-forward), an IP
+// address (probes, a node port: no other site's page has that origin) and
+// in-cluster Service names. Without a PublicURL the console cannot know
+// its name and answers every host, as before.
+func (s *Server) hostGate(h http.Handler) http.Handler {
+	if s.opt.PublicURL == "" {
+		return h
+	}
+	own := ""
+	if u, err := url.Parse(s.opt.PublicURL); err == nil {
+		own = strings.ToLower(u.Hostname())
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !allowedHost(r.Host, own) {
+			http.Error(w, "this console answers on "+s.opt.PublicURL+" (its address), localhost and in-cluster names, not on "+r.Host, http.StatusMisdirectedRequest)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// allowedHost says whether a request's Host header names the console: see
+// hostGate.
+func allowedHost(hostport, own string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	switch {
+	case host == "":
+		return false
+	case host == own, host == "localhost", strings.HasSuffix(host, ".localhost"):
+		return true
+	case net.ParseIP(host) != nil:
+		return true
+	}
+	// <service>.<namespace>.svc, with the default cluster domain or without
+	return strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster.local")
 }

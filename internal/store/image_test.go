@@ -180,3 +180,56 @@ func TestPreviousWithoutTargetBehindManyOthers(t *testing.T) {
 		t.Fatalf("next of %s: %v (err %v), want %s", api1.Ref, next, err, api2.Ref)
 	}
 }
+
+// One Dockerfile built with the same --target for several services, each
+// pushing its own repository: a build's previous build is its own
+// repository's, not the other service's latest (which named changes that
+// were not there). A build that pushed nothing still pairs by target.
+func TestPreviousSharedTargetByRepository(t *testing.T) {
+	c := &clock{time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
+	s := open(t, t.TempDir(), c)
+	bs := fixtures(t, s.SecretKey())
+	var base *history.Build
+	for _, b := range bs {
+		if b.Attribution.State == history.Attributed {
+			base = b
+		}
+	}
+	mk := func(i int, image string) *history.Build {
+		b := *base
+		b.Ref, b.Target = fmt.Sprintf("app-%d", i), "app"
+		b.Attribution.Pipeline, b.Attribution.Job = uint64(7100+i), uint64(8100+i)
+		b.Started = base.Started.Add(time.Duration(i) * time.Minute)
+		b.Completed = b.Started.Add(time.Second)
+		b.Images = nil
+		if image != "" {
+			b.Images = []string{image}
+		}
+		return &b
+	}
+	api1, worker, api2, local := mk(1, "registry.example.com/g/api:a"), mk(2, "registry.example.com/g/worker:b"),
+		mk(3, "registry.example.com/g/api:c"), mk(4, "")
+	all := []*history.Build{api1, worker, api2, local}
+	saveJobs(t, s, all)
+	for _, b := range all {
+		if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		b    *history.Build
+		want string
+	}{{api2, "app-1"}, {worker, ""}, {local, "app-3"}} {
+		prev, _, err := s.Previous(ctx, c.b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		if prev != nil {
+			got = prev.Build.Ref
+		}
+		if got != c.want {
+			t.Errorf("previous of %s (%v): %q, want %q", c.b.Ref, c.b.Images, got, c.want)
+		}
+	}
+}

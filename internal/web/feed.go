@@ -527,8 +527,14 @@ func fingerprint(b store.BuildRow, st Status) string {
 		// One group per text reasonText gives: never one build's words for
 		// the others.
 		switch {
+		case b.Reason == history.RemoteSource:
+			return "unclear:remote"
 		case b.Reason != history.CacheElsewhere:
 			return "unclear:nothing to compare"
+		case store.FromComparison(b.Via) && b.Old == "":
+			return "unclear:no repository change here"
+		case store.FromComparison(b.Via):
+			return "unclear:no repository change"
 		case b.Old == "":
 			return "unclear:here"
 		case replacedHere(b):
@@ -549,6 +555,8 @@ func fingerprint(b store.BuildRow, st Status) string {
 	switch b.Reason {
 	case history.FirstBuild:
 		return "first"
+	case history.NoCache:
+		return "no-cache"
 	case history.FilesChanged:
 		// Unverified paths are candidates, and the label does not name
 		// them: one group, or equal-looking groups would multiply.
@@ -563,6 +571,15 @@ func fingerprint(b store.BuildRow, st Status) string {
 func reasonText(b store.BuildRow, st Status) string {
 	switch st.Key {
 	case "unclear":
+		if b.Reason == history.RemoteSource {
+			return "Rebuilt behind a download without a checksum: changed upstream, or the cache, unclear"
+		}
+		if b.Reason == history.CacheElsewhere && store.FromComparison(b.Via) {
+			if b.Old == "" {
+				return "No change in the repository; an evicted cache, or files outside it"
+			}
+			return "No change in the repository; another node, or files outside it"
+		}
 		if b.Reason == history.CacheElsewhere {
 			if b.Old == "" {
 				return "Rebuilt here although nothing seems to have changed; files or an evicted cache, unclear"
@@ -598,6 +615,8 @@ func reasonText(b store.BuildRow, st Status) string {
 		return "Build argument " + b.Arg + " changed"
 	case history.BaseImageChanged:
 		return "Base image changed: " + clip(b.ReasonStep, 80)
+	case history.NoCache:
+		return "Built without the cache: the job's --no-cache"
 	}
 	return string(b.Reason)
 }
@@ -760,10 +779,14 @@ type InsightsView struct {
 	Lost        string
 	Farm        int // percent of the rebuild time the build farm caused (history.FarmKinds)
 	Unclear     int // percent of it where files or node is unclear
-	Reasons     []Reason
-	MoreReasons string
-	Running     int
-	Empty       bool
+	// NoRepoChange counts the unclear rebuilds in which GitLab's comparison
+	// showed no change in the repository; OtherNode how many of those ran
+	// on another node than the image's previous build.
+	NoRepoChange, OtherNode int
+	Reasons                 []Reason
+	MoreReasons             string
+	Running                 int
+	Empty                   bool
 }
 
 func windowOf(r *http.Request) (string, time.Duration, string) {
@@ -812,6 +835,12 @@ func (s *Server) insights(w http.ResponseWriter, r *http.Request) {
 			farm += b.BuiltTime
 		case "unclear":
 			unclear += b.BuiltTime
+			if b.Reason == history.CacheElsewhere && store.FromComparison(b.Via) {
+				v.NoRepoChange++
+				if b.Old != "" {
+					v.OtherNode++
+				}
+			}
 		}
 	}
 	v.Builds, v.Empty = len(in), len(in) == 0

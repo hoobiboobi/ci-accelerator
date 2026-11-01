@@ -310,7 +310,14 @@ func run(c config, log *slog.Logger) error {
 		})
 	}
 
-	st, err := store.Open(ctx, c.data, store.Options{Keep: time.Duration(c.keepDays) * 24 * time.Hour, KeepOutput: c.keepOutputDays})
+	// An environment variable, not a flag: a controller image older than
+	// the chart would stop on an unknown flag.
+	trustGit := os.Getenv(store.TrustGitComparisonEnv) == "true"
+	if trustGit {
+		log.Info("rebuilds with no change in the repository count as the build farm's", "env", store.TrustGitComparisonEnv)
+	}
+	st, err := store.Open(ctx, c.data, store.Options{Keep: time.Duration(c.keepDays) * 24 * time.Hour, KeepOutput: c.keepOutputDays,
+		TrustGitComparison: trustGit})
 	if err != nil {
 		return err
 	}

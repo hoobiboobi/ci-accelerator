@@ -59,10 +59,7 @@ func imageTitle(target string, repos []string) string {
 // and without one the same repository pushed first (as the store pairs a
 // build with its previous one).
 func sameImage(targetA string, imagesA []string, targetB string, imagesB []string) bool {
-	if targetA != targetB {
-		return false
-	}
-	return targetA != "" || firstRepository(imagesA) == firstRepository(imagesB)
+	return store.SameImage(targetA, imagesA, targetB, imagesB)
 }
 
 func firstRepository(images []string) string {

@@ -59,3 +59,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0053](0053-running-builds-live.md) | A running build shows live on its job's page: its job from the build's options, its progress while someone looks |
 | [0054](0054-link-previews.md) | Shared console links show a preview card: the page's title and sentence, one static image, no project behind sign-in |
 | [0055](0055-renovate.md) | Renovate, self-hosted as a GitHub App, keeps the pins current; the checksums are recomputed from upstream |
+| [0056](0056-build-farm-only-when-proven.md) | "Build farm" only when it is proven: no change in the repository is not no change in the context, witnesses need the same context folder |

@@ -805,3 +805,40 @@ func TestUnreachableDaemonIsPassedOver(t *testing.T) {
 		t.Errorf("reports %+v", *reports)
 	}
 }
+
+// A node with one daemon (the quickstart's): one failed dial must not turn
+// the next jobs away while the daemon answers again.
+func TestOneDaemonNotTurnedAwayAfterAFailedDial(t *testing.T) {
+	b := newBackend(t, "d1")
+	v := &view{daemons: []route.Daemon{{Name: "bk-1", Node: "n1", Addr: "10.9.0.1", Ready: true}},
+		jobs: map[string]Job{"127.0.0.1": {Project: projA, JobID: 99, Node: "n1"}}}
+	var mu sync.Mutex
+	fail := 1
+	r := &Router{View: v, Node: "n1", Port: "1234", IdentityWait: -1,
+		Dial: func(ctx context.Context, addr string) (net.Conn, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if fail > 0 {
+				fail--
+				return nil, errors.New("connection refused")
+			}
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", b.ln.Addr().String())
+		}}
+	ln, err := Listen(context.Background(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go r.Serve(ctx, ln, 2*time.Second)
+	if got, err := exchange(t, ln.Addr().String(), "build"); err == nil && got != "" {
+		t.Fatalf("the failed dial was answered: %q", got)
+	}
+	if got, err := exchange(t, ln.Addr().String(), "build"); err != nil || got != "d1:BUILD" {
+		t.Fatalf("the next connection: %q (%v), want the daemon again", got, err)
+	}
+	if r.skipped(time.Now())["bk-1"] {
+		t.Error("a daemon that answered is still passed over")
+	}
+}

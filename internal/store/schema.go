@@ -325,6 +325,12 @@ var toleratedColumns = []struct{ table, column, def string }{
 	// known) and has not been compared since: the comparison is done
 	// again until it succeeds (DueJobs).
 	{"builds", "compare_due", "INTEGER NOT NULL DEFAULT 0"},
+	// The job's no-cache option, whether the build reported only the steps
+	// above a cache hit, and the context folder the job named (0.3.11; an
+	// older release of the schema leaves them empty).
+	{"builds", "no_cache", "TEXT NOT NULL DEFAULT ''"},
+	{"builds", "truncated", "INTEGER NOT NULL DEFAULT 0"},
+	{"builds", "context", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // toleratedIndexes are created by the repairs when missing, on tolerated

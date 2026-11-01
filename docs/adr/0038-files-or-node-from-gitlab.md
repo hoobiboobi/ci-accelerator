@@ -34,3 +34,14 @@ A step that copies files from the build context, rebuilt on a node other than th
   pass); with sign-in, from the stored comparisons alone.
 - GitLab failing for a moment (5xx, timeouts) is no longer stored as
   "unresolved": those builds are asked about again later. A 4xx still is.
+
+## Update 2026-11-01
+
+- "If none is and GitLab's list is complete, it becomes 'build farm'" and
+  "a 'build farm' verdict can be trusted" assumed that the build context
+  is the repository's tree. It is not: CI artifacts, generated files and
+  a `.dockerignore` edit change a context with no change in the
+  repository. Since 0.3.11 such a rebuild stays unclear unless
+  `control-plane.reasons.trustGitComparison` is set
+  ([ADR-0056](0056-build-farm-only-when-proven.md)). A changed file that
+  the first rebuilt step copies still makes it "your change".

@@ -31,10 +31,11 @@ const Selector = "ci-accelerator.io/component=ci-job"
 func Job(pod *corev1.Pod, gitlabURLs []string) (store.Job, bool) {
 	a := pod.Annotations
 	url := a["job.runner.gitlab.com/url"]
-	instance := ""
+	instance, path := "", ""
 	for _, u := range gitlabURLs {
-		if strings.HasPrefix(url, strings.TrimSuffix(u, "/")+"/") {
+		if rest, ok := strings.CutPrefix(url, strings.TrimSuffix(u, "/")+"/"); ok {
 			instance = history.InstancePrefix(u)
+			path, _, _ = strings.Cut(rest, "/-/jobs/")
 			break
 		}
 	}
@@ -42,21 +43,33 @@ func Job(pod *corev1.Pod, gitlabURLs []string) (store.Job, bool) {
 	if instance == "" || id == 0 {
 		return store.Job{}, false
 	}
+	// The project's path from the job's URL, which the runner writes from
+	// GitLab's answer; the CI_PROJECT_PATH annotation is a variable the job
+	// may set, so it is only the fallback (a job could name its project
+	// after another one).
+	if path == "" || !strings.Contains(url, "/-/jobs/") {
+		path = a["ci-accelerator.io/project-path"]
+	}
+	// Times a job wrote are not trusted after the pod existed: see timestamp.
+	ref := pod.CreationTimestamp.Time
+	if ref.IsZero() {
+		ref = time.Now()
+	}
 	return store.Job{
 		Instance:          instance,
 		JobID:             id,
 		PipelineID:        number(a["ci-accelerator.io/pipeline-id"]),
 		ProjectID:         number(a["project.runner.gitlab.com/id"]),
-		ProjectPath:       a["ci-accelerator.io/project-path"],
+		ProjectPath:       path,
 		Name:              a["job.runner.gitlab.com/name"],
 		Stage:             a["ci-accelerator.io/job-stage"],
 		URL:               url,
 		Node:              pod.Spec.NodeName,
-		StartedAt:         timestamp(a["ci-accelerator.io/job-started-at"]),
+		StartedAt:         timestamp(a["ci-accelerator.io/job-started-at"], ref),
 		Ref:               a["job.runner.gitlab.com/ref"],
 		SHA:               a["job.runner.gitlab.com/sha"],
 		Source:            a["ci-accelerator.io/pipeline-source"],
-		PipelineCreatedAt: timestamp(a["ci-accelerator.io/pipeline-created-at"]),
+		PipelineCreatedAt: timestamp(a["ci-accelerator.io/pipeline-created-at"], ref),
 		CommitTitle:       a["ci-accelerator.io/commit-title"],
 		CommitAuthor:      a["ci-accelerator.io/commit-author"],
 		MergeRequestIID:   number(a["ci-accelerator.io/merge-request-iid"]),
@@ -196,12 +209,28 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 	return nil
 }
 
+// maxID bounds the ids read from annotations: GitLab's are far below it,
+// and trace ids hold 48 bits of each. A larger value is not a GitLab id
+// (CI_PIPELINE_ID is a variable a job may set) and would not fit the
+// store's signed integers.
+const maxID = 1<<48 - 1
+
 func number(s string) uint64 {
-	v, _ := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	if err != nil || v > maxID {
+		return 0
+	}
 	return v
 }
 
-func timestamp(s string) time.Time {
-	t, _ := time.Parse(time.RFC3339, strings.TrimSpace(s))
+// timestamp reads a time a job's variables carried. One more than ten
+// minutes after ref (when the pod was created) is not the job's: a job may
+// set the variable, and a row dated in the future would sort first and
+// outlive every retention run.
+func timestamp(s string, ref time.Time) time.Time {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+	if err != nil || t.After(ref.Add(10*time.Minute)) {
+		return time.Time{}
+	}
 	return t
 }

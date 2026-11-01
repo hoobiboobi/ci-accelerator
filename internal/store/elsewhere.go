@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -168,6 +169,11 @@ func (s *Store) SettleElsewhere(ctx context.Context, settled []Settled) error {
 			kind  = string(st.Kind)
 			paths sql.NullString
 		)
+		if !s.opts.TrustGitComparison && FromComparison(st.Via) && (st.Kind == history.OtherNode || st.Kind == history.NotInCache) {
+			// No change in the repository is not no change in the context:
+			// it stays unclear, with what the comparison showed (Via).
+			kind = string(history.CacheElsewhere)
+		}
 		if st.Kind == history.FilesChanged {
 			b, _ := json.Marshal(nonNil(st.Paths))
 			paths = sql.NullString{String: string(b), Valid: true}
@@ -207,4 +213,69 @@ func (s *Store) SettleElsewhere(ctx context.Context, settled []Settled) error {
 		}
 	}
 	return nil
+}
+
+// FromComparison says whether a settled reason came from GitLab's
+// comparison of the commits ("gitlab <from>..<to>"), or from the image's
+// previous build having built the same commit ("same commit <sha>").
+func FromComparison(via string) bool {
+	return strings.HasPrefix(via, "gitlab ") || strings.HasPrefix(via, "same commit")
+}
+
+// fromComparisonSQL is FromComparison over builds.reason_via.
+const fromComparisonSQL = `(reason_via LIKE 'gitlab %' OR reason_via LIKE 'same commit%')`
+
+// applyGitTrust brings the stored verdicts in line with TrustGitComparison
+// when it changed since the store was last opened (releases before 0.3.11
+// always trusted it). Off: the farm verdicts the comparison made become
+// unclear again, keeping what it showed. On: those unclear builds go back
+// to settling, which works them out from the comparisons stored (no
+// request to GitLab). The days they belong to are summed up again.
+func (s *Store) applyGitTrust(ctx context.Context) error {
+	want := "0"
+	if s.opts.TrustGitComparison {
+		want = "1"
+	}
+	var have string
+	err := s.db.QueryRowContext(ctx, "SELECT value FROM meta WHERE name = 'trust_git_comparison'").Scan(&have)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		have = "1"
+	case err != nil:
+		return err
+	}
+	if have == want {
+		return nil
+	}
+	q := `UPDATE builds SET reason_kind = 'cache-elsewhere' WHERE reason_kind IN ` + farmKinds + ` AND ` + fromComparisonSQL + ` RETURNING started_at`
+	if want == "1" {
+		q = `UPDATE builds SET reason_via = '' WHERE reason_kind = 'cache-elsewhere' AND ` + fromComparisonSQL + ` RETURNING started_at`
+	}
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return err
+	}
+	days := map[int64]bool{}
+	for rows.Next() {
+		var started int64
+		if err := rows.Scan(&started); err != nil {
+			rows.Close()
+			return err
+		}
+		days[started/dayMs] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	today := dayOf(s.opts.Now())
+	floor := dayOf(s.opts.Now().Add(-s.opts.Keep)) + 1
+	for d := range days {
+		if d < today && d >= floor {
+			if err := s.rollupDays(ctx, d, d+1); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = s.db.ExecContext(ctx, "INSERT INTO meta (name, value) VALUES ('trust_git_comparison', ?) ON CONFLICT (name) DO UPDATE SET value = excluded.value", want)
+	return err
 }

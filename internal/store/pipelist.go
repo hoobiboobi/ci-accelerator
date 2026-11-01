@@ -35,7 +35,7 @@ func searchWhere(q string) (string, []any) {
 	q = strings.TrimSpace(q)
 	like := "%" + likeEscape(q) + "%"
 	conds := []string{`commit_title LIKE ? ESCAPE '\'`, `ref LIKE ? ESCAPE '\'`, `commit_author LIKE ? ESCAPE '\'`,
-		`EXISTS (SELECT 1 FROM jobs WHERE jobs.instance = pipelines.instance AND jobs.pipeline_id = pipelines.pipeline_id
+		`EXISTS (SELECT 1 FROM jobs INDEXED BY jobs_pipeline WHERE jobs.instance = pipelines.instance AND jobs.pipeline_id = pipelines.pipeline_id
 			AND jobs.name LIKE ? ESCAPE '\' AND ` + pipelinesOwn + `)`}
 	args := []any{like, like, like, like}
 	if digits := strings.TrimPrefix(q, "#"); digits != "" {

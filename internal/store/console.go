@@ -195,7 +195,7 @@ var pipelinesOwn = "NOT " + ownedElsewhere("jobs.instance", "jobs.pipeline_id", 
 func (s *Store) PipelineJobs(ctx context.Context, instance string, pipeline uint64) ([]JobInfo, error) {
 	// GitLab queues every job of a pipeline when it creates it: jobs that
 	// never started (skipped, canceled while waiting, manual) come last.
-	return s.jobs(ctx, "WHERE instance = ? AND pipeline_id = ? AND "+pipelinesOwn+" ORDER BY started_at IS NULL, started_at, queued_at, job_id",
+	return s.jobs(ctx, "INDEXED BY jobs_pipeline WHERE instance = ? AND pipeline_id = ? AND "+pipelinesOwn+" ORDER BY started_at IS NULL, started_at, queued_at, job_id",
 		nullInstance(instance), nullUint(pipeline))
 }
 
@@ -245,7 +245,7 @@ func (p ProjectsIn) any() bool { return p.All || p.Only.ID != 0 }
 // the projects in asks for.
 func (s *Store) DaemonCounts(ctx context.Context, since time.Time, in ProjectsIn) (map[string]DaemonCount, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT d.name, d.node, count(b.id),
-			COALESCE(sum(b.reason_kind IN `+farmKinds+`), 0), COALESCE(sum(b.reason_kind = 'cache-elsewhere'), 0), max(b.started_at),
+			COALESCE(sum(b.reason_kind IN `+farmKinds+`), 0), COALESCE(sum(b.reason_kind IN `+unclearKinds+`), 0), max(b.started_at),
 			count(DISTINCT CASE WHEN b.instance IS NOT NULL AND b.project_id IS NOT NULL THEN b.instance || '/' || b.project_id END)
 		FROM daemons d LEFT JOIN builds b ON b.daemon_id = d.id AND b.started_at >= ? GROUP BY d.name`, since.UnixMilli())
 	if err != nil {
@@ -307,7 +307,7 @@ func (s *Store) projectsPerDaemon(ctx context.Context, since time.Time, in Proje
 		args = append(args, nullInstance(in.Only.Instance), nullUint(in.Only.ID))
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT d.name, b.instance, b.project_id, count(*),
-			COALESCE(sum(b.reason_kind IN `+farmKinds+`), 0), COALESCE(sum(b.reason_kind = 'cache-elsewhere'), 0), max(b.started_at)
+			COALESCE(sum(b.reason_kind IN `+farmKinds+`), 0), COALESCE(sum(b.reason_kind IN `+unclearKinds+`), 0), max(b.started_at)
 		FROM builds b INDEXED BY builds_started
 		JOIN daemons d ON d.id = b.daemon_id
 		WHERE b.started_at >= ? AND b.instance IS NOT NULL AND b.project_id IS NOT NULL`+where+`

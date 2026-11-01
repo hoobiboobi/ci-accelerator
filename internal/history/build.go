@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -98,6 +99,15 @@ type Build struct {
 	// Vertices this build executed or took from cache itself (its own
 	// digestMapping keys).
 	Vertices map[string]bool
+	// NoCache is the job's no-cache option: "" none, NoCacheAll for every
+	// stage, else the stages it named, comma-separated.
+	NoCache string
+	// Truncated: the build reported steps only above a cache hit (BuildKit
+	// does not load what is below one), so its steps are not all its steps.
+	Truncated bool
+	// Context is the build context's folder as the job named it (the CI
+	// component passes it as ContextOpt); "" when not known.
+	Context string
 
 	prov *Provenance
 	// errSrc is the Dockerfile and failed step of a failed build (which has
@@ -108,6 +118,14 @@ type Build struct {
 	// execution.
 	vertexStart map[string]time.Time
 }
+
+// NoCacheAll is Build.NoCache for a build without the cache in every stage.
+const NoCacheAll = "*"
+
+// ContextOpt is the frontend option that names the build context's folder
+// (--opt ci-accelerator.io/context=services/api). BuildKit's Dockerfile
+// frontend ignores it, so no cache key changes; the records keep it.
+const ContextOpt = "ci-accelerator.io/context"
 
 // stepKey matches a Dockerfile step's vertex name: "[api 2/3] COPY ...", or
 // "[2/3] COPY ..." in a Dockerfile whose only stage has no name.
@@ -153,6 +171,17 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 	for k, v := range rec.FrontendAttrs {
 		if name, ok := strings.CutPrefix(k, "build-arg:"); ok {
 			b.BuildArgs[name] = v
+		}
+	}
+	if v := rec.FrontendAttrs[ContextOpt]; v != "" {
+		b.Context = cleanContext(v)
+	}
+	// The Dockerfile frontend reads "no-cache" as every stage when empty,
+	// else as a list of stages.
+	if v, ok := rec.FrontendAttrs["no-cache"]; ok {
+		b.NoCache = NoCacheAll
+		if v = strings.TrimSpace(v); v != "" {
+			b.NoCache = v
 		}
 	}
 	if rec.CreatedAt != nil {
@@ -205,6 +234,7 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 		}
 	}
 	b.Warnings = warnings(progress)
+	b.Truncated = !b.complete()
 	return b, nil
 }
 
@@ -389,6 +419,13 @@ func waits(start time.Time, steps []Step) {
 }
 
 var stageKeyRE = regexp.MustCompile(`^\[(?:(.+) )?\d+/\d+\]$`)
+
+// cleanContext is a context folder as written in a job, compared as a path:
+// "./services/api/" and "services/api" are one folder.
+func cleanContext(s string) string {
+	s = path.Clean(strings.TrimSpace(s))
+	return strings.TrimPrefix(s, "./")
+}
 
 // stageOfKey is the stage of a step's "[stage n/m]" key ("" for none).
 func stageOfKey(key string) string {
