@@ -99,8 +99,11 @@ Numbers from the production setup this project is derived from:
 - **NetworkPolicies:** the daemons accept connections only from the
   routers and the controller, the routers only from the jobs namespace,
   the controller only from the web and the routers, and the web from
-  neither the jobs namespace nor the daemons. Builds cannot reach cloud
-  instance metadata.
+  neither the jobs namespace nor the daemons. Neither builds nor job
+  scripts reach cloud instance metadata (the jobs namespace has a policy of
+  its own: nothing connects into a job pod, and everything but the
+  metadata addresses stays reachable from it), and nothing reaches a
+  runner tier's pod.
 - **Metrics and traces over OTLP (optional):** the daemons push them to
   your own backend (`buildkit.otel.*`). The box stores none of it; build
   times and cache answers are in the console.
@@ -282,7 +285,8 @@ availability.
   `global.router.enabled=false`).
 - **A CNI that enforces NetworkPolicy** (Calico, Cilium, kindnet, ...).
   Without one, the daemons accept connections from any namespace and builds
-  can reach cloud instance metadata; mutual TLS still applies.
+  and job scripts can reach cloud instance metadata; mutual TLS still
+  applies.
 - **Permission to create a PriorityClass** (cluster-scoped): the daemons get
   their own, so under node pressure the kubelet evicts CI jobs before them.
   Without that permission set `buildkit.priorityClass.create=false`, or name
@@ -766,13 +770,25 @@ vulnerability: [SECURITY.md](SECURITY.md).)
     (moby/buildkit#7268);
   - heap retained after builds (moby/buildkit#7181);
   - metadata that grows outside the GC budget (moby/buildkit#7263).
+- **Known vulnerabilities in the default third-party images.** The
+  daemons' `moby/buildkit:v0.34.1` (its CNI plugins are built with Go
+  1.25.8; brotli, curl and go-archive) and the runner's
+  `gitlab-runner:alpine-v19.4.2` have HIGH and CRITICAL findings fixed
+  upstream but in no release of theirs yet. They are listed, with the date
+  each is looked at again, in `.trivyignore-third-party.yaml`; a weekly
+  scan (`make third-party-scan`) fails on a new one. Their exposure is not
+  analysed.
 - **Kernel risk on Talos 6.18:** a very large cache with high parallelism
   has led to node hangs (dying cgroups). This is under investigation, not
   solved.
 
 **The console.**
 - **Without sign-in it is open.** Every page, `/search-index`, `/events`
-  and `/api/v1` answer whoever reaches the Service `<release>-web`. The
+  and `/api/v1` answer whoever reaches the Service `<release>-web`. With
+  `global.console.url` set, it answers only requests for that host,
+  `localhost`, IP addresses and in-cluster Service names (`*.svc`), so a
+  web page elsewhere cannot point a name of its own at it (DNS rebinding);
+  without the address, every host. The
   Service is ClusterIP only: use `kubectl port-forward`, or an Ingress with its own
   authentication. "Inside the cluster" is not a trust boundary here: the
   box's own CI jobs and builds run untrusted code in it. The box therefore
@@ -805,13 +821,32 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   console starts with an empty history ([Upgrading](#upgrading)).
 - **Without sign-in and without a token** the console shows no runner wait
   times and cannot compare commits, so "files or node" stays "unclear".
+- **"Build farm" only when it is proven.** BuildKit does not record which
+  files a step read, so when a step that reads the build context is
+  rebuilt with the same definition, either its files changed or the cache
+  was elsewhere. The console says "build farm" when another job of the same
+  pipeline found the step in the cache on its node and both builds read the
+  same context folder (the CI component names it; without it, only builds
+  of the same image count), or when nothing below the step reads files at
+  all. GitLab's comparison of the commits proves a change ("your change",
+  naming the files), but no change in the repository is not no change in
+  the context: CI artifacts and files generated in the job are not in it.
+  Such a rebuild stays unclear, saying what the comparison showed;
+  `control-plane.reasons.trustGitComparison=true` counts it as the build
+  farm's when your build contexts hold repository files alone. A step that
+  fetches from the network without a checksum (`ADD https://...`, a git
+  branch) is unclear too, and a build with `--no-cache` counts as the
+  job's own choice.
 - **Images are told apart by Dockerfile target.** Builds without a target
   (the CI component's default) are named by the repository they push to,
   and each is compared with the previous build that pushed the same
   repository and has that repository's own usual time and slow mark; but
   the Images page and the daily figures put all of a project's builds
-  without a target in one row. Give each image its own target, or one
-  project per image, to see them apart there.
+  without a target in one row. Builds with one target that push different
+  repositories (one Dockerfile for several services) are compared each with
+  its own repository's previous build, but share the target's row there
+  too. Give each image its own target, or one project per image, to see
+  them apart there.
 - **A failed build's Dockerfile** comes from BuildKit's stored error: only
   the failed step's lines are marked (BuildKit records no provenance for a
   failed build), and a canceled build has none.

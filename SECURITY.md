@@ -70,6 +70,11 @@ sign-in shows everything to whoever reaches it.
   `govulncheck` on the Go code for both release targets and `trivy` on the
   built image; a weekly run repeats both against `main` and the latest
   published image, so an advisory published after a merge still turns
-  something red.
+  something red. The same weekly run scans the third-party images the
+  charts run by default (BuildKit, gitlab-runner); findings with no
+  release to move to are granted a date in `.trivyignore-third-party.yaml`
+  and come back after it.
+- A release is built only from a commit on `main` (or a release branch),
+  and its checksum list is signed like its artifacts.
 - GitHub's dependency graph, Dependabot alerts and security updates,
   CodeQL and secret push protection are on.
