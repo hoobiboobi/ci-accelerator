@@ -54,6 +54,11 @@ run_case() {
   local name=$1 want=$2; shift 2
   rm -rf "$WORK/out" && mkdir -p "$WORK/out"
   rm -f "$WORK/repo/build.env" "$WORK/repo/build-metadata.json"
+  # STALE=1: an earlier job's artifacts in the directory.
+  if [[ " $* " == *" STALE=1 "* ]]; then
+    printf '{\n  "containerimage.digest": "sha256:%064d"\n}\n' 9 >"$WORK/repo/build-metadata.json"
+    echo "IMAGE_DIGEST=sha256:old" >"$WORK/repo/build.env"
+  fi
   local env=(-e CIA_CONTEXT=. -e CIA_DOCKERFILE= -e CIA_TARGET= -e CIA_PLATFORM= -e CIA_BUILD_ARGS=
     -e CIA_SECRETS= -e "CIA_IMAGES=registry.example.com/g/p:abc123" -e CIA_PUSH=true -e CIA_REGISTRY_AUTH=job-token
     -e CIA_LABELS=true -e CIA_PROVENANCE=false -e CIA_TIMEOUT_MINUTES=60 -e CIA_BUILDCTL_ARGS=
@@ -67,6 +72,7 @@ run_case() {
   docker run --rm --entrypoint sh "${env[@]}" -v "$WORK/job.sh:/job.sh:ro" -v "$WORK/buildctl:/usr/local/bin/buildctl:ro" \
     -v "$WORK/out:/out" -v "$WORK/repo:/repo" -w /repo "$IMAGE" -c 'PATH=/usr/local/bin:$PATH; [ -z "${UNSET:-}" ] || unset $UNSET UNSET; sh /job.sh' \
     >"$WORK/out/stdout" 2>&1 || status=$?
+  cp "$WORK/repo/build.env" "$WORK/out/build.env" 2>/dev/null || true
   [ "$status" = 0 ] && got=0 || got=1
   local ok=1
   [ "$got" = "$want" ] || { ok=0; echo "    exit $status, wanted $( [ "$want" = 0 ] && echo 0 || echo non-zero)"; }
@@ -146,6 +152,11 @@ run_case "labels and provenance switches" 0 CIA_LABELS=false CIA_PROVENANCE=true
 run_case "the job's trace names the build's job while it runs" 0 TRACEPARENT=00-01abcdef0000b33b2ec9000419350c4d-0000000419350c4d-01 -- \
   'argv:^ci-accelerator\.io/traceparent=00-01abcdef0000b33b2ec9000419350c4d-0000000419350c4d-01$'
 run_case "without a trace, no option" 0 UNSET=TRACEPARENT -- 'argv:!traceparent'
+run_case "the context folder goes with the build" 0 CIA_CONTEXT=app CIA_DOCKERFILE=app/Containerfile -- 'argv:^ci-accelerator\.io/context=app$'
+run_case "push=false after an earlier job's artifacts: no digest, no image" 0 CIA_PUSH=false STALE=1 -- \
+  'build.env:^IMAGE=$' 'build.env:^IMAGE_DIGEST=$' 'build.env:!IMAGE_REF' 'stdout:!digest'
+run_case "a push names its own digest, not an earlier one" 0 STALE=1 -- \
+  'build.env:^IMAGE=registry\.example\.com/g/p:abc123$' 'build.env:IMAGE_DIGEST=sha256:0+1$'
 run_case "extra buildctl arguments, one per line" 0 "CIA_BUILDCTL_ARGS=$(printf -- '--no-cache\n')" -- 'argv:^--no-cache$'
 run_case "a failing build fails the job" 1 FAKE=fail -- 'stdout:buildctl exit status 1'
 [ -f "$WORK/repo/build.env" ] && [ -f "$WORK/repo/build-metadata.json" ] && echo "  ok    the artifact files exist after a failure" && pass=$((pass + 1)) \

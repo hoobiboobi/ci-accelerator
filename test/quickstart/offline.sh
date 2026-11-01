@@ -88,6 +88,20 @@ qs --uninstall --yes
 check "--uninstall goes by values.yaml, not by an older record" \
   eval '[ "$rc" = 0 ] && [ ! -e "$STATE" ] && [ -e /srv/other/keep ]'
 
+# A cache directory that was there before the install stays: --uninstall
+# removes only what the script made.
+mkdir -p /srv/shared && touch /srv/shared/keep
+qs --build-dir /srv/shared
+qs --uninstall --yes
+check "--uninstall leaves a cache directory that was there before" \
+  eval '[ "$rc" = 0 ] && [ -e /srv/shared/keep ] && [ ! -e "$STATE" ] && grep -q "Left /srv/shared" /tmp/out'
+# k3s that quickstart.sh did not install is not its to remove.
+mkdir -p "$STATE" /usr/local/bin && cp /stub/k3s-uninstall.sh /usr/local/bin/
+qs --uninstall --yes
+check "--uninstall refuses without its own install's marker" \
+  eval '[ "$rc" != 0 ] && grep -q "not installed by quickstart.sh" /tmp/out && [ -x /usr/local/bin/k3s-uninstall.sh ] && [ -d "$STATE" ]'
+rm -rf "$STATE" /usr/local/bin/k3s-uninstall.sh
+
 qs --build-dir /srv/cache-b
 sed -i 's/^    type: hostPath$/    type: emptyDir/' "$STATE/values.yaml"
 qs

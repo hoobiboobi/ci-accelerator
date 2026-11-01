@@ -121,6 +121,9 @@ esac
 
 if [ "$uninstall" = 1 ]; then
   [ -x /usr/local/bin/k3s-uninstall.sh ] || [ -d "$STATE" ] || die "nothing to uninstall"
+  # Only what this script installed: k3s found here otherwise is someone
+  # else's, and so is everything it runs.
+  [ -f "$STATE/.quickstart" ] || die "$STATE/.quickstart is missing: this machine's k3s was not installed by quickstart.sh, nothing removed (k3s's own /usr/local/bin/k3s-uninstall.sh removes it)"
   # The build cache may live outside $STATE (--build-dir): where the
   # daemons keep it is in values.yaml, else in the install's record (which
   # earlier releases rewrote on every run, whatever values.yaml said). Only
@@ -129,17 +132,25 @@ if [ "$uninstall" = 1 ]; then
   [ ! -f "$STATE/values.yaml" ] || cache=$(values_cache_dir "$STATE/values.yaml")
   [ -n "$cache" ] || cache=$(cat "$STATE/build-dir" 2>/dev/null || echo "$BUILD_DIR")
   case "$cache" in /?*) ;; *) cache=$STATE/buildkit ;; esac
+  # A cache directory that was there before the install (a shared disk,
+  # --build-dir /data) is not removed: only one the script made.
+  kept=""
+  case "$cache" in
+    "$STATE"/*) ;;
+    *) [ "$(cat "$STATE/build-dir-made" 2>/dev/null)" = "$cache" ] || { kept=$cache; cache=""; } ;;
+  esac
   if [ "$yes" = 0 ]; then
     [ -t 0 ] || die "not a terminal: pass --yes to remove without asking"
-    read -r -p "Remove k3s, everything running in it, $STATE and the build cache in $cache? [y/N] " a
+    read -r -p "Remove k3s, everything running in it, $STATE${cache:+ and the build cache in $cache}? [y/N] " a
     case "$a" in y|Y|yes) ;; *) exit 1 ;; esac
   fi
   if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
     say "Removing k3s"
     /usr/local/bin/k3s-uninstall.sh
   fi
-  rm -rf "$STATE" "$TOOLS" "$cache"
+  rm -rf "$STATE" "$TOOLS" ${cache:+"$cache"}
   say "Removed."
+  [ -z "$kept" ] || say "Left $kept: it was there before the install. BuildKit's cache in it can be removed by hand."
   exit 0
 fi
 
@@ -326,7 +337,12 @@ if [ -n "$gitlab_token" ]; then
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 fi
 if [ -n "$BUILD_DIR" ]; then
-  mkdir -p "$BUILD_DIR"
+  # A directory the script makes is the script's to remove on --uninstall;
+  # one that was there before is left alone then.
+  if [ ! -e "$BUILD_DIR" ]; then
+    mkdir -p "$BUILD_DIR"
+    printf '%s\n' "$BUILD_DIR" >"$STATE/build-dir-made"
+  fi
   printf '%s\n' "$BUILD_DIR" >"$STATE/build-dir"
 fi
 

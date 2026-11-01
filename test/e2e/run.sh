@@ -94,9 +94,9 @@ RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02
 # UPGRADE_FROM_DIR=<dir> takes ci-accelerator-<v>.tgz and buildkit-<v>.tgz
 # from a directory instead (a packaged tree, to rehearse the next upgrade;
 # no checksums), with UPGRADE_FROM_VALUES for what it needs on kind.
-UPGRADE_FROM=${UPGRADE_FROM:-0.3.9}
-UPGRADE_FROM_SHA256=7166bbb3c48e27a7e24ef9383f7caf39023b72434c6f70e40651611e31f195a7
-UPGRADE_FROM_BUILDKIT_SHA256=a00c6408d5dc4525f50a6f72c0b75c0d2c30136580e0e984a50377e45d5ee64e
+UPGRADE_FROM=${UPGRADE_FROM:-0.3.10}
+UPGRADE_FROM_SHA256=3ed8ac49dc5bb3cbef77c2cd1680714b64ce3d72c668bf871dc13644a6ff1d0a
+UPGRADE_FROM_BUILDKIT_SHA256=5be8da3c66b81b25e2608f01c504e2a06c0816dc295ff7cfa17352b7c5cf7e2e
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 UPGRADE_FROM_DIR=${UPGRADE_FROM_DIR:-}
 UPGRADE_FROM_VALUES=${UPGRADE_FROM_VALUES:-$ROOT/test/e2e/box-values-old.yaml}
@@ -1938,7 +1938,9 @@ box_signin() {
 # and building on that node's daemon, so jobs of one pipeline can be put on
 # different nodes.
 settle_job() {
-  local pipeline=$1 job=$2 node=$3 files=$4 ip tp
+  # ctx: the context folder the job names, as the CI component does (the
+  # files are the same here; the console may compare only builds of one).
+  local pipeline=$1 job=$2 node=$3 files=$4 ctx=${5:-.} ip tp
   ip=$(box_daemon_ip "$node")
   [ -n "$ip" ] || { fail "no daemon of the box on $node"; return 1; }
   tp=$(expected_traceparent "http://fake-gitlab.$NS.svc/" "$pipeline" "$job")
@@ -1969,6 +1971,7 @@ spec:
           export TRACEPARENT=$tp &&
           buildctl --addr tcp://$ip:1234 --tlsdir /certs --tlsservername $BOX_REL-buildkit.$BOX_NS.svc
           build --frontend dockerfile.v0 --local context=/src --local dockerfile=/src --progress plain
+          --opt ci-accelerator.io/context=$ctx
       volumeMounts:
         - {name: certs, mountPath: /certs, readOnly: true}
         - {name: src, mountPath: /src, readOnly: true}
@@ -1991,6 +1994,14 @@ settle_reason() {
 b = [x for x in json.load(sys.stdin)["builds"] if x.get("job") == int(sys.argv[1])]
 r = (b[0].get("reason") or {}) if b else {}
 print(r.get("kind", "none"), "by" if r.get("by") else "-")' "$1"
+}
+
+# settle_stored <job>: the console has a build of the job (one from the
+# cache has no reason, so settle_reason cannot tell).
+settle_stored() {
+  kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/api/v1/builds?limit=200" 2>/dev/null \
+    | python3 -c 'import json,sys
+sys.exit(0 if any(x.get("job") == int(sys.argv[1]) for x in json.load(sys.stdin)["builds"]) else 1)' "$1"
 }
 
 # box_settle: reasons that need two daemons. A rebuild on a node that never
@@ -2142,6 +2153,7 @@ box_settle_jobs() {
   next_id
   kc -n "$BOX_JOBS_NS" create configmap settle-v1 --from-literal=Dockerfile="$df" --from-literal=app="one $ID" >/dev/null
   kc -n "$BOX_JOBS_NS" create configmap settle-v2 --from-literal=Dockerfile="$df" --from-literal=app="two $ID" >/dev/null
+  kc -n "$BOX_JOBS_NS" create configmap settle-v3 --from-literal=Dockerfile="$df" --from-literal=app="three $ID" >/dev/null
   # Pipeline 9100 builds on node a; in 9200 the same files go to node b
   # (cold: the cache is on a) and then to node a (from cache).
   settle_job 9100 9101 "$a" settle-v1 || return
@@ -2157,6 +2169,15 @@ box_settle_jobs() {
     eventually 60 eval '[ "$(settle_reason 9301)" = "files-changed by" ]'
   check "the job's page says it was not the job's change" \
     eventually 30 eval 'kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)/9201" 2>/dev/null | grep -q "Not your change"'
+  # A job that found the step in its node's cache but read another context
+  # folder (one Dockerfile for several services) proves nothing.
+  settle_job 9390 9391 "$a" settle-v3 services/a || return
+  settle_job 9400 9401 "$b" settle-v3 services/b || return
+  settle_job 9400 9402 "$a" settle-v3 services/a || return
+  check "the witness is stored (control)" eventually 60 settle_stored 9402
+  sleep 5
+  check "a job of the pipeline that read another context folder settles nothing" \
+    eval 'r=$(settle_reason 9401); [ "${r% *}" = cache-elsewhere ] && [ "$r" != "cache-elsewhere by" ]'
 }
 
 # The last release, as users have it, and this tree. The daemon has its

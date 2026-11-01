@@ -277,5 +277,17 @@ at the tag v<chart version>): its integrity is the sha256 of that file, kept
 equal to it by the component's tests and the release check.
 */}}
 {{- define "ci-accelerator.componentIntegrity" -}}
-sha256-4AS9aDnJ8M6bEueDe5JBS9pxjab+kvIKnM2ORF4/uCM=
+sha256-eQ+NA/AQdoHXkdZMjOiYNnhxDqt9YNqe2znadSdrcfA=
+{{- end }}
+
+{{/*
+The CIDRs of one address family (4 or 6) of a list, as a flow sequence
+for an ipBlock's except; empty when there are none.
+*/}}
+{{- define "ci-accelerator.except" -}}
+{{- $out := list }}
+{{- range .cidrs }}
+{{- if eq (contains ":" .) (eq $.family 6) }}{{ $out = append $out . }}{{ end }}
+{{- end }}
+{{- if $out }}{{ toJson $out }}{{ end }}
 {{- end }}

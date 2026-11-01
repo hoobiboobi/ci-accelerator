@@ -188,4 +188,30 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+---
+# The runner's listener (:9252) serves its health checks and metrics
+# together with /debug/jobs/list (the URL of every job it runs) and
+# /debug/pprof, without authentication, and job pods and RUN steps can
+# reach the pod. Nothing needs it but the kubelet's probes, which a
+# NetworkPolicy does not stop; metricsFrom lets a scraper in.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $full }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.tierLabels" (dict "root" $ "name" $name) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ci-accelerator.tierSelector" (dict "root" $ "name" $name) | nindent 6 }}
+  policyTypes: [Ingress]
+  {{- with $manager.metricsFrom }}
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: 9252
+          protocol: TCP
+  {{- end }}
 {{- end }}

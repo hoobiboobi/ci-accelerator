@@ -26,4 +26,4 @@ tests:
       victoria-traces-single: { enabled: false }
     asserts:
       - hasDocuments:
-          count: 1
+          count: 2

@@ -70,6 +70,18 @@ jobsNamespace:
   create: true
   # -- Pod Security level enforced for the job pods.
   podSecurity: baseline
+  networkPolicy:
+    # -- A NetworkPolicy for every pod of the jobs namespace: no connection
+    # into a job pod, and none out of it to the addresses the daemons may
+    # not reach either (buildkit.networkPolicy.egress.blockedCIDRs: cloud
+    # instance metadata, which hands out the node's credentials). Every
+    # other destination stays open. Needs a CNI that enforces egress
+    # policies.
+    enabled: true
+    # -- More egress rules (NetworkPolicyEgressRule), for a CNI that does
+    # not apply ipBlock to in-cluster addresses the way the default rules
+    # expect.
+    extraEgress: []
 
 # The daemons: charts/buildkit, see its values for everything else.
 buildkit:
@@ -183,7 +195,8 @@ gitlab-runner:
 #         secretName: runner-cache-deploy
 #         s3: {server: s3.example.com, bucket: ci-cache, region: eu-1}
 # Optional per tier: image (default job image, alpine:3.22), manager
-# (resources, nodeSelector, tolerations of the runner pod),
+# (resources, nodeSelector, tolerations of the runner pod; metricsFrom:
+# NetworkPolicyPeers that may scrape its :9252, which nothing else may reach),
 # terminationGracePeriodSeconds (how long a rollout waits for running jobs,
 # default 3600).
 runnerTiers: {}
