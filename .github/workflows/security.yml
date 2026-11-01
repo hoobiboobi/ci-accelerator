@@ -1,6 +1,7 @@
 # Weekly: known vulnerabilities reachable from the Go code on main,
-# and in the published ci-accelerator images the charts run by default (the
-# latest, and the disk probe's while it stays on an earlier release). Pull requests run the same
+# in the published ci-accelerator images the charts run by default (the
+# latest, and the disk probe's while it stays on an earlier release), and in
+# the third-party images they run by default (BuildKit, gitlab-runner). Pull requests run the same
 # checks against their own code and image (checks.yml); this catches what
 # is published after a quiet week.
 name: security
@@ -56,3 +57,20 @@ jobs:
             make image-scan IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator:$tag" || failed=1
           done
           exit "$failed"
+
+  third-party:
+    name: trivy (default third-party images)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      # The daemons' BuildKit (privileged, every build runs in it) and the
+      # box's gitlab-runner: findings without a release to move to are
+      # granted a while in .trivyignore-third-party.yaml; a new one, or an
+      # expired grant, fails the job.
+      - name: Scan the third-party images the charts run by default
+        run: make third-party-scan

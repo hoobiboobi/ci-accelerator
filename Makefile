@@ -239,6 +239,14 @@ image-scan: $(TRIVY) ## trivy over the ci-accelerator image (IMAGE=<ref> or IMAG
 	$(TRIVY) image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
 		--ignorefile .trivyignore.yaml $(if $(IMAGE_TAR),--input $(IMAGE_TAR),$(IMAGE))
 
+.PHONY: third-party-scan
+third-party-scan: $(TRIVY) ## trivy over the third-party images the charts run by default (BuildKit, gitlab-runner): HIGH/CRITICAL with a fix fail unless .trivyignore-third-party.yaml grants a while
+	@failed=0; for img in $$(scripts/third-party-images.sh); do \
+		echo "==> $$img"; \
+		$(TRIVY) image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+			--ignorefile .trivyignore-third-party.yaml "$$img" || failed=1; \
+	done; exit $$failed
+
 .PHONY: ci-tools
 ci-tools: $(CI_HELM) $(CI_KIND) $(CI_KUBECTL) $(CI_GO) ## CI only (Linux): pinned helm (CI_HELM_VERSION), kind, kubectl and Go into .tools/bin
 	@mkdir -p $(CI_BIN)
@@ -311,7 +319,7 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 	@echo "==> images the weekly scan covers"
 	@test/default-images.sh
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/update-pins.sh test/renovate-check.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/third-party-images.sh scripts/update-pins.sh test/renovate-check.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -364,11 +372,11 @@ console-dev: ## The console on its fixtures at CONSOLE_DEV (127.0.0.1:8095), pag
 	@CONSOLE_DEV=$${CONSOLE_DEV:-127.0.0.1:8095} $(GO_RUN) test -count=1 -v -run '^TestDevServer$$' -timeout 0 ./internal/web/
 
 .PHONY: go-test
-go-test: ## Go: gofmt, go vet and the tests (the pages twice: with the controller in the process, and through its API)
+go-test: ## Go: gofmt, go vet and the tests with the race detector (the pages twice: with the controller in the process, and through its API)
 	@out=$$("$$($(GO_RUN) env GOROOT)/bin/gofmt" -l internal cmd); \
 		if [ -n "$$out" ]; then echo "not gofmt-formatted: $$out" >&2; exit 1; fi
 	@$(GO_RUN) vet ./...
-	@$(GO_RUN) test -count=1 ./...
+	@$(GO_RUN) test -race -count=1 ./...
 	@WEB_TEST_SPLIT=1 $(GO_RUN) test -count=1 ./internal/web/
 
 .PHONY: quick

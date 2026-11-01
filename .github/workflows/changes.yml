@@ -23,6 +23,9 @@ on:
       renovate:
         description: "true when Renovate's checks run (its configs, every pin found, the checksums against upstream)"
         value: ${{ jobs.changes.outputs.renovate }}
+      docs:
+        description: "true when the release gate runs on its own (documentation changed, the charts' jobs, which run it too, do not run)"
+        value: ${{ jobs.changes.outputs.docs }}
 
 permissions:
   contents: read
@@ -38,6 +41,7 @@ jobs:
       component: ${{ steps.what.outputs.component }}
       e2e_matrix: ${{ steps.what.outputs.e2e_matrix }}
       renovate: ${{ steps.what.outputs.renovate }}
+      docs: ${{ steps.what.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

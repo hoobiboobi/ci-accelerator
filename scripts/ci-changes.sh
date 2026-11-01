@@ -15,13 +15,16 @@
 #   renovate=true|false Renovate's configs validated and every pin found
 #                       (make renovate-check), the pinned checksums against
 #                       upstream (make pins-check)
+#   docs=true|false     the release gate on copies of the tree
+#                       (test/release-check.sh, which lint runs too): it
+#                       reads the README, the changelog and the docs
 #   e2e_matrix=[...]    the e2e groups to run with their scenarios, as the
 #                       JSON of the e2e workflow's matrix (empty: none)
 #
 # A change the lists below do not know, an empty list or no list at all
 # runs everything: skipping is only for what is certainly untouched.
 # Documentation alone (Markdown outside the charts and the CI component,
-# docs/, Artifact Hub metadata) runs nothing. A real GitLab
+# docs/, Artifact Hub metadata) runs only the release gate. A real GitLab
 # runs only for the component's own files.
 set -eu
 
@@ -29,6 +32,7 @@ charts=false
 go=false
 component=false
 renovate=false
+docs=false
 all=false
 any=false
 while IFS= read -r f; do
@@ -45,7 +49,8 @@ while IFS= read -r f; do
     cmd/ci-accelerator/Dockerfile | scripts/build-image.sh | .dockerignore) all=true ;;
     # .gitlab-ci.yml and ci/showcase/ are the mirror's pipeline at
     # gitlab.com: GitLab is their check.
-    docs/* | *.md | artifacthub/* | .github/ISSUE_TEMPLATE/* | .gitignore | .editorconfig | .gitlab-ci.yml | ci/showcase/*) ;;
+    docs/* | *.md) docs=true ;;
+    artifacthub/* | .github/ISSUE_TEMPLATE/* | .gitignore | .editorconfig | .gitlab-ci.yml | ci/showcase/*) ;;
     # The Go job runs the vulnerability gate, lint shellchecks it.
     scripts/vulncheck.sh) charts=true; go=true ;;
     # Renovate's configs and its checks (lint shellchecks the scripts); its
@@ -62,11 +67,14 @@ if [ "$any" = false ] || [ "$all" = true ]; then
   go=true
   renovate=true
 fi
+# lint runs the release gate: the job of its own only without it.
+[ "$charts" = false ] || docs=false
 [ "$any" = true ] || component=true
 echo "charts=$charts"
 echo "go=$go"
 echo "component=$component"
 echo "renovate=$renovate"
+echo "docs=$docs"
 # The e2e groups: scenario times from a full local run, upgrade 401 s,
 # box 350 s, existing 181 s, runner 101 s, the rest about 360 s together;
 # component (a real GitLab boots first) on its own.

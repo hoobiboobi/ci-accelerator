@@ -33,6 +33,7 @@ docker buildx build --builder "$builder" --provenance=mode=min -f "$ROOT/cmd/ci-
   --platform linux/amd64,linux/arm64 \
   --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY:-hoobiboobi/ci-accelerator}" \
   --label "org.opencontainers.image.version=${ref##*:}" \
+  --label "org.opencontainers.image.licenses=Apache-2.0" \
   --build-arg "VERSION=${ref##*:}" --build-arg "COMMIT=$COMMIT" \
   --output "$output" --metadata-file "$meta" "$ROOT" >&2
 digest=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["containerimage.digest"])' "$meta")
