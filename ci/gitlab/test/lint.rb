@@ -127,7 +127,7 @@ valid("the README's include builds one job as the component defines it", include
   expect(j["stage"], "build", "stage") ||
     expect(j["tags"], ["rc-check"], "tags") ||
     expect(j["image"], { "name" => default_image, "entrypoint" => [""] }, "image") ||
-    expect(j["interruptible"], true, "interruptible") ||
+    expect(j["interruptible"], false, "interruptible (off while moby/buildkit#7268 is open)") ||
     expect(j["script"], script, "script (the inputs must never reach it)") ||
     expect(Array(j.dig("artifacts", "reports", "dotenv")), ["build.env"], "dotenv report") ||
     expect(j.dig("artifacts", "when"), "always", "artifacts when") ||
@@ -148,6 +148,7 @@ every = {
   "images" => "$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA\n$CI_REGISTRY_IMAGE/api:latest\n",
   "push" => false, "registry-auth" => "none", "labels" => false, "provenance" => true,
   "timeout-minutes" => 5, "buildctl-args" => "--no-cache\n", "buildkit-image" => "moby/buildkit:v0.34.1",
+  "interruptible" => true,
 }
 valid("every input reaches the job as a variable, never the script", include_yaml(every, extra: "stages: [images]\n")) do |m, jobs|
   j = m["build api"] or next "no job 'build api' in #{m.keys}"
@@ -161,6 +162,7 @@ valid("every input reaches the job as a variable, never the script", include_yam
   }
   expect(j["stage"], "images", "stage") || expect(j["tags"], %w[a b], "tags") ||
     expect(j.dig("image", "name"), "moby/buildkit:v0.34.1", "image") ||
+    expect(j["interruptible"], true, "interruptible") ||
     expect(v.slice(*want.keys), want, "variables") || expect(j["script"], script, "script") ||
     expect(jobs.map { |x| [x["name"], x["tag_list"]] }, [["build api", %w[a b]]], "simulated pipeline")
 end
