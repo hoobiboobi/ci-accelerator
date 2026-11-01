@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.3.10
+version: 0.3.11
 # The box's own version (its control plane's image); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.3.10"
+appVersion: "0.3.11"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -26,7 +26,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.34.1
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.10
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.3.11
       platforms:
         - linux/amd64
         - linux/arm64
@@ -46,7 +46,13 @@ annotations:
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
     - kind: changed
-      description: The console compresses its pages, JSON and text (gzip or zstd) - a pipeline's page goes as 8.7 KB instead of 87 KB, which counts behind a tunnel, a VPN or a slow proxy
+      description: The console says "build farm" only when it is proven - no change in the repository is not no change in the build context (CI artifacts, generated files); reasons.trustGitComparison restores the old reading
+    - kind: security
+      description: NetworkPolicies for the jobs namespace (no cloud instance metadata, no ingress) and the runner tier pods; the console answers only its own host names without sign-in
+    - kind: fixed
+      description: Pipeline searches no longer hold the controller's database; the router retries the only daemon of a node; the CI component no longer exports an earlier job's digest
+    - kind: added
+      description: Signed SHA256SUMS, licences and notices in the image, a weekly scan of the default third-party images
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -54,10 +60,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.3.10
+    version: 0.3.11
     repository: file://../buildkit
   - name: control-plane
-    version: 0.3.10
+    version: 0.3.11
     repository: file://../control-plane
     condition: control-plane.enabled
   - name: gitlab-runner

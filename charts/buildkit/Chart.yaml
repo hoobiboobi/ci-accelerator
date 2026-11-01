@@ -4,7 +4,7 @@ description: >-
   Persistent BuildKit daemons as a shared build service for CI, with probe
   and garbage-collection defaults derived from a production setup.
 type: application
-version: 0.3.10
+version: 0.3.11
 # Upstream moby/buildkit release; the default image tag is derived from it.
 # renovate: datasource=docker depName=moby/buildkit
 appVersion: "v0.34.1"
