@@ -50,13 +50,18 @@ git tag -a v<v> -m v<v>
 git push origin v<v>
 ```
 
-Tags `v*` cannot be moved or deleted once pushed. The workflow:
+Tags `v*` cannot be moved or deleted once pushed. Two settings of the
+repository close what the workflow cannot: the tag ruleset also restricts
+**creating** `v*` tags (to the maintainers), and **immutable releases** are
+on, so a published release's files cannot be replaced. The workflow:
+- stops unless the tagged commit is on `main` (or a `release-0.N` branch,
+  for a patch): a tag on any other commit builds and signs nothing;
 - runs the checks again, checks that the GitLab CI component at the tag on GitHub is the file whose integrity the notes print and, when it changed since the previous release, has a real GitLab (CE at the oldest version the component claims and at the runner's minor) read it from there (`make component-gitlab-test` with `COMPONENT_URL`); a GitLab that refuses it stops the release;
 - packages the three charts (ci-accelerator, buildkit, control-plane) reproducibly (Helm 4, `SOURCE_DATE_EPOCH` = the commit's time);
 - builds the ci-accelerator image (every role: controller, web, router, disk probe) for amd64 and arm64 (`scripts/build-image.sh`, the same build the checks run on pull requests that touch the Go code or the image's recipe) and pushes it as `ghcr.io/hoobiboobi/ci-accelerator:v<v>`;
-- pushes the charts to `oci://ghcr.io/hoobiboobi/charts` and signs all four artifacts with cosign right after;
+- pushes the charts to `oci://ghcr.io/hoobiboobi/charts` and signs all four artifacts with cosign right after, and `SHA256SUMS` (the quickstart script and the chart archives) as a blob, into `SHA256SUMS.sigstore.json`;
 - pushes the Artifact Hub repository metadata (`artifacthub/*.yml`, `make artifacthub-metadata`);
-- creates the GitHub release with the changelog entry, install and verify instructions, the GitLab CI component's `include` with its integrity hash, the chart archives, `quickstart.sh`, `SHA256SUMS` and the digests.
+- creates the GitHub release with the changelog entry, install and verify instructions, the GitLab CI component's `include` with its integrity hash, the chart archives, `quickstart.sh`, `SHA256SUMS`, its signature bundle and the digests.
 
 ## 5. Verify as a user
 
@@ -76,6 +81,12 @@ for ref in charts/buildkit:<v> charts/control-plane:<v> charts/ci-accelerator:<v
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 done
 docker pull ghcr.io/hoobiboobi/ci-accelerator:v<v>
+# the release's files, through their signed checksums
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v<v>/SHA256SUMS
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v<v>/SHA256SUMS.sigstore.json
+cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity https://github.com/hoobiboobi/ci-accelerator/.github/workflows/release.yml@refs/tags/v<v> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 About half an hour later [Artifact Hub](https://artifacthub.io/packages/helm/ci-accelerator/ci-accelerator) lists the version with the Signed badge and the verified publisher mark. It checks the signature once, when it first indexes the version (every half hour), and never again for the same digest; the workflow therefore signs right after the push. A version indexed inside that window stays unsigned there for good (0.2.1 did; `cosign verify` is what counts).
@@ -93,7 +104,10 @@ Open a pull request that moves the upgrade test to the new release. In `test/e2e
 - `UPGRADE_ROLLOUT_EXPECTED` back to `0`, unless `main` already holds a change that restarts the daemons on purpose;
 - `test/e2e/box-values-old.yaml` to what the new release needs on kind (tolerations for what runs on the control-plane node, small volumes). From 0.2.x the scenario checks the refusal and the reinstall; from 0.3.0 on it upgrades in place and rolls back. `UPGRADE_FROM_DIR` and `UPGRADE_FROM_VALUES` rehearse the in-place path against a packaged tree before a release.
 
-From then on every change is tested against the version users have.
+From then on every change is tested against the version users have. Until
+it is done, `make lint` fails wherever the repository's tags are at hand
+(the checks fetch them): `test/released-images.sh` wants the newest final
+release tag to be `UPGRADE_FROM`.
 
 ## A patch from a release branch
 

@@ -9,10 +9,100 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.3.10, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the daemons, their disk probe
+  and the main runner stay as they are. A router's restart, like every
+  release's, cuts the builds it still carries after
+  `control-plane.router.drainSeconds` (300 s by default; production with
+  long builds: 1200-1800 s, with a longer `--timeout`).
+- **Rebuilds the console called "build farm" because GitLab showed no
+  change in the repository become "unclear"** when the controller starts:
+  the comparison cannot see CI artifacts or generated files in a build
+  context. Set `control-plane.reasons.trustGitComparison=true` to keep the
+  old reading if your build contexts hold repository files alone (it can
+  be switched either way later; GitLab is not asked again). Insights'
+  figures change accordingly for the last 30 days.
+- **The jobs namespace gets a NetworkPolicy** (`jobsNamespace.networkPolicy`,
+  on): nothing connects into a job pod, and job pods reach everything but
+  cloud instance metadata (`buildkit.networkPolicy.egress.blockedCIDRs`).
+  It is created also when the namespace is not the release's
+  (`jobsNamespace.create=false`). Turn it off with
+  `jobsNamespace.networkPolicy.enabled=false`.
+- **Runner tier pods get a NetworkPolicy** without ingress: their
+  `:9252` (health, metrics and an unauthenticated job list and pprof) is
+  reachable only by the kubelet's probes. A scraper of their metrics needs
+  `runnerTiers.<tier>.manager.metricsFrom`.
+- **The console answers only its own host names when it knows its address**
+  (`global.console.url`, without sign-in): `localhost`, IP addresses and
+  `*.svc` names still work. If people reach it under another name, set
+  `global.console.url` to that name.
+- **The CI component** no longer marks its job `interruptible` by default
+  (cancelling a build whose steps another build shares can fail that build,
+  moby/buildkit#7268); `interruptible: true` brings it back. It passes the
+  context folder to BuildKit (`--opt ci-accelerator.io/context`, ignored by
+  the Dockerfile frontend, no cache key changes), so its integrity hash
+  changes: update an `include` with `integrity`.
+
+### Changed
+
+- **"Build farm" only when it is proven**
+  ([ADR-0056](docs/adr/0056-build-farm-only-when-proven.md)). No change in
+  the repository is no longer taken for no change in the build context: such
+  a rebuild is unclear, and its page says what GitLab's comparison showed
+  and what it cannot see. A witness from the same pipeline counts only when
+  it read the same context folder (or is a build of the same image), and a
+  verdict the settling made itself is never a witness. Builds with
+  `--no-cache` count as the job's own choice, and a step behind a download
+  without a checksum (`ADD https://...`, a git branch) as unclear, naming the
+  source without its credentials.
+- **A change in a stage shared with another job** is named: a build that
+  received the changed stage from a parallel job said "this step changed"
+  with the same text on both sides; it now names the build argument or
+  the line that changed.
+- **One Dockerfile for several images with one target** (`--target app`
+  for each service): each build is compared with its own repository's
+  previous build, not with the other service's.
+
+### Fixed
+
+- A pipeline search or the home page held the controller's database for
+  seconds at a few hundred thousand jobs: the store now keeps the query
+  planner's statistics, and the pipeline queries name their index.
+- A build's Dockerfile line ranges are kept within the file: ranges from a
+  client's source map could make one page view walk billions of lines.
+- Ids beyond GitLab's range and times in the future from job variables
+  (`CI_PIPELINE_ID`, `CI_PIPELINE_CREATED_AT`, `CI_JOB_STARTED_AT`) are not
+  stored (a pipeline id of 2^63 made the project's Pipelines page fail),
+  and a project's name comes from the job's URL, which the job cannot set.
+- A job's second build no longer shows the first build's time as
+  "checkout and the job's script"; the waterfall shows the runner's wait
+  once per job.
+- The build page found the router's decision for a job only among its
+  first 50 connections.
+- After one failed connection to the only daemon of a node or zone, the
+  router turned jobs away for 30 s; it now tries that daemon again.
+- The web and the routers notice a controller that stopped answering
+  within about 20 s (HTTP/2 pings), not at each call's timeout.
+- After a top cache hit, a build restored from the store read every
+  changed step as new.
+- The CI component no longer exports the digest of an earlier job's
+  `build-metadata.json` when `push: false` or the build fails, and names
+  `IMAGE` only for an image it pushed.
+- `quickstart.sh --uninstall` removes only what the script installed: it
+  refuses without its install's marker, and keeps a `--build-dir` that
+  existed before the install.
 
 ### Added
 
+- The published image carries the licences and notices of every module
+  linked into it (`/licenses`) and the `org.opencontainers.image.licenses`
+  label.
+- A release is built only from a commit on `main` or a release branch, and
+  its `SHA256SUMS` is signed (`SHA256SUMS.sigstore.json`, `cosign
+  verify-blob`).
+- A weekly scan of the third-party images the charts run by default
+  (BuildKit, gitlab-runner), with dated grants for findings that have no
+  release to move to (`make third-party-scan`).
 - **Renovate keeps the pins current** (docs/dependencies.md): a weekly
   run from the repository's own workflow, as a GitHub App, opens one pull
   request per subject (the Go toolchain, BuildKit, the gitlab-runner chart
