@@ -208,7 +208,7 @@ tests:
     asserts:
       - hasDocuments: {count: 0}
 
-  - it: renders a service account, configuration, role, binding and pod per tier
+  - it: renders a service account, configuration, role, binding, pod and network policy per tier
     set:
       runnerTiers:
         deploy:
@@ -220,17 +220,51 @@ tests:
           resources: {requests: {cpu: "2", memory: 4Gi}, limits: {cpu: "4", memory: 8Gi}}
     template: runner-tiers.yaml
     asserts:
-      - hasDocuments: {count: 10}
+      - hasDocuments: {count: 12}
       - equal: {path: kind, value: Deployment}
         documentIndex: 4
       - equal: {path: metadata.name, value: box-runner-deploy}
         documentIndex: 4
       - equal: {path: kind, value: Deployment}
-        documentIndex: 9
+        documentIndex: 10
       - equal: {path: metadata.name, value: box-runner-heavy}
-        documentIndex: 9
+        documentIndex: 10
       - equal: {path: metadata.namespace, value: ci-accelerator-jobs}
         documentIndex: 2
+
+  # The runner's :9252 serves /debug/jobs/list and pprof with the health
+  # checks, without authentication: nothing may reach the manager pod but
+  # the kubelet (which a NetworkPolicy does not stop) and, when asked, a
+  # metrics scraper.
+  - it: closes a tier's runner pod to every connection, and opens its metrics only when asked
+    set:
+      runnerTiers:
+        deploy:
+          token: {existingSecret: runner-deploy}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+        metered:
+          token: {existingSecret: runner-metered}
+          resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {memory: 2Gi}}
+          manager:
+            metricsFrom:
+              - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+    template: runner-tiers.yaml
+    asserts:
+      - equal: {path: kind, value: NetworkPolicy}
+        documentIndex: 5
+      - equal:
+          path: spec
+          value:
+            podSelector:
+              matchLabels: {app.kubernetes.io/name: runner, app.kubernetes.io/instance: box, ci-accelerator.io/runner-tier: deploy}
+            policyTypes: [Ingress]
+        documentIndex: 5
+      - equal:
+          path: spec.ingress
+          value:
+            - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
+              ports: [{port: 9252, protocol: TCP}]
+        documentIndex: 11
 
   - it: gives a tier's runner its URL, token variable, job size and the box's job settings
     set:

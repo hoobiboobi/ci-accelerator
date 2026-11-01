@@ -61,6 +61,14 @@ spec:
       description: Attach a provenance attestation (SLSA, mode=min) to the image.
       type: boolean
       default: false
+    interruptible:
+      description: >-
+        Let GitLab cancel the job when a newer pipeline starts on the same
+        branch. Off by default: cancelling a build whose steps another build
+        shares can fail that other build (moby/buildkit#7268, open in
+        BuildKit v0.34.1).
+      type: boolean
+      default: false
     timeout-minutes:
       description: Stop the build after this many minutes (the connection to the daemon has no keepalive of its own).
       type: number
@@ -82,7 +90,7 @@ spec:
   image:
     name: $[[ inputs.buildkit-image ]]
     entrypoint: [""]
-  interruptible: true
+  interruptible: $[[ inputs.interruptible ]]
   variables:
     CIA_CONTEXT: $[[ inputs.context ]]
     CIA_DOCKERFILE: $[[ inputs.dockerfile ]]
@@ -113,6 +121,9 @@ spec:
       # overrides the job token and breaks the push.
       DOCKER_CONFIG=$(mktemp -d)
       export DOCKER_CONFIG
+      # Files an earlier job left (an earlier stage's build of this
+      # component, downloaded as artifacts) must not pass for this build's.
+      rm -f build-metadata.json build.env
       # The artifact files exist whatever happens, so GitLab reports no
       # missing files on a failed build.
       trap 'rm -rf "$DOCKER_CONFIG"; [ -f build-metadata.json ] || echo "{}" >build-metadata.json; [ -f build.env ] || : >build.env' EXIT
@@ -163,6 +174,11 @@ spec:
       # build's progress on the job's page while it runs. BuildKit's
       # Dockerfile frontend ignores the option; no cache key sees it.
       [ -z "${TRACEPARENT:-}" ] || set -- "$@" --opt "ci-accelerator.io/traceparent=$TRACEPARENT"
+      # The context's folder: builds of one pipeline from the same folder
+      # read the same files, which the console needs to know before one
+      # build's cache hit can explain another's rebuild. Ignored by the
+      # frontend like the trace.
+      set -- "$@" --opt "ci-accelerator.io/context=$CIA_CONTEXT"
       while IFS= read -r line; do
         line=${line#"${line%%[![:space:]]*}"}   # an indented line names its key without the indent
         [ -n "$line" ] || continue
@@ -245,7 +261,9 @@ spec:
       digest=""
       [ ! -f build-metadata.json ] || digest=$(sed -n 's/.*"containerimage.digest": *"\([^"]*\)".*/\1/p' build-metadata.json | head -n 1)
       say "Dockerfile steps: $cached from cache, $built run; context sent: ${context:-unknown}"
-      first=${names%%,*}
+      # Only an image this job pushed is named.
+      first=""
+      [ "$CIA_PUSH" != true ] || first=${names%%,*}
       repo=$first
       case "${first##*/}" in *:*) repo=${first%:*} ;; esac   # drop the tag, not a registry port
       {

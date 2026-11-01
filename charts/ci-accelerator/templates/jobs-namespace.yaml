@@ -11,3 +11,41 @@ metadata:
     pod-security.kubernetes.io/warn: {{ .Values.jobsNamespace.podSecurity }}
     pod-security.kubernetes.io/audit: {{ .Values.jobsNamespace.podSecurity }}
 {{- end }}
+{{- if dig "jobsNamespace" "networkPolicy" "enabled" true .Values.AsMap }}
+{{- $blocked := dig "buildkit" "networkPolicy" "egress" "blockedCIDRs" (list "169.254.169.254/32" "fd00:ec2::254/128") .Values.AsMap }}
+---
+# CI job pods run untrusted code on the build nodes: they reach what they
+# need (GitLab, registries, package mirrors, the router, in-cluster
+# services) but not cloud instance metadata, which hands out the node's
+# credentials, and nothing connects into them (the runner works through
+# the Kubernetes API).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-jobs
+  namespace: {{ .Values.global.jobs.namespace }}
+  labels:
+    {{- include "ci-accelerator.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress:
+    # Every pod in the cluster (kube-dns, the router, in-cluster services),
+    # whatever the CNI does with ipBlock for pod addresses.
+    - to:
+        - namespaceSelector: {}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with (include "ci-accelerator.except" (dict "family" 4 "cidrs" $blocked)) }}
+            except: {{ . }}
+            {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            {{- with (include "ci-accelerator.except" (dict "family" 6 "cidrs" $blocked)) }}
+            except: {{ . }}
+            {{- end }}
+    {{- with (dig "jobsNamespace" "networkPolicy" "extraEgress" (list) .Values.AsMap) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

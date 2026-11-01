@@ -144,6 +144,7 @@ value outside `options` stops the pipeline before it starts.
 | `registry-auth` | `job-token` | `job-token` (GitLab's registry and Dependency Proxy), `docker-auth-config` or `none` |
 | `labels` | `true` | OCI labels `source` and `revision` |
 | `provenance` | `false` | Attach a SLSA provenance attestation |
+| `interruptible` | `false` | Let GitLab cancel the job for a newer pipeline; off while moby/buildkit#7268 (a cancelled build can fail another build that shares its steps) is open |
 | `timeout-minutes` | `60` | Stop the build after this |
 | `buildctl-args` | | More `buildctl build` arguments, one per line |
 | `buildkit-image` | `moby/buildkit:v0.34.1` by digest | Image with buildctl for the job; keep it at the daemons' BuildKit release |
