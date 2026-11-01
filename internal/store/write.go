@@ -539,7 +539,10 @@ func nullInstance(h string) sql.NullInt64 {
 // nullUint stores an id; 0 and values a signed column cannot hold are
 // NULL (ids come from annotations a job can set).
 func nullUint(v uint64) sql.NullInt64 {
-	return sql.NullInt64{Int64: int64(v), Valid: v != 0 && v <= math.MaxInt64}
+	if v == 0 || v > math.MaxInt64 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(v), Valid: true}
 }
 
 func nullTime(t time.Time) sql.NullInt64 {
