@@ -134,7 +134,7 @@ func TestLinkPreviewOrigin(t *testing.T) {
 		}
 	}
 	tsp, _, _, _ := consoleWith(t, testOpts{PublicURL: "https://builds.example.com"})
-	p = getWith(t, tsp, tsp.URL+"/insights", map[string]string{"Host": "other.example.com"})
+	p = getWith(t, tsp, tsp.URL+"/insights", map[string]string{"Host": "localhost:8080"})
 	if u, _ := meta(p.body, "og:url"); u != "https://builds.example.com/insights" {
 		t.Errorf("configured address: og:url %q", u)
 	}
@@ -252,5 +252,37 @@ func TestPipelineCardShowsTheNewestBuild(t *testing.T) {
 	}
 	if strings.Contains(home.body, fmt.Sprintf(`href="/builds/%d"`, first.ID)) {
 		t.Errorf("the job's lane still links its first build %d", first.ID)
+	}
+}
+
+// Without sign-in, a console that knows its address answers only its own
+// names: a page on another site that points its host name at the console
+// (DNS rebinding) gets nothing. A console that does not know its address
+// answers every host, as before.
+func TestHostGateWithoutSignIn(t *testing.T) {
+	tsp, _, _, _ := consoleWith(t, testOpts{PublicURL: "https://builds.example.com"})
+	for host, want := range map[string]int{
+		"builds.example.com":                        200,
+		"Builds.Example.com:443":                    200,
+		"localhost:8080":                            200,
+		"127.0.0.1:8080":                            200,
+		"[::1]:8080":                                200,
+		"10.42.0.17:8080":                           200,
+		"c-web.ci-accelerator.svc":                  200,
+		"c-web.ci-accelerator.svc.cluster.local:80": 200,
+		"evil.example.com":                          http.StatusMisdirectedRequest,
+		"builds.example.com.evil.example.com":       http.StatusMisdirectedRequest,
+		"svc.evil.example.com":                      http.StatusMisdirectedRequest,
+		"a.svc.evil.example.com":                    http.StatusMisdirectedRequest,
+	} {
+		for _, path := range []string{"/", "/search-index", "/api/v1/builds"} {
+			if p := getWith(t, tsp, tsp.URL+path, map[string]string{"Host": host}); p.status != want {
+				t.Errorf("%s%s: %d, want %d", host, path, p.status, want)
+			}
+		}
+	}
+	ts, _, _ := console(t)
+	if p := getWith(t, ts, ts.URL+"/", map[string]string{"Host": "anything.example.com"}); p.status != 200 {
+		t.Errorf("without an address: %d", p.status)
 	}
 }

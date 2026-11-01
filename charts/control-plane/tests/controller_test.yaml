@@ -213,3 +213,28 @@ tests:
       - equal: { path: metadata.name, value: ci-controller }
       - equal: { path: "spec.template.spec.volumes[0].persistentVolumeClaim.claimName", value: ci-controller-data }
       - contains: { path: "spec.template.spec.containers[0].args", content: -api-allow=ci-accelerator/ci-web }
+
+  # A rebuild with no change in the repository counts as the farm's only
+  # when asked; the setting goes in the environment (an older image that
+  # knows no such flag still starts). Values from before the key existed
+  # (--reuse-values) render as off.
+  - it: passes trustGitComparison only when on, in the environment
+    set:
+      reasons.trustGitComparison: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: { name: CI_ACCELERATOR_TRUST_GIT_COMPARISON, value: "true" }
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: -trust-git-comparison
+  - it: leaves the controller's environment alone by default
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env
+  - it: renders without the reasons block (values of an earlier release)
+    set:
+      reasons: null
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env

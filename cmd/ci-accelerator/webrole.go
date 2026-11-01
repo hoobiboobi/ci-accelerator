@@ -55,8 +55,7 @@ func webMain(args []string) error {
 	if !pool.AppendCertsFromPEM(ca) {
 		return fmt.Errorf("-controller-ca %s: no certificate", *caFile)
 	}
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.TLSClientConfig = &tls.Config{RootCAs: pool, ServerName: *serverName, MinVersion: tls.VersionTLS12}
+	tr := control.Transport(&tls.Config{RootCAs: pool, ServerName: *serverName, MinVersion: tls.VersionTLS12})
 	tr.MaxIdleConnsPerHost = 64
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -86,8 +85,9 @@ func webMain(args []string) error {
 		}
 	}()
 
-	// Calls end within two minutes (a page waits less); the change stream
-	// is long-lived and has no overall timeout.
+	// Calls end within two minutes; a controller that stopped answering is
+	// found by the transport's pings sooner. The change stream is
+	// long-lived and has no overall timeout.
 	client, err := control.Dial(ctx, control.ClientOptions{URL: *controller, HTTP: &http.Client{Transport: tr, Timeout: 2 * time.Minute},
 		Stream: &http.Client{Transport: tr}, Token: control.FileToken(*tokenFile), Log: log})
 	if err != nil {

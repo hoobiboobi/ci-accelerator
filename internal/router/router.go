@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"sync"
 	"time"
@@ -96,6 +97,13 @@ func (r *Router) skipped(now time.Time) map[string]bool {
 		}
 	}
 	return out
+}
+
+// markUp forgets that a daemon was not reached: it answered now.
+func (r *Router) markUp(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.down, name)
 }
 
 func (r *Router) markDown(name string, at time.Time) {
@@ -254,13 +262,23 @@ func (r *Router) handle(ctx context.Context, c net.Conn) {
 	// A daemon that is listed but cannot be reached (its node lost, its
 	// listener closed before the endpoint went) is passed over: the job
 	// goes to the next choice rather than fail.
-	skip := r.skipped(r.now())
+	// earlier: not reached by an earlier connection lately; tried: not
+	// reached by this one.
+	earlier, tried := r.skipped(r.now()), map[string]bool{}
 	var d route.Decision
 	var rec store.Decision
 	var up net.Conn
 	for attempt := 0; ; attempt++ {
+		skip := maps.Clone(tried)
+		maps.Copy(skip, earlier)
 		var err error
 		d, rec, err = r.Decide(ip, skip)
+		if err != nil && len(earlier) > 0 {
+			// Every daemon left failed an earlier connection: try them
+			// again rather than refuse. A node with one daemon must not
+			// turn jobs away for downFor after one failed dial.
+			d, rec, err = r.Decide(ip, tried)
+		}
 		if err != nil {
 			r.Log.Warn("connection refused: no daemon", "from", ip, "err", err, "passed_over", len(skip))
 			return
@@ -269,11 +287,12 @@ func (r *Router) handle(ctx context.Context, c net.Conn) {
 		up, err = r.dial(dctx, net.JoinHostPort(d.Daemon.Addr, r.Port))
 		cancel()
 		if err == nil {
+			r.markUp(d.Daemon.Name)
 			break
 		}
 		r.Log.Warn("daemon not reached", "daemon", d.Daemon.Name, "from", ip, "err", err)
 		r.markDown(d.Daemon.Name, r.now())
-		skip[d.Daemon.Name] = true
+		tried[d.Daemon.Name] = true
 		if attempt == 2 || ctx.Err() != nil {
 			return
 		}

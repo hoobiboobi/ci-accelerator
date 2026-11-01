@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -108,6 +109,25 @@ func (s *Store) Warm(ctx context.Context, since time.Time, live []string) (Warmt
 		out[p] = append(out[p], route.Activity{Node: node, At: time.UnixMilli(at).UTC()})
 	}
 	return out, rows.Err()
+}
+
+// JobRoute is the latest router decision for a job that sent it to daemon
+// at or before t; nil when there is none.
+func (s *Store) JobRoute(ctx context.Context, instance string, job uint64, daemon string, t time.Time) (*Decision, error) {
+	d := Decision{Project: route.Project{Instance: instance}, JobID: job}
+	var project sql.NullInt64
+	var at int64
+	err := s.db.QueryRowContext(ctx, `SELECT project_id, node, daemon, reason, candidates, job_node, at
+		FROM route_decisions WHERE instance = ? AND job_id = ? AND daemon = ? AND at <= ? ORDER BY at DESC, id DESC LIMIT 1`,
+		nullInstance(instance), job, daemon, t.UnixMilli()).Scan(&project, &d.Node, &d.Daemon, &d.Reason, &d.Cands, &d.JobNode, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	d.Project.ID, d.At = uint64(project.Int64), time.UnixMilli(at).UTC()
+	return &d, nil
 }
 
 // JobRoutes is the routers' decisions for a job, oldest first.

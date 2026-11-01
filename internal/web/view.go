@@ -194,9 +194,12 @@ func dockerfile(text string, stepViews []StepView, b *history.Build) []Line {
 		return nil
 	}
 	byLine := map[int]int{}
+	// Ranges stored before they were kept within the file are bounded here
+	// too: the page walks every line of them.
+	n := strings.Count(strings.TrimRight(text, "\n"), "\n") + 1
 	for i, s := range b.Steps {
 		for _, r := range s.Lines {
-			for l := r.Start; l <= r.End; l++ {
+			for l := max(r.Start, 1); l <= min(r.End, n); l++ {
 				if _, ok := byLine[l]; !ok {
 					byLine[l] = i
 				}

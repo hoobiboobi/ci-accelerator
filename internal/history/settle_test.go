@@ -6,8 +6,10 @@ func TestSettle(t *testing.T) {
 	att := func(pipeline uint64) Attribution {
 		return Attribution{State: Attributed, Instance: "abcdef", Pipeline: pipeline, Job: pipeline*10 + 1}
 	}
+	// Every build of these cases names the same context folder (the CI
+	// component's ContextOpt); the cases at the end take it away.
 	build := func(ref, daemon string, pipeline uint64, steps ...Step) *Build {
-		return &Build{Ref: ref, Daemon: daemon, Attribution: att(pipeline), Steps: steps}
+		return &Build{Ref: ref, Daemon: daemon, Attribution: att(pipeline), Steps: steps, Context: "."}
 	}
 	common := Step{Key: "[app 1/2]", Name: "COPY common/ ./common", Identity: "id-common"}
 	cached := func(s Step) Step { s.State = Cached; return s }
@@ -72,6 +74,34 @@ func TestSettle(t *testing.T) {
 		if tc.reasons[0].Kind != CacheElsewhere {
 			t.Errorf("%s: the input was changed", tc.name)
 		}
+	}
+
+	// A witness must have read the same build context: one Dockerfile for
+	// several services with a folder each gives their steps one identity
+	// over different files.
+	ctx := func(b *Build, c string, images ...string) *Build { b.Context, b.Images = c, images; return b }
+	for _, tc := range []struct {
+		name         string
+		cur, witness *Build
+		wr           Reason
+		kind         ReasonKind
+	}{
+		{"another context folder", ctx(build("cur", "node-b", 7, built(common)), "services/a"), ctx(build("w", "node-c", 7, cached(common)), "services/b"), Reason{}, CacheElsewhere},
+		{"the same folder", ctx(build("cur", "node-b", 7, built(common)), "services/a"), ctx(build("w", "node-c", 7, cached(common)), "services/a"), Reason{}, OtherNode},
+		{"no folder, other repositories", ctx(build("cur", "node-b", 7, built(common)), "", "r.example/g/a:1"), ctx(build("w", "node-c", 7, cached(common)), "", "r.example/g/b:1"), Reason{}, CacheElsewhere},
+		{"no folder, nothing pushed", ctx(build("cur", "node-b", 7, built(common)), ""), ctx(build("w", "node-c", 7, cached(common)), ""), Reason{}, CacheElsewhere},
+		{"no folder, the same image", ctx(build("cur", "node-b", 7, built(common)), "", "r.example/g/a:1"), ctx(build("w", "node-c", 7, cached(common)), "", "r.example/g/a:2"), Reason{}, OtherNode},
+		{"files witness from another folder", ctx(build("cur", "node-b", 7, built(common)), "services/a"), ctx(build("w", "node-c", 7, built(common)), "services/b"), files, CacheElsewhere},
+	} {
+		if got := Settle([]*Build{tc.cur, tc.witness}, []Reason{elsewhere, tc.wr}); got[0].Kind != tc.kind {
+			t.Errorf("%s: %s, want %s", tc.name, got[0].Kind, tc.kind)
+		}
+	}
+	// A FilesChanged that Settle made is not a witness: two builds would
+	// settle each other and leave the queue that GitLab answers.
+	a, b := build("a", "node-b", 7, built(common)), build("b", "node-c", 7, built(common))
+	if got := Settle([]*Build{a, b}, []Reason{elsewhere, {Kind: FilesChanged, Step: built(common), Paths: []string{"common"}, By: "a"}}); got[0].Kind != CacheElsewhere {
+		t.Errorf("own FilesChanged as a witness: %s by %q", got[0].Kind, got[0].By)
 	}
 
 	// Unattributed builds belong to no pipeline.

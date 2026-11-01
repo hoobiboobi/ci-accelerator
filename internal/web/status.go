@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
@@ -42,12 +43,12 @@ func statusOf(kind history.ReasonKind, buildErr string, built int, running bool)
 	case buildErr != "":
 		return statuses["failed"]
 	}
-	switch kind {
-	case history.FirstBuild, history.StepChanged, history.NewStep, history.ArgChanged, history.BaseImageChanged, history.FilesChanged:
+	switch {
+	case slices.Contains(history.ChangeKinds(), kind):
 		return statuses["change"]
-	case history.OtherNode, history.NotInCache:
+	case slices.Contains(history.FarmKinds(), kind):
 		return statuses["farm"]
-	case history.CacheElsewhere:
+	case slices.Contains(history.UnclearKinds(), kind):
 		return statuses["unclear"]
 	}
 	if built > 0 {
@@ -100,7 +101,17 @@ func whyShort(b store.BuildRow) string {
 		return "cached on another node, not on this one"
 	case history.NotInCache:
 		return "no longer in this node's cache"
+	case history.NoCache:
+		return "built without the cache (the job's --no-cache)"
+	case history.RemoteSource:
+		return "a download without a checksum, or the cache, unclear"
 	case history.CacheElsewhere:
+		if store.FromComparison(b.Via) {
+			if b.Old == "" {
+				return "no change in git; files outside it or an evicted cache, unclear"
+			}
+			return "no change in git; files outside it or the node, unclear"
+		}
 		if b.Old == "" {
 			return "files or an evicted cache, unclear"
 		}

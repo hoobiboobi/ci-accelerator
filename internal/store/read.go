@@ -34,7 +34,8 @@ type Stored struct {
 const buildColumns = `b.id, b.generation, d.name, b.ref, b.attribution, b.instance, b.pipeline_id, b.job_id,
 	b.target, b.build_args, b.started_at, b.completed_at, b.error, b.context_bytes, b.images,
 	b.reason_kind, b.reason_step, b.reason_old, b.reason_new, b.reason_arg, b.reason_paths,
-	(SELECT ref FROM builds x WHERE x.id = b.reason_by), b.saved_ms, b.reason_via, b.warnings`
+	(SELECT ref FROM builds x WHERE x.id = b.reason_by), b.saved_ms, b.reason_via, b.warnings,
+	b.no_cache, b.truncated, b.context`
 
 // Previous returns the latest build of the same project and image (target,
 // or pushed repository without one: imageKey) that started before b,
@@ -87,6 +88,30 @@ func ImageKey(target string, images []string) string {
 	return ""
 }
 
+// SameImage says whether two builds of a project are of one image: the
+// same target and, when both pushed, the same repository first; without a
+// target, the same repository first. A target name alone is not enough:
+// one Dockerfile built with --target app for several services gives every
+// service's image the same target, and comparing a worker build with the
+// api's previous build names changes that are not there.
+func SameImage(targetA string, imagesA []string, targetB string, imagesB []string) bool {
+	if targetA != targetB {
+		return false
+	}
+	ra, rb := firstRepository(imagesA), firstRepository(imagesB)
+	if targetA == "" {
+		return ra == rb
+	}
+	return ra == "" || rb == "" || ra == rb
+}
+
+func firstRepository(images []string) string {
+	if rs := history.Repositories(images); len(rs) > 0 {
+		return rs[0]
+	}
+	return ""
+}
+
 // sameImage returns the id of the build of b's project and image (its
 // target, or imageKey without one) nearest to b before it (after: after
 // it), skipping b's own pipeline and failed builds; 0 when there is none.
@@ -123,7 +148,6 @@ func (s *Store) walkImage(ctx context.Context, instance sql.NullInt64, project a
 		return err
 	}
 	defer rows.Close()
-	key := imageKey(b)
 	for rows.Next() {
 		var (
 			id     int64
@@ -136,7 +160,7 @@ func (s *Store) walkImage(ctx context.Context, instance sql.NullInt64, project a
 		}
 		found.Target = b.Target
 		_ = json.Unmarshal([]byte(images), &found.Images)
-		if imageKey(&found) == key && !fn(id, failed) {
+		if SameImage(b.Target, b.Images, found.Target, found.Images) && !fn(id, failed) {
 			return nil
 		}
 	}
@@ -260,7 +284,8 @@ func (s *Store) scanBuilds(ctx context.Context, rows *sql.Rows) ([]*Stored, erro
 		)
 		if err := rows.Scan(&st.ID, &st.Generation, &b.Daemon, &b.Ref, &attribution, &instance, &pipeline, &job,
 			&b.Target, &args, &started, &completed, &b.Error, &b.ContextBytes, &images,
-			&kind, &rstep, &st.Reason.Old, &st.Reason.New, &st.Reason.Arg, &paths, &by, &saved, &st.Via, &warnings); err != nil {
+			&kind, &rstep, &st.Reason.Old, &st.Reason.New, &st.Reason.Arg, &paths, &by, &saved, &st.Via, &warnings,
+			&b.NoCache, &b.Truncated, &b.Context); err != nil {
 			rows.Close()
 			return nil, err
 		}

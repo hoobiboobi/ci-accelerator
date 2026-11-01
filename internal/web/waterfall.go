@@ -247,7 +247,7 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 		row := WFRow{ID: jid, Parent: parent, Depth: depth, Kind: "job", Glyph: glyph, Icon: ic, Name: j.Name, Chip: j.Status, Note: j.Note,
 			Crit: j.Crit, Open: len(jobs) == 1 || j.Live, Kids: b != nil, Link: j.Link, Text: strings.ToLower(j.Name)}
 		// Waiting for a runner, when GitLab said when it queued the job.
-		if q := j.Times.Queued; !q.IsZero() && !q.Before(start) && j.Times.Known && q.Before(j.Times.Start) {
+		if q := j.Times.Queued; !q.IsZero() && !q.Before(start) && j.Times.Known && q.Before(j.Times.Start) && j.Times.Prev.IsZero() {
 			row.Bars = append(row.Bars, WFBar{Class: "queue", L: at(q), W: width(j.Times.Start.Sub(q)), Title: "Waiting for a runner: " + duration(j.Times.Start.Sub(q))})
 		}
 		if b != nil {

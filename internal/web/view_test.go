@@ -454,6 +454,14 @@ func TestStartParts(t *testing.T) {
 	if ps := startParts(jobTimes{Start: start}, start); ps != nil {
 		t.Errorf("no time before the build: %+v", ps)
 	}
+	// A job's second build: what came before it is the job's script since
+	// its first build, not the runner and the pod again (a 10-minute first
+	// build showed as 10 minutes of "checkout and script").
+	second := build.Add(10 * time.Minute)
+	jt.Prev = second.Add(-6 * time.Second)
+	if ps := startParts(jt, second); len(ps) != 1 || !ps[0].From.Equal(jt.Prev) || ps[0].To != second || ps[0].Label != "The job's script since its previous build" {
+		t.Errorf("a later build's parts: %+v", ps)
+	}
 }
 
 func TestReadsAny(t *testing.T) {
@@ -528,5 +536,21 @@ func TestFailureText(t *testing.T) {
 	}
 	if got := failureText("failed to solve: base image not found\nmore"); got != "failed to solve: base image not found" {
 		t.Errorf("%q", got)
+	}
+}
+
+// A stored range that reaches far past the file (stored before ranges were
+// kept within it, or from a hostile client) costs the file's lines only.
+func TestDockerfileRangesBoundedByTheFile(t *testing.T) {
+	b := &history.Build{Steps: []history.Step{{Key: "[1/1]", Name: "RUN x", Lines: []history.LineRange{{Start: -3, End: 1<<31 - 1}}}}}
+	done := make(chan []Line, 1)
+	go func() { done <- dockerfile("FROM alpine\nRUN x\n", []StepView{{}}, b) }()
+	select {
+	case lines := <-done:
+		if len(lines) != 2 {
+			t.Errorf("%d lines", len(lines))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the page walked the whole range")
 	}
 }

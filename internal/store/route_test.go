@@ -426,3 +426,31 @@ func TestTimeSavedUsesExecutedRuns(t *testing.T) {
 		t.Errorf("plan: %q", plan)
 	}
 }
+
+// A job that connects many times (a build per service) keeps a decision
+// per connection: the build page takes the latest one for its daemon made
+// before it started, however many came first.
+func TestJobRouteLatestForDaemon(t *testing.T) {
+	c := &clock{time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)}
+	s := open(t, t.TempDir(), c)
+	inst := history.InstancePrefix("https://gitlab.example.com/")
+	p := route.Project{Instance: inst, ID: 7}
+	var ds []Decision
+	for i := 0; i < 60; i++ {
+		daemon := "bk-a"
+		if i >= 50 {
+			daemon = "bk-b"
+		}
+		ds = append(ds, Decision{Project: p, JobID: 900, Node: "n", Daemon: daemon, Reason: route.ZoneHash, Cands: i, At: c.t.Add(time.Duration(i) * time.Second)})
+	}
+	if err := s.SaveDecisions(ctx, ds); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.JobRoute(ctx, inst, 900, "bk-b", c.t.Add(55*time.Second))
+	if err != nil || d == nil || d.Cands != 55 || d.Daemon != "bk-b" {
+		t.Fatalf("latest bk-b decision before 55 s: %+v, %v", d, err)
+	}
+	if d, _ := s.JobRoute(ctx, inst, 900, "bk-b", c.t.Add(10*time.Second)); d != nil {
+		t.Errorf("a decision after the build's start taken: %+v", d)
+	}
+}

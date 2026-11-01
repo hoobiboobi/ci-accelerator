@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -52,6 +54,23 @@ type Usage struct {
 // LineRange is a range of Dockerfile lines, both ends included.
 type LineRange struct {
 	Start, End int
+}
+
+// maxRanges bounds the line ranges kept per step: a Dockerfile step has
+// one or a few, and the source map is the client's to send.
+const maxRanges = 16
+
+// clampLines keeps a range within a file of n lines; ok is false when no
+// line of it is in the file. The ranges come from the client, and a page
+// walks every line of every range.
+func clampLines(r LineRange, n int) (LineRange, bool) {
+	r.Start, r.End = max(r.Start, 1), min(r.End, n)
+	return r, r.Start <= r.End
+}
+
+// lineCount is how many lines a file's text has.
+func lineCount(text string) int {
+	return strings.Count(strings.TrimRight(text, "\n"), "\n") + 1
 }
 
 // ProvStep is one LLB operation of the build definition.
@@ -183,6 +202,7 @@ func ParseProvenance(data []byte, key []byte) (*Provenance, error) {
 		p.Dockerfile = string(src.Infos[dockerfile].Data)
 		p.DockerfileName = src.Infos[dockerfile].Filename
 	}
+	n := lineCount(p.Dockerfile)
 	for id, l := range src.Locations {
 		for _, loc := range l.Locations {
 			if loc.SourceIndex != dockerfile {
@@ -193,7 +213,9 @@ func ParseProvenance(data []byte, key []byte) (*Provenance, error) {
 				if end < r.Start.Line {
 					end = r.Start.Line
 				}
-				p.Ranges[id] = append(p.Ranges[id], LineRange{Start: r.Start.Line, End: end})
+				if lr, ok := clampLines(LineRange{Start: r.Start.Line, End: end}, n); ok && len(p.Ranges[id]) < maxRanges {
+					p.Ranges[id] = append(p.Ranges[id], lr)
+				}
 			}
 		}
 		if rs := p.Ranges[id]; len(rs) > 0 {
@@ -349,7 +371,8 @@ func keyedMask(key []byte, value string) string {
 type opView struct {
 	Op struct {
 		Source *struct {
-			Identifier string `json:"identifier"`
+			Identifier string            `json:"identifier"`
+			Attrs      map[string]string `json:"attrs"`
 		} `json:"source"`
 		Exec *struct {
 			Meta struct {
@@ -445,6 +468,62 @@ func (p *Provenance) walkCone(id string, seen map[string]bool, sources map[strin
 		}
 	}
 	return found
+}
+
+// remoteSources lists what a step and its ancestors fetch from the network
+// without a checksum: http(s) sources without one, git sources by branch
+// or tag (a commit id pins them). Their content can change while every
+// definition stays the same. Credentials and queries are left out.
+func (p *Provenance) remoteSources(id string) []string {
+	cone := map[string]bool{}
+	p.walkCone(id, cone, map[string]bool{})
+	set := map[string]bool{}
+	for sid := range cone {
+		src := viewOf(p.Steps[sid].Op).Op.Source
+		if src == nil {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(src.Identifier, "https://") || strings.HasPrefix(src.Identifier, "http://"):
+			if src.Attrs["http.checksum"] == "" {
+				set[safeURL(src.Identifier)] = true
+			}
+		case strings.HasPrefix(src.Identifier, "git://"):
+			ref, _, _ := strings.Cut(src.Identifier[strings.LastIndex(src.Identifier, "#")+1:], ":")
+			if !strings.Contains(src.Identifier, "#") {
+				ref = ""
+			}
+			if src.Attrs["git.checksum"] == "" && !commitID.MatchString(ref) {
+				set[safeURL(src.Identifier)] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for s := range set {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+var commitID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// safeURL is a source's address without its user information and query,
+// which may carry credentials.
+func safeURL(s string) string {
+	u, err := url.Parse(s)
+	if err != nil {
+		if i := strings.IndexAny(s, "@?"); i >= 0 {
+			return s[:i] + "…"
+		}
+		return s
+	}
+	u.User = nil
+	if u.RawQuery != "" {
+		u.RawQuery = ""
+		return u.String() + "?…"
+	}
+	return u.String()
 }
 
 // copySources lists the source paths of a step's copy actions.

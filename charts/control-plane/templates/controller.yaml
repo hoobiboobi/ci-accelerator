@@ -97,13 +97,22 @@ spec:
             - -caches=/caches/{{ .Values.caches.key }}
             - -cache-every={{ default "10m" .Values.caches.every }}
             {{- end }}
-          {{- if $caches }}
+          {{- $trustGit := dig "reasons" "trustGitComparison" false .Values.AsMap }}
+          {{- if or $caches $trustGit }}
           env:
+            {{- if $caches }}
             # Where the Secrets with the caches' keys are.
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- end }}
+            {{- if $trustGit }}
+            # In the environment, so an older image that knows no such
+            # setting still starts.
+            - name: CI_ACCELERATOR_TRUST_GIT_COMPARISON
+              value: "true"
+            {{- end }}
           {{- end }}
           ports:
             - name: api

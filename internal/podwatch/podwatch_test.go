@@ -189,3 +189,41 @@ func TestWatchSeesJobPods(t *testing.T) {
 		t.Errorf("jobs gone: %+v at %v, want the deletion asked at %v", gone, goneAt, asked)
 	}
 }
+
+// Annotations copied from CI variables are the job's to set: ids beyond
+// GitLab's range, times after the pod existed and another project's path
+// are not taken as facts.
+func TestJobDistrustsJobVariables(t *testing.T) {
+	a := jobAnnotations()
+	a["ci-accelerator.io/pipeline-id"] = "9223372036854775808"   // 2^63
+	a["ci-accelerator.io/merge-request-iid"] = "281474976710656" // 2^48
+	a["ci-accelerator.io/project-path"] = "other-group/their-app"
+	a["ci-accelerator.io/pipeline-created-at"] = "2099-01-01T00:00:00Z"
+	a["ci-accelerator.io/job-started-at"] = "2099-01-01T00:00:00Z"
+	p := pod("p", "node-1", a)
+	p.CreationTimestamp = metav1.NewTime(time.Date(2026, 10, 19, 21, 17, 0, 0, time.UTC))
+	j, ok := Job(p, []string{"https://gitlab.com/"})
+	if !ok {
+		t.Fatal("not read")
+	}
+	if j.PipelineID != 0 || j.MergeRequestIID != 0 {
+		t.Errorf("ids out of range kept: pipeline %d, MR %d", j.PipelineID, j.MergeRequestIID)
+	}
+	if j.ProjectPath != "group/app" {
+		t.Errorf("project path %q, want the job URL's group/app", j.ProjectPath)
+	}
+	if !j.PipelineCreatedAt.IsZero() || !j.StartedAt.IsZero() {
+		t.Errorf("future times kept: created %v, started %v", j.PipelineCreatedAt, j.StartedAt)
+	}
+	// Within the pod's lifetime (and a skew of minutes) they stand.
+	a["ci-accelerator.io/job-started-at"] = "2026-10-19T21:20:00Z"
+	a["ci-accelerator.io/pipeline-id"] = "281474976710655" // 2^48-1
+	if j, _ := Job(pod("p", "node-1", a), []string{"https://gitlab.com/"}); j.PipelineID != 281474976710655 || j.StartedAt.IsZero() {
+		t.Errorf("valid values dropped: pipeline %d, started %v", j.PipelineID, j.StartedAt)
+	}
+	// A GitLab under a path keeps its path out of the project's.
+	a["job.runner.gitlab.com/url"] = "https://example.com/gitlab/group/sub/app/-/jobs/17298723831"
+	if j, _ := Job(pod("p", "node-1", a), []string{"https://example.com/gitlab/"}); j.ProjectPath != "group/sub/app" {
+		t.Errorf("project path %q under a sub-path GitLab", j.ProjectPath)
+	}
+}

@@ -72,11 +72,58 @@ func TestFarmStatusFollowsFarmKinds(t *testing.T) {
 	}
 	kinds := []history.ReasonKind{"", history.FirstBuild, history.StepChanged, history.NewStep,
 		history.ArgChanged, history.BaseImageChanged, history.FilesChanged, history.NotInCache,
-		history.CacheElsewhere, history.OtherNode}
+		history.CacheElsewhere, history.OtherNode, history.NoCache, history.RemoteSource}
 	for _, k := range kinds {
 		got := statusOf(k, "", 1, false).Key == "farm"
 		if got != farm[k] {
 			t.Errorf("statusOf(%q) farm = %v, history.FarmKinds says %v", k, got, farm[k])
+		}
+	}
+	// The other two lists the same way, and every kind is in one of them.
+	for key, ks := range map[string][]history.ReasonKind{"change": history.ChangeKinds(), "unclear": history.UnclearKinds()} {
+		for _, k := range ks {
+			if got := statusOf(k, "", 1, false).Key; got != key {
+				t.Errorf("statusOf(%q) = %s, the list says %s", k, got, key)
+			}
+		}
+	}
+	for _, k := range kinds[1:] {
+		if statusOf(k, "", 1, false).Key == "cached" {
+			t.Errorf("%q is in no list of outcomes", k)
+		}
+	}
+}
+
+// A rebuild GitLab's comparison found no change for (or the same commit)
+// is unclear on every page with what was compared said, and its own group
+// in Insights: files outside the repository may have changed.
+func TestNoRepositoryChangeTexts(t *testing.T) {
+	for _, via := range []string{"gitlab 11111111..22222222", "same commit 11111111"} {
+		row := store.BuildRow{Reason: history.CacheElsewhere, Via: via, Old: "bk-a", Daemon: "bk-b", Built: 1, Completed: time.Now()}
+		if st := rowStatus(row); st.Key != "unclear" {
+			t.Fatalf("%s: status %s", via, st.Key)
+		}
+		if w := whyShort(row); !strings.Contains(w, "no change in git") || !strings.Contains(w, "node") {
+			t.Errorf("%s: whyShort %q", via, w)
+		}
+		if r := reasonText(row, rowStatus(row)); !strings.HasPrefix(r, "No change in the repository") {
+			t.Errorf("%s: reasonText %q", via, r)
+		}
+		plain := row
+		plain.Via = ""
+		if fingerprint(row, rowStatus(row)) == fingerprint(plain, rowStatus(plain)) {
+			t.Errorf("%s: shares the group of rebuilds nothing was compared for", via)
+		}
+		here := row
+		here.Old = ""
+		if w := whyShort(here); strings.Contains(w, "node") {
+			t.Errorf("%s: a same-node rebuild names a node: %q", via, w)
+		}
+		r := history.Reason{Kind: history.CacheElsewhere, Step: history.Step{Name: "COPY services/api/ ./"}, Old: "bk-a", New: "bk-b"}
+		v := withVia(Verdict{}, r, via)
+		if !strings.Contains(string(v.Detail), "Not in the repository") || !strings.Contains(string(v.Detail), "Not known") ||
+			!strings.Contains(string(v.Hint), "trustGitComparison") {
+			t.Errorf("%s: verdict %+v", via, v)
 		}
 	}
 }
@@ -305,5 +352,21 @@ func TestSettleFromStoredComparisons(t *testing.T) {
 	m2 := &memSettle{fakeSettle: fakeSettle{open: []store.Elsewhere{{ID: 8, SHA: "c", PrevSHA: "b", Paths: []string{"x"}}}}, compares: map[string][]string{}}
 	if n, _ := SettleProject(ctx, m2, nil, p, testNow, 0, 25); n != 0 || len(m2.settled) != 0 {
 		t.Errorf("settled without anything to settle with: %+v", m2.settled)
+	}
+}
+
+// The two reasons the farm never answers for, on the build page: the
+// job's --no-cache, and a download without a checksum (shown without its
+// credentials, which the history package already left out).
+func TestNoCacheAndRemoteSourceVerdicts(t *testing.T) {
+	b := &history.Build{Target: "api"}
+	step := history.Step{Name: "RUN make", Line: 9}
+	nc := verdictFor(b, history.Reason{Kind: history.NoCache, Step: step}, "", 3, 0, nil)
+	if nc.Tone != "built" || !strings.Contains(string(nc.Title), "without the cache") {
+		t.Errorf("no-cache verdict: %+v", nc)
+	}
+	rs := verdictFor(b, history.Reason{Kind: history.RemoteSource, Step: step, Paths: []string{"https://example.com/tool.tar.gz?…"}, Old: "bk-a", New: "bk-b"}, "", 3, 0, nil)
+	if rs.Tone != "unknown" || !strings.Contains(string(rs.Detail), "example.com/tool.tar.gz") || !strings.Contains(string(rs.Hint), "--checksum") {
+		t.Errorf("remote source verdict: %+v", rs)
 	}
 }

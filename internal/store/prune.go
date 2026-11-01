@@ -57,6 +57,10 @@ func (s *Store) Prune(ctx context.Context) (int64, error) {
 	if _, err := s.db.ExecContext(ctx, "PRAGMA incremental_vacuum"); err != nil {
 		errs = append(errs, err)
 	}
+	// Statistics for the planner, now that the tables changed (see Open).
+	if _, err := s.db.ExecContext(ctx, "PRAGMA optimize"); err != nil {
+		errs = append(errs, err)
+	}
 	errs = append(errs, s.pruneOutputs(now))
 	return deleted, errors.Join(errs...)
 }

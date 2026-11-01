@@ -90,6 +90,9 @@ type BuildPage struct {
 	// Persists says, by daemon name, whether the daemon's cache outlives
 	// its pod (hostPath), as its worker said.
 	Persists map[string]bool
+	// PrevInJob is when the job's build before this one ended; zero for
+	// the job's first build (a job may build several images).
+	PrevInJob time.Time
 }
 
 // StepRun is one build's run of a step identity, for its history.
@@ -272,20 +275,20 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 		if len(jobs) > 0 {
 			p.Job = &jobs[0]
 		}
+		var prev sql.NullInt64
+		if err := s.db.QueryRowContext(ctx, `SELECT MAX(completed_at) FROM builds INDEXED BY builds_job
+			WHERE instance = ? AND job_id = ? AND started_at < ? AND id != ?`,
+			nullInstance(a.Instance), nullUint(a.Job), st.Build.Started.UnixMilli(), id).Scan(&prev); err != nil {
+			return nil, err
+		}
+		p.PrevInJob = msTime(prev)
 		if p.Pipeline, err = s.PipelineInfo(ctx, a.Instance, a.Pipeline); err != nil {
 			return nil, err
 		}
-		routes, err := s.JobRoutes(ctx, a.Instance, a.Job)
-		if err != nil {
-			return nil, err
-		}
 		// The latest decision for this build's daemon made before the build
-		// started (a job may connect, and build, several times).
-		for i := range routes {
-			d := routes[i]
-			if d.Daemon == st.Build.Daemon && !d.At.After(st.Build.Started.Add(time.Second)) {
-				p.Route = &d
-			}
+		// started (a job may connect, and build, many times).
+		if p.Route, err = s.JobRoute(ctx, a.Instance, a.Job, st.Build.Daemon, st.Build.Started.Add(time.Second)); err != nil {
+			return nil, err
 		}
 	}
 	p.Nodes, p.Persists = map[string]string{}, map[string]bool{}

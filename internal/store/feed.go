@@ -72,8 +72,12 @@ type BuildQuery struct {
 	Light bool
 }
 
-// changeKinds are the reasons that are the build's own change.
-const changeKinds = `('first-build', 'step-changed', 'new-step', 'arg-changed', 'base-image-changed', 'files-changed')`
+// changeKinds and unclearKinds are history.ChangeKinds and UnclearKinds as
+// SQL lists, like farmKinds below.
+var (
+	changeKinds  = kindsSQL(history.ChangeKinds())
+	unclearKinds = kindsSQL(history.UnclearKinds())
+)
 
 // farmKinds is history.FarmKinds as a SQL list: every query that decides
 // "the farm's fault" uses this one value, so the Overview, the outcome
@@ -95,7 +99,7 @@ var outcomes = map[string]string{
 	"cached":  "(b.built = 0 AND b.error = '' AND b.reason_kind = '' AND b.completed_at IS NOT NULL)",
 	"change":  "(b.error = '' AND b.reason_kind IN " + changeKinds + " AND b.completed_at IS NOT NULL)",
 	"farm":    "(b.error = '' AND b.reason_kind IN " + farmKinds + " AND b.completed_at IS NOT NULL)",
-	"unclear": "(b.error = '' AND (b.reason_kind = 'cache-elsewhere' OR (b.reason_kind = '' AND b.built > 0)) AND b.completed_at IS NOT NULL)",
+	"unclear": "(b.error = '' AND (b.reason_kind IN " + unclearKinds + " OR (b.reason_kind = '' AND b.built > 0)) AND b.completed_at IS NOT NULL)",
 	"failed":  "(b.error != '')",
 	"rebuilt": "(b.error != '' OR (b.completed_at IS NOT NULL AND (b.built > 0 OR b.reason_kind != '')))",
 }
@@ -261,7 +265,7 @@ func (s *Store) Branches(ctx context.Context, p ProjectKey, since time.Time) ([]
 // PipelineJobCount is how many jobs of a pipeline the console saw.
 func (s *Store) PipelineJobCount(ctx context.Context, instance string, pipeline uint64) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM jobs WHERE instance = ? AND pipeline_id = ? AND "+pipelinesOwn,
+	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM jobs INDEXED BY jobs_pipeline WHERE instance = ? AND pipeline_id = ? AND "+pipelinesOwn,
 		nullInstance(instance), nullUint(pipeline)).Scan(&n)
 	return n, err
 }

@@ -32,7 +32,18 @@ type Options struct {
 	KeepDays int
 	// Now replaces the clock in tests.
 	Now func() time.Time
+	// TrustGitComparison counts a rebuild as the build farm's when GitLab's
+	// comparison of the commits shows no change in the files its first
+	// rebuilt step copies (or the image's previous build built the same
+	// commit). Off by default: the comparison sees only the repository,
+	// while a build context also holds what the job made or fetched (CI
+	// artifacts, generated files), which can change with the same commit.
+	TrustGitComparison bool
 }
+
+// TrustGitComparisonEnv switches Options.TrustGitComparison on in the
+// controller ("true").
+const TrustGitComparisonEnv = "CI_ACCELERATOR_TRUST_GIT_COMPARISON"
 
 // Store is an open store directory.
 type Store struct {
@@ -77,6 +88,19 @@ func Open(ctx context.Context, dir string, opts Options) (*Store, error) {
 		return nil, err
 	}
 	if s.key, err = s.secretKey(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	// The query planner needs table statistics: without them it reads the
+	// jobs and builds tables through the wrong index (a pipeline search took
+	// seconds at a few hundred thousand jobs). 0x10002: analyze every table
+	// that needs it, bounded, as SQLite recommends at open; Prune refreshes
+	// them.
+	if _, err := s.db.ExecContext(ctx, "PRAGMA optimize=0x10002"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.applyGitTrust(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}

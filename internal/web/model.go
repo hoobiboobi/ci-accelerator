@@ -43,10 +43,12 @@ func catOf(kind history.ReasonKind, buildErr string, built int) Cat {
 	switch kind {
 	case history.FirstBuild:
 		return cats["first"]
-	case history.StepChanged, history.NewStep:
+	case history.StepChanged, history.NewStep, history.NoCache:
 		return cats["step"]
 	case history.ArgChanged, history.BaseImageChanged:
 		return cats["step"]
+	case history.RemoteSource:
+		return cats["unknown"]
 	case history.FilesChanged:
 		return cats["files"]
 	case history.OtherNode:
@@ -176,6 +178,10 @@ type jobTimes struct {
 	Start, End time.Time
 	Total      time.Duration
 	Known      bool // the job's own times, not only its builds'
+	// Prev is when the job's previous build ended; zero for its first.
+	// The time before a later build is the job's script since then, not
+	// the runner's.
+	Prev time.Time
 	// Queued is when the job began waiting for a runner: its start less
 	// the time GitLab says it waited. (GitLab creates every job of a
 	// pipeline at once, so a job's creation also counts the earlier
@@ -200,6 +206,12 @@ type startPart struct {
 func startParts(t jobTimes, build time.Time) []startPart {
 	if !build.After(t.Start) {
 		return nil
+	}
+	if t.Prev.After(t.Start) && !t.Prev.After(build) {
+		if build.Sub(t.Prev) < 50*time.Millisecond {
+			return nil
+		}
+		return []startPart{{"runner", "The job's script since its previous build", t.Prev, build}}
 	}
 	if t.PodCreated.IsZero() || t.PodRunning.IsZero() {
 		return []startPart{{"runner", "Runner & checkout", t.Start, build}}

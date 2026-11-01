@@ -54,6 +54,7 @@ func ParseErrorSource(data []byte) (*ErrorSource, error) {
 	}
 	info := srcs[pick].Info
 	es := &ErrorSource{Name: info.Filename, Text: string(info.Data)}
+	n := lineCount(es.Text)
 	for _, s := range srcs {
 		if s.Info == nil || s.Info.Filename != info.Filename || string(s.Info.Data) != es.Text {
 			continue
@@ -66,7 +67,9 @@ func ParseErrorSource(data []byte) (*ErrorSource, error) {
 			if r.End != nil && int(r.End.Line) > lr.End {
 				lr.End = int(r.End.Line)
 			}
-			es.Ranges = append(es.Ranges, lr)
+			if lr, ok := clampLines(lr, n); ok && len(es.Ranges) < maxRanges {
+				es.Ranges = append(es.Ranges, lr)
+			}
 		}
 	}
 	es.Ranges = mergeRanges(es.Ranges)

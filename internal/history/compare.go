@@ -42,7 +42,29 @@ const (
 	OtherNode ReasonKind = "other-node"
 	// NewStep: the previous build had no step at this position.
 	NewStep ReasonKind = "new-step"
+	// NoCache: the job switched the cache off for the step's stage
+	// (buildctl --no-cache, or --opt no-cache=<stages>): every step ran
+	// whatever was cached.
+	NoCache ReasonKind = "no-cache"
+	// RemoteSource: same definition as in the previous build, but the step
+	// or an ancestor reads from the network (ADD of an http(s) URL, a git
+	// repository by branch or tag) without a checksum: what it fetched may
+	// have changed upstream, or the cache was missing — the records cannot
+	// tell. Paths names the sources (without credentials or queries).
+	RemoteSource ReasonKind = "remote-source"
 )
+
+// ChangeKinds are the reasons that are the build's own doing: its code,
+// its Dockerfile, its arguments or base image, or its job's choice to
+// build without the cache. Like FarmKinds, defined once for every page
+// and query.
+func ChangeKinds() []ReasonKind {
+	return []ReasonKind{FirstBuild, StepChanged, NewStep, ArgChanged, BaseImageChanged, FilesChanged, NoCache}
+}
+
+// UnclearKinds are the reasons that name a rebuilt step without being able
+// to say whether the build or the farm caused it.
+func UnclearKinds() []ReasonKind { return []ReasonKind{CacheElsewhere, RemoteSource} }
 
 // FarmKinds are the reasons the build farm answers for: the code did not
 // change and the cache was missing — on another node, or no longer on this
@@ -104,6 +126,9 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		if prev == nil || prev.prov == nil {
 			return Reason{Kind: FirstBuild, Step: s}, true
 		}
+		if cur.noCacheFor(s.Key) {
+			return Reason{Kind: NoCache, Step: s}, true
+		}
 		p, ok := prevSteps[s.Key]
 		if !ok || p.StepID == "" {
 			// A build whose last steps came from the cache reports only
@@ -138,6 +163,16 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		}
 		if p.Identity == s.Identity {
 			crossDaemon := prev.Daemon != "" && cur.Daemon != "" && prev.Daemon != cur.Daemon
+			if rs := cur.prov.remoteSources(s.StepID); len(rs) > 0 {
+				// Something fetched from the network feeds the step: its
+				// content can change while the definition does not, and no
+				// comparison of commits can tell.
+				r := Reason{Kind: RemoteSource, Step: s, Paths: rs}
+				if crossDaemon {
+					r.Old, r.New = prev.Daemon, cur.Daemon
+				}
+				return r, true
+			}
 			if cur.prov.contextDependent(s.StepID) {
 				// The build context feeds this step or an ancestor (the
 				// file-reading step may itself be cached or received, so
@@ -181,11 +216,82 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 			}
 			return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: s.Name}, true
 		}
-		// Same operation, different inputs: an earlier step changed but was
-		// not reported (it came from cache or another build). Name this one.
+		// Same operation, different inputs: a step it builds on changed, but
+		// came from the cache or another job (a stage shared by parallel
+		// jobs). Explain the earliest such step that the previous build did
+		// not have, as the reason of this one.
+		if r, ok := changedAncestor(prev, cur, s, prevSteps); ok {
+			return r, true
+		}
 		return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: s.Name}, true
 	}
 	return Reason{}, false
+}
+
+// changedAncestor explains a rebuilt step whose own operation did not
+// change by the earliest step it builds on (in the Dockerfile's order)
+// that the previous build did not have and that was not executed here:
+// received from another job or found in the cache. Its change is the
+// reason, s stays the step named. ok is false when no such step explains
+// it.
+func changedAncestor(prev, cur *Build, s Step, prevSteps map[string]Step) (Reason, bool) {
+	cone := map[string]bool{}
+	cur.prov.walkCone(s.StepID, cone, map[string]bool{})
+	for _, a := range cur.Steps {
+		if a.StepID == "" || a.StepID == s.StepID || !cone[a.StepID] || prev.prov.has(a.Identity) {
+			continue
+		}
+		pa, ok := prevSteps[a.Key]
+		if !ok || pa.StepID == "" {
+			continue
+		}
+		if img := cur.prov.imageSource(a.StepID); img != "" {
+			if old := prev.prov.imageSource(pa.StepID); old != "" && old != img {
+				return Reason{Kind: BaseImageChanged, Step: s, Old: old, New: img}, true
+			}
+			continue
+		}
+		if !bytes.Equal(prev.prov.Steps[pa.StepID].Op, cur.prov.Steps[a.StepID].Op) {
+			if args, o, n, ok := argChange(prev, cur, pa.StepID, a.StepID); ok {
+				if len(args) > 1 {
+					return Reason{Kind: ArgChanged, Step: s, Arg: strings.Join(args, ", ")}, true
+				}
+				if SecretArg(args[0]) {
+					o, n = Masked, Masked
+				}
+				return Reason{Kind: ArgChanged, Step: s, Arg: args[0], Old: o, New: n}, true
+			}
+			if k, o, n, ok := argInText(prev, cur, pa.Name, a.Name); ok && sameCommand(prev.prov, cur.prov, pa.StepID, a.StepID) {
+				if SecretArg(k) {
+					o, n = Masked, Masked
+				}
+				return Reason{Kind: ArgChanged, Step: s, Arg: k, Old: o, New: n}, true
+			}
+			return Reason{Kind: StepChanged, Step: s, Old: pa.Name, New: a.Name}, true
+		}
+	}
+	return Reason{}, false
+}
+
+// noCacheFor says whether the job switched the cache off for the stage of
+// the step with this key: for every stage, or for the stage named.
+func (b *Build) noCacheFor(key string) bool {
+	switch b.NoCache {
+	case "":
+		return false
+	case NoCacheAll:
+		return true
+	}
+	f := strings.Fields(stageOfKey(key)) // "[linux/amd64 build 2/3]": the name is last
+	if len(f) == 0 {
+		return false
+	}
+	for _, st := range strings.Split(b.NoCache, ",") {
+		if strings.TrimSpace(st) == f[len(f)-1] {
+			return true
+		}
+	}
+	return false
 }
 
 // argInText finds a build argument whose change alone turns one step text
@@ -312,6 +418,11 @@ func (p *Provenance) replacedImage(cur *Provenance, img string) string {
 // cached operation of its provenance that has a Dockerfile line: a build
 // whose top came from the cache reports only the steps above the hit.
 func (b *Build) complete() bool {
+	if b.Truncated {
+		// Known when the build was read; a restored build's provenance
+		// holds only its reported steps and cannot tell.
+		return false
+	}
 	if b.prov == nil {
 		return true
 	}
@@ -462,7 +573,13 @@ func Settle(builds []*Build, reasons []Reason) []Reason {
 			continue
 		}
 		for j, o := range reasons {
-			if j == i || !samePipeline(builds[i], builds[j]) || o.Step.Identity != r.Step.Identity {
+			if j == i || !samePipeline(builds[i], builds[j]) || o.Step.Identity != r.Step.Identity || !sameContext(builds[i], builds[j]) {
+				continue
+			}
+			// A FilesChanged that Settle made itself is no evidence: two
+			// builds would settle each other in turn and never be asked
+			// about again. Only GitLab's comparison makes one without By.
+			if o.Kind == FilesChanged && o.By != "" {
 				continue
 			}
 			// A sibling that rebuilt the same step although its previous
@@ -487,7 +604,7 @@ func Settle(builds []*Build, reasons []Reason) []Reason {
 // seconds earlier), not a survivor from before the change.
 func cachedOnAnotherDaemon(builds []*Build, i int, identity string) string {
 	for j, o := range builds {
-		if j == i || !samePipeline(builds[i], o) || o.Daemon == "" || o.Daemon == builds[i].Daemon {
+		if j == i || !samePipeline(builds[i], o) || o.Daemon == "" || o.Daemon == builds[i].Daemon || !sameContext(builds[i], o) {
 			continue
 		}
 		for _, s := range o.Steps {
@@ -513,6 +630,20 @@ func builtInPipelineOn(builds []*Build, cur *Build, daemon, identity string) boo
 		}
 	}
 	return false
+}
+
+// sameContext says whether two builds of a pipeline read the same build
+// context, so that a step of one identity read the same files in both: the
+// folders they named (ContextOpt), else the same image (one target, one
+// repository pushed first). Otherwise it cannot be told: a Dockerfile used
+// for several services, each with its own folder as the context, gives
+// their steps the same identities over different files.
+func sameContext(a, b *Build) bool {
+	if a.Context != "" && b.Context != "" {
+		return a.Context == b.Context
+	}
+	ra, rb := Repositories(a.Images), Repositories(b.Images)
+	return a.Target == b.Target && len(ra) > 0 && len(rb) > 0 && ra[0] == rb[0]
 }
 
 func samePipeline(a, b *Build) bool {

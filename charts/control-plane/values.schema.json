@@ -158,6 +158,13 @@
         "outputDays": { "type": "integer", "minimum": 1, "maximum": 3650 }
       }
     },
+    "reasons": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trustGitComparison": { "type": "boolean" }
+      }
+    },
     "log": {
       "type": "object",
       "additionalProperties": false,

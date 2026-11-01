@@ -153,6 +153,18 @@ retention:
   # -- Days the steps' output is kept.
   outputDays: 7
 
+# Why an image was rebuilt: "your change", "build farm", or unclear.
+reasons:
+  # -- Count a rebuild as the build farm's when GitLab's comparison of the
+  # commits shows no change in the files its first rebuilt step copies (or
+  # the image's previous build built the same commit). Off: such a rebuild
+  # is unclear, because the comparison sees only the repository while a
+  # build context also holds what the job made or downloaded (CI artifacts,
+  # generated files). Turn it on only when your build contexts hold
+  # repository files alone. Switching it either way recounts the stored
+  # builds; GitLab is not asked again.
+  trustGitComparison: false
+
 # The roles' own logs (kubectl logs): one JSON object per line. Never in
 # them: tokens, cookies, query strings, build arguments, step output.
 log:

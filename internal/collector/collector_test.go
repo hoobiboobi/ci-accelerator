@@ -293,9 +293,11 @@ func TestSettleStoredPipeline(t *testing.T) {
 	step := func(state history.StepState) history.Step {
 		return history.Step{Key: "[app 1/2]", Name: "COPY common/ ./common", Identity: "00000000000000aa", State: state, Started: t0, Completed: t0.Add(time.Second)}
 	}
-	worker := &history.Build{Ref: "worker", Daemon: "node-b", Attribution: att, Target: "worker", Started: t0, Completed: t0.Add(time.Minute), Steps: []history.Step{step(history.Built)}}
+	// Both from the repository root (the CI component names the folder):
+	// read back from the store, the folder still lets api witness worker.
+	worker := &history.Build{Ref: "worker", Daemon: "node-b", Attribution: att, Target: "worker", Context: ".", Started: t0, Completed: t0.Add(time.Minute), Steps: []history.Step{step(history.Built)}}
 	worker.Attribution.Job = 71
-	api := &history.Build{Ref: "api", Daemon: "node-c", Attribution: att, Target: "api", Started: t0, Completed: t0.Add(time.Minute), Steps: []history.Step{step(history.Cached)}}
+	api := &history.Build{Ref: "api", Daemon: "node-c", Attribution: att, Target: "api", Context: ".", Started: t0, Completed: t0.Add(time.Minute), Steps: []history.Step{step(history.Cached)}}
 	api.Attribution.Job = 72
 	elsewhere := history.Reason{Kind: history.CacheElsewhere, Step: worker.Steps[0], Old: "node-a", New: "node-b", Paths: []string{"common"}}
 	if _, err := s.SaveBuild(ctx, store.Build{Build: worker, Generation: 1, Reason: elsewhere}); err != nil {
