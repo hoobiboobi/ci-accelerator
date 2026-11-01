@@ -39,6 +39,13 @@ type backend struct {
 	got  []string
 }
 
+// requests returns what the backend received so far.
+func (b *backend) requests() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.got...)
+}
+
 func newBackend(t *testing.T, name string) *backend {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -100,7 +107,9 @@ var projA = route.Project{Instance: "0a1b2c", ID: 7}
 
 // setup starts a router over two daemons on nodes n1 and n2; the client
 // (127.0.0.1) is a job of projA on n1 unless jobs says otherwise.
-func setup(t *testing.T, v *view) (addr string, b1, b2 *backend, reports *[]store.Decision, cancel context.CancelFunc, done chan error) {
+// reports returns what the router reported so far (read under the lock
+// the router's goroutines write under).
+func setup(t *testing.T, v *view) (addr string, b1, b2 *backend, reports func() []store.Decision, cancel context.CancelFunc, done chan error) {
 	t.Helper()
 	b1, b2 = newBackend(t, "d1"), newBackend(t, "d2")
 	if v.daemons == nil {
@@ -111,9 +120,10 @@ func setup(t *testing.T, v *view) (addr string, b1, b2 *backend, reports *[]stor
 	}
 	real := map[string]string{"10.9.0.1:1234": b1.ln.Addr().String(), "10.9.0.2:1234": b2.ln.Addr().String()}
 	var mu sync.Mutex
-	reports = &[]store.Decision{}
+	var got []store.Decision
+	reports = func() []store.Decision { mu.Lock(); defer mu.Unlock(); return append([]store.Decision(nil), got...) }
 	r := &Router{View: v, Node: "n1", Port: "1234", IdentityWait: -1,
-		Report: func(d store.Decision) { mu.Lock(); *reports = append(*reports, d); mu.Unlock() },
+		Report: func(d store.Decision) { mu.Lock(); got = append(got, d); mu.Unlock() },
 		Dial: func(ctx context.Context, addr string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "tcp", real[addr])
@@ -163,13 +173,14 @@ func TestRoutesByProject(t *testing.T) {
 	if err != nil || got != "d2:BUILD" {
 		t.Fatalf("got %q (%v): the project is warm on n2", got, err)
 	}
-	if len(b1.got) != 0 || len(b2.got) != 1 {
-		t.Errorf("daemon 1 saw %v, daemon 2 %v", b1.got, b2.got)
+	if r1, r2 := b1.requests(), b2.requests(); len(r1) != 0 || len(r2) != 1 {
+		t.Errorf("daemon 1 saw %v, daemon 2 %v", r1, r2)
 	}
-	if len(*reports) != 1 {
-		t.Fatalf("reports %+v", *reports)
+	rs := reports()
+	if len(rs) != 1 {
+		t.Fatalf("reports %+v", rs)
 	}
-	d := (*reports)[0]
+	d := rs[0]
 	if d.Project != projA || d.JobID != 99 || d.Node != "n2" || d.Daemon != "bk-2" || d.Reason != route.ZoneWarm || d.JobNode != "n1" {
 		t.Errorf("decision %+v", d)
 	}
@@ -181,8 +192,8 @@ func TestUnknownPeerGoesToItsNode(t *testing.T) {
 	if got, err := exchange(t, addr, "x"); err != nil || got != "d1:X" {
 		t.Fatalf("got %q (%v)", got, err)
 	}
-	if len(*reports) != 0 {
-		t.Errorf("unknown connections reported: %+v", *reports)
+	if rs := reports(); len(rs) != 0 {
+		t.Errorf("unknown connections reported: %+v", rs)
 	}
 }
 
@@ -798,11 +809,11 @@ func TestUnreachableDaemonIsPassedOver(t *testing.T) {
 			t.Fatalf("connection %d: got %q (%v), want the other daemon", i, got, err)
 		}
 	}
-	if len(b1.got) != 2 {
-		t.Errorf("daemon 1 saw %v", b1.got)
+	if r1 := b1.requests(); len(r1) != 2 {
+		t.Errorf("daemon 1 saw %v", r1)
 	}
-	if len(*reports) != 2 || (*reports)[0].Daemon != "bk-1" {
-		t.Errorf("reports %+v", *reports)
+	if rs := reports(); len(rs) != 2 || rs[0].Daemon != "bk-1" {
+		t.Errorf("reports %+v", rs)
 	}
 }
 
