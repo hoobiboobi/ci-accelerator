@@ -8,12 +8,15 @@
 # The push uses a deploy key of the mirror project (secret
 # GITLAB_MIRROR_KEY): GitLab.com's project access tokens need a paid tier.
 # Nothing of GitHub's is stored at GitLab: the pipeline is public and read
-# without a token. Forks have no secrets and are not mirrored.
+# without a token. Forks have no secrets and are not mirrored, and neither
+# are the bots' branches: their pipeline would build an update nobody has
+# reviewed yet on the box, whose Go caches the main builds share.
 name: mirror
 
 on:
   push:
-    branches: ["**"]
+    # One filter per event: branches with exclusions, not branches-ignore.
+    branches: ["**", "!renovate/**", "!dependabot/**"]
   delete:
 
 permissions:

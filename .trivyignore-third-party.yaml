@@ -1,0 +1,108 @@
+# Findings in the third-party images the charts run by default (the
+# daemons' moby/buildkit, the box's gitlab-runner), accepted for a while:
+# there is no release with the fix to move to (BuildKit v0.34.1 is its
+# latest; its CNI plugins are built with Go 1.25.8), or the release that
+# has it waits for the two-week rule (Renovate opens it). Not analysed for
+# reachability. Each entry expires: the weekly scan (make third-party-scan)
+# fails on it again, and it is looked at again then. Listed 2026-11-01 with
+# trivy 0.75.0.
+vulnerabilities:
+  - id: CVE-2026-111943
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-17106
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-27145
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-32280
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-32281
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-32283
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-33811
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-33814
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-33818
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-39820
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-39821
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-39822
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-39836
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-42499
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-42504
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-56853
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-56858
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-56859
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-56860
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-56862
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-78667
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-97031
+    statement: "moby/buildkit v0.34.1 (buildkitd, its CNI plugins): no BuildKit release with the fix"
+    expired_at: 2026-12-01
+  - id: CVE-2026-116587
+    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    expired_at: 2026-12-01
+  - id: CVE-2026-56851
+    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    expired_at: 2026-12-01
+  - id: CVE-2026-56852
+    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    expired_at: 2026-12-01
+  - id: CVE-2026-56854
+    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    expired_at: 2026-12-01
+  - id: CVE-2026-84304
+    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    expired_at: 2026-12-01
+  - id: CVE-2026-84445
+    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    expired_at: 2026-12-01
+  - id: GHSA-hrxh-6v49-42gf
+    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    expired_at: 2026-12-01
+  - id: CVE-2026-111497
+    statement: "moby/buildkit v0.34.1 and gitlab-runner alpine-v19.4.2: no release of either with the fix yet"
+    expired_at: 2026-12-01
+  - id: CVE-2026-46600
+    statement: "moby/buildkit v0.34.1 and gitlab-runner alpine-v19.4.2: no release of either with the fix yet"
+    expired_at: 2026-12-01
+  - id: CVE-2026-78669
+    statement: "moby/buildkit v0.34.1 and gitlab-runner alpine-v19.4.2: no release of either with the fix yet"
+    expired_at: 2026-12-01
+  - id: CVE-2026-92392
+    statement: "moby/buildkit v0.34.1 and gitlab-runner alpine-v19.4.2: no release of either with the fix yet"
+    expired_at: 2026-12-01

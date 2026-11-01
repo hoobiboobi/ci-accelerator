@@ -32,6 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The branches' history, to check where the tagged commit is.
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -43,13 +45,28 @@ jobs:
         id: version
         run: echo "version=$(scripts/check-release-version.sh "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
 
+      # Only a commit of main (or of a release-0.N branch, for a patch
+      # release) is released: reviewed and checked there. A tag on any other
+      # commit, pushed by anyone who may create tags, stops here, before
+      # anything is built, pushed or signed.
+      - name: The tagged commit is on main or a release branch
+        run: |
+          for b in $(git for-each-ref --format='%(refname)' refs/remotes/origin/main 'refs/remotes/origin/release-*'); do
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$b"; then echo "$GITHUB_REF_NAME is on ${b#refs/remotes/origin/}"; exit 0; fi
+          done
+          echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is on neither main nor a release-* branch"
+          exit 1
+
       - name: Install helm, kind, kubectl
         run: |
           make ci-tools
           echo "$PWD/.tools/bin" >> "$GITHUB_PATH"
 
       # The same checks as on every push; the dependencies are vendored here.
+      # This tag is not yet a release the upgrade test could start from.
       - name: Lint, unit tests, schema validation
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: make deps lint unittest validate
 
       # The GitLab CI component as the release notes publish it: the file at
@@ -139,6 +156,10 @@ jobs:
         run: |
           printf '%s' "$GH_TOKEN" | cosign login ghcr.io -u "$GH_ACTOR" --password-stdin
           while read -r artifact; do cosign sign --yes "$artifact"; done < dist/digests
+          # The checksums of the release's files (the quickstart script and
+          # the charts' archives), signed like the artifacts: a release
+          # file replaced later no longer matches a signed list.
+          cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
 
       - name: Artifact Hub repository metadata
         env:
@@ -202,6 +223,15 @@ jobs:
               echo "    --certificate-oidc-issuer https://token.actions.githubusercontent.com"
               echo "done"
               echo '```'
+              echo
+              echo "The release's files (quickstart.sh, the charts' archives) through their signed checksums:"
+              echo
+              echo '```sh'
+              echo "cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \\"
+              echo "  --certificate-identity https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$GITHUB_REF_NAME \\"
+              echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+              echo "sha256sum -c --ignore-missing SHA256SUMS"
+              echo '```'
             fi
             # The previous release, for a compare link (gh lists releases newest first;
             # this release does not exist yet). A final release compares with the
@@ -235,6 +265,8 @@ jobs:
           } > dist/notes.md
           prerelease=()
           case "$VERSION" in *-*) prerelease=(--prerelease) ;; esac
-          gh release create "$GITHUB_REF_NAME" dist/*.tgz dist/quickstart.sh dist/SHA256SUMS \
+          files=(dist/*.tgz dist/quickstart.sh dist/SHA256SUMS)
+          [ ! -f dist/SHA256SUMS.sigstore.json ] || files+=(dist/SHA256SUMS.sigstore.json)
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --verify-tag --title "$GITHUB_REF_NAME" --notes "$(cat dist/notes.md)" \
             ${prerelease[@]+"${prerelease[@]}"}

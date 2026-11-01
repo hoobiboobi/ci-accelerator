@@ -40,6 +40,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # lint compares the newest release tag with the upgrade test's.
+          fetch-tags: true
 
       # Pinned tools and chart archives (sha256-checked on download).
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -60,7 +62,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # The race detector makes the tests several times slower.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -193,9 +196,25 @@ jobs:
 
   # One result for branch protection, whatever ran: red when a job failed
   # or when it could not be told what to run.
+  # The release gate reads the README, the changelog and the docs: a change
+  # to them alone must keep it passing (lint runs it with the charts).
+  docs:
+    name: release gate
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The release gate on copies of the tree
+        run: test/release-check.sh
+
   passed:
     name: checks passed
-    needs: [changes, checks, go, image, component, component-gitlab, ui, renovate]
+    needs: [changes, checks, go, image, component, component-gitlab, ui, renovate, docs]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
