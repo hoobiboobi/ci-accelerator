@@ -87,8 +87,8 @@ VT_CHART_SHA256=59471db9c6e053fc740b1ad0eb6365dc872bba3f0c9e06f5780ddde9655c9e88
 # The official gitlab-runner chart the integration fragment is written for.
 RUNNER_REPO=https://charts.gitlab.io
 # renovate: datasource=helm depName=gitlab-runner registryUrl=https://charts.gitlab.io
-RUNNER_CHART_VERSION=0.93.0
-RUNNER_CHART_SHA256=a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
+RUNNER_CHART_VERSION=0.94.0
+RUNNER_CHART_SHA256=036ae85f70db3ab552b853041968f8bb37c4a063a916be065c5d9b54c37b5fb6
 # The last published release, which the upgrade scenario installs from the
 # registry and upgrades to this tree. Bump both with every release.
 # UPGRADE_FROM_DIR=<dir> takes ci-accelerator-<v>.tgz and buildkit-<v>.tgz
