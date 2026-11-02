@@ -17,10 +17,9 @@
   gitlabci: { enabled: false },
   "gitlabci-include": { enabled: false },
   "helm-values": { enabled: false },
-  timezone: "Europe/Nicosia",
-  // Branches are made on Monday mornings (the workflow runs then); PRs
-  // already open are rebased whenever main moves, on any day.
-  schedule: ["* 0-9 * * 1"],
+  // No schedule of its own: the workflow's cron decides when Renovate runs.
+  // A second window here missed a whole week when GitHub started the
+  // Monday run 7 hours late (2026-11-02).
   // A version is taken only once it is two weeks old (a security patch of
   // a pinned line is taken by hand at once: the changelog says so).
   minimumReleaseAge: "14 days",

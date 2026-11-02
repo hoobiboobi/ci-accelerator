@@ -7,13 +7,13 @@
 # pinned (image by digest) and updates these pins through its own rules.
 #
 # By hand: a dry run (no branch, the log says what it would do), or a run
-# outside the Monday window.
+# for real at any time.
 name: renovate
 
 on:
   schedule:
-    # Monday 03:00 UTC: inside the window renovate.json5 allows (Monday
-    # mornings, Europe/Nicosia), whatever the daylight saving.
+    # Monday 03:00 UTC (GitHub may start it hours later; renovate.json5
+    # has no window of its own to miss).
     - cron: "0 3 * * 1"
   workflow_dispatch:
     inputs:
@@ -22,10 +22,6 @@ on:
         type: choice
         options: ["none", "extract", "lookup", "full"]
         default: "none"
-      ignore-schedule:
-        description: "Open branches now, outside the Monday window"
-        type: boolean
-        default: false
       log-level:
         description: "Renovate's log level"
         type: choice
@@ -72,10 +68,8 @@ jobs:
           # Not RENOVATE_*: Renovate reads those as its own options.
           additional-env-list: |
             RUN_DRY_RUN
-            RUN_IGNORE_SCHEDULE
           # renovate: datasource=docker depName=ghcr.io/renovatebot/renovate
           renovate-image: ghcr.io/renovatebot/renovate:44.166.0@sha256:510b885a90cd70437816c5c2da1d0c3beff513d3979497b2db1d37c84adfbc2b
         env:
           LOG_LEVEL: ${{ inputs.log-level || 'info' }}
           RUN_DRY_RUN: ${{ inputs.dry-run != 'none' && inputs.dry-run || '' }}
-          RUN_IGNORE_SCHEDULE: ${{ inputs.ignore-schedule && 'true' || 'false' }}

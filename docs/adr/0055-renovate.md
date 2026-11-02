@@ -59,3 +59,9 @@ recompute a checksum.
   a few PRs a week.
 - The GitHub App is one more credential to keep: a private key in a
   secret, revocable from the App's page.
+
+## Update 2026-11-02
+
+The first scheduled run started 7 hours after its cron time, outside the
+Monday-morning window renovate.json5 set, and opened nothing. Renovate no
+longer has a schedule of its own: the workflow's cron is the only one.

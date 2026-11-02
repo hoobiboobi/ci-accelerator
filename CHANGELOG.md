@@ -11,6 +11,14 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Changed
+
+- The console's project switch builds its redirect from the checked
+  parts of the address it returns to (a CodeQL finding; it could not lead
+  elsewhere before either).
+- Renovate has no schedule of its own; the workflow's weekly run decides
+  (a run GitHub started late fell outside the old window).
+
 ## 0.3.11 - 2026-11-02
 
 ### Upgrade notes
