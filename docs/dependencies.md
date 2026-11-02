@@ -42,8 +42,8 @@ need no script: Renovate updates a digest with its tag, which is why a
 bare digest in the tree is written with its image after it
 (`digest: "sha256:..." # moby/buildkit:v0.34.1`).
 
-Renovate opens branches on Monday mornings (Europe/Nicosia) and at most
-three pull requests at once; a PR already open is rebased whenever main
+Renovate runs on Mondays (the workflow's cron; by hand at any time) and
+keeps at most three pull requests open at once; a PR already open is rebased whenever main
 moves. Nothing is merged by Renovate.
 
 ## What stays by hand, and why

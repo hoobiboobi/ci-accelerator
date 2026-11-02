@@ -390,9 +390,10 @@ func pinProject(sh *Shell, instance string, project uint64) {
 
 var pagesOf = map[string]bool{"/": true, "/pipelines": true, "/insights": true, "/builds": true, "/images": true, "/nodes": true}
 
-// imagePath is an image's page, the one other place switching the project
-// may lead to (an image's address holds no project).
-var imagePath = regexp.MustCompile(`^/images/[A-Za-z0-9._~%-]+$`)
+// imageSlug is the name in an image's page address (/images/<name>), the
+// one other place switching the project may lead to (an image's address
+// holds no project).
+var imageSlug = regexp.MustCompile(`^[A-Za-z0-9._~%-]+$`)
 
 // navPage is the address of a section, for the project switcher to stay in it.
 func navPage(nav string) string {
@@ -413,9 +414,17 @@ func (s *Server) chooseProject(w http.ResponseWriter, r *http.Request) {
 	// Secure where the console is reached over https: always with sign-in.
 	http.SetCookie(w, &http.Cookie{Name: "project", Value: k.String(), Path: "/", MaxAge: 365 * 24 * 3600,
 		Secure: s.opt.Auth != nil || r.TLS != nil, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	to := r.URL.Query().Get("to")
-	if !pagesOf[to] && !imagePath.MatchString(to) {
-		to = "/"
+	// Back to where the switch was made: one of the sections, or an image's
+	// page. The address is rebuilt from the checked parts (a section's own
+	// path, a fixed prefix and a checked name), never taken as given.
+	asked, to := r.URL.Query().Get("to"), "/"
+	for p := range pagesOf {
+		if p == asked {
+			to = p
+		}
+	}
+	if name, ok := strings.CutPrefix(asked, "/images/"); ok && imageSlug.MatchString(name) {
+		to = "/images/" + name
 	}
 	http.Redirect(w, r, to, http.StatusFound)
 }
