@@ -111,7 +111,13 @@ up() {
       >"$out/token" )
   grep -q '^glpat-' "$out/token" || { echo "no token from $name" >&2; return 1; }
   # The component is fetched from a URL in the same Docker network.
-  api "$out" PUT /application/settings allow_local_requests_from_web_hooks_and_services=true >/dev/null || return 1
+  # Under emulation the API may still answer 502 for a while: retry.
+  local tries=0
+  until api "$out" PUT /application/settings allow_local_requests_from_web_hooks_and_services=true >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 30 ] || { echo "the API of $name keeps failing" >&2; return 1; }
+    sleep 10
+  done
   say "$name: token and settings in place ($((SECONDS - start))s)"
 }
 
@@ -143,8 +149,12 @@ lint_one() {
   out=$(mktemp -d)
   LEFT_CONTAINERS+=("$name")
   LEFT_DIRS+=("$out")
-  if up "$name" "$which" "$out" &&
-    version=$(api "$out" GET /version | ruby -rjson -e 'puts JSON.parse(STDIN.read)["version"]'); then
+  # Under emulation (an amd64 image on arm64) the API may answer 502 for a
+  # few minutes after the health check passes: ask again for up to 5 min.
+  if up "$name" "$which" "$out" && for _ in $(seq 1 30); do
+    version=$(api "$out" GET /version 2>/dev/null | ruby -rjson -e 'puts JSON.parse(STDIN.read)["version"]' 2>/dev/null) && [ -n "$version" ] && break
+    version=""; sleep 10
+  done && [ -n "$version" ]; then
     ruby ci/gitlab/test/lint.rb "http://127.0.0.1:$(cat "$out/port")" "$out/token" "http://$name" "$version" "${COMPONENT_FILE:-ci/gitlab/build.yml}" || rc=$?
   else
     echo "GitLab $which did not come up" >&2; rc=1

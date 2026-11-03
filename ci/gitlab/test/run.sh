@@ -9,7 +9,7 @@ COMPONENT=ci/gitlab/build.yml
 IMAGE=$(ruby -ryaml -e 'puts YAML.load_stream(File.read(ARGV[0]))[0]["spec"]["inputs"]["buildkit-image"]["default"]' "$COMPONENT")
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-ruby -ryaml -e 'puts YAML.load_stream(File.read(ARGV[0]))[1].values[0]["script"].join("\n")' "$COMPONENT" >"$WORK/job.sh"
+ruby -ryaml -e 'puts YAML.load_stream(File.read(ARGV[0]))[1].reject { |k, _| k.start_with?(".") }.values[0]["script"].join("\n")' "$COMPONENT" >"$WORK/job.sh"
 
 # The fake buildctl: argv and environment to files, plain progress and a
 # metadata file like the real one, or a failure on demand.
@@ -27,8 +27,29 @@ case "${FAKE:-ok}" in
 esac
 echo "#1 [internal] load build definition from Dockerfile"
 echo "#1 DONE 0.0s"
-echo "#5 [internal] load build context"
-[ "${FAKE:-ok}" = nocontext ] || echo "#5 transferring context: 1.23MB 0.1s done"
+# A context from git: the daemon fetches it, and the git auth secret's
+# file is kept for the checks.
+git=""
+prev=""
+for a in "$@"; do
+  case "$a" in context=http*) git=1 ;; esac
+  if [ "$prev" = --secret ]; then
+    case "$a" in id=GIT_AUTH_HEADER.*,src=*) cp "${a#*,src=}" /out/git-auth ;; esac
+  fi
+  prev=$a
+done
+if [ -n "$git" ]; then
+  # As BuildKit v0.34.1 prints it: the vertex twice (the ref resolved,
+  # then the fetch), each with its own time.
+  if [ "${FAKE:-ok}" = gitcached ]; then
+    printf '#5 [internal] load git source https://gitlab.example.com/g/p.git\n#5 CACHED\n\n#5 [internal] load git source https://gitlab.example.com/g/p.git\n#5 CACHED\n'
+  else
+    printf '#5 [internal] load git source https://gitlab.example.com/g/p.git\n#5 DONE 1.2s\n\n#5 [internal] load git source https://gitlab.example.com/g/p.git\n#5 0.011 0123abc\n#5 DONE 2.0s\n'
+  fi
+else
+  echo "#5 [internal] load build context"
+  [ "${FAKE:-ok}" = nocontext ] || echo "#5 transferring context: 1.23MB 0.1s done"
+fi
 echo "#4 [base 1/3] FROM docker.io/library/alpine:3.22"
 echo "#4 DONE 0.0s"
 echo "#6 [base 2/3] RUN apk add curl"
@@ -59,7 +80,7 @@ run_case() {
     printf '{\n  "containerimage.digest": "sha256:%064d"\n}\n' 9 >"$WORK/repo/build-metadata.json"
     echo "IMAGE_DIGEST=sha256:old" >"$WORK/repo/build.env"
   fi
-  local env=(-e CIA_CONTEXT=. -e CIA_DOCKERFILE= -e CIA_TARGET= -e CIA_PLATFORM= -e CIA_BUILD_ARGS=
+  local env=(-e CIA_CONTEXT_SOURCE=local -e CI_JOB_TOKEN=job-token-value -e CIA_CONTEXT=. -e CIA_DOCKERFILE= -e CIA_TARGET= -e CIA_PLATFORM= -e CIA_BUILD_ARGS=
     -e CIA_SECRETS= -e "CIA_IMAGES=registry.example.com/g/p:abc123" -e CIA_PUSH=true -e CIA_REGISTRY_AUTH=job-token
     -e CIA_LABELS=true -e CIA_PROVENANCE=false -e CIA_TIMEOUT_MINUTES=60 -e CIA_BUILDCTL_ARGS=
     -e BUILDKIT_REMOTE_ADDR=tcp://box-buildkit:1234 -e BUILDKIT_TLS_DIR=/certs
@@ -152,6 +173,32 @@ run_case "labels and provenance switches" 0 CIA_LABELS=false CIA_PROVENANCE=true
 run_case "the job's trace names the build's job while it runs" 0 TRACEPARENT=00-01abcdef0000b33b2ec9000419350c4d-0000000419350c4d-01 -- \
   'argv:^ci-accelerator\.io/traceparent=00-01abcdef0000b33b2ec9000419350c4d-0000000419350c4d-01$'
 run_case "without a trace, no option" 0 UNSET=TRACEPARENT -- 'argv:!traceparent'
+run_case "context-source git: no checkout needed, the commit by URL, the token as a secret file only" 0 \
+  CIA_CONTEXT_SOURCE=git CIA_CONTEXT=services/api -- \
+  'argv:^context=https://gitlab\.example\.com/g/p\.git\?ref=ci-accelerator&checksum=0123abc&fetch-by-commit=true&subdir=services/api$' \
+  'argv:^filename=Dockerfile$' 'argv:^id=GIT_AUTH_HEADER\.gitlab\.example\.com,src=' 'argv:!^--local$' 'argv:!job-token-value' \
+  'git-auth:^basic Z2l0bGFiLWNpLXRva2VuOmpvYi10b2tlbi12YWx1ZQ==$' \
+  'stdout:context services/api from git' 'stdout:fetched from git by the build node in 2\.0s' 'stdout:!job-token-value'
+run_case "context-source git: a commit the build node had already" 0 CIA_CONTEXT_SOURCE=git FAKE=gitcached -- \
+  'stdout:context sent: none, the build node had this commit already' 'stdout:!in cached'
+run_case "context-source git: the folder is percent-encoded in the address" 0 CIA_CONTEXT_SOURCE=git 'CIA_CONTEXT=web app/a+b%;c#d?e&f=g' -- \
+  'argv:&subdir=web%20app/a%2Bb%25%3Bc%23d%3Fe%26f%3Dg$' 'argv:^filename=Dockerfile$'
+run_case "context-source git: a non-ASCII folder name" 0 CIA_CONTEXT_SOURCE=git 'CIA_CONTEXT=сервис' -- \
+  'argv:&subdir=%D1%81%D0%B5%D1%80%D0%B2%D0%B8%D1%81$'
+run_case "context-source git: doubled and trailing slashes in the context" 0 CIA_CONTEXT_SOURCE=git 'CIA_CONTEXT=.//services//api//' -- \
+  'argv:&subdir=services/api$' 'argv:^filename=Dockerfile$'
+run_case "context-source git: a context with .. is refused" 1 CIA_CONTEXT_SOURCE=git 'CIA_CONTEXT=../shared' -- \
+  'stdout:must be a folder of the repository' 'argv:!.'
+run_case "context-source git: .. inside the context is refused too" 1 CIA_CONTEXT_SOURCE=git 'CIA_CONTEXT=a/../../x' -- 'argv:!.'
+run_case "a timeout-minutes that is not whole is refused before the build" 1 CIA_TIMEOUT_MINUTES=1.5 -- \
+  'stdout:timeout-minutes must be a whole number of minutes' 'argv:!.'
+run_case "context-source git at the repository root: no subdir" 0 CIA_CONTEXT_SOURCE=git CIA_CONTEXT=./ -- \
+  'argv:fetch-by-commit=true$' 'argv:!subdir=' 'argv:^filename=Dockerfile$'
+run_case "context-source git: a Dockerfile given inside the context" 0 CIA_CONTEXT_SOURCE=git CIA_CONTEXT=services/api CIA_DOCKERFILE=services/api/build/Containerfile -- \
+  'argv:^filename=build/Containerfile$'
+run_case "context-source git: a Dockerfile outside the context is refused" 1 CIA_CONTEXT_SOURCE=git CIA_CONTEXT=services/api CIA_DOCKERFILE=docker/api.Dockerfile -- \
+  'stdout:must be inside the context' 'argv:!.'
+run_case "context-source local stays as it was" 0 -- 'argv:^--local$' 'argv:^context=\.$' 'argv:!GIT_AUTH_HEADER' 'git-auth:!.'
 run_case "the context folder goes with the build" 0 CIA_CONTEXT=app CIA_DOCKERFILE=app/Containerfile -- 'argv:^ci-accelerator\.io/context=app$'
 run_case "push=false after an earlier job's artifacts: no digest, no image" 0 CIA_PUSH=false STALE=1 -- \
   'build.env:^IMAGE=$' 'build.env:^IMAGE_DIGEST=$' 'build.env:!IMAGE_REF' 'stdout:!digest'

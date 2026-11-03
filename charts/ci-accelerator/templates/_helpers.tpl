@@ -277,7 +277,7 @@ at the tag v<chart version>): its integrity is the sha256 of that file, kept
 equal to it by the component's tests and the release check.
 */}}
 {{- define "ci-accelerator.componentIntegrity" -}}
-sha256-eQ+NA/AQdoHXkdZMjOiYNnhxDqt9YNqe2znadSdrcfA=
+sha256-iibbYj0/ehafKBcsUhYpVtLfd2NF5uXohTc78teJZZ8=
 {{- end }}
 
 {{/*

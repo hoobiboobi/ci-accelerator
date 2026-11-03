@@ -122,6 +122,68 @@ deploy:
     - echo "deploying $IMAGE_REF"
 ```
 
+## Huge repositories: `context-source: git`
+
+By default (`context-source: local`) the job does what every GitLab job
+does: it checks the repository out (`GIT_DEPTH` deep, all files) and sends
+the context to the build node. With a repository of gigabytes that is most
+of the job's time, on every job.
+
+With `context-source: git` the job checks nothing out (`GIT_STRATEGY: none`
+on this job only; the other jobs of the pipeline are not touched). The build
+node fetches the job's commit from GitLab itself, with the job's token
+passed as a build secret, into a copy of the repository it keeps: the first
+build fetches one commit, every later one only what changed since.
+
+```yaml
+include:
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/<release>/ci/gitlab/build.yml
+    integrity: sha256-<from the release notes>
+    inputs:
+      runner-tags: [ci-accelerator]
+      context: services/api
+      context-source: git
+```
+
+Measured on a copy of the kubernetes repository (1.5 GB of history, a
+373 MB tree) at GitLab: the checkout took 19-27 s and 83-87 MB per job and
+the context upload 283 MB; with `git`, the first build on a node fetched
+45 MB, every next commit next to nothing, and the build node lays the tree
+out in about 12 s (once per commit and context folder; parallel jobs that
+build the same folder of a commit share it).
+
+Use it when the build needs only committed files. It is not for every
+build:
+
+- **Only committed files are in the context.** Files an earlier job made
+  (artifacts) or the job's script wrote are not there.
+- **`.dockerignore` is not applied** (BuildKit ignores it for a git
+  context). Copy the paths the image needs, or use `COPY --exclude`.
+- **The Dockerfile is read from the commit** and must be inside the
+  context (`dockerfile` relative to the repository root, as always).
+- **Git LFS files arrive as pointers, and a private submodule fails the
+  build** (BuildKit: moby/buildkit#7000, #6046). Keep `local` for those.
+- **A commit a build node holds can be read by its SHA.** BuildKit keeps
+  checkouts by commit, and a later build that names a commit already there
+  gets its files without fetching, so without a token. Any job that can
+  build on the farm can read that project's files, and it need not guess
+  the SHA: a daemon lists its recent builds, git addresses included, to
+  every client. One installation is one trust domain already (builds share
+  the cache); give projects that must not read each other separate build
+  nodes.
+- **The build nodes fetch from `$CI_PROJECT_URL`.** They must reach it
+  (and trust its CA if GitLab has its own), not only the job; a runner's
+  `clone_url` is not used.
+- **The job runs without a checkout.** A `default: before_script` of the
+  pipeline that runs a repository script fails in it: give the job
+  `before_script: []`, or keep `local`.
+- **`GIT_STRATEGY: none` comes from a template the job extends**
+  (`.cia-checkout-git`). A `GIT_STRATEGY` set as a CI/CD variable in the
+  project's or group's settings outranks it (the job then checks out
+  again, which works, only slower), and so does an `extends:` of your own
+  on the same job. With `local` the job sets no `GIT_STRATEGY`: the
+  pipeline's or the project's applies, as without the component.
+
 ## Inputs
 
 The inputs are declared and described in the `spec` of
@@ -134,6 +196,7 @@ value outside `options` stops the pipeline before it starts.
 | `stage` | `build` | Stage of the job |
 | `runner-tags` | `[]` | Tags that send the job to a ci-accelerator runner |
 | `context` | `.` | Build context directory |
+| `context-source` | `local` | `local`: the job checks out and sends the context. `git`: the job checks nothing out, the build node fetches the commit into a copy it keeps (see [Huge repositories](#huge-repositories-context-source-git)) |
 | `dockerfile` | `<context>/Dockerfile` | Path of the Dockerfile |
 | `target` | (last stage) | Dockerfile stage to build |
 | `platform` | (the node's) | Platforms, comma-separated |

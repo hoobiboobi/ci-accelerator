@@ -19,6 +19,16 @@ spec:
     context:
       description: Build context, a directory relative to the repository root.
       default: .
+    context-source:
+      description: >-
+        local: the job checks the repository out and sends the context to
+        the build (as GitLab jobs do). git: the job checks nothing out; the
+        build node fetches the commit itself into a copy it keeps, so only
+        new commits travel. With git, only committed files are in the
+        context, .dockerignore is not applied, artifacts of earlier jobs are
+        not there, and Git LFS and private submodules are not supported.
+      options: [local, git]
+      default: local
     dockerfile:
       description: Path of the Dockerfile relative to the repository root. Empty means <context>/Dockerfile.
       default: ""
@@ -84,7 +94,19 @@ spec:
 # ci-accelerator: https://ci-accelerator.io/docs/ - this file is the
 # component; its inputs are above. The inputs reach the script only as
 # CI/CD variables, never as script text.
+# context-source git checks nothing out: the job extends a template that
+# sets GIT_STRATEGY none. The local template sets nothing, so a
+# GIT_STRATEGY of the pipeline or the project still applies there (a job
+# variable, even an empty one, would override the pipeline's).
+".cia-checkout-git":
+  variables:
+    GIT_STRATEGY: none
+".cia-checkout-local":
+  variables:
+    CIA_CHECKOUT: runner
+
 "$[[ inputs.job-name ]]":
+  extends: ".cia-checkout-$[[ inputs.context-source ]]"
   stage: $[[ inputs.stage ]]
   tags: $[[ inputs.runner-tags ]]
   image:
@@ -92,6 +114,7 @@ spec:
     entrypoint: [""]
   interruptible: $[[ inputs.interruptible ]]
   variables:
+    CIA_CONTEXT_SOURCE: $[[ inputs.context-source ]]
     CIA_CONTEXT: $[[ inputs.context ]]
     CIA_DOCKERFILE: $[[ inputs.dockerfile ]]
     CIA_TARGET: $[[ inputs.target ]]
@@ -110,6 +133,17 @@ spec:
       set -eu
       set -o pipefail
       say() { printf '\033[1m%s\033[0m\n' "$*"; }
+      # urlencode <text>: percent-encoded but for letters, digits, - . _ ~ /
+      urlencode() {
+        printf '%s' "$1" | od -An -v -tx1 | tr -s ' ' '\n' | while read -r h; do
+          case "$h" in
+            "") ;;
+            2d | 2e | 2f | 5f | 7e | 3[0-9] | 4[1-9a-f] | 5[0-9a] | 6[1-9a-f] | 7[0-9a])
+              printf "\\$(printf '%03o' "0x$h")" ;;
+            *) printf '%%%s' "$(printf '%s' "$h" | tr 'a-f' 'A-F')" ;;
+          esac
+        done
+      }
       if [ -z "${BUILDKIT_REMOTE_ADDR:-}" ] || [ -z "${BUILDKIT_TLS_DIR:-}" ]; then
         echo "BUILDKIT_REMOTE_ADDR/BUILDKIT_TLS_DIR are not set: this job must run on a ci-accelerator runner (check runner-tags)." >&2
         exit 1
@@ -155,14 +189,48 @@ spec:
 
       # The Dockerfile: <context>/Dockerfile unless given.
       dockerfile=${CIA_DOCKERFILE:-$CIA_CONTEXT/Dockerfile}
-      [ -f "$dockerfile" ] || { echo "no Dockerfile at $dockerfile" >&2; exit 1; }
-      [ -d "$CIA_CONTEXT" ] || { echo "no build context at $CIA_CONTEXT" >&2; exit 1; }
-
-      set -- --frontend dockerfile.v0 \
-        --local "context=$CIA_CONTEXT" \
-        --local "dockerfile=$(dirname "$dockerfile")" \
-        --opt "filename=$(basename "$dockerfile")" \
-        --progress plain
+      if [ "$CIA_CONTEXT_SOURCE" = git ]; then
+        # The build node fetches the job's commit from GitLab with the job's
+        # token (a secret, never in the build's options): only that commit
+        # with --depth 1 (fetch-by-commit), kept under one local name, so
+        # the next commit fetches only what changed. The Dockerfile is read
+        # from the same commit, so it must be inside the context.
+        ctx=$(printf '%s' "$CIA_CONTEXT" | sed 's#//*#/#g; s#^\./##; s#/$##')
+        [ -n "$ctx" ] || ctx=.
+        case "/$ctx/" in */../*)
+          echo "context-source git: the context ($CIA_CONTEXT) must be a folder of the repository, without .." >&2
+          exit 1 ;;
+        esac
+        df=$(printf '%s' "$dockerfile" | sed 's#//*#/#g; s#^\./##')
+        if [ "$ctx" = . ]; then
+          rel=$df
+        else
+          case "$df" in "$ctx"/*) rel=${df#"$ctx"/} ;; *) rel="" ;; esac
+        fi
+        case "$rel" in "" | /* | ../* | */../*)
+          echo "context-source git: the Dockerfile ($dockerfile) must be inside the context ($CIA_CONTEXT): the build reads it from the commit" >&2
+          exit 1 ;;
+        esac
+        host=${CI_PROJECT_URL#*://}; host=${host%%/*}
+        printf 'basic %s' "$(printf 'gitlab-ci-token:%s' "$CI_JOB_TOKEN" | base64 | tr -d '\n')" >"$DOCKER_CONFIG/git-auth"
+        src="${CI_PROJECT_URL}.git?ref=ci-accelerator&checksum=${CI_COMMIT_SHA}&fetch-by-commit=true"
+        # The folder goes into the address's query: percent-encoded, or
+        # BuildKit drops a pair it cannot read and builds from the root.
+        [ "$ctx" = . ] || src="$src&subdir=$(urlencode "$ctx")"
+        set -- --frontend dockerfile.v0 \
+          --opt "context=$src" \
+          --opt "filename=$rel" \
+          --secret "id=GIT_AUTH_HEADER.$host,src=$DOCKER_CONFIG/git-auth" \
+          --progress plain
+      else
+        [ -f "$dockerfile" ] || { echo "no Dockerfile at $dockerfile" >&2; exit 1; }
+        [ -d "$CIA_CONTEXT" ] || { echo "no build context at $CIA_CONTEXT" >&2; exit 1; }
+        set -- --frontend dockerfile.v0 \
+          --local "context=$CIA_CONTEXT" \
+          --local "dockerfile=$(dirname "$dockerfile")" \
+          --opt "filename=$(basename "$dockerfile")" \
+          --progress plain
+      fi
       [ -z "$CIA_TARGET" ] || set -- "$@" --opt "target=$CIA_TARGET"
       [ -z "$CIA_PLATFORM" ] || set -- "$@" --opt "platform=$CIA_PLATFORM"
       if [ "$CIA_LABELS" = true ]; then
@@ -224,7 +292,12 @@ spec:
       $CIA_BUILDCTL_ARGS
       EOF
 
-      say "context $CIA_CONTEXT ($(du -sh "$CIA_CONTEXT" 2>/dev/null | cut -f1) on disk, before .dockerignore), Dockerfile $dockerfile"
+      if [ "$CIA_CONTEXT_SOURCE" = git ]; then
+        say "context $CIA_CONTEXT from git, commit $CI_COMMIT_SHA, fetched by the build node; Dockerfile $dockerfile"
+        echo "  only committed files are in it: .dockerignore is not applied, artifacts of earlier jobs are not there"
+      else
+        say "context $CIA_CONTEXT ($(du -sh "$CIA_CONTEXT" 2>/dev/null | cut -f1) on disk, before .dockerignore), Dockerfile $dockerfile"
+      fi
       [ "$CIA_PUSH" != true ] || say "pushing $names"
       log=$(mktemp)
       # buildctl has no keepalive: a build node that vanishes without a
@@ -232,6 +305,10 @@ spec:
       # buildctl cancels the build and exits 1, so the time tells a timeout
       # from a failure; one that does not stop in a minute is killed. (The
       # seconds variables are for the script's own test.)
+      case "$CIA_TIMEOUT_MINUTES" in "" | *[!0-9]*)
+        echo "timeout-minutes must be a whole number of minutes, not $CIA_TIMEOUT_MINUTES" >&2
+        exit 1 ;;
+      esac
       limit=${CIA_TIMEOUT_SECONDS:-$((CIA_TIMEOUT_MINUTES * 60))}
       start=$(date +%s)
       if timeout -k "${CIA_TIMEOUT_GRACE_SECONDS:-60}" -s TERM "$limit" \
@@ -255,11 +332,28 @@ spec:
         /^#[0-9]+ DONE / && step[$1] { done[$1] = 1 }
         END { c = 0; r = 0; for (k in step) { if (k in cached) c++; else if (k in done) r++ } print c, r }' "$log")
       cached=${counts% *}; built=${counts#* }
-      # A context BuildKit fetched itself (a git URL) prints no such line.
+      # A context BuildKit fetched itself (a git URL) prints no such line:
+      # then its "load git source" step's time says what the fetch took.
       context=$(grep -oE 'transferring context: [0-9.]+[kMG]?B' "$log" | tail -n 1 | sed 's/transferring context: //' || true)
+      if [ "$CIA_CONTEXT_SOURCE" = git ]; then
+        # BuildKit may print the vertex twice (resolving the ref, then
+        # fetching); each DONE is the total so far, so the last one counts.
+        # No `| head` here: under pipefail a writer cut off early fails the
+        # job (SIGPIPE).
+        n=$(sed -n '/^#[0-9][0-9]* \[internal\] load git source /{s/^\(#[0-9][0-9]*\) .*/\1/p;q;}' "$log")
+        took=""
+        [ -z "$n" ] || took=$(awk -v n="$n" '
+          $1 == n && $2 == "DONE" { t = $3 + 0; d = 1 }
+          $1 == n && $2 == "CACHED" && NF == 2 { c = 1 }
+          END { if (d) printf "%.1fs", t; else if (c) print "cached" }' "$log")
+        case "$took" in
+          cached) context="none, the build node had this commit already" ;;
+          *) context="none, fetched from git by the build node${took:+ in $took}" ;;
+        esac
+      fi
       # No exporter (push false), no metadata file.
       digest=""
-      [ ! -f build-metadata.json ] || digest=$(sed -n 's/.*"containerimage.digest": *"\([^"]*\)".*/\1/p' build-metadata.json | head -n 1)
+      [ ! -f build-metadata.json ] || digest=$(sed -n '/"containerimage.digest"/{s/.*"containerimage.digest": *"\([^"]*\)".*/\1/p;q;}' build-metadata.json)
       say "Dockerfile steps: $cached from cache, $built run; context sent: ${context:-unknown}"
       # Only an image this job pushed is named.
       first=""
