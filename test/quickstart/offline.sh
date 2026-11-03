@@ -34,7 +34,7 @@ stub /stub/k3s 'echo "$*" >>/tmp/k3s-calls
 [ "$1" != --version ] || { echo "k3s version v1.36.5+k3s1 (stub)"; exit 0; }
 [ "$1" = kubectl ] && shift
 [ "$1 $2" != "get nodes" ] || echo node/stub
-case "$*" in *"get secret gitlab-api-token"*) [ -e /tmp/has-api-token ] ;; *) exit 0 ;; esac'
+case "$*" in *"get secret gitlab-api-token"*) [ -e /tmp/secret-left ] ;; *) exit 0 ;; esac'
 stub /stub/k3s-install.sh "cp /stub/k3s-uninstall.sh /usr/local/bin/"
 stub /stub/k3s-uninstall.sh 'rm -rf /usr/local/bin/k3s /usr/local/bin/k3s-uninstall.sh /etc/rancher/k3s'
 stub /stub/curl 'while [ $# -gt 0 ]; do [ "$1" != -o ] || out=$2; shift; done
@@ -43,7 +43,12 @@ stub /stub/df 'echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
 echo "stub 209715200 1 ${STUB_FREE_KB:-104857600} 50% /"'
 setup() {
   mkdir -p "$TOOLS/helm-$HELM_VERSION"
-  stub "$TOOLS/helm-$HELM_VERSION/helm" 'echo "$*" >>/tmp/helm-calls; [ "$1" != get ] || echo "(the notes)"; exit 0'
+  stub "$TOOLS/helm-$HELM_VERSION/helm" 'echo "$*" >>/tmp/helm-calls
+case "$1 $2" in
+  "get values") [ ! -e /tmp/has-api-token ] || printf "control-plane:\n  gitlab:\n    token:\n      existingSecret: gitlab-api-token\n" ;;
+  "get notes") echo "(the notes)" ;;
+esac
+exit 0'
 }
 
 # qs <args>: one run of the script; its output in /tmp/out, status in $rc.
@@ -121,11 +126,13 @@ check "a second run says k3s stays as installed" \
   eval '[ "$rc" = 0 ] && grep -q "k3s: kept as installed (v1.36.5+k3s1)" /tmp/out && ! grep -q "^  - k3s v" /tmp/out'
 rm -f /tmp/helm-calls && touch /tmp/has-api-token
 qs
-check "a GitLab token Secret from an earlier run stays in use" \
+check "a GitLab token the running release uses stays in use" \
   eval '[ "$rc" = 0 ] && grep "upgrade --install ci-accelerator" /tmp/helm-calls | grep -q "existingSecret=gitlab-api-token"'
-rm -f /tmp/has-api-token /tmp/helm-calls
+# Switched to sign-in: the token's Secret is still there, the running
+# release no longer names it.
+rm -f /tmp/has-api-token /tmp/helm-calls && touch /tmp/secret-left
 qs
-check "without such a Secret, no token is set" \
+check "a token the running release no longer uses (sign-in, or taken out) stays out" \
   eval '[ "$rc" = 0 ] && ! grep -q "existingSecret=gitlab-api-token" /tmp/helm-calls'
 printf 'console:\n  enabled: true\n' >>"$STATE/values.yaml"
 rm -f /tmp/k3s-calls /tmp/helm-calls

@@ -15,9 +15,9 @@ None.
 
 - `quickstart.sh`, run again to upgrade: it stops on a 0.2.x install
   before it changes anything on the machine (it upgraded cert-manager and
-  rewrote the runner's Secret first); it keeps using a GitLab token whose
-  Secret an earlier run made, also when `values.yaml` does not name it (a
-  later run dropped it); it says that k3s stays as installed instead of
+  rewrote the runner's Secret first); it keeps using a GitLab token that
+  the running release uses, also when `values.yaml` does not name it (a
+  later run dropped it), and leaves out one the release no longer uses; it says that k3s stays as installed instead of
   naming the version it would install; the command it prints for applying
   `values.yaml` waits up to 15 minutes.
 - Upgrading has a page of its own, [docs/upgrading.md](docs/upgrading.md):
