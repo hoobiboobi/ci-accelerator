@@ -9,9 +9,40 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.3.11, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the daemons, their disk probe
+  and the main runner stay as they are. The store gets one more column,
+  which 0.3.11 ignores: a rollback keeps working on the same store.
+- The component's `include` changes with the release (its integrity hash
+  is in the release notes and the box's NOTES); jobs that keep the old
+  include keep working.
+- The component's job now `extends` a template of its own
+  (`.cia-checkout-local` or `.cia-checkout-git`). With the default
+  `local` it sets nothing: an `extends:` you add to the job replaces it
+  without changing anything.
+
+### Added
+
+- The CI component builds from a git context with
+  `context-source: git`: the build job checks nothing out, and the build
+  node fetches the pipeline's commit itself (only that commit, into a copy
+  of the repository it keeps), with the job token as a BuildKit secret.
+  Other jobs of the pipeline keep their checkout. Meant for repositories
+  with a large history; see the component's README for what a git context
+  leaves out (`.dockerignore`, CI artifacts, Git LFS, private submodules)
+  and [ADR-0057](docs/adr/0057-builds-from-a-git-context.md).
+- The console reads a git context's commit as the build context: a new
+  commit is "your change" or not by comparing the commits (which holds in
+  full for a git context), and a rebuild of the same commit is the build
+  farm's.
 
 ### Changed
+
+- GitLab's comparison of two commits now tells a submodule's new commit
+  from a file: it counts for everything the build copies from inside the
+  submodule, and for a context folder inside it. Comparisons stored by
+  earlier releases are asked again when a git context's rebuild needs
+  them.
 
 - The console's project switch builds its redirect from the checked
   parts of the address it returns to (a CodeQL finding; it could not lead
