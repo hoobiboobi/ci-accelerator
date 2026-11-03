@@ -11,6 +11,23 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Changed
+
+- `quickstart.sh`, run again to upgrade: it stops on a 0.2.x install
+  before it changes anything on the machine (it upgraded cert-manager and
+  rewrote the runner's Secret first); it keeps using a GitLab token whose
+  Secret an earlier run made, also when `values.yaml` does not name it (a
+  later run dropped it); it says that k3s stays as installed instead of
+  naming the version it would install; the command it prints for applying
+  `values.yaml` waits up to 15 minutes.
+- Upgrading has a page of its own, [docs/upgrading.md](docs/upgrading.md):
+  Helm, the one-machine install (what a second run of the new release's
+  `quickstart.sh` changes and what it leaves alone), GitOps, checks,
+  rollbacks and the moves from 0.2.x and 0.1.0.
+- Documentation brought up to 0.4.0: git contexts in the architecture,
+  troubleshooting and the network policies, the e2e against GitLab CE,
+  the disk probe's load figures in the buildkit chart's README.
+
 ## 0.4.0 - 2026-11-03
 
 ### Upgrade notes

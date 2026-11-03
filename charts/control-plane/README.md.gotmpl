@@ -24,7 +24,7 @@ helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/control-plane --vers
   --set jobs.namespace=ci-jobs
 ```
 
-[The console](https://ci-accelerator.io/docs/#the-console) in the documentation explains the levels and the sign-in setup; troubleshooting has [reading the logs](https://ci-accelerator.io/docs/troubleshooting/#reading-the-logs) (one JSON line per event, `log.level` and each role's `logLevel`). Up to 0.2.x this chart was `console` with the image `ci-accelerator-console`; 0.3.0 does not upgrade a release of it in place (the upgrade notes in the [changelog](https://ci-accelerator.io/changelog/) say how to move).
+[The console](https://ci-accelerator.io/docs/#the-console) in the documentation explains the levels and the sign-in setup; troubleshooting has [reading the logs](https://ci-accelerator.io/docs/troubleshooting/#reading-the-logs) (one JSON line per event, `log.level` and each role's `logLevel`). Up to 0.2.x this chart was `console` with the image `ci-accelerator-console`; 0.3.0 does not upgrade a release of it in place ([upgrading](https://ci-accelerator.io/docs/upgrading/) says how to move).
 
 {{ template "chart.requirementsSection" . }}
 

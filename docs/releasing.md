@@ -23,6 +23,7 @@ On a branch `release/v<v>`:
    - `VERSION=` in `scripts/quickstart.sh` (the one-node installer installs it; the release attaches the script);
    - in `README.md`: the status line, the quickstart's download links (`releases/download/v<v>/...`), `helm install ... --version <v>`, the one-node upgrade command (it runs the Helm that `HELM_VERSION=` in `scripts/quickstart.sh` installs) and the GitLab CI component's `include` (`.../ci-accelerator/v<v>/ci/gitlab/build.yml`);
    - the component's `include` lines in `ci/gitlab/README.md`;
+   - when `HELM_VERSION=` in `scripts/quickstart.sh` changed: the Helm path in `docs/upgrading.md` (the README's one-node command is checked, this one is not);
    - the box's `helm install ... --version <v>` in `integrations/gitlab-runner/README.md` (the check refuses an install of another version anywhere in the README, `docs/`, `integrations/` or `ci/`);
    - the Flux `version:` and the Argo CD `targetRevision:` in `docs/gitops.md`;
    - the ci-accelerator image tag in `artifacthub.io/images` of `charts/control-plane/Chart.yaml` and `charts/ci-accelerator/Chart.yaml`, and the release's `artifacthub.io/changes` in the umbrella's `Chart.yaml` (Artifact Hub shows them on the version page).

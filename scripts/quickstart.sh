@@ -27,8 +27,10 @@
 #   --yes                    do not ask before installing
 #   --uninstall              remove k3s, everything in it, and the build cache
 #
-# Running it again (a new release with --version, a token added) keeps
-# /var/lib/ci-accelerator/values.yaml and what you put there.
+# Running it again keeps /var/lib/ci-accelerator/values.yaml and what you
+# put there. To upgrade, run the NEW release's quickstart.sh (it brings that
+# release's Helm and cert-manager); k3s stays as first installed. See
+# docs/upgrading.md.
 #
 # Needs: Ubuntu 24.04 or Debian 13 (or similar, systemd and cgroup v2),
 # amd64 or arm64, 4 CPUs, 8 GB of memory and 40 GB of free disk.
@@ -194,6 +196,14 @@ if [ -f "$STATE/values.yaml" ]; then
     die "--build-dir $BUILD_DIR: $STATE/values.yaml, which a second run keeps, has the build cache ${kept:-not on a hostPath}${kept:+ (buildkit.storage.hostPath.path)}. To move it, change it there, move the directory and run this script again without --build-dir"
   fi
   BUILD_DIR=$kept
+  # Before anything on this machine changes.
+  if [ -f "$STATE/values.yaml" ] && grep -q '^console:' "$STATE/values.yaml"; then
+    # 0.3.0 renamed the console's objects and values: no in-place upgrade.
+    die "this machine runs ci-accelerator 0.2.x, which $VERSION cannot upgrade in place (the console became the control plane, with new names). Remove the release, keeping k3s and the build cache:
+    sudo KUBECONFIG=$KUBECONFIG $(ls -d "$TOOLS"/helm-v*/helm 2>/dev/null | tail -n 1) uninstall $REL -n $NS --wait
+    sudo k3s kubectl -n $NS delete secret $REL-buildkit-tls
+  (the daemons' certificate outlives the release; the new one names the build router), then in $STATE/values.yaml rename the top-level console: to control-plane: or delete the file to start over, and run this script again (with --gitlab-token-file to keep reading GitLab with a token). The old console's history stays on the PersistentVolumeClaim $REL-console-data until you delete it."
+  fi
 fi
 disk_dir=$STATE
 if [ -n "$BUILD_DIR" ]; then
@@ -231,10 +241,14 @@ if [ -n "$gitlab_token_file" ]; then
   gitlab_token=$(tr -d '\r\n' <"$gitlab_token_file")
 fi
 
+k3s_line="k3s $K3S_VERSION (Kubernetes, one node, also the build node)"
+if [ -x /usr/local/bin/k3s ]; then
+  k3s_line="k3s: kept as installed ($(/usr/local/bin/k3s --version 2>/dev/null | awk 'NR == 1 {print $3}')); this script never upgrades it"
+fi
 cat <<EOF
 
 This installs, on this machine:
-  - k3s $K3S_VERSION (Kubernetes, one node, also the build node)
+  - $k3s_line
   - Helm $HELM_VERSION (in $TOOLS)
   - cert-manager $CERT_MANAGER_VERSION
   - ci-accelerator $VERSION: build daemons, a GitLab runner for $gitlab_url
@@ -359,19 +373,15 @@ fi
 # cache path or anything else the user added live. Flags that change values
 # are applied with --set and printed, to be copied into the file.
 value_set=()
-if [ -f "$STATE/values.yaml" ] && grep -q '^console:' "$STATE/values.yaml"; then
-  # 0.3.0 renamed the console's objects and values: no in-place upgrade.
-  die "this machine runs ci-accelerator 0.2.x, which $VERSION cannot upgrade in place (the console became the control plane, with new names). Remove the release, keeping k3s and the build cache:
-  sudo KUBECONFIG=$KUBECONFIG $HELM uninstall $REL -n $NS --wait
-  sudo k3s kubectl -n $NS delete secret $REL-buildkit-tls
-(the daemons' certificate outlives the release; the new one names the build router), then in $STATE/values.yaml rename the top-level console: to control-plane: or delete the file to start over, and run this script again (with --gitlab-token-file to keep reading GitLab with a token). The old console's history stays on the PersistentVolumeClaim $REL-console-data until you delete it."
-fi
 if [ -f "$STATE/values.yaml" ]; then
   say "Keeping the existing $STATE/values.yaml (delete it to start over)"
   grep -q "gitlabUrl: $gitlab_url\$" "$STATE/values.yaml" || warn "$STATE/values.yaml names another GitLab than --gitlab-url: the file wins"
-  if [ -n "$gitlab_token" ] && ! grep -q "existingSecret: gitlab-api-token" "$STATE/values.yaml"; then
+  # A GitLab token given now or on an earlier run (its Secret is there)
+  # stays in use, also when values.yaml does not name it.
+  if ! grep -q "existingSecret: gitlab-api-token" "$STATE/values.yaml" &&
+    { [ -n "$gitlab_token" ] || kubectl -n "$NS" get secret gitlab-api-token >/dev/null 2>&1; }; then
     value_set+=(--set control-plane.gitlab.token.existingSecret=gitlab-api-token)
-    warn "the GitLab token is applied with --set; add control-plane.gitlab.token.existingSecret: gitlab-api-token to $STATE/values.yaml to keep it"
+    warn "the GitLab token is applied with --set; add control-plane.gitlab.token.existingSecret: gitlab-api-token to $STATE/values.yaml to keep it in your own helm upgrades too"
   fi
 else
 # The daemon on this one node: half the CPUs and a quarter of the memory
@@ -445,7 +455,9 @@ and runner waits come from GitLab, which it cannot read yet. To add them,
 run this script again with --gitlab-token-file FILE (a token with read_api).
 For sign-in through GitLab, follow "The console" in the README; the values
 are in $STATE/values.yaml, apply changes with
-  sudo KUBECONFIG=$KUBECONFIG $HELM upgrade $REL $CHARTS/ci-accelerator --version $VERSION -n $NS -f $STATE/values.yaml --wait
+  sudo KUBECONFIG=$KUBECONFIG $HELM upgrade $REL $CHARTS/ci-accelerator --version $VERSION -n $NS -f $STATE/values.yaml --wait --timeout 15m
+To upgrade to a later release, run that release's quickstart.sh: see
+https://ci-accelerator.io/docs/upgrading/
 
 Values: $STATE/values.yaml   Install log: $STATE/install.log
 Kubernetes: sudo k3s kubectl get pods -A

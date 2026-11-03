@@ -248,10 +248,10 @@ It prints a job to add to `.gitlab-ci.yml` and the SSH tunnel to the
 console. The console starts in its first level (builds only, no GitLab
 access; see [Setting up the console](#setting-up-the-console)):
 `--gitlab-token-file` adds job results and runner waits, and sign-in
-through GitLab works on this box too. A machine that runs 0.2.x is not
-upgraded in place: the script stops and says what to do (see
-[Upgrading](#upgrading)). `sudo bash quickstart.sh --uninstall` removes
-everything again. It is not meant for production: one node, no high
+through GitLab works on this box too. To upgrade, run a later release's
+`quickstart.sh` the same way
+([docs/upgrading.md](docs/upgrading.md#one-machine-installs-quickstartsh)).
+`sudo bash quickstart.sh --uninstall` removes everything again. It is not meant for production: one node, no high
 availability.
 
 ### Requirements
@@ -343,7 +343,8 @@ values.
   to each daemon (it runs the image of the release that last changed it)
   with `--set buildkit.diskProbe.image.digest=sha256:...`. The daemons'
   BuildKit image is pinned by digest already. A digest belongs to one
-  release: upgrades set the new one (see [Upgrading](#upgrading)).
+  release: upgrades set the new one (see
+  [docs/upgrading.md](docs/upgrading.md#helm-installs)).
 - **Without cert-manager:** `buildkit.tls.source=existingSecret` with four
   certificates from one CA that `scripts/buildkit-certs.sh` makes (the
   daemons' with the router's names, the jobs' client, the controller's
@@ -413,12 +414,13 @@ include:
 ```
 
 Build arguments, secrets, several images, another Dockerfile, the digest
-for later jobs and GitLab without access to GitHub:
+for later jobs, GitLab without access to GitHub, and large repositories
+built without a checkout (`context-source: git`):
 [ci/gitlab/README.md](ci/gitlab/README.md).
 
-Add `.git` to `.dockerignore`. Every job has a fresh clone, so with `.git`
-in the build context, every step after `COPY . .` runs again in every
-pipeline. More in [docs/dockerfile-guide.md](docs/dockerfile-guide.md).
+Add `.git` to `.dockerignore` (with the default context, the job's own
+files). Every job has a fresh clone, so with `.git` in the build context,
+every step after `COPY . .` runs again in every pipeline. More in [docs/dockerfile-guide.md](docs/dockerfile-guide.md).
 
 Without the component, call buildctl yourself: `buildctl --addr
 "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build ...` in the
@@ -480,8 +482,10 @@ control-plane:
 ```
 
 On the one-machine install, run the script again with
-`--gitlab-token-file ./token` (same GitLab URL and runner token; it only
-updates the release).
+`--gitlab-token-file ./token` and the same GitLab URL and runner token.
+Like every second run, it keeps `values.yaml`, and it also brings the
+script's cert-manager and Helm
+([what a second run changes](docs/upgrading.md#upgrade-with-the-new-releases-script)).
 
 **3. With sign-in through GitLab.** Replaces the shared token: each person
 signs in with their GitLab account, the console reads GitLab with their
@@ -539,8 +543,13 @@ reaches over https.
    ```sh
    sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
      oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.4.0 \
-     -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait
+     -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait --timeout 15m
    ```
+
+   An install made by an older script may have another Helm under
+   `/usr/local/lib/ci-accelerator/` and another version: the script prints
+   the command for its own at the end
+   ([details](docs/upgrading.md#apply-your-own-changes-or-upgrade-by-hand)).
 
 Every key is in [charts/control-plane/values.yaml](charts/control-plane/values.yaml).
 
@@ -601,71 +610,18 @@ no trace backend.
 
 ## Upgrading
 
-Every release upgrades in place from the previous one, except 0.3.0 from
-0.2.x (below). Read its **Upgrade notes** in [CHANGELOG.md](CHANGELOG.md)
-first, then:
+Every release upgrades in place from the release before it (a 0.2.x
+install reaches 0.3.0 or later by installing again). Read the release's
+**Upgrade notes** in [CHANGELOG.md](CHANGELOG.md) first, then:
 
 ```sh
 helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <new version> \
-  -n ci-accelerator --reset-then-reuse-values --wait --timeout 10m
+  -n ci-accelerator --reset-then-reuse-values --wait --timeout 15m
 ```
 
-`--reset-then-reuse-values` keeps your values and takes the new version's
-defaults for everything else. With the images pinned by digest, add the new
-release's digests from its notes (`--set control-plane.image.digest=...`,
-and `buildkit.diskProbe.image.digest` when the notes name another probe
-image): a kept digest of the release before would run that release under
-the new version, so the charts refuse it and say which version they run.
-The end-to-end tests upgrade the previous release this way before every
-change to the charts or the code is merged
-([ADR-0027](docs/adr/0027-upgrades-and-branches.md)).
-
-**From 0.2.x to 0.3.0: install again.** 0.3.0 split the console into the
-control plane (chart `control-plane`, image
-`ghcr.io/hoobiboobi/ci-accelerator`, a controller, a web and the build
-router) and gave every object and value of it a new name, so Helm refuses
-to upgrade a 0.2.x release in place and says how to move:
-
-1. Remove the release and wait until its pods are gone (the jobs
-   namespace goes with it), then delete the daemons' certificate Secret:
-   it outlives the release, and 0.3.0's must name the build router.
-
-   ```sh
-   helm uninstall ci-accelerator -n ci-accelerator --wait
-   kubectl -n ci-accelerator wait --for=delete pod -l app.kubernetes.io/instance=ci-accelerator --timeout=10m
-   kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls
-   ```
-
-   Without cert-manager, make it again from the same CA with
-   `scripts/buildkit-certs.sh --router <release>` (the runbook below has
-   the whole command).
-2. Move your values from `console:` to `control-plane:`: the controller's
-   pod settings and volume under `control-plane.controller`, the web's
-   under `control-plane.web`; a runner cache's `consoleSecretName` is now
-   `controllerSecretName`. A runner of your own (the values fragment) sets
-   `BUILDKIT_REMOTE_ADDR` to the router,
-   `tcp://<release>-router.<namespace>.svc:1234`.
-3. Install this release (without cert-manager, also the controller API's
-   certificate: `control-plane.controller.api.tls.existingSecret`).
-4. Point port-forwards, Ingresses and `global.console.url` at the Service
-   `<release>-web` (it was `<release>-console`).
-
-The daemons' cache on a hostPath stays. The new console starts with an
-empty history; the old one stays on the volume `<release>-console-data`
-until you delete it. The one-machine install stops with the same steps;
-GitOps tools delete the release and create it again with the new values.
-`charts/buildkit` installed on its own upgrades in place; its daemons
-restart once. Step by step:
-[troubleshooting](docs/troubleshooting.md#upgrading-from-02x-to-030).
-
-**From 0.1.0:** the box no longer installs VictoriaMetrics and
-VictoriaTraces. Helm removes them on upgrade, but their volumes stay until
-you delete them
-([troubleshooting](docs/troubleshooting.md#after-upgrading-from-010)).
-Endpoint values reused from 0.1.0 with `--reuse-values` point at the
-removed Services: use `--reset-then-reuse-values`, or set
-`buildkit.otel.metricsEndpoint` and `tracesEndpoint` to `""` or to your
-backend.
+A one-machine install upgrades by running the new release's
+`quickstart.sh` again. Both ways step by step, with pinned digests, GitOps,
+checks and rollbacks: [docs/upgrading.md](docs/upgrading.md).
 
 ## Limitations
 
@@ -826,7 +782,8 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   changes it), the pages answer that it is not reachable (502) and the
   routers route on what they last knew. There is no built-in backup.
 - **No in-place upgrade from 0.2.x.** 0.3.0 is installed again, and its
-  console starts with an empty history ([Upgrading](#upgrading)).
+  console starts with an empty history
+  ([docs/upgrading.md](docs/upgrading.md#from-02x-to-030-or-later-install-again)).
 - **Without sign-in and without a token** the console shows no runner wait
   times and cannot compare commits, so "files or node" stays "unclear".
 - **"Build farm" only when it is proven.** BuildKit does not record which
@@ -908,10 +865,14 @@ make renovate-check pins-check # Renovate sees every pin (docker); every pinned 
   console, then uninstalls (`.github/workflows/quickstart.yml`).
   `test/quickstart/offline.sh` (`make quickstart-test`) runs the script in a
   container with stand-ins for k3s and Helm: where the build cache is on
-  later runs, the free-disk check, what `--uninstall` removes.
-- **CI jobs in the e2e** come from a real gitlab-runner talking to a
-  stand-in for the GitLab API. The box has also been tested by hand against
-  gitlab.com.
+  later runs, the free-disk check, what `--uninstall` removes, what a
+  second run keeps and when it stops before changing anything.
+- **CI jobs in the e2e** come from a real gitlab-runner. Most scenarios
+  talk to a stand-in for the GitLab API; the component scenario runs real
+  pipelines in GitLab CE (checkout, pushes with the job token to GitLab's
+  registry, builds from a git context, GitLab's comparison of commits in
+  the console), and the component is linted by GitLab CE 17.9 and 19.4.
+  The box has also been tested by hand against gitlab.com.
 - **The project builds itself on its own build farm.** Every branch pushed
   to GitHub goes to the read-only mirror
   [gitlab.com/ci-accelerator/ci-accelerator](https://gitlab.com/ci-accelerator/ci-accelerator)
@@ -942,6 +903,7 @@ make renovate-check pins-check # Renovate sees every pin (docker); every pinned 
 | `CHANGELOG.md` | Changes and upgrade notes of every release |
 | `CONTRIBUTING.md` | How to report issues and propose changes |
 | `SECURITY.md` | How to report a vulnerability, and what is scanned |
+| `docs/upgrading.md` | Upgrading an installation: Helm, one machine, GitOps, rollbacks |
 | `docs/releasing.md` | How a release is cut and verified |
 | `charts/ci-accelerator` | The box (umbrella chart) |
 | `charts/buildkit` | The daemons, usable on their own |
