@@ -132,8 +132,8 @@ before, the earlier chart's default digest among them: under this chart's
 tag it would run the earlier BuildKit under the new name (the runtime pulls
 by digest). An earlier default counts as this chart's default; pinning an
 earlier BuildKit takes its tag too. */}}
-{{- if and (eq $tag .Chart.AppVersion) (has $digest (list "sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea")) }}
-{{- $digest = "sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c" }}
+{{- if and (eq $tag .Chart.AppVersion) (has $digest (list "sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c" "sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea")) }}
+{{- $digest = "sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe" }}
 {{- end }}
 {{- if $digest }}
 {{- printf "%s:%s@%s" .Values.image.repository $tag $digest }}

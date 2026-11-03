@@ -154,7 +154,7 @@ every = {
   "build-args" => "NODE_VERSION=22\nGREETING=hello world\n", "secrets" => "npmrc=NPM_TOKEN",
   "images" => "$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA\n$CI_REGISTRY_IMAGE/api:latest\n",
   "push" => false, "registry-auth" => "none", "labels" => false, "provenance" => true,
-  "timeout-minutes" => 5, "buildctl-args" => "--no-cache\n", "buildkit-image" => "moby/buildkit:v0.34.1",
+  "timeout-minutes" => 5, "buildctl-args" => "--no-cache\n", "buildkit-image" => "moby/buildkit:v0.34.2",
   "interruptible" => true, "context-source" => "git",
 }
 valid("every input reaches the job as a variable, never the script", include_yaml(every, extra: "stages: [images]\n")) do |m, jobs|
@@ -168,7 +168,7 @@ valid("every input reaches the job as a variable, never the script", include_yam
     "CIA_TIMEOUT_MINUTES" => "5", "CIA_BUILDCTL_ARGS" => "--no-cache\n",
   }
   expect(j["stage"], "images", "stage") || expect(j["tags"], %w[a b], "tags") ||
-    expect(j.dig("image", "name"), "moby/buildkit:v0.34.1", "image") ||
+    expect(j.dig("image", "name"), "moby/buildkit:v0.34.2", "image") ||
     expect(j["interruptible"], true, "interruptible") ||
     # git: no checkout in this job (its template sets GIT_STRATEGY none).
     expect(v["CIA_CONTEXT_SOURCE"], "git", "context source") || expect(j["extends"], ".cia-checkout-git", "extends (git)") ||

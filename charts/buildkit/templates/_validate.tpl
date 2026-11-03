@@ -42,7 +42,7 @@ the install/upgrade with the fix in the message.
 
 {{- /* The default digest belongs to the appVersion tag and the runtime pulls
 by digest: another tag with it would still run the appVersion image. */}}
-{{- if and $v.image.tag (ne (toString $v.image.tag) .Chart.AppVersion) (eq (toString $v.image.digest) "sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c") }}
+{{- if and $v.image.tag (ne (toString $v.image.tag) .Chart.AppVersion) (eq (toString $v.image.digest) "sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe") }}
 {{- fail (printf "image.tag is %s, but image.digest is still the digest of %s, and the runtime pulls by digest: set image.digest to the digest of %s (or to \"\" to pull by tag)." (toString $v.image.tag) .Chart.AppVersion (toString $v.image.tag)) }}
 {{- end }}
 

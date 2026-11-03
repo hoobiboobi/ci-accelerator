@@ -40,7 +40,7 @@ cert-manager install command the chart prints (and the README and the
 GitOps guide repeat), the Helm path in the README's upgrade commands. Image digests
 need no script: Renovate updates a digest with its tag, which is why a
 bare digest in the tree is written with its image after it
-(`digest: "sha256:..." # moby/buildkit:v0.34.1`).
+(`digest: "sha256:..." # moby/buildkit:v0.34.2`).
 
 Renovate runs on Mondays (the workflow's cron; by hand at any time) and
 keeps at most three pull requests open at once; a PR already open is rebased whenever main

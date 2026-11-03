@@ -69,7 +69,7 @@ kubectl -n ci-accelerator describe pod <daemon pod> | tail -20
 | `disk-probe` in `ImagePullBackOff`, daemon pod not started | The probe runs the `ghcr.io/hoobiboobi/ci-accelerator` image at its own pinned tag (`buildkit.diskProbe.image`, default tag `v0.3.3`), and a pod starts only with all its images: mirror that tag too, or `buildkit.diskProbe.enabled=false` |
 | No pods at all after a successful `helm install` | The namespace enforces `baseline`/`restricted` without a label the chart could see (some distributions default to `baseline`); see the DaemonSet's events |
 
-The daemons run BuildKit v0.34.1. To check what they actually run, the
+The daemons run BuildKit v0.34.2. To check what they actually run, the
 console's Nodes page names the BuildKit version (a column appears when the
 daemons differ), or:
 
@@ -273,7 +273,7 @@ The pipeline's timeline draws the same parts on each job's bar.
 
 ## Builds hang or fail
 
-Open BuildKit issues that still apply to v0.34.1:
+Open BuildKit issues that still apply to v0.34.2:
 
 - **Every build on one daemon hangs, but the daemon still answers its
   probes.** A registry push that got stuck can hold BuildKit's per-registry
@@ -322,7 +322,7 @@ Other causes:
 
 Fixed upstream: the daemon panic when one of several builds sharing a step
 was cancelled (moby/buildkit#7253) is fixed in BuildKit v0.34.0. If
-daemons still restart that way, check that they run v0.34.1
+daemons still restart that way, check that they run v0.34.2
 ([above](#the-daemons-do-not-start)).
 
 ## Disk, inodes and processes
@@ -349,7 +349,7 @@ says why and how to prepare the disk.
 Keep headroom beyond `maxUsedSpace`. Two reasons:
 - GC runs only after builds, while running builds and BuildKit's databases
   grow outside the GC budget. One of those databases grows without bound
-  (moby/buildkit#7263, still open in v0.34.1).
+  (moby/buildkit#7263, still open in v0.34.2).
 - On a node's root disk, `minFreeSpace` must stay above kubelet's eviction
   thresholds (10-15%); the chart's default is 30%. An evicted daemon gets
   about a second of grace and loses its running builds.

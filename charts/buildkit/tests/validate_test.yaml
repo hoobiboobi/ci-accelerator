@@ -16,7 +16,7 @@ tests:
       image.tag: v0.0.1-another
     asserts:
       - failedTemplate:
-          errorPattern: 'image.tag is v0.0.1-another, but image.digest is still the digest of v0.34.1'
+          errorPattern: 'image.tag is v0.0.1-another, but image.digest is still the digest of v0.34.2'
 
   # helm upgrade --reuse-values keeps the earlier chart's default digest:
   # under this chart's tag it runs this chart's image, not the earlier one.
@@ -27,7 +27,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+          value: moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
 
   - it: keeps an earlier digest with its own tag (an earlier BuildKit pinned on purpose)
     template: daemonset.yaml

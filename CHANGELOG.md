@@ -9,10 +9,21 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 0.4.0 - 2026-11-03
+
+### Upgrade notes
+
 - From 0.3.11, `helm upgrade` in place. The controller, the web and the
-  routers restart once for the new image; the daemons, their disk probe
-  and the main runner stay as they are. The store gets one more column,
-  which 0.3.11 ignores: a rollback keeps working on the same store.
+  routers restart once for the new image; the main runner stays as it is.
+  The store gets two more columns, which 0.3.11 ignores: a rollback keeps
+  working on the same store.
+- **The daemons restart once** for BuildKit v0.34.2 (a security release,
+  see below), one node at a time: the builds running on a node finish
+  first (up to `terminationGracePeriodSeconds`). With the default
+  `emptyDir` storage the restarted daemons start with an empty cache; with
+  `hostPath` they keep it.
 - The component's `include` changes with the release (its integrity hash
   is in the release notes and the box's NOTES); jobs that keep the old
   include keep working.
@@ -36,6 +47,16 @@ workflow copies them into the GitHub release.
   full for a git context), and a rebuild of the same commit is the build
   farm's.
 
+### Security
+
+- BuildKit v0.34.2 for the daemons, the CI component's client image and
+  the image build, at once under the security-patch rule
+  ([ADR-0041](docs/adr/0041-security-patch-exception.md)): it fixes a
+  daemon panic when a build resolves the same git source twice
+  (GHSA-2fqp-xg6f-v7gj, which git contexts make reachable) and a client of
+  the control API setting extended attributes on files outside the state
+  directory (GHSA-w26x-xg27-7qjc).
+
 ### Changed
 
 - GitLab's comparison of two commits now tells a submodule's new commit
@@ -43,7 +64,9 @@ workflow copies them into the GitHub release.
   submodule, and for a context folder inside it. Comparisons stored by
   earlier releases are asked again when a git context's rebuild needs
   them.
-
+- The CI component no longer fails a job after a good build when BuildKit
+  prints a step twice (its summary used `head` under `pipefail`), and
+  refuses a `timeout-minutes` that is not a whole number before the build.
 - The console's project switch builds its redirect from the checked
   parts of the address it returns to (a CodeQL finding; it could not lead
   elsewhere before either).

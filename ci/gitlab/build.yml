@@ -76,7 +76,7 @@ spec:
         Let GitLab cancel the job when a newer pipeline starts on the same
         branch. Off by default: cancelling a build whose steps another build
         shares can fail that other build (moby/buildkit#7268, open in
-        BuildKit v0.34.1).
+        BuildKit v0.34.2).
       type: boolean
       default: false
     timeout-minutes:
@@ -89,7 +89,7 @@ spec:
     buildkit-image:
       description: Image with buildctl for the job; keep it at the daemons' BuildKit release.
       # renovate: datasource=docker depName=moby/buildkit
-      default: moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+      default: moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
 ---
 # ci-accelerator: https://ci-accelerator.io/docs/ - this file is the
 # component; its inputs are above. The inputs reach the script only as

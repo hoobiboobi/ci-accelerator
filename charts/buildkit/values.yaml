@@ -19,7 +19,7 @@ image:
   # change or clear it together with tag (another tag with this default
   # digest is refused). Default: the digest of the appVersion tag
   # (multi-arch index).
-  digest: "sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c" # moby/buildkit:v0.34.1
+  digest: "sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe" # moby/buildkit:v0.34.2
   pullPolicy: IfNotPresent
 
 # -- Image pull secrets for private mirrors of the buildkit image.

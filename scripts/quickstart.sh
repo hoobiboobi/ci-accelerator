@@ -34,7 +34,7 @@
 # amd64 or arm64, 4 CPUs, 8 GB of memory and 40 GB of free disk.
 set -euo pipefail
 
-VERSION=0.3.11
+VERSION=0.4.0
 CHARTS=oci://ghcr.io/hoobiboobi/charts
 RELEASES=https://github.com/hoobiboobi/ci-accelerator/releases/download
 
