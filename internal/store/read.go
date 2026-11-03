@@ -35,7 +35,7 @@ const buildColumns = `b.id, b.generation, d.name, b.ref, b.attribution, b.instan
 	b.target, b.build_args, b.started_at, b.completed_at, b.error, b.context_bytes, b.images,
 	b.reason_kind, b.reason_step, b.reason_old, b.reason_new, b.reason_arg, b.reason_paths,
 	(SELECT ref FROM builds x WHERE x.id = b.reason_by), b.saved_ms, b.reason_via, b.warnings,
-	b.no_cache, b.truncated, b.context`
+	b.no_cache, b.truncated, b.context, b.context_commit`
 
 // Previous returns the latest build of the same project and image (target,
 // or pushed repository without one: imageKey) that started before b,
@@ -285,7 +285,7 @@ func (s *Store) scanBuilds(ctx context.Context, rows *sql.Rows) ([]*Stored, erro
 		if err := rows.Scan(&st.ID, &st.Generation, &b.Daemon, &b.Ref, &attribution, &instance, &pipeline, &job,
 			&b.Target, &args, &started, &completed, &b.Error, &b.ContextBytes, &images,
 			&kind, &rstep, &st.Reason.Old, &st.Reason.New, &st.Reason.Arg, &paths, &by, &saved, &st.Via, &warnings,
-			&b.NoCache, &b.Truncated, &b.Context); err != nil {
+			&b.NoCache, &b.Truncated, &b.Context, &b.ContextCommit); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -302,6 +302,7 @@ func (s *Store) scanBuilds(ctx context.Context, rows *sql.Rows) ([]*Stored, erro
 		_ = json.Unmarshal([]byte(warnings), &b.Warnings)
 		st.Reason.Kind = history.ReasonKind(kind)
 		_ = json.Unmarshal([]byte(paths), &st.Reason.Paths)
+		st.Reason.Paths = plainPaths(st.Reason.Paths)
 		if len(st.Reason.Paths) == 0 {
 			st.Reason.Paths = nil
 		}

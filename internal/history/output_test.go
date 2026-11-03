@@ -174,7 +174,7 @@ func TestSecretValuesInOperations(t *testing.T) {
 	if string(a.Steps["step0"].Op) == string(otherKey.Steps["step0"].Op) {
 		t.Error("the mask does not depend on the key")
 	}
-	if got := string(normalizeOp(a.Steps["step0"].Op, []byte("k1"))); got != op {
+	if got := string(normalizeOp(a.Steps["step0"].Op, []byte("k1"), gitContext{})); got != op {
 		t.Errorf("normalising twice changed the operation:\n%s\n%s", op, got)
 	}
 }

@@ -824,7 +824,8 @@ func (e *StatusError) Error() string { return fmt.Sprintf("gitlab: %s: %s", e.UR
 // Changed returns the files that differ between two commits of a project
 // (GitLab's direct comparison, from..to), and whether the list is
 // complete: GitLab cuts it when the comparison is too large or too slow,
-// and so does MaxCompare.
+// and so does MaxCompare. A submodule whose commit changed is one path
+// with a trailing slash ("third_party/proto/"): everything in it changed.
 func (c *Client) Changed(ctx context.Context, cred Credential, instance string, project uint64, from, to string) ([]string, bool, error) {
 	base := c.bases[instance]
 	if base == "" {
@@ -853,8 +854,10 @@ func (c *Client) Changed(ctx context.Context, cred Credential, instance string, 
 	var cmp struct {
 		Timeout bool `json:"compare_timeout"`
 		Diffs   []struct {
-			Old string `json:"old_path"`
-			New string `json:"new_path"`
+			Old     string `json:"old_path"`
+			New     string `json:"new_path"`
+			OldMode string `json:"a_mode"`
+			NewMode string `json:"b_mode"`
 		} `json:"diffs"`
 	}
 	if err := json.Unmarshal(raw, &cmp); err != nil {
@@ -863,7 +866,13 @@ func (c *Client) Changed(ctx context.Context, cred Credential, instance string, 
 	seen := map[string]bool{}
 	var out []string
 	for _, d := range cmp.Diffs {
-		for _, p := range []string{d.Old, d.New} {
+		for i, p := range []string{d.Old, d.New} {
+			switch mode := []string{d.OldMode, d.NewMode}[i]; {
+			case mode == "0":
+				continue // the side where the path does not exist
+			case mode == gitlinkMode && p != "":
+				p += "/"
+			}
 			if p != "" && !seen[p] {
 				seen[p] = true
 				out = append(out, p)
@@ -873,6 +882,9 @@ func (c *Client) Changed(ctx context.Context, cred Credential, instance string, 
 	sort.Strings(out)
 	return out, !cmp.Timeout, nil
 }
+
+// gitlinkMode is a submodule's mode in a git tree.
+const gitlinkMode = "160000"
 
 // Changed is Client.Changed, waiting while GitLab asks the console to.
 func (f *Fetcher) Changed(ctx context.Context, cred Credential, instance string, project uint64, from, to string) ([]string, bool, error) {

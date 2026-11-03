@@ -331,6 +331,14 @@ var toleratedColumns = []struct{ table, column, def string }{
 	{"builds", "no_cache", "TEXT NOT NULL DEFAULT ''"},
 	{"builds", "truncated", "INTEGER NOT NULL DEFAULT 0"},
 	{"builds", "context", "TEXT NOT NULL DEFAULT ''"},
+	// The commit a git build context was fetched from (0.4.0; an older
+	// release of the schema leaves it empty and treats the build as one
+	// with a local context).
+	{"builds", "context_commit", "TEXT NOT NULL DEFAULT ''"},
+	// A comparison stored with submodules marked (a trailing slash; 0.4.0).
+	// Older ones list a submodule like a file: a git context's verdict,
+	// which the comparison decides, asks GitLab again instead.
+	{"compares", "marks", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // toleratedIndexes are created by the repairs when missing, on tolerated

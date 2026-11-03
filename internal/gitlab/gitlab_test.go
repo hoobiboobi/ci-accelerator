@@ -654,3 +654,35 @@ func TestJobLogPartEndsOnBadRanges(t *testing.T) {
 		srv.Close()
 	}
 }
+
+// GitLab's comparison as the console reads it: both paths of a rename, a
+// submodule's new commit marked with a trailing slash (mode 160000), and
+// the list cut short by GitLab.
+func TestChanged(t *testing.T) {
+	timeout := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v4/projects/42/repository/compare" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"compare_timeout":%v,"diffs":[
+			{"old_path":"a.txt","new_path":"b.txt","a_mode":"100644","b_mode":"100644"},
+			{"old_path":"third_party/proto","new_path":"third_party/proto","a_mode":"160000","b_mode":"160000"},
+			{"old_path":"vendor/lib","new_path":"vendor/lib","a_mode":"0","b_mode":"160000"},
+			{"old_path":"src/x.go","new_path":"src/x.go","a_mode":"100644","b_mode":"100755"}]}`, timeout)
+	}))
+	defer srv.Close()
+	c := New([]string{srv.URL + "/"})
+	inst := history.InstancePrefix(srv.URL + "/")
+	files, complete, err := c.Changed(context.Background(), Token("t"), inst, 42, "aaaa", "bbbb")
+	if err != nil || !complete {
+		t.Fatalf("%v, complete %v", err, complete)
+	}
+	if got, want := strings.Join(files, ","), "a.txt,b.txt,src/x.go,third_party/proto/,vendor/lib/"; got != want {
+		t.Errorf("files %s, want %s", got, want)
+	}
+	timeout = true
+	if _, complete, err := c.Changed(context.Background(), Token("t"), inst, 42, "aaaa", "bbbb"); err != nil || complete {
+		t.Errorf("a cut comparison: complete %v, %v", complete, err)
+	}
+}

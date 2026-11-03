@@ -183,6 +183,7 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 		r.Started, r.Completed, r.PipelineCreatedAt = time.UnixMilli(started).UTC(), msTime(completed), msTime(created)
 		r.Reason, r.BuiltTime = history.ReasonKind(kind), time.Duration(builtMs)*time.Millisecond
 		_ = json.Unmarshal([]byte(paths), &r.Paths)
+		r.Paths = plainPaths(r.Paths)
 		_ = json.Unmarshal([]byte(imgs), &r.Images)
 		out = append(out, r)
 	}
