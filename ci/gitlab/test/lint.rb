@@ -43,7 +43,10 @@ text = File.binread(COMPONENT)
 spec, job_doc = YAML.load_stream(text)
 inputs = spec.fetch("spec").fetch("inputs")
 default_image = inputs.fetch("buildkit-image").fetch("default")
-script = job_doc.values.first.fetch("script")
+script = job_doc.reject { |k, _| k.start_with?(".") }.values.first.fetch("script")
+# The checkout templates: none for git; nothing about GIT_STRATEGY for local,
+# so the pipeline's or the project's own setting applies.
+CHECKOUT = { "git" => { "GIT_STRATEGY" => "none" }, "local" => { "CIA_CHECKOUT" => "runner" } }
 
 # The component and two copies with spec:description, one too long: a
 # public project of this GitLab serves them (GitLab may fetch its own URL).
@@ -133,6 +136,10 @@ valid("the README's include builds one job as the component defines it", include
     expect(j.dig("artifacts", "when"), "always", "artifacts when") ||
     expect(v.values_at("CIA_CONTEXT", "CIA_DOCKERFILE", "CIA_PUSH", "CIA_REGISTRY_AUTH", "CIA_LABELS", "CIA_PROVENANCE", "CIA_TIMEOUT_MINUTES", "CIA_IMAGES"),
            [".", "", "true", "job-token", "true", "false", "60", "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"], "variables") ||
+    # local: the job sets no GIT_STRATEGY of its own.
+    expect(v["CIA_CONTEXT_SOURCE"], "local", "context source") || expect(v.key?("GIT_STRATEGY"), false, "job's own GIT_STRATEGY") ||
+    expect(j["extends"], ".cia-checkout-local", "extends (local)") ||
+    expect(CHECKOUT.keys.map { |k| m[".cia-checkout-#{k}"]&.fetch("variables") }, CHECKOUT.values, "checkout templates") ||
     expect(jobs.map { |x| [x["name"], x["stage"], x["tag_list"]] }, [["build-image", "build", ["rc-check"]]], "simulated pipeline")
 end
 
@@ -148,7 +155,7 @@ every = {
   "images" => "$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA\n$CI_REGISTRY_IMAGE/api:latest\n",
   "push" => false, "registry-auth" => "none", "labels" => false, "provenance" => true,
   "timeout-minutes" => 5, "buildctl-args" => "--no-cache\n", "buildkit-image" => "moby/buildkit:v0.34.1",
-  "interruptible" => true,
+  "interruptible" => true, "context-source" => "git",
 }
 valid("every input reaches the job as a variable, never the script", include_yaml(every, extra: "stages: [images]\n")) do |m, jobs|
   j = m["build api"] or next "no job 'build api' in #{m.keys}"
@@ -163,6 +170,8 @@ valid("every input reaches the job as a variable, never the script", include_yam
   expect(j["stage"], "images", "stage") || expect(j["tags"], %w[a b], "tags") ||
     expect(j.dig("image", "name"), "moby/buildkit:v0.34.1", "image") ||
     expect(j["interruptible"], true, "interruptible") ||
+    # git: no checkout in this job (its template sets GIT_STRATEGY none).
+    expect(v["CIA_CONTEXT_SOURCE"], "git", "context source") || expect(j["extends"], ".cia-checkout-git", "extends (git)") ||
     expect(v.slice(*want.keys), want, "variables") || expect(j["script"], script, "script") ||
     expect(jobs.map { |x| [x["name"], x["tag_list"]] }, [["build api", %w[a b]]], "simulated pipeline")
 end
@@ -178,6 +187,7 @@ end
 refused("an input the component does not have", include_yaml({ "runner-tag" => ["x"] }), /runner-tag/)
 refused("a job name the regex refuses", include_yaml({ "job-name" => "-x" }), /job-name.*(RegEx|regex)/i)
 refused("a registry-auth outside its options", include_yaml({ "registry-auth" => "token" }), /registry-auth.*(allowed options|not in the list)/i)
+refused("a context-source outside its options", include_yaml({ "context-source" => "remote" }), /context-source.*(allowed options|not in the list)/i)
 refused("push that is not a boolean", include_yaml({ "push" => "yes" }), /push.*boolean/i)
 refused("timeout-minutes that is not a number", include_yaml({ "timeout-minutes" => "soon" }), /timeout-minutes.*number/i)
 refused("runner-tags that is not an array", include_yaml({ "runner-tags" => "a" }), /runner-tags.*array/i)
