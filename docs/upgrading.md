@@ -90,8 +90,16 @@ script brings that release's chart, Helm and cert-manager.
    curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/SHA256SUMS | grep ' quickstart.sh$' | sha256sum -c -
    ```
 
-   To check the checksums themselves, verify their signature as in the
-   [README](../README.md#try-it-on-one-machine).
+   The checksums are signed by the release workflow. To check that too
+   (cosign 2.6 or newer):
+
+   ```sh
+   curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/SHA256SUMS
+   curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/SHA256SUMS.sigstore.json
+   cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+     --certificate-identity https://github.com/hoobiboobi/ci-accelerator/.github/workflows/release.yml@refs/tags/v$v \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+   ```
 2. Run it with the same GitLab URL and the runner token, as on the first
    install. A token is never read from the command line: put it in a file
    (or `RUNNER_TOKEN=...` in the environment, or type it when asked).
