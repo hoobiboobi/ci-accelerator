@@ -678,6 +678,14 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   privileged pods.
 - **Builds share the cache:** RUN steps can read and write cache mounts
   that other projects' builds left in the same daemon.
+- **A fetched commit is readable without a token.** With the CI
+  component's `context-source: git`, a daemon keeps the commits it fetched
+  and serves a commit's files to any build that names the commit id,
+  whether or not it has a token for that repository. A build job does not
+  even have to know the id: any client of a daemon can list its recent
+  builds, and a git context's address (repository and commit) is part of
+  each. Treat every project that builds on one installation as able to
+  read the code the others built there.
 - **Builds share the daemon's network.** RUN steps run in the daemon pod's
   network namespace, so they see its localhost and the connections of
   concurrent builds. Their egress is whatever the daemon's NetworkPolicy
@@ -833,7 +841,11 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   the context: CI artifacts and files generated in the job are not in it.
   Such a rebuild stays unclear, saying what the comparison showed;
   `control-plane.reasons.trustGitComparison=true` counts it as the build
-  farm's when your build contexts hold repository files alone. A step that
+  farm's when your build contexts hold repository files alone. A build
+  whose context the build node fetched from git (the CI component's
+  `context-source: git`) is the repository's folder at its commit, so
+  there the comparison decides either way, counting only the changed files
+  inside that folder, and a rebuild of the same commit is the farm's. A step that
   fetches from the network without a checksum (`ADD https://...`, a git
   branch) is unclear too, and a build with `--no-cache` counts as the
   job's own choice.

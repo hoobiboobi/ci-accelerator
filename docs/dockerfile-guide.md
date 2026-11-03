@@ -69,6 +69,15 @@ cached".
 to the daemon over the network. The plain progress line
 `transferring context: 12.3MB ... done` shows its size.
 
+With the CI component's `context-source: git` the build node fetches the
+commit itself, so `.git` is never in the context, but BuildKit does not
+apply `.dockerignore` to a git context either. Leave out what the image
+does not need in the `COPY` itself:
+
+```dockerfile
+COPY --exclude=docs --exclude=*.md . /src
+```
+
 ## 2. Order steps from least to most often changed
 
 Dependencies change rarely; source code changes in every commit. Copy the
