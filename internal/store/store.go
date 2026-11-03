@@ -162,11 +162,15 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("store: repairs: %w", err)
 	}
 	for _, c := range toleratedColumns {
-		var n int
+		var n, tables int
 		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info(?) WHERE name = ?", c.table, c.column).Scan(&n); err != nil {
 			return err
 		}
-		if n == 0 {
+		// A table a later migration of this schema creates is not there yet.
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", c.table).Scan(&tables); err != nil {
+			return err
+		}
+		if n == 0 && tables > 0 {
 			if _, err := tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", c.table, c.column, c.def)); err != nil {
 				return fmt.Errorf("store: adding %s.%s: %w", c.table, c.column, err)
 			}

@@ -173,7 +173,8 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				}
 				return r, true
 			}
-			if cur.prov.contextDependent(s.StepID) {
+			sameGitContext := cur.ContextCommit != "" && prev.ContextCommit == cur.ContextCommit && !cur.prov.localDependent(s.StepID)
+			if cur.prov.contextDependent(s.StepID) && !sameGitContext {
 				// The build context feeds this step or an ancestor (the
 				// file-reading step may itself be cached or received, so
 				// the first executed step says nothing by itself): the
@@ -188,9 +189,10 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				}
 				return r, true
 			}
-			// No local source anywhere below the step and it did not
-			// change: with the same identity its cache key is the same,
-			// so only the cache can be missing, never the code.
+			// No local source anywhere below the step, or a git context at
+			// the same commit as before, and it did not change: with the
+			// same identity its cache key is the same, so only the cache
+			// can be missing, never the code.
 			if crossDaemon {
 				return Reason{Kind: OtherNode, Step: s, Old: prev.Daemon, New: cur.Daemon}, true
 			}

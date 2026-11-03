@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path"
 	"regexp"
 	"sort"
@@ -108,6 +109,12 @@ type Build struct {
 	// Context is the build context's folder as the job named it (the CI
 	// component passes it as ContextOpt); "" when not known.
 	Context string
+	// ContextCommit is the commit the build context was fetched from when
+	// the build read it from a git repository (the CI component's
+	// context-source git) and nothing from the job's files; "" when the job
+	// sent files of its own (its context, or a named local context next to
+	// the git one), whose content no commit pins.
+	ContextCommit string
 
 	prov *Provenance
 	// errSrc is the Dockerfile and failed step of a failed build (which has
@@ -213,6 +220,18 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 		b.prov = mergeProvenance(provs)
 		for d := range b.prov.DigestMapping {
 			b.Vertices[d] = true
+		}
+		if !b.prov.readsLocal() {
+			b.ContextCommit = b.prov.ContextCommit
+		}
+	} else {
+		// A failed build has no provenance: the commit is in the request,
+		// unless the request also names a local context.
+		b.ContextCommit = contextURLCommit(rec.FrontendAttrs["context"])
+		for k, v := range rec.FrontendAttrs {
+			if strings.HasPrefix(k, "context:") && strings.HasPrefix(v, "local:") {
+				b.ContextCommit = ""
+			}
 		}
 	}
 	if b.prov == nil && rec.Error != nil {
@@ -419,6 +438,28 @@ func waits(start time.Time, steps []Step) {
 }
 
 var stageKeyRE = regexp.MustCompile(`^\[(?:(.+) )?\d+/\d+\]$`)
+
+// contextURLCommit is the commit a git context's address pins
+// (<repository>?ref=...&checksum=<commit>): "" for anything else. Only the
+// commit is taken; the address may carry credentials.
+func contextURLCommit(s string) string {
+	if !strings.Contains(s, "://") && !strings.HasPrefix(s, "git@") {
+		return ""
+	}
+	_, q, ok := strings.Cut(s, "?")
+	if !ok {
+		return ""
+	}
+	q, _, _ = strings.Cut(q, "#")
+	v, err := url.ParseQuery(q)
+	if err != nil {
+		return ""
+	}
+	if c := v.Get("checksum"); commitID.MatchString(c) {
+		return c
+	}
+	return ""
+}
 
 // cleanContext is a context folder as written in a job, compared as a path:
 // "./services/api/" and "services/api" are one folder.

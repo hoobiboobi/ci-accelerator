@@ -212,6 +212,10 @@ func (f *fakeSettle) Compared(context.Context, store.ProjectKey, string, string)
 	return nil, false, false, nil
 }
 
+func (f *fakeSettle) ComparedMarked(context.Context, store.ProjectKey, string, string) ([]string, bool, bool, error) {
+	return nil, false, false, nil
+}
+
 func (f *fakeSettle) SaveCompare(context.Context, store.ProjectKey, string, string, []string, bool) error {
 	return nil
 }
@@ -298,10 +302,12 @@ func TestUnclearGroupsByText(t *testing.T) {
 	}
 }
 
-// memSettle keeps comparisons like the store does.
+// memSettle keeps comparisons like the store does; legacy ones were
+// stored by a release that did not mark submodules.
 type memSettle struct {
 	fakeSettle
 	compares map[string][]string
+	legacy   map[string]bool
 }
 
 func (m *memSettle) Compared(_ context.Context, _ store.ProjectKey, from, to string) ([]string, bool, bool, error) {
@@ -309,9 +315,62 @@ func (m *memSettle) Compared(_ context.Context, _ store.ProjectKey, from, to str
 	return f, true, ok, nil
 }
 
+func (m *memSettle) ComparedMarked(ctx context.Context, p store.ProjectKey, from, to string) ([]string, bool, bool, error) {
+	if m.legacy[from+".."+to] {
+		return nil, false, false, nil
+	}
+	return m.Compared(ctx, p, from, to)
+}
+
 func (m *memSettle) SaveCompare(_ context.Context, _ store.ProjectKey, from, to string, files []string, _ bool) error {
 	m.compares[from+".."+to] = files
+	delete(m.legacy, from+".."+to)
 	return nil
+}
+
+// A git context's verdict needs submodules marked: a comparison stored
+// before that is asked again, while a local context still uses it.
+func TestSettleGitContextAsksAgainForAnUnmarkedComparison(t *testing.T) {
+	p := store.ProjectKey{Instance: "abcdef", ID: 42}
+	legacy := func(e store.Elsewhere) *memSettle {
+		return &memSettle{fakeSettle: fakeSettle{open: []store.Elsewhere{e}},
+			compares: map[string][]string{"a..b": {"third_party/proto"}}, legacy: map[string]bool{"a..b": true}}
+	}
+	git := store.Elsewhere{ID: 7, SHA: "b", PrevSHA: "a", Paths: []string{"third_party/proto/api"}, Old: "bk-old", GitFolder: ".", Folder: ".", Git: true}
+	m := legacy(git)
+	gl := &countChanged{files: []string{"third_party/proto/"}}
+	if n, err := SettleProject(ctx, m, gl, p, testNow, 0, 25); n != 1 || err != nil || gl.n != 1 || m.settled[0].Kind != history.FilesChanged {
+		t.Fatalf("git context: %d %v, %d calls, %+v", n, err, gl.n, m.settled)
+	}
+	local := git
+	local.GitFolder, local.Git = "", false
+	m = legacy(local)
+	gl = &countChanged{}
+	if n, _ := SettleProject(ctx, m, gl, p, testNow, 0, 25); n != 1 || gl.n != 0 {
+		t.Errorf("local context: %d settled, %d calls (the stored comparison serves it)", n, gl.n)
+	}
+	// Both in one pass, the local build first: its older comparison is
+	// not passed on to the git build.
+	m = legacy(local)
+	local.ID, git.ID = 8, 9
+	m.open = []store.Elsewhere{local, git}
+	gl = &countChanged{files: []string{"third_party/proto/"}}
+	SettleProject(ctx, m, gl, p, testNow, 0, 25)
+	kinds := map[int64]history.ReasonKind{}
+	for _, s := range m.settled {
+		kinds[s.ID] = s.Kind
+	}
+	if gl.n != 1 || kinds[9] != history.FilesChanged {
+		t.Errorf("mixed pass: %d calls, %v", gl.n, kinds)
+	}
+	// A git context without a known folder still needs the marks.
+	nofolder := git
+	nofolder.GitFolder, nofolder.Folder = "", ""
+	m = legacy(nofolder)
+	gl = &countChanged{files: []string{"third_party/proto/"}}
+	if SettleProject(ctx, m, gl, p, testNow, 0, 25); gl.n != 1 || m.settled[0].Kind != history.FilesChanged {
+		t.Errorf("git without a folder: %d calls, %+v", gl.n, m.settled)
+	}
 }
 
 type countChanged struct {
@@ -368,5 +427,85 @@ func TestNoCacheAndRemoteSourceVerdicts(t *testing.T) {
 	rs := verdictFor(b, history.Reason{Kind: history.RemoteSource, Step: step, Paths: []string{"https://example.com/tool.tar.gz?…"}, Old: "bk-a", New: "bk-b"}, "", 3, 0, nil)
 	if rs.Tone != "unknown" || !strings.Contains(string(rs.Detail), "example.com/tool.tar.gz") || !strings.Contains(string(rs.Hint), "--checksum") {
 		t.Errorf("remote source verdict: %+v", rs)
+	}
+}
+
+// A git context in a folder of the repository: only files inside the
+// folder count, by their path in it; a file elsewhere that merely ends like
+// a copied path is not the build's change.
+func TestDecideByDiffGitFolder(t *testing.T) {
+	api := store.Elsewhere{ID: 3, SHA: "b", PrevSHA: "a", Old: "node-a", GitFolder: "services/api", Paths: []string{"."}}
+	named := api
+	named.Paths = []string{"go.mod", "cmd/*"}
+	root := named
+	root.GitFolder = "."
+	sub := api
+	sub.Paths = []string{"third_party/proto/api"}
+	globbed := api
+	globbed.Paths = []string{"vendor/*/go.mod"}
+	starred := api
+	starred.Paths = []string{"*/go.mod"}
+	for _, c := range []struct {
+		name    string
+		e       store.Elsewhere
+		changed []string
+		kind    history.ReasonKind
+		paths   []string
+	}{
+		{"whole context, change elsewhere", api, []string{"services/web/main.go", "docs/README.md"}, history.OtherNode, nil},
+		{"whole context, change inside", api, []string{"services/web/main.go", "services/api/x.go"}, history.FilesChanged, []string{"services/api/x.go"}},
+		{"named sources, same name in another folder", named, []string{"services/web/go.mod", "go.mod"}, history.OtherNode, nil},
+		{"named sources, inside", named, []string{"services/api/go.mod"}, history.FilesChanged, []string{"services/api/go.mod"}},
+		{"named glob, inside", named, []string{"services/api/cmd/run/main.go"}, history.FilesChanged, []string{"services/api/cmd/run/main.go"}},
+		{"a folder whose name starts like the context", api, []string{"services/api-v2/x.go"}, history.OtherNode, nil},
+		{"root context, nested same name", root, []string{"vendor/x/go.mod"}, history.OtherNode, nil},
+		{"root context, the file itself", root, []string{"go.mod"}, history.FilesChanged, []string{"go.mod"}},
+		{"a submodule above a copied folder", sub, []string{"services/api/third_party/proto/"}, history.FilesChanged, []string{"services/api/third_party/proto"}},
+		{"a file where a submodule would be", sub, []string{"services/api/third_party/proto"}, history.OtherNode, nil},
+		{"a submodule beside it", sub, []string{"services/api/third_party/other/"}, history.OtherNode, nil},
+		{"a submodule holding the context folder", api, []string{"services/"}, history.FilesChanged, []string{"services"}},
+		{"the context folder itself (a submodule)", api, []string{"services/api/"}, history.FilesChanged, []string{"services/api"}},
+		{"a file named like a folder above the context", api, []string{"services"}, history.OtherNode, nil},
+		{"a submodule under a glob", globbed, []string{"services/api/vendor/lib/"}, history.FilesChanged, []string{"services/api/vendor/lib"}},
+		{"a file under the glob's first folder", globbed, []string{"services/api/vendor/README.md"}, history.OtherNode, nil},
+		{"a path beside the glob", globbed, []string{"services/api/other/lib/"}, history.OtherNode, nil},
+		{"a shallow file and a two-level glob", starred, []string{"services/api/README.md"}, history.OtherNode, nil},
+	} {
+		got := decideByDiff(c.e, c.changed, true, nil)
+		if got.Kind != c.kind || strings.Join(got.Paths, ",") != strings.Join(c.paths, ",") {
+			t.Errorf("%s: %s %v, want %s %v", c.name, got.Kind, got.Paths, c.kind, c.paths)
+		}
+	}
+	// Without the folder (a local context) the old, broad matching stays:
+	// a same-named file anywhere counts.
+	local := named
+	local.GitFolder = ""
+	if got := decideByDiff(local, []string{"services/web/go.mod"}, true, nil); got.Kind != history.FilesChanged {
+		t.Errorf("local context: %s, want files-changed", got.Kind)
+	}
+	local.Paths = []string{"third_party/proto/api"}
+	if got := decideByDiff(local, []string{"third_party/proto/"}, true, nil); got.Kind != history.FilesChanged || got.Paths[0] != "third_party/proto" {
+		t.Errorf("local context, submodule above the source: %s %v, want files-changed", got.Kind, got.Paths)
+	}
+	// Only a submodule is above a source: a file named like the source's
+	// first folder, or any shallow file for a glob, is not.
+	// A local context in a submodule's folder: its new commit is the
+	// whole context.
+	local.Folder, local.Paths = "services/api", []string{"go.mod"}
+	if got := decideByDiff(local, []string{"services/"}, true, nil); got.Kind != history.FilesChanged {
+		t.Errorf("local context inside a submodule: %s", got.Kind)
+	}
+	// A file that became a submodule is listed once.
+	if got := decideByDiff(api, []string{"services/api/lib", "services/api/lib/"}, true, nil); strings.Join(got.Paths, ",") != "services/api/lib" {
+		t.Errorf("file -> submodule: %v", got.Paths)
+	}
+	local.Folder = ""
+	local.Paths = []string{"cmd/server"}
+	if got := decideByDiff(local, []string{"tools/cmd"}, true, nil); got.Kind == history.FilesChanged {
+		t.Errorf("local context, a file named like a folder: %s %v", got.Kind, got.Paths)
+	}
+	local.Paths = []string{"*/go.mod"}
+	if got := decideByDiff(local, []string{"docs/intro.md", ".gitlab-ci.yml"}, true, nil); got.Kind == history.FilesChanged {
+		t.Errorf("local context, a glob and unrelated files: %s %v", got.Kind, got.Paths)
 	}
 }

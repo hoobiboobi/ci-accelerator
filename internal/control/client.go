@@ -449,6 +449,11 @@ func (c *Client) Compared(ctx context.Context, p store.ProjectKey, from, to stri
 	return
 }
 
+func (c *Client) ComparedMarked(ctx context.Context, p store.ProjectKey, from, to string) (files []string, complete, ok bool, err error) {
+	err = c.call(ctx, "ComparedMarked", []any{p, from, to}, &files, &complete, &ok)
+	return
+}
+
 func (c *Client) SaveCompare(ctx context.Context, p store.ProjectKey, from, to string, files []string, complete bool) error {
 	return c.call(ctx, "SaveCompare", []any{p, from, to, files, complete})
 }

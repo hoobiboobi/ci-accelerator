@@ -41,6 +41,7 @@ type Backend interface {
 	Refs(ctx context.Context, refs []string) (map[string]store.RefInfo, error)
 	Previous(ctx context.Context, b *history.Build) (*store.Stored, bool, error)
 	Compared(ctx context.Context, p store.ProjectKey, from, to string) ([]string, bool, bool, error)
+	ComparedMarked(ctx context.Context, p store.ProjectKey, from, to string) ([]string, bool, bool, error)
 	SaveCompare(ctx context.Context, p store.ProjectKey, from, to string, files []string, complete bool) error
 	StepHistory(ctx context.Context, buildID int64, step int, limit int) ([]store.StepRun, error)
 	Output(ctx context.Context, buildID int64, step int) (string, error)

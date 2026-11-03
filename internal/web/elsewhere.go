@@ -89,6 +89,9 @@ type SettleData interface {
 	Elsewhere(ctx context.Context, p store.ProjectKey, since time.Time, limit int) ([]store.Elsewhere, error)
 	SettleElsewhere(ctx context.Context, settled []store.Settled) error
 	Compared(ctx context.Context, p store.ProjectKey, from, to string) ([]string, bool, bool, error)
+	// ComparedMarked is Compared for comparisons stored with submodules
+	// marked, which a git context's verdict needs.
+	ComparedMarked(ctx context.Context, p store.ProjectKey, from, to string) ([]string, bool, bool, error)
 	SaveCompare(ctx context.Context, p store.ProjectKey, from, to string, files []string, complete bool) error
 }
 
@@ -114,6 +117,9 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 		files    []string
 		complete bool
 		err      error
+		// marked: submodules are marked (GitLab asked now, or stored so);
+		// a git context's verdict needs that.
+		marked bool
 	}
 	diffs := map[pair]*diff{}
 	var out []store.Settled
@@ -132,13 +138,20 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 		}
 		k := pair{e.PrevSHA, e.SHA}
 		d := diffs[k]
+		if d != nil && e.Git && !d.marked {
+			d = nil // read for a local context from an older comparison
+		}
 		if d == nil {
-			files, complete, ok, err := data.Compared(ctx, p, k.from, k.to)
+			compared := data.Compared
+			if e.Git {
+				compared = data.ComparedMarked
+			}
+			files, complete, ok, err := compared(ctx, p, k.from, k.to)
 			if err != nil {
 				return 0, err
 			}
 			if ok {
-				d = &diff{files, complete, nil}
+				d = &diff{files, complete, nil, e.Git}
 				diffs[k] = d
 			}
 		}
@@ -165,7 +178,7 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 				stop = err
 				continue
 			}
-			d = &diff{files, complete, err}
+			d = &diff{files, complete, err, true}
 			diffs[k] = d
 			if err == nil {
 				if err := data.SaveCompare(ctx, p, k.from, k.to, files, complete); err != nil {
@@ -200,9 +213,37 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 		return store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: " + clip(err.Error(), 120)}
 	}
 	var hit []string
+	seen := map[string]bool{}
 	for _, f := range changed {
+		// A submodule's new commit is its path with a trailing slash
+		// (gitlab.Client.Changed): everything below it changed.
+		sub := strings.HasSuffix(f, "/")
+		f = strings.TrimSuffix(f, "/")
+		if seen[f] {
+			continue // a file that became a submodule: one path
+		}
+		folder := e.GitFolder
+		if folder == "" {
+			folder = e.Folder
+		}
+		// A submodule holding the context folder changes the whole
+		// context, wherever the context came from.
+		if sub && folder != "" && folder != "." && strings.HasPrefix(folder+"/", f+"/") {
+			seen[f] = true
+			hit = append(hit, f)
+			continue
+		}
+		in, rel := f, ""
+		if e.GitFolder != "" {
+			// A git context is the repository's folder at the commit:
+			// only files inside it count, by their path in it.
+			if rel, in = inFolder(f, e.GitFolder); in == "" {
+				continue
+			}
+		}
 		for _, src := range e.Paths {
-			if touches(f, src) {
+			if (e.GitFolder == "" && touches(f, src, sub)) || (e.GitFolder != "" && touchesExactly(rel, src, sub)) {
+				seen[f] = true
 				hit = append(hit, f)
 				break
 			}
@@ -228,18 +269,67 @@ func noChangeKind(e store.Elsewhere) history.ReasonKind {
 	return history.OtherNode
 }
 
+// inFolder is a file's path inside folder ("." for the root) and the file
+// itself when it is inside; in is "" when it is not.
+func inFolder(file, folder string) (rel, in string) {
+	if folder == "." {
+		return file, file
+	}
+	if r, ok := strings.CutPrefix(file, strings.TrimSuffix(folder, "/")+"/"); ok {
+		return r, file
+	}
+	return "", ""
+}
+
+// touchesExactly reports whether a copy source, relative to the context,
+// covers a file relative to the context: the same path, a folder above it
+// or a glob matching it or a folder above it; for a submodule (sub) also
+// a source inside it. Unlike touches, the source is never matched against
+// the file's trailing path parts: the folder of the context is known.
+func touchesExactly(rel, src string, sub bool) bool {
+	src = strings.TrimSuffix(strings.TrimPrefix(src, "./"), "/")
+	if src == "" || src == "." || rel == src || strings.HasPrefix(rel, src+"/") {
+		return true
+	}
+	if sub && (strings.HasPrefix(src, rel+"/") || globAbove(src, rel)) {
+		return true
+	}
+	if strings.ContainsAny(src, "*?[") {
+		for d := rel; d != "." && d != "/" && d != ""; d = path.Dir(d) {
+			if ok, _ := path.Match(src, d); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// globAbove reports whether a path is above what a glob copies: the
+// glob's first segments match it (a submodule "vendor/lib" for
+// "vendor/*/go.mod").
+func globAbove(src, p string) bool {
+	ss, ps := strings.Split(src, "/"), strings.Split(p, "/")
+	if len(ps) >= len(ss) {
+		return false
+	}
+	ok, _ := path.Match(strings.Join(ss[:len(ps)], "/"), p)
+	return ok
+}
+
 // touches says whether a changed file of the repository is something a
 // COPY source reads. The build context may be a folder of the repository,
 // so the source is also matched against the file's trailing parts: a
 // change then counts as the step's more often than it should, never less.
-func touches(file, src string) bool {
+// A submodule (sub) counts for the sources inside it too: its new commit
+// is one changed path for everything below it.
+func touches(file, src string, sub bool) bool {
 	src = strings.TrimSuffix(strings.TrimPrefix(src, "./"), "/")
 	if src == "" || src == "." {
 		return true
 	}
 	glob := strings.ContainsAny(src, "*?[")
 	for rest := file; ; {
-		if rest == src || strings.HasPrefix(rest, src+"/") {
+		if rest == src || strings.HasPrefix(rest, src+"/") || (sub && (strings.HasPrefix(src, rest+"/") || globAbove(src, rest))) {
 			return true
 		}
 		if glob {

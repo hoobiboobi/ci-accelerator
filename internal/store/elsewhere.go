@@ -25,6 +25,30 @@ type Elsewhere struct {
 	// one; empty when the previous build ran on the same daemon. It decides
 	// whether a no-change outcome is "other node" or an evicted cache.
 	Old string
+	// GitFolder is the folder of the repository a git context was fetched
+	// from ("." for its root), when the build's context came from git and
+	// the job named the folder: the changed files that count are the ones
+	// inside it. Empty otherwise.
+	GitFolder string
+	// Folder is the context folder the job named, whatever the context's
+	// source; empty when not known.
+	Folder string
+	// Git: the build's context was fetched from git (the folder may not
+	// be known): GitLab's comparison decides its verdict, so it needs the
+	// submodules marked (ComparedMarked).
+	Git bool
+}
+
+// plainPaths are changed files as people read them: a submodule's path
+// without the trailing slash a comparison marks it with (an older release
+// that settled from a marked comparison kept it).
+func plainPaths(ps []string) []string {
+	for i, p := range ps {
+		if len(p) > 1 {
+			ps[i] = strings.TrimSuffix(p, "/")
+		}
+	}
+	return ps
 }
 
 // Compared returns GitLab's comparison of two commits as stored by
@@ -44,11 +68,26 @@ func (s *Store) Compared(ctx context.Context, p ProjectKey, from, to string) (fi
 	return files, complete, err == nil, err
 }
 
+// ComparedMarked is Compared for a comparison stored with its submodules
+// marked (see the marks column); ok is false for an older one.
+func (s *Store) ComparedMarked(ctx context.Context, p ProjectKey, from, to string) (files []string, complete, ok bool, err error) {
+	var marks int
+	err = s.db.QueryRowContext(ctx, `SELECT marks FROM compares WHERE instance = ? AND project_id = ? AND from_sha = ? AND to_sha = ?`,
+		nullInstance(p.Instance), nullUint(p.ID), from, to).Scan(&marks)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && marks == 0) {
+		return nil, false, false, nil
+	}
+	if err != nil {
+		return nil, false, false, err
+	}
+	return s.Compared(ctx, p, from, to)
+}
+
 // SaveCompare stores GitLab's comparison of two commits of a project.
 func (s *Store) SaveCompare(ctx context.Context, p ProjectKey, from, to string, files []string, complete bool) error {
 	raw, _ := json.Marshal(nonNil(files))
-	_, err := s.db.ExecContext(ctx, `INSERT INTO compares (instance, project_id, from_sha, to_sha, files, complete, at) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (instance, project_id, from_sha, to_sha) DO UPDATE SET files = excluded.files, complete = excluded.complete, at = excluded.at`,
+	_, err := s.db.ExecContext(ctx, `INSERT INTO compares (instance, project_id, from_sha, to_sha, files, complete, at, marks) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+		ON CONFLICT (instance, project_id, from_sha, to_sha) DO UPDATE SET files = excluded.files, complete = excluded.complete, at = excluded.at, marks = 1`,
 		nullInstance(p.Instance), nullUint(p.ID), from, to, string(raw), complete, s.opts.Now().UnixMilli())
 	return err
 }
@@ -81,8 +120,9 @@ func (s *Store) ElsewhereProjects(ctx context.Context, since time.Time) ([]Proje
 // image without a target, its own repository's previous build, not the
 // latest of the project's other Dockerfiles.
 func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, limit int) ([]Elsewhere, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.started_at, COALESCE(p.sha, ''), b.reason_paths, b.reason_old,
-			b.ref, b.target, b.images, b.pipeline_id
+	// A git context names its commit itself; otherwise the pipeline's.
+	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.started_at, COALESCE(NULLIF(b.context_commit, ''), p.sha, ''), b.reason_paths, b.reason_old,
+			b.ref, b.target, b.images, b.pipeline_id, b.context_commit, b.context
 		FROM builds b INDEXED BY builds_elsewhere
 		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
 		WHERE b.instance = ? AND b.project_id = ? AND b.started_at >= ?
@@ -103,12 +143,20 @@ func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, li
 			started       int64
 			paths, images string
 			pipeline      sql.NullInt64
+			commit, ctxt  string
 		)
-		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.Old, &b.Ref, &b.Target, &images, &pipeline); err != nil {
+		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.Old, &b.Ref, &b.Target, &images, &pipeline, &commit, &ctxt); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		e.Started = time.UnixMilli(started).UTC()
+		e.Git = commit != ""
+		if ctxt != "" && ctxt != ".." && !strings.HasPrefix(ctxt, "../") && !strings.HasPrefix(ctxt, "/") {
+			e.Folder = ctxt
+			if commit != "" {
+				e.GitFolder = ctxt
+			}
+		}
 		_ = json.Unmarshal([]byte(paths), &e.Paths)
 		b.Started, b.Attribution.Pipeline = e.Started, uint64(pipeline.Int64)
 		_ = json.Unmarshal([]byte(images), &b.Images)
@@ -126,7 +174,7 @@ func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, li
 		if prev == 0 {
 			continue
 		}
-		if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(p.sha, '') FROM builds b
+		if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(b.context_commit, ''), p.sha, '') FROM builds b
 			LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
 			WHERE b.id = ?`, prev).Scan(&out[i].PrevSHA); err != nil {
 			return nil, err
@@ -169,11 +217,11 @@ func (s *Store) SettleElsewhere(ctx context.Context, settled []Settled) error {
 			kind  = string(st.Kind)
 			paths sql.NullString
 		)
-		if !s.opts.TrustGitComparison && FromComparison(st.Via) && (st.Kind == history.OtherNode || st.Kind == history.NotInCache) {
-			// No change in the repository is not no change in the context:
-			// it stays unclear, with what the comparison showed (Via).
-			kind = string(history.CacheElsewhere)
-		}
+		// No change in the repository is not no change in a local context
+		// (the job's files): it stays unclear, with what the comparison
+		// showed (Via). A git context is the repository at that commit, so
+		// the comparison holds for it.
+		distrust := !s.opts.TrustGitComparison && FromComparison(st.Via) && (st.Kind == history.OtherNode || st.Kind == history.NotInCache)
 		if st.Kind == history.FilesChanged {
 			b, _ := json.Marshal(nonNil(st.Paths))
 			paths = sql.NullString{String: string(b), Valid: true}
@@ -181,11 +229,12 @@ func (s *Store) SettleElsewhere(ctx context.Context, settled []Settled) error {
 		var started int64
 		var instance, pipeline sql.NullInt64
 		open, _ := json.Marshal(nonNil(st.Open))
-		err := tx.QueryRowContext(ctx, `UPDATE builds SET reason_kind = ?, reason_via = ?,
+		err := tx.QueryRowContext(ctx, `UPDATE builds SET
+				reason_kind = CASE WHEN ? AND context_commit = '' THEN 'cache-elsewhere' ELSE ? END, reason_via = ?,
 				reason_paths = COALESCE(?, reason_paths)
 			WHERE id = ? AND reason_kind = 'cache-elsewhere' AND reason_via = ''
 				AND (NOT ? OR (reason_old = ? AND reason_paths = ?))
-			RETURNING started_at, instance, pipeline_id`, kind, st.Via, paths, st.ID, st.Asked, st.Old, string(open)).Scan(&started, &instance, &pipeline)
+			RETURNING started_at, instance, pipeline_id`, distrust, kind, st.Via, paths, st.ID, st.Asked, st.Old, string(open)).Scan(&started, &instance, &pipeline)
 		if err == sql.ErrNoRows {
 			continue
 		}
@@ -247,7 +296,8 @@ func (s *Store) applyGitTrust(ctx context.Context) error {
 	if have == want {
 		return nil
 	}
-	q := `UPDATE builds SET reason_kind = 'cache-elsewhere' WHERE reason_kind IN ` + farmKinds + ` AND ` + fromComparisonSQL + ` RETURNING started_at`
+	q := `UPDATE builds SET reason_kind = 'cache-elsewhere' WHERE reason_kind IN ` + farmKinds + ` AND ` + fromComparisonSQL + `
+		AND context_commit = '' RETURNING started_at`
 	if want == "1" {
 		q = `UPDATE builds SET reason_via = '' WHERE reason_kind = 'cache-elsewhere' AND ` + fromComparisonSQL + ` RETURNING started_at`
 	}
