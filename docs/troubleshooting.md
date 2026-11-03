@@ -41,7 +41,7 @@ names the fix; the common ones:
 | `diskProbe.image.digest (buildkit.diskProbe.image.digest in the box) is the digest of the v... image, but the disk probe runs v...` | Set the digest the message names (the release notes list it too), or remove it |
 | `priorityclasses.scheduling.k8s.io is forbidden` | The installer may not create cluster-scoped objects: `buildkit.priorityClass.create=false`, or name an existing class in `buildkit.priorityClassName` (and the same class, or `""`, in `control-plane.router.priorityClassName`) |
 | `clusterroles.rbac.authorization.k8s.io is forbidden` | The controller checks its callers' ServiceAccount tokens with a TokenReview, which needs a ClusterRole and its binding: install with the right to create them |
-| `ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place`, or `release ... has the console of ci-accelerator 0.2.x` | 0.3.0 renamed every object and value of the console: uninstall, wait for the pods, install again ([below](#upgrading-from-02x-to-030)) |
+| `ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place`, or `release ... has the console of ci-accelerator 0.2.x` | 0.3.0 renamed every object and value of the console: uninstall, wait for the pods, install again ([upgrading](upgrading.md#from-02x-to-030-or-later-install-again)) |
 | `values under console: are the 0.2.x console's` | Move them under `control-plane:` (pod settings and volume under `control-plane.controller`, the web's under `control-plane.web`) |
 
 Checks that read the live cluster (Pod Security, build nodes, Secrets)
@@ -303,12 +303,29 @@ Other causes:
   limit), 143 is SIGTERM (the job was cancelled or timed out, or the daemon
   was shutting down). It also says whether the failed step is new or
   changed in this build.
-- **A registry fails certificate verification after the upgrade to
-  0.3.0.** BuildKit v0.34.1 is built with Go 1.26.10, which no
-  longer accepts the revoked eMudhra intermediate certificates: a registry
+- **A registry fails certificate verification since the upgrade to
+  0.3.0.** BuildKit since v0.34.1 is built with Go 1.26.10 or later, which
+  no longer accepts the revoked eMudhra intermediate certificates: a registry
   whose certificate chain uses one of them now fails verification, for
   base images and pushes alike. The registry has to serve a chain without
   them.
+- **A build from a git context fails** (the CI component's
+  `context-source: git`; [ci/gitlab/README.md](../ci/gitlab/README.md#huge-repositories-context-source-git)):
+  - `load git source` fails to connect or with a certificate error: the
+    build node fetches from `$CI_PROJECT_URL`, so the daemons must reach
+    GitLab and trust its CA, not only the job. With
+    `buildkit.networkPolicy.egress.clusterCIDRs` set and GitLab inside
+    them, add an egress rule for GitLab
+    (`buildkit.networkPolicy.egress.extraRules`);
+  - `could not read Username` or 401/403: the job token was not passed,
+    or the project's job token may not read the repository;
+  - a private submodule fails, and Git LFS files arrive as pointers: keep
+    `context-source: local` for such repositories;
+  - the job's `before_script` (often a `default:` one) fails with a
+    missing file: the job has no checkout; give it `before_script: []`;
+  - the job checks out after all: a `GIT_STRATEGY` set as a CI/CD
+    variable in the project's or group's settings outranks the
+    component's.
 - **Builds stop when a router restarts.** A stopping router keeps
   carrying its open connections for `control-plane.router.drainSeconds`
   (300) and then closes them (log `drain time over: closing open
@@ -492,7 +509,15 @@ limit on build nodes.
   - the console has no GitLab token and no sign-in, or (with sign-in) no
     one who may read the project has opened its pages since the build;
   - a commit is not known (the job pod's annotations were missing);
-  - GitLab's comparison failed or was cut short (too large or too slow).
+  - GitLab's comparison failed or was cut short (too large or too slow);
+  - GitLab's comparison shows no change in the files the step copies:
+    the build context also holds what the job made or fetched (CI
+    artifacts, generated files), which no comparison of commits sees.
+    `control-plane.reasons.trustGitComparison=true` counts such a rebuild
+    as the build farm's when your contexts hold repository files alone.
+    A build from a git context (the CI component's `context-source: git`)
+    is the repository's folder at its commit, so the comparison decides
+    it either way.
 
   The build router, which keeps a project's jobs on the node that built it,
   makes the case rare; the build page says how the router placed the job.
@@ -574,7 +599,7 @@ ids, paths and counts, and mask anything that looks like a GitLab token.
 
 - **Upgrades:** use `helm upgrade --reset-then-reuse-values`. With
   `--reuse-values`, keys added by a newer chart are missing from the old
-  values.
+  values. Everything about upgrades: [upgrading](upgrading.md).
 - **`helm template`:**
   - pass `--api-versions cert-manager.io/v1`;
   - on Helm 3 older than 3.19, also `--kube-version 1.34.0` or newer: the
@@ -635,84 +660,11 @@ by itself.
 
 ### Upgrading from 0.2.x to 0.3.0
 
-0.3.0 split the console into the control plane: chart `control-plane`
-(was `console`), image `ghcr.io/hoobiboobi/ci-accelerator` (was
-`ci-accelerator-console`), a controller and a web with new names for every
-object (`<release>-controller`, `<release>-web`) and value, and the build
-router in front of the daemons. Helm refuses to upgrade a 0.2.x release in
-place, so install it again:
-
-1. Remove the release and wait for its pods:
-   ```sh
-   helm uninstall ci-accelerator -n ci-accelerator --wait
-   kubectl -n ci-accelerator wait --for=delete pod -l app.kubernetes.io/instance=ci-accelerator --timeout=10m
-   ```
-   The jobs namespace goes with the release (running jobs fail); the
-   daemons' cache on a hostPath stays. With cert-manager, then delete the
-   daemons' certificate Secret: it outlives the release, and 0.3.0's names
-   the build router (the daemons read their certificate only at start):
-   ```sh
-   kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls
-   ```
-   Without cert-manager (`buildkit.tls.source=existingSecret`), make the
-   daemons' certificate again from the same CA (the same `--out`
-   directory, so the clients' certificates stay valid) and replace the
-   Secret named in `buildkit.tls.existingSecret` with it:
-   ```sh
-   scripts/buildkit-certs.sh --name ci-accelerator-buildkit --namespace ci-accelerator \
-     --out <your certs directory> --router ci-accelerator
-   ```
-2. In your values, move everything under `console:` to `control-plane:`.
-   The controller's pod settings and volume go under
-   `control-plane.controller` (`resources`, `nodeSelector`, `tolerations`,
-   `affinity`, `podLabels`, `podAnnotations`, `persistence`), the web's
-   under `control-plane.web` (`port`, from `service.port`; the web no
-   longer follows the controller's placement). Drop
-   `daemons.diskProbePort`: the daemons tell the controller their probe's
-   port. An image mirror now mirrors `ghcr.io/hoobiboobi/ci-accelerator`
-   (`control-plane.image` and `buildkit.diskProbe.image`). A runner
-   cache's `consoleSecretName` is now `controllerSecretName`. A runner of
-   your own sets `BUILDKIT_REMOTE_ADDR` to the router,
-   `tcp://ci-accelerator-router.ci-accelerator.svc:1234`.
-3. Install 0.3.0 with those values. Without cert-manager, issue the
-   controller's API certificate from the same CA and name its Secret in
-   `control-plane.controller.api.tls.existingSecret` (the script prints the
-   `kubectl create secret` command):
-   ```sh
-   scripts/buildkit-certs.sh --name ci-accelerator-buildkit --namespace ci-accelerator \
-     --out <your certs directory> --controller ci-accelerator
-   ```
-4. The new console starts with an empty history. The old one stays on
-   `<release>-console-data`; delete it when you no longer need it, with
-   the old client certificate Secret:
-   ```sh
-   kubectl -n ci-accelerator delete pvc ci-accelerator-console-data
-   kubectl -n ci-accelerator delete secret ci-accelerator-console-client --ignore-not-found
-   ```
-   Port-forwards, an Ingress or a `global.console.url` tunnel point at the
-   Service `<release>-web` now (it was `<release>-console`).
-
-On the one-machine install, `quickstart.sh` stops with these steps: run
-the `helm uninstall` and `kubectl delete secret` it prints, rename
-`console:` to `control-plane:` in `/var/lib/ci-accelerator/values.yaml` (or
-delete the file to start over) and run the script again. GitOps: delete
-the Application or HelmRelease and create it again with the new values.
+Moved to [upgrading](upgrading.md#from-02x-to-030-or-later-install-again).
 
 ### After upgrading from 0.1.0
 
-0.1.0 installed VictoriaMetrics and VictoriaTraces for metrics and traces.
-The upgrade removes them, but their volumes stay. Find them and delete
-them:
-
-```sh
-kubectl -n ci-accelerator get pvc | grep -e victoria-metrics-single -e vt-single
-kubectl -n ci-accelerator delete pvc <name> <name>
-```
-
-If the daemons still try to send to the removed Services, the upgrade
-reused the old endpoint values: upgrade again with
-`--reset-then-reuse-values`, or set `buildkit.otel.metricsEndpoint` and
-`tracesEndpoint` to `""` or to your own backend.
+Moved to [upgrading](upgrading.md#from-010).
 
 ### Uninstall completely
 

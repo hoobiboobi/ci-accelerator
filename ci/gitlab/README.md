@@ -137,7 +137,7 @@ build fetches one commit, every later one only what changed since.
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/<release>/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.4.0/ci/gitlab/build.yml
     integrity: sha256-<from the release notes>
     inputs:
       runner-tags: [ci-accelerator]
@@ -172,7 +172,9 @@ build:
   the cache); give projects that must not read each other separate build
   nodes.
 - **The build nodes fetch from `$CI_PROJECT_URL`.** They must reach it
-  (and trust its CA if GitLab has its own), not only the job; a runner's
+  (and trust its CA if GitLab has its own), not only the job; with
+  GitLab inside `buildkit.networkPolicy.egress.clusterCIDRs`, add an
+  egress rule for it (`buildkit.networkPolicy.egress.extraRules`); a runner's
   `clone_url` is not used.
 - **The job runs without a checkout.** A `default: before_script` of the
   pipeline that runs a repository script fails in it: give the job

@@ -162,7 +162,9 @@ reasons:
   # build context also holds what the job made or downloaded (CI artifacts,
   # generated files). Turn it on only when your build contexts hold
   # repository files alone. Switching it either way recounts the stored
-  # builds; GitLab is not asked again.
+  # builds; GitLab is not asked again. Builds from a git context (the CI
+  # component's context-source: git) are decided by the comparison either
+  # way, counting only the files in the context's folder.
   trustGitComparison: false
 
 # The roles' own logs (kubectl logs): one JSON object per line. Never in

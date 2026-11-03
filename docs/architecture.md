@@ -97,6 +97,12 @@ routers run with the same PriorityClass: they carry the daemons' builds.
 4. **The build runs in the daemon:**
    - `buildctl` streams the build context and Dockerfile from the job pod
      (across the network when the router chose another node's daemon);
+     with the CI component's `context-source: git` the job sends nothing:
+     the daemon fetches the pipeline's commit from `$CI_PROJECT_URL`
+     itself, with the job token as a build secret, into one copy of the
+     repository per remote that it keeps, and lays the commit out from
+     there; the Dockerfile comes from the commit
+     ([ADR-0057](adr/0057-builds-from-a-git-context.md));
    - the daemon resolves and pulls base images;
    - it runs `RUN` steps in runc sandboxes;
    - it exports the result.
@@ -121,6 +127,10 @@ The box renders these (a CNI that enforces NetworkPolicy is needed):
 | Routers | The jobs namespace (`control-plane.router.clientNamespaces`) | Not limited |
 | Controller | The web's and the routers' pods, on the API port | Not limited |
 | Web | Every namespace except the box's own and the jobs namespace; in the box namespace, every pod except the daemons | Not limited |
+
+A daemon that builds from a git context must reach the GitLab it fetches
+from: with GitLab inside `clusterCIDRs`, add a rule for it in
+`buildkit.networkPolicy.egress.extraRules`.
 
 CI jobs therefore reach a daemon only through a router, and neither CI
 jobs nor `RUN` steps can reach the controller's API or the console's
@@ -192,9 +202,9 @@ pages. `kubectl port-forward` still works.
 
   | Policy | What it removes |
   |---|---|
-  | Build contexts and git checkouts | Records unused for 48 h (while the whole cache is above 512 MB) |
+  | Build contexts and git checkouts | Records unused for 48 h (while the whole cache is above 512 MB). A git context's commit is laid out again from the daemon's copy of the repository when its checkout was removed |
   | Cache mounts (`RUN --mount=type=cache`) | Records unused for 14 days (`config.gc.cacheMounts.keepDuration`) |
-  | Everything else | Nothing by age alone. While the cache is above `maxUsedSpace` or free disk is below `minFreeSpace`: records unused for 60 days first, then the least recently used records, down to the caps but never below `reservedSpace` |
+  | Everything else (also a git context's copy of the repository) | Nothing by age alone. While the cache is above `maxUsedSpace` or free disk is below `minFreeSpace`: records unused for 60 days first, then the least recently used records, down to the caps but never below `reservedSpace` |
 
   - A size cap on a filtered policy is compared with the size of the whole
     cache, not with the filtered records.

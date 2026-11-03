@@ -223,7 +223,9 @@ new project on two nodes meet on one daemon, that a later job goes to the
 node its project built on, and that a pod in the jobs namespace cannot
 reach a daemon around the router.
 
-It does not show compatibility with a real GitLab server: git checkout,
-artifacts, or pushing with the job token. The stand-in follows the runner's
-API at the pinned version, so bump the runner and chart together and run the
-e2e again.
+This scenario does not show compatibility with a real GitLab server. The
+same runner configuration does, through the box, in the e2e's component
+scenario: real pipelines in GitLab CE with checkout, pushes with the job
+token to GitLab's registry and a later job using the pushed digest. The
+stand-in follows the runner's API at the pinned version, so bump the
+runner and chart together and run the e2e again.

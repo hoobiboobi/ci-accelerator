@@ -371,6 +371,10 @@ daemons directly: leave out `--router` and admit the jobs namespace in
   the build router and the daemons' disk probe. The disk probe has its own
   pinned tag (it changes only when the probe does), so a mirror needs
   `buildkit.diskProbe.image` set as well as `control-plane.image`.
+- To upgrade, change the chart version in Git (`ref.tag` of the
+  `OCIRepository`, `targetRevision` of the `Application`) and, when you
+  pin them, the image digests in the same commit, after reading the
+  release's Upgrade notes ([upgrading](upgrading.md#gitops-flux-argo-cd)).
 - 0.3.0 does not upgrade a 0.2.x release in place (the console became the
   control plane, with new names). Under GitOps:
   1. Delete the release (the Argo CD `Application` or Flux
@@ -384,9 +388,9 @@ daemons directly: leave out `--router` and admit the jobs namespace in
      the web's port under `control-plane.web`; a runner cache's
      `consoleSecretName` is now `controllerSecretName`) and point your
      Ingress at the Service `<release>-web` (it was `<release>-console`).
-  4. Create the release again at 0.4.0.
+  4. Create the release again at the current version.
 
   The box refuses values under `console:` even when rendered offline; the
   check for a running 0.2.x console needs the live cluster, so Argo CD
   does not run it. Details:
-  [troubleshooting](troubleshooting.md#upgrading-from-02x-to-030).
+  [upgrading](upgrading.md#from-02x-to-030-or-later-install-again).
