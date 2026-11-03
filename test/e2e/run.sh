@@ -1364,6 +1364,11 @@ s_component() {
   kc -n "$COMP_NS" delete secret gitlab-runner-token --ignore-not-found >/dev/null
   kc -n "$COMP_NS" create secret generic gitlab-runner-token --from-file=runner-token="$rtoken" \
     --from-literal=runner-registration-token= >/dev/null || { fail "the runner token Secret"; return; }
+  # The console reads GitLab with a token (the admin's, from its file): it
+  # compares commits to settle "files or node".
+  kc -n "$COMP_NS" delete secret component-gitlab-token --ignore-not-found >/dev/null
+  kc -n "$COMP_NS" create secret generic component-gitlab-token --from-file=token="$COMP_GL_DIR/token" >/dev/null \
+    || { fail "the console's GitLab token Secret"; return; }
   make -C "$ROOT" deps >"$LOGS/component-deps.log" 2>&1 || { fail "make deps (see $LOGS/component-deps.log)"; return; }
   e2e_image component || return
   arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
@@ -1374,6 +1379,7 @@ s_component() {
     --set "gitlab-runner.gitlabUrl=http://$COMP_GL/" --set gitlab-runner.runners.secret=gitlab-runner-token \
     --set "global.jobs.namespace=$COMP_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$COMP_JOBS_NS" \
     --set "global.jobs.architecture=$arch" --set global.console.url=https://console.e2e.example \
+    --set control-plane.gitlab.token.existingSecret=component-gitlab-token \
     --wait --timeout 8m >"$LOGS/component-install.log" 2>&1 || { fail "install the box (see $LOGS/component-install.log)"; return; }
   check "the box's runner registers with GitLab" \
     eventually 120 eval '[ "$(gl GET /runners/$rid | jv "v[\"status\"]")" = online ]'
@@ -1490,6 +1496,187 @@ sys.exit(0 if one and two and one["steps"].get("built") and not two["steps"].get
       grep -q 'RUN exit 3' "$LOGS/component-failed.html"
   }
   check "the console's page for the failed build shows its Dockerfile with the failed line" eventually 60 comp_failed_page
+
+  # context-source git in a private project: the build job checks nothing
+  # out, the build node fetches the pipeline's commit itself with the job's
+  # token (folder svc as the context), while a job without the component
+  # in the same pipeline still gets its checkout. A new commit rebuilds
+  # only what reads the context, and the console tells it from a changed
+  # Dockerfile; the same commit again comes from the cache.
+  local git_id g1 g2 g3 gs1 gs2 gs3 gj2
+  mkdir -p "$LOGS/component-files/app-git/svc/src"
+  cp "$LOGS/component-files/app/Dockerfile" "$LOGS/component-files/app-git/svc/Dockerfile"
+  echo hello >"$LOGS/component-files/app-git/svc/src/app.txt"
+  cat >"$LOGS/component-files/app-git/.gitlab-ci.yml" <<EOF_GIT
+include:
+  - remote: http://$COMP_GL/root/component/-/raw/main/build.yml
+    integrity: sha256-$(openssl dgst -sha256 -binary "$ROOT/ci/gitlab/build.yml" | base64 | tr -d '\n')
+    inputs:
+      runner-tags: [e2e-component]
+      context: svc
+      context-source: git
+
+checked-out:
+  stage: build
+  tags: [e2e-component]
+  image: alpine:3.22
+  script:
+    - test -f svc/src/app.txt && echo "CHECKOUT PRESENT"
+EOF_GIT
+  git_id=$(gl POST /projects '{"name":"app-git","visibility":"private","initialize_with_readme":true}' | jv 'v["id"]') \
+    && gl_commit "$git_id" main main "$LOGS/component-files/app-git" >/dev/null || { fail "the git-context project"; return; }
+  read -r g1 gs1 <<<"$(gl_pipeline "$git_id" main 0)"
+  check "context-source git: the private project's pipeline succeeds (${gs1:-none})" test "$gs1" = success
+  gl_trace "$git_id" "$g1" build-image "$LOGS/component-git-1.trace" >/dev/null
+  gl_trace "$git_id" "$g1" checked-out "$LOGS/component-git-checkout.trace" >/dev/null
+  check "context-source git: the build job checks nothing out, the build node fetches the commit" \
+    eval 'grep -q "Skipping Git repository setup" "$LOGS/component-git-1.trace" &&
+      grep -qE "^Dockerfile steps: [0-9]+ from cache, [1-9][0-9]* run; context sent: none, fetched from git by the build node in [0-9.]+s$" "$LOGS/component-git-1.trace"'
+  check "context-source git: a job without the component still gets the checkout" \
+    eval '! grep -q "Skipping Git repository setup" "$LOGS/component-git-checkout.trace" && grep -qx "CHECKOUT PRESENT" "$LOGS/component-git-checkout.trace"'
+  check "context-source git: the job token never reaches the job log" eval '! grep -q "gitlab-ci-token:" "$LOGS/component-git-1.trace"'
+
+  gl POST "/projects/$git_id/repository/commits" '{"branch":"main","commit_message":"e2e: change the app","actions":[{"action":"update","file_path":"svc/src/app.txt","content":"changed\n"}]}' >/dev/null \
+    || fail "commit a change to the git-context project"
+  read -r g2 gs2 <<<"$(gl_pipeline "$git_id" main "$g1")"
+  check "context-source git: the next commit's pipeline succeeds (${gs2:-none})" test "$gs2" = success
+  gj2=$(gl_trace "$git_id" "$g2" build-image "$LOGS/component-git-2.trace")
+  check "context-source git: the next commit rebuilds only what reads the context" \
+    grep -qE '^Dockerfile steps: [1-9][0-9]* from cache, [1-9][0-9]* run; context sent: none, (fetched from git by the build node in [0-9.]+s|the build node had this commit already)$' "$LOGS/component-git-2.trace"
+  # The commit is the build context, not a change of the Dockerfile: the
+  # first rebuilt step is the COPY, and the console settles it by GitLab's
+  # comparison of the two commits, naming the changed file inside the
+  # context's folder.
+  comp_git_reason() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080/api/v1/builds?limit=50" 2>/dev/null \
+      | python3 -c 'import json,sys
+b = [x for x in json.load(sys.stdin)["builds"] if x.get("job") == int(sys.argv[1])]
+r = (b[0].get("reason") or {}) if b else {}
+print(r)
+sys.exit(0 if r.get("kind") == "files-changed" and r.get("step", "").endswith(" 3/4]") and r.get("paths") == ["svc/src/app.txt"] else 1)' "$gj2" >"$LOGS/component-git-reason.txt"
+  }
+  check "context-source git: the console explains the rebuild by the changed file in the context (GitLab's comparison)" eventually 180 comp_git_reason
+
+  gl POST "/projects/$git_id/pipeline" '{"ref":"main"}' >/dev/null || fail "run the git-context pipeline again"
+  read -r g3 gs3 <<<"$(gl_pipeline "$git_id" main "$g2")"
+  gl_trace "$git_id" "$g3" build-image "$LOGS/component-git-3.trace" >/dev/null
+  check "context-source git: the same commit again comes from the cache (${gs3:-none})" \
+    eval '[ "$gs3" = success ] && grep -qE "^Dockerfile steps: [1-9][0-9]* from cache, 0 run; " "$LOGS/component-git-3.trace"'
+
+  # context-source git, the edges: four builds of one commit at once (one
+  # fetch per repository on a daemon), the repository root as the context
+  # with a Dockerfile elsewhere, a target and two platforms (one record per
+  # platform, merged), a folder with a space in its name, .dockerignore not
+  # applied (documented), a Dockerfile outside the context refused before
+  # any build, a tag pipeline and a retried job.
+  local edge_id e1 es1 e2 es2 ej
+  mkdir -p "$LOGS/component-files/app-edge/build" "$LOGS/component-files/app-edge/web app"
+  printf 'FROM --platform=$BUILDPLATFORM alpine:3.22 AS gen\nARG TARGETPLATFORM\nRUN mkdir /out && echo "$TARGETPLATFORM" > /out/platform\nFROM alpine:3.22 AS final\nCOPY --from=gen /out /out\nCOPY app.txt /app.txt\nFROM final AS unused\nRUN exit 7\n' \
+    >"$LOGS/component-files/app-edge/build/Containerfile"
+  echo edge >"$LOGS/component-files/app-edge/app.txt"
+  echo ignored >"$LOGS/component-files/app-edge/ignored.txt"
+  printf 'ignored.txt\n' >"$LOGS/component-files/app-edge/.dockerignore"
+  printf 'FROM alpine:3.22\nCOPY . /ctx\nRUN if test -f /ctx/ignored.txt; then echo IGNORED-PRESENT; fi\n' >"$LOGS/component-files/app-edge/Dockerfile.ignore"
+  printf 'FROM alpine:3.22\nCOPY index.txt /index.txt\nRUN cat /index.txt\n' >"$LOGS/component-files/app-edge/web app/Dockerfile"
+  echo space >"$LOGS/component-files/app-edge/web app/index.txt"
+  local integ
+  integ="sha256-$(openssl dgst -sha256 -binary "$ROOT/ci/gitlab/build.yml" | base64 | tr -d '\n')"
+  cat >"$LOGS/component-files/app-edge/.gitlab-ci.yml" <<EOF_EDGE
+include:
+  - remote: http://$COMP_GL/root/component/-/raw/main/build.yml
+    integrity: $integ
+    inputs: {job-name: build-root, runner-tags: [e2e-component], context-source: git, context: ".", dockerfile: build/Containerfile, target: final, platform: "linux/amd64,linux/arm64", push: false}
+  - remote: http://$COMP_GL/root/component/-/raw/main/build.yml
+    integrity: $integ
+    inputs: {job-name: build-space, runner-tags: [e2e-component], context-source: git, context: "web app/", images: "\$CI_REGISTRY_IMAGE/space:\$CI_COMMIT_SHORT_SHA"}
+  - remote: http://$COMP_GL/root/component/-/raw/main/build.yml
+    integrity: $integ
+    inputs: {job-name: build-ignore, runner-tags: [e2e-component], context-source: git, context: ./, dockerfile: Dockerfile.ignore, push: false}
+  - remote: http://$COMP_GL/root/component/-/raw/main/build.yml
+    integrity: $integ
+    inputs: {job-name: build-outside, runner-tags: [e2e-component], context-source: git, context: "web app", dockerfile: build/Containerfile, push: false}
+  - remote: http://$COMP_GL/root/component/-/raw/main/build.yml
+    integrity: $integ
+    inputs: {job-name: build-local, runner-tags: [e2e-component], context: "web app", push: false}
+
+# With native clone the runner says "Cloning repository" for clone and
+# "Fetching changes" for fetch (the project's default): the two tell apart.
+variables:
+  GIT_STRATEGY: clone
+  FF_USE_GIT_NATIVE_CLONE: "true"
+
+build-outside:
+  allow_failure: true
+EOF_EDGE
+  edge_id=$(gl POST /projects '{"name":"app-edge","visibility":"private","initialize_with_readme":true}' | jv 'v["id"]') \
+    && gl_commit "$edge_id" main main "$LOGS/component-files/app-edge" >/dev/null || { fail "the git edge project"; return; }
+  read -r e1 es1 <<<"$(gl_pipeline "$edge_id" main 0)"
+  check "context-source git edges: the pipeline of five parallel builds succeeds, the refused one allowed to fail (${es1:-none})" test "$es1" = success
+  for ej in build-root build-space build-ignore build-outside build-local; do
+    gl_trace "$edge_id" "$e1" "$ej" "$LOGS/component-edge-$ej.trace" >/dev/null
+  done
+  check "context-source git edges: the root as the context, another Dockerfile, a target and two platforms" \
+    eval 'grep -qE "^Dockerfile steps: [0-9]+ from cache, [1-9][0-9]* run; context sent: none, (fetched from git by the build node in [0-9.]+s|the build node had this commit already)$" "$LOGS/component-edge-build-root.trace" &&
+      grep -qE "^#[0-9]+ \[linux/amd64 " "$LOGS/component-edge-build-root.trace" && grep -qE "^#[0-9]+ \[linux/arm64 " "$LOGS/component-edge-build-root.trace" &&
+      ! grep -qE "^#[0-9]+ \[.*RUN exit 7" "$LOGS/component-edge-build-root.trace" &&
+      grep -qE "^#[0-9]+ \[internal\] load git source .*/root/app-edge\.git\?ref=ci-accelerator&checksum=[0-9a-f]{40}&fetch-by-commit=true$" "$LOGS/component-edge-build-root.trace"'
+  check "context-source git edges: the pipeline's GIT_STRATEGY clone stays for a local job, git jobs still check nothing out" \
+    eval 'grep -q "^Cloning repository" "$LOGS/component-edge-build-local.trace" && ! grep -q "^Fetching changes" "$LOGS/component-edge-build-local.trace" && ! grep -q "Skipping Git repository setup" "$LOGS/component-edge-build-local.trace" &&
+      grep -q "Skipping Git repository setup" "$LOGS/component-edge-build-space.trace" && ! grep -q "Cloning repository" "$LOGS/component-edge-build-space.trace" &&
+      grep -qE "^Dockerfile steps: .*context sent: [0-9.]+[kMG]?B$" "$LOGS/component-edge-build-local.trace"'
+  check "context-source git edges: a context folder with a space in its name" \
+    eval 'grep -qE "^#[0-9]+ [0-9.]+ space$" "$LOGS/component-edge-build-space.trace" && grep -qE "^Dockerfile steps: " "$LOGS/component-edge-build-space.trace"'
+  check "context-source git edges: .dockerignore is not applied to a git context (as documented)" \
+    grep -qE '^#[0-9]+ [0-9.]+ IGNORED-PRESENT$' "$LOGS/component-edge-build-ignore.trace"
+  check "context-source git edges: a Dockerfile outside the context fails the job before any build" \
+    eval 'grep -q "^context-source git: the Dockerfile .*must be inside the context" "$LOGS/component-edge-build-outside.trace" && ! grep -qE "^#[0-9]+ " "$LOGS/component-edge-build-outside.trace" &&
+      [ "$(gl GET "/projects/$edge_id/pipelines/$e1/jobs" | jv "[j[\"status\"] for j in v if j[\"name\"] == \"build-outside\"][0]")" = failed ]'
+  # Both platforms' records of the root build reach the console as one
+  # build with steps of its own.
+  comp_edge_console() {
+    local job
+    job=$(gl GET "/projects/$edge_id/pipelines/$e1/jobs" | jv '[j["id"] for j in v if j["name"] == "build-root"][0]') || return 1
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080/api/v1/builds?limit=100" 2>/dev/null \
+      | python3 -c 'import json,sys
+b = [x for x in json.load(sys.stdin)["builds"] if x.get("job") == int(sys.argv[1])]
+sys.exit(0 if len(b) == 1 and b[0]["steps"].get("built") else 1)' "$job"
+  }
+  check "context-source git edges: the console stores the two-platform build as one build" eventually 90 comp_edge_console
+
+  # A tag pipeline builds the tag's commit; a retried job builds it again
+  # from the cache.
+  gl POST "/projects/$edge_id/repository/tags" '{"tag_name":"v1.0.0","ref":"main"}' >/dev/null || fail "tag the git edge project"
+  read -r e2 es2 <<<"$(gl_pipeline "$edge_id" v1.0.0 0)"
+  gl_trace "$edge_id" "$e2" build-space "$LOGS/component-edge-tag.trace" >/dev/null
+  check "context-source git edges: a tag pipeline builds the tag's commit (${es2:-none})" \
+    eval '[ "$es2" = success ] && grep -qE "^Dockerfile steps: [1-9][0-9]* from cache, 0 run; " "$LOGS/component-edge-tag.trace"'
+  ej=$(gl GET "/projects/$edge_id/pipelines/$e2/jobs" | jv '[j["id"] for j in v if j["name"] == "build-space"][0]')
+  gl POST "/projects/$edge_id/jobs/$ej/retry" >/dev/null || fail "retry a git-context job"
+  comp_edge_retry() {
+    local st
+    st=$(gl GET "/projects/$edge_id/pipelines/$e2/jobs" | jv "[j['status'] for j in v if j['name'] == 'build-space' and j['id'] != $ej][0]") || return 1
+    case "$st" in success | failed | canceled) [ "$st" = success ] ;; *) return 1 ;; esac
+  }
+  check "context-source git edges: a retried job succeeds" eventually 180 comp_edge_retry
+
+  # A new commit that changes a file in the folder with a space: the
+  # console finds the build context by its percent-encoded folder and names
+  # the changed file (GitLab's comparison, inside the folder only).
+  local e3 es3 sj
+  gl POST "/projects/$edge_id/repository/commits" '{"branch":"main","commit_message":"e2e: change web app","actions":[{"action":"update","file_path":"web app/index.txt","content":"changed\n"}]}' >/dev/null \
+    || fail "commit a change in the folder with a space"
+  read -r e3 es3 <<<"$(gl_pipeline "$edge_id" main "$e1")"
+  sj=$(gl GET "/projects/$edge_id/pipelines/$e3/jobs" | jv '[j["id"] for j in v if j["name"] == "build-space"][0]')
+  comp_edge_space_reason() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$COMP_REL-web.$COMP_NS.svc:8080/api/v1/builds?limit=200" 2>/dev/null \
+      | python3 -c 'import json,sys
+b = [x for x in json.load(sys.stdin)["builds"] if x.get("job") == int(sys.argv[1])]
+r = (b[0].get("reason") or {}) if b else {}
+print(r)
+sys.exit(0 if r.get("kind") == "files-changed" and r.get("paths") == ["web app/index.txt"] else 1)' "$sj" >"$LOGS/component-edge-space-reason.txt"
+  }
+  check "context-source git edges: a change in the folder with a space is named by the console (${es3:-none})" \
+    eventually 180 comp_edge_space_reason
 
   hc uninstall "$COMP_REL" -n "$COMP_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the component box"
   kc -n "$COMP_NS" delete pvc "$COMP_REL-controller-data" --ignore-not-found >/dev/null 2>&1
