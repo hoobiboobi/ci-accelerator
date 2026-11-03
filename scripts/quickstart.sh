@@ -376,10 +376,11 @@ value_set=()
 if [ -f "$STATE/values.yaml" ]; then
   say "Keeping the existing $STATE/values.yaml (delete it to start over)"
   grep -q "gitlabUrl: $gitlab_url\$" "$STATE/values.yaml" || warn "$STATE/values.yaml names another GitLab than --gitlab-url: the file wins"
-  # A GitLab token given now or on an earlier run (its Secret is there)
-  # stays in use, also when values.yaml does not name it.
+  # A GitLab token given now, or one the running release uses (an earlier
+  # run set it), stays in use, also when values.yaml does not name it. One
+  # the release no longer uses (sign-in instead, or taken out) stays out.
   if ! grep -q "existingSecret: gitlab-api-token" "$STATE/values.yaml" &&
-    { [ -n "$gitlab_token" ] || kubectl -n "$NS" get secret gitlab-api-token >/dev/null 2>&1; }; then
+    { [ -n "$gitlab_token" ] || helm get values "$REL" -n "$NS" 2>/dev/null | grep -q "existingSecret: gitlab-api-token"; }; then
     value_set+=(--set control-plane.gitlab.token.existingSecret=gitlab-api-token)
     warn "the GitLab token is applied with --set; add control-plane.gitlab.token.existingSecret: gitlab-api-token to $STATE/values.yaml to keep it in your own helm upgrades too"
   fi

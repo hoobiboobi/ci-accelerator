@@ -2,8 +2,8 @@
 
 Every release upgrades in place from the release before it. The one
 exception is 0.3.0, which a 0.2.x install reaches by installing again
-([below](#from-02x-to-030-or-later-install-again)). Before every change is
-merged, the end-to-end tests install the previous published release,
+([below](#from-02x-to-030-or-later-install-again)). Before every change to
+the charts or the code is merged, the end-to-end tests install the previous published release,
 upgrade it to the change and roll it back again
 ([ADR-0027](adr/0027-upgrades-and-branches.md)).
 
@@ -29,6 +29,12 @@ Pick the section for how you installed:
    helm list -n ci-accelerator
    helm get values ci-accelerator -n ci-accelerator -o yaml > values-before-upgrade.yaml
    ```
+
+   On a one-machine install, use the script's Helm and the cluster's
+   kubeconfig ([below](#apply-your-own-changes-or-upgrade-by-hand)), for
+   example `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+   /usr/local/lib/ci-accelerator/helm-v4.3.1/helm list -n ci-accelerator`;
+   your values are in `/var/lib/ci-accelerator/values.yaml`.
 3. **Pick a quiet moment when the daemons restart.** A daemon restart
    waits for the builds running on its node, one node at a time, up to
    `buildkit.terminationGracePeriodSeconds` (300 s). With the default
@@ -71,7 +77,7 @@ its own state on the machine:
 | What | Where |
 |---|---|
 | Your values (written once, never changed by the script) | `/var/lib/ci-accelerator/values.yaml` |
-| The output of the last install or upgrade | `/var/lib/ci-accelerator/install.log` |
+| Helm's output for the box, from the last run | `/var/lib/ci-accelerator/install.log` |
 | Helm, one directory per version | `/usr/local/lib/ci-accelerator/helm-<version>/helm` |
 | The cluster's kubeconfig (root only) | `/etc/rancher/k3s/k3s.yaml` |
 | The build cache (unless you chose another `--build-dir`) | `/var/lib/ci-accelerator/buildkit` |
@@ -81,20 +87,20 @@ its own state on the machine:
 This is the way to upgrade a one-machine install. The new release's
 script brings that release's chart, Helm and cert-manager.
 
-1. Download the new release's script and check it against the release's
-   checksums:
+1. Download the new release's script and its checksums, and check the
+   script against them:
 
    ```sh
-   v=<new version, e.g. 0.4.0>
+   v=<new version>
    curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/quickstart.sh
-   curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/SHA256SUMS | grep ' quickstart.sh$' | sha256sum -c -
+   curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/SHA256SUMS
+   grep ' quickstart.sh$' SHA256SUMS | sha256sum -c -
    ```
 
    The checksums are signed by the release workflow. To check that too
-   (cosign 2.6 or newer):
+   (cosign 2.6 or newer), before the `sha256sum` line:
 
    ```sh
-   curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/SHA256SUMS
    curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/SHA256SUMS.sigstore.json
    cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
      --certificate-identity https://github.com/hoobiboobi/ci-accelerator/.github/workflows/release.yml@refs/tags/v$v \
@@ -110,11 +116,14 @@ script brings that release's chart, Helm and cert-manager.
 
    - Add `--yes` when no terminal can answer the question it asks.
    - Do not pass `--build-dir`: the cache stays where `values.yaml` says.
-   - A GitLab token for the console from an earlier run stays in use. To
-     add one now, pass `--gitlab-token-file`.
+   - A GitLab token for the console that the running install uses stays
+     in use (scripts from 0.4.1 on; with an older script, pass
+     `--gitlab-token-file` again). To add one now, pass
+     `--gitlab-token-file`.
 3. The script prints what it does before it starts, and the console's
-   address and the next steps when it is done. If it fails, it prints
-   `/var/lib/ci-accelerator/install.log`.
+   address and the next steps when it is done. A step that fails says so
+   on the terminal; if the box's own Helm upgrade fails, the script also
+   prints `/var/lib/ci-accelerator/install.log`.
 
 What a second run changes, and what it leaves alone:
 
@@ -163,8 +172,7 @@ control-plane:
       existingSecret: gitlab-api-token
 ```
 
-under the existing `control-plane:` key. The script warns when this is
-the case.
+under the existing `control-plane:` key. The script warns when this is the case.
 
 ## GitOps (Flux, Argo CD)
 
@@ -213,8 +221,8 @@ would also move cert-manager back.
 `ci-accelerator-console`), a controller and a web with new names for every
 object (`<release>-controller`, `<release>-web`) and value, and the build
 router in front of the daemons. Helm refuses to upgrade a 0.2.x release in
-place and says how to move; so does `quickstart.sh`, before it changes
-anything on the machine. Install the current release again:
+place and says how to move; so does `quickstart.sh` (from 0.4.1 on before
+it changes anything on the machine). Install the current release again:
 
 1. Remove the release and wait for its pods:
    ```sh
@@ -304,5 +312,6 @@ reused the old endpoint values: upgrade again with
 - A daemon that crashes on the new configuration stops the rollout on
   its first node; the other daemons keep serving. Roll back, then fix the
   value.
-- On the one-machine install, the whole output is in
-  `/var/lib/ci-accelerator/install.log`.
+- On the one-machine install, the box's Helm output is in
+  `/var/lib/ci-accelerator/install.log`; the steps before it (k3s, Helm,
+  cert-manager, the downloads) fail on the terminal.
