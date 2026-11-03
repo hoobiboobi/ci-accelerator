@@ -11,6 +11,19 @@ workflow copies them into the GitHub release.
 
 None.
 
+## 0.4.1 - 2026-11-03
+
+### Upgrade notes
+
+- From 0.4.0, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the daemons, their disk probe
+  and the main runner stay as they are.
+- One-machine installs: run 0.4.1's `quickstart.sh` the same way as the
+  first time ([docs/upgrading.md](docs/upgrading.md#one-machine-installs-quickstartsh)).
+  A GitLab token that a second run of an earlier script added is kept
+  from now on, as long as the running release still uses it; if a later
+  run already dropped it, pass `--gitlab-token-file` once more.
+
 ### Changed
 
 - `quickstart.sh`, run again to upgrade: it stops on a 0.2.x install
