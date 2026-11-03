@@ -50,7 +50,7 @@ job's BuildKit client matches the daemons:
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.11/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.4.0/ci/gitlab/build.yml
     integrity: sha256-<from the release notes>
     inputs:
       runner-tags: [ci-accelerator]
@@ -71,7 +71,7 @@ Several images of a monorepo, each its own job:
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.11/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.4.0/ci/gitlab/build.yml
     integrity: sha256-...
     inputs:
       job-name: build-api
@@ -80,7 +80,7 @@ include:
       images: |
         $CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA
         $CI_REGISTRY_IMAGE/api:latest
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.11/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.4.0/ci/gitlab/build.yml
     integrity: sha256-...
     inputs:
       job-name: build-web
@@ -210,7 +210,7 @@ value outside `options` stops the pipeline before it starts.
 | `interruptible` | `false` | Let GitLab cancel the job for a newer pipeline; off while moby/buildkit#7268 (a cancelled build can fail another build that shares its steps) is open |
 | `timeout-minutes` | `60` | Stop the build after this |
 | `buildctl-args` | | More `buildctl build` arguments, one per line |
-| `buildkit-image` | `moby/buildkit:v0.34.1` by digest | Image with buildctl for the job; keep it at the daemons' BuildKit release |
+| `buildkit-image` | `moby/buildkit:v0.34.2` by digest | Image with buildctl for the job; keep it at the daemons' BuildKit release |
 
 Values may use CI/CD variables (`$CI_COMMIT_REF_SLUG`); write `$$` for a
 literal `$`.

@@ -19,7 +19,7 @@ hardware you already run.
 > its [GitLab mirror](https://gitlab.com/ci-accelerator/ci-accelerator/-/pipelines).
 > Open a running job to watch its build live.
 
-> **Status:** v0.3.11 is released: signed charts and the ci-accelerator image on
+> **Status:** v0.4.0 is released: signed charts and the ci-accelerator image on
 > ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
 > the released version: [ci-accelerator.io](https://ci-accelerator.io/docs/).
 
@@ -68,7 +68,7 @@ Numbers from the production setup this project is derived from:
 
 - **BuildKit daemons:** a DaemonSet on the nodes labelled
   `ci-accelerator.io/node-role=build` (`charts/buildkit`, BuildKit
-  v0.34.1, pinned by digest), each with a small disk probe next to it
+  v0.34.2, pinned by digest), each with a small disk probe next to it
   that reports the cache disk's size and free space, and the node's and
   the daemon's CPU and memory, for the console.
 - **The control plane** (`charts/control-plane`): one image,
@@ -226,8 +226,8 @@ it from a file (`--runner-token-file`), so it never sits on a command line
 where other users and the shell history see it. Then run:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.3.11/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.3.11/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.4.0/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.4.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
 ```
 
@@ -323,7 +323,7 @@ kubectl -n ci-accelerator create secret generic gitlab-runner-token \
 ### 3. Install
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.11 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.4.0 \
   -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -406,7 +406,7 @@ hash:
 ```yaml
 # .gitlab-ci.yml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.3.11/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.4.0/ci/gitlab/build.yml
     integrity: sha256-<from the release notes>
     inputs:
       runner-tags: [my-runner-tag]   # if the runner only takes tagged jobs
@@ -538,7 +538,7 @@ reaches over https.
 
    ```sh
    sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
-     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.3.11 \
+     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.4.0 \
      -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait
    ```
 
@@ -779,8 +779,8 @@ vulnerability: [SECURITY.md](SECURITY.md).)
   - heap retained after builds (moby/buildkit#7181);
   - metadata that grows outside the GC budget (moby/buildkit#7263).
 - **Known vulnerabilities in the default third-party images.** The
-  daemons' `moby/buildkit:v0.34.1` (its CNI plugins are built with Go
-  1.25.8; brotli, curl and go-archive) and the runner's
+  daemons' `moby/buildkit:v0.34.2` (its CNI plugins are built with Go
+  1.25.7; brotli, curl and go-archive) and the runner's
   `gitlab-runner:alpine-v19.4.2` have HIGH and CRITICAL findings fixed
   upstream but in no release of theirs yet. They are listed, with the date
   each is looked at again, in `.trivyignore-third-party.yaml`; a weekly

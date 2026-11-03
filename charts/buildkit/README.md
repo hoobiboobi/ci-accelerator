@@ -1,13 +1,13 @@
 # buildkit
 
-![Version: 0.3.11](https://img.shields.io/badge/Version-0.3.11-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.34.1](https://img.shields.io/badge/AppVersion-v0.34.1-informational?style=flat-square)
+![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.34.2](https://img.shields.io/badge/AppVersion-v0.34.2-informational?style=flat-square)
 
 Persistent BuildKit daemons as a shared build service for CI, with probe and garbage-collection defaults derived from a production setup.
 
-Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator); this chart is the daemons alone, for a cluster that already has a runner. It runs BuildKit v0.34.1 (the official `moby/buildkit` image, pinned by digest) as a privileged DaemonSet on the build nodes, with the probe, termination and garbage-collection defaults of a production setup: the garbage-collection policies are rendered in full by the chart (see `config.gc`). mTLS between jobs and daemons is mandatory: cert-manager issues the daemons' certificate and a client certificate (Secret `<fullname>-client`) into each of `tls.client.namespaces`, or you provide them (`tls.source=existingSecret`, made by `scripts/buildkit-certs.sh`).
+Part of [ci-accelerator](https://github.com/hoobiboobi/ci-accelerator); this chart is the daemons alone, for a cluster that already has a runner. It runs BuildKit v0.34.2 (the official `moby/buildkit` image, pinned by digest) as a privileged DaemonSet on the build nodes, with the probe, termination and garbage-collection defaults of a production setup: the garbage-collection policies are rendered in full by the chart (see `config.gc`). mTLS between jobs and daemons is mandatory: cert-manager issues the daemons' certificate and a client certificate (Secret `<fullname>-client`) into each of `tls.client.namespaces`, or you provide them (`tls.source=existingSecret`, made by `scripts/buildkit-certs.sh`).
 
 ```sh
-helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.3.11 \
+helm install buildkit oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.4.0 \
   -n ci-accelerator --set 'tls.client.namespaces={ci-jobs}'
 ```
 
@@ -60,7 +60,7 @@ Kubernetes: `>=1.34.0-0`
 | global.router.enabled | bool | `false` |  |
 | global.router.service | string | `""` | The router's Service in this namespace. Rendered with tpl. |
 | global.tls.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | cert-manager issuer for the daemons' and the clients' certificates (tls.source=certManager). Empty name: the chart creates a CA dedicated to this release (see tls.certManager). Your own issuer must be dedicated to these daemons too (any certificate it signs gets in) and must put ca.crt into the Secrets it fills (CA or Vault issuers do, ACME does not). Client certificates in other namespaces need a ClusterIssuer. |
-| image.digest | string | `"sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c"` | Image index digest. The runtime pulls by digest when it is set, so change or clear it together with tag (another tag with this default digest is refused). Default: the digest of the appVersion tag (multi-arch index). |
+| image.digest | string | `"sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe"` | Image index digest. The runtime pulls by digest when it is set, so change or clear it together with tag (another tag with this default digest is refused). Default: the digest of the appVersion tag (multi-arch index). |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"moby/buildkit"` |  |
 | image.tag | string | `""` | Defaults to the chart appVersion. |
