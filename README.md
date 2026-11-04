@@ -19,7 +19,7 @@ hardware you already run.
 > its [GitLab mirror](https://gitlab.com/ci-accelerator/ci-accelerator/-/pipelines).
 > Open a running job to watch its build live.
 
-> **Status:** v0.5.0 is released: signed charts and the ci-accelerator image on
+> **Status:** v0.5.1 is released: signed charts and the ci-accelerator image on
 > ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
 > the released version: [ci-accelerator.io](https://ci-accelerator.io/docs/).
 
@@ -243,8 +243,8 @@ it from a file (`--runner-token-file`), so it never sits on a command line
 where other users and the shell history see it. Then run:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.0/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.1/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.1/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
 ```
 
@@ -340,7 +340,7 @@ kubectl -n ci-accelerator create secret generic gitlab-runner-token \
 ### 3. Install
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.0 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.1 \
   -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -424,7 +424,7 @@ hash:
 ```yaml
 # .gitlab-ci.yml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.5.0/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.5.1/ci/gitlab/build.yml
     integrity: sha256-<from the release notes>
     inputs:
       runner-tags: [my-runner-tag]   # if the runner only takes tagged jobs
@@ -559,7 +559,7 @@ reaches over https.
 
    ```sh
    sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
-     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.0 \
+     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.1 \
      -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait --timeout 15m
    ```
 
