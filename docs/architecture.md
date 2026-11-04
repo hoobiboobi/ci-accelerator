@@ -351,6 +351,14 @@ What the controller does:
   build's node is read every 10 s meanwhile. The pages compare the build
   with the last one of the same image that ran the same step, for how
   long the rest likely takes ([ADR-0053](adr/0053-running-builds-live.md)).
+- **Cache-mount hints, when a build page is read.** Each step's
+  operation (command, environment, user, working directory, mounts) is
+  kept in the store already; the controller reads it against a table of
+  about thirty package managers and, for a step that runs one without a
+  working cache mount, sums how long that step took in the image's builds
+  of the last 30 days (one indexed query per build). Nothing is stored for
+  it, so the hints also cover builds stored before the feature
+  ([ADR-0058](adr/0058-cache-mount-hints.md)).
 - **Job data from the job pods.** A Role in the jobs namespace lets it get,
   list and watch pods. The pods' annotations tie each build to its
   pipeline, job, project and commit; the trace id ties the build record to

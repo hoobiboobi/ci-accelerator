@@ -19,7 +19,7 @@ hardware you already run.
 > its [GitLab mirror](https://gitlab.com/ci-accelerator/ci-accelerator/-/pipelines).
 > Open a running job to watch its build live.
 
-> **Status:** v0.4.1 is released: signed charts and the ci-accelerator image on
+> **Status:** v0.5.0 is released: signed charts and the ci-accelerator image on
 > ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
 > the released version: [ci-accelerator.io](https://ci-accelerator.io/docs/).
 
@@ -202,6 +202,23 @@ Dockerfiles' differing lines and every step's state and time. The Compare
 button on a build's page (key `x`), "Compare two builds" on the builds
 list, "compare two" on an image's page and Ctrl+K lead there.
 
+**Speed-ups**: a step that runs a package manager (apt, apk, dnf, pip,
+uv, npm, Yarn, pnpm, Go, Cargo, Maven, Gradle and about twenty more)
+without a cache mount, or with one that cannot work, gets a hint with a
+ready fragment for the Dockerfile and how long that step took in the
+image's builds of the last 30 days. A cache mount cannot work when a flag,
+a setting or a cleanup switches the cache off, when it sits on another
+path than the one the manager uses, when it covers what the image needs,
+when apt, apk, dnf or zypper share it without `sharing=locked`, or when a
+non-root step cannot write to it. The hints come from the operation
+BuildKit recorded (command, environment, user, mounts), not from the
+Dockerfile's text; where the path cannot be known from it, the hint names
+the manager's own command that prints it. They show as a card above the
+steps, on the Dockerfile tab, on the step panel's Speed-up tab and as
+`hints` in `GET /api/v1/builds`;
+[the Dockerfile guide](docs/dockerfile-guide.md#3-use-cache-mounts-for-package-managers) explains the
+mounts.
+
 Every figure is measured, not estimated. Medians and p95 are nearest-rank
 percentiles, so always one of the measured times; "usual" needs five
 builds of its kind and a p95 twenty rebuilds (a dash until then). The
@@ -226,8 +243,8 @@ it from a file (`--runner-token-file`), so it never sits on a command line
 where other users and the shell history see it. Then run:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.4.1/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.4.1/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.0/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
 ```
 
@@ -323,7 +340,7 @@ kubectl -n ci-accelerator create secret generic gitlab-runner-token \
 ### 3. Install
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.4.1 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.0 \
   -n ci-accelerator \
   --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
   --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -407,7 +424,7 @@ hash:
 ```yaml
 # .gitlab-ci.yml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.4.1/ci/gitlab/build.yml
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.5.0/ci/gitlab/build.yml
     integrity: sha256-<from the release notes>
     inputs:
       runner-tags: [my-runner-tag]   # if the runner only takes tagged jobs
@@ -542,7 +559,7 @@ reaches over https.
 
    ```sh
    sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
-     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.4.1 \
+     oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.0 \
      -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait --timeout 15m
    ```
 

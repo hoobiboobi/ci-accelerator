@@ -9,6 +9,12 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 0.5.0 - 2026-11-04
+
+### Upgrade notes
+
 - From 0.4.1, `helm upgrade` in place. The controller, the web and the
   routers restart once for the new image; the daemons, their disk probe
   and the main runner stay as they are. Nothing changes in the store:
