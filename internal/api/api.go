@@ -6,12 +6,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/hints"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
@@ -19,6 +21,7 @@ import (
 // Store is what the API reads.
 type Store interface {
 	Recent(ctx context.Context, limit int) ([]*store.Stored, error)
+	BuildHints(ctx context.Context, ids []int64) (map[int64][]store.StepHints, error)
 	Ping(ctx context.Context) error
 }
 
@@ -38,6 +41,23 @@ type Build struct {
 	Steps     map[string]int    `json:"steps"`
 	Images    []string          `json:"images,omitempty"`
 	BuildArgs map[string]string `json:"buildArgs,omitempty"`
+	// Hints are the build's cache-mount hints: steps that run a package
+	// manager without a cache mount (and ran in the image's builds of the
+	// last 30 days), or with one that cannot work.
+	Hints []Hint `json:"hints,omitempty"`
+}
+
+// Hint is one step's cache-mount hint.
+type Hint struct {
+	Step     string       `json:"step"`
+	Name     string       `json:"name"`
+	Line     int          `json:"line,omitempty"`
+	Managers []hints.Hint `json:"managers"`
+	Fragment string       `json:"fragment,omitempty"`
+	Runs     int          `json:"runs"`
+	RunTime  float64      `json:"runSeconds"`
+	Median   float64      `json:"medianSeconds"`
+	Since    time.Time    `json:"since"`
 }
 
 // Reason is why a build's first rebuilt step ran.
@@ -78,12 +98,39 @@ func Handler(s Store) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		ids := make([]int64, 0, len(stored))
+		for _, st := range stored {
+			ids = append(ids, st.ID)
+		}
+		hs, err := s.BuildHints(r.Context(), ids)
+		hintsNote := ""
+		if err != nil {
+			// The builds still answer, saying their hints could not be read;
+			// the cause goes to the log.
+			log.Printf("api: hints: %v", err)
+			hs, hintsNote = nil, "unavailable"
+		} else if len(ids) > store.MaxHintBuilds {
+			hintsNote = fmt.Sprintf("hints for the newest %d builds only", store.MaxHintBuilds)
+		}
 		out := make([]Build, 0, len(stored))
 		for _, st := range stored {
-			out = append(out, view(st))
+			v := view(st)
+			for _, h := range hs[st.ID] {
+				x := Hint{Step: h.Key, Name: h.Name, Managers: h.Hints, Fragment: h.Fragment, Runs: h.Runs,
+					RunTime: h.RunTime.Seconds(), Median: h.Median.Seconds(), Since: h.Since}
+				if len(h.Lines) > 0 {
+					x.Line = h.Lines[0].Start
+				}
+				v.Hints = append(v.Hints, x)
+			}
+			out = append(out, v)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"builds": out})
+		body := map[string]any{"builds": out}
+		if hintsNote != "" {
+			body["hintsNote"] = hintsNote
+		}
+		json.NewEncoder(w).Encode(body)
 	})
 	return mux
 }
