@@ -108,7 +108,7 @@ var (
 	backendMethods = []string{"Projects", "Builds", "Branches", "Targets", "TargetImages", "StepCounts", "ImageDays", "PipelineList",
 		"JobsOf", "BuildsOf", "PipelineInfo", "PipelineProject", "PipelineJobs", "Job", "JobBuilds", "BuildPage", "Refs",
 		"Previous", "StepHistory", "Output", "DaemonCounts", "ProjectCache", "Elsewhere", "SettleElsewhere", "Compared", "ComparedMarked", "SaveCompare",
-		"Recent", "Ping", "Daemons", "LiveBuild"}
+		"Recent", "BuildHints", "Ping", "Daemons", "LiveBuild"}
 	gitlabMethods = []string{"Ensure", "JobLogPart", "Changed", "Status"}
 	authMethods   = []string{"BeginWith", "FinishWith", "LoadCookie", "EndCookie"}
 )

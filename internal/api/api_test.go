@@ -9,14 +9,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/hints"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
 type fakeStore struct {
-	builds []*store.Stored
-	down   bool
-	limit  int
+	builds   []*store.Stored
+	down     bool
+	limit    int
+	hints    map[int64][]store.StepHints
+	hintsErr error
+}
+
+func (f *fakeStore) BuildHints(_ context.Context, ids []int64) (map[int64][]store.StepHints, error) {
+	return f.hints, f.hintsErr
 }
 
 func (f *fakeStore) Recent(_ context.Context, limit int) ([]*store.Stored, error) {
@@ -84,5 +91,33 @@ func TestHealth(t *testing.T) {
 	f.down = true
 	if w := get(t, Handler(f), "/healthz"); w.Code != http.StatusServiceUnavailable || w.Body.String() != "store unavailable\n" {
 		t.Errorf("store down: %d %q (the cause belongs in the log)", w.Code, w.Body.String())
+	}
+}
+
+func TestBuildHints(t *testing.T) {
+	t0 := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	b := &history.Build{Ref: "r1", Daemon: "d1", Started: t0, Steps: []history.Step{{Key: "[2/3]", Name: "RUN npm ci", State: history.Built}}}
+	h := store.StepHints{Step: 0, Key: "[2/3]", Name: "RUN npm ci", Lines: []history.LineRange{{Start: 4, End: 4}},
+		Hints:    []hints.Hint{{Manager: "npm", Problems: []hints.Problem{{Kind: hints.Missing, Cache: "cache"}}, Caches: []hints.Cache{{Label: "cache", Path: "/root/.npm"}}}},
+		Fragment: "RUN --mount=type=cache,target=/root/.npm npm ci", Runs: 3, RunTime: 90 * time.Second, Median: 30 * time.Second, Since: t0}
+	f := &fakeStore{builds: []*store.Stored{{ID: 1, Build: b}, {ID: 2, Build: b}}, hints: map[int64][]store.StepHints{1: {h}}}
+	var out struct{ Builds []Build }
+	if err := json.Unmarshal(get(t, Handler(f), "/api/v1/builds").Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Builds) != 2 || len(out.Builds[0].Hints) != 1 || len(out.Builds[1].Hints) != 0 {
+		t.Fatalf("hints: %+v", out.Builds)
+	}
+	x := out.Builds[0].Hints[0]
+	if x.Step != "[2/3]" || x.Line != 4 || x.Runs != 3 || x.RunTime != 90 || x.Median != 30 || x.Fragment == "" ||
+		len(x.Managers) != 1 || x.Managers[0].Caches[0].Path != "/root/.npm" || x.Managers[0].Problems[0].Kind != hints.Missing {
+		t.Errorf("hint: %+v", x)
+	}
+	// The builds answer when the hints cannot be read, and say so.
+	f.hintsErr = errors.New("store down")
+	w := get(t, Handler(f), "/api/v1/builds")
+	var note struct{ HintsNote string }
+	if json.Unmarshal(w.Body.Bytes(), &note); w.Code != 200 || note.HintsNote != "unavailable" {
+		t.Errorf("status %d, note %q without hints", w.Code, note.HintsNote)
 	}
 }
