@@ -117,6 +117,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod go build ./...
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+RUN rm -f /etc/apt/apt.conf.d/docker-clean
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends curl
@@ -140,6 +141,40 @@ What to know about cache mounts here:
   use the mount at once.
 - **Cache mounts are not part of the image.** Nothing in them ends up in
   the pushed layers.
+- **A step that runs as another user needs an owner on the mount.**
+  Without `uid`/`gid` or `mode`, BuildKit creates the mount as root's
+  with mode 0755, and a `USER node` or `USER 1000` step cannot write to
+  it. Use `uid=1000,gid=1000` or `mode=0777`. A mount with these options
+  is a separate mount from the same id without them.
+- **Put the mount on every step that uses the packages.** What a
+  manager downloads into a cache mount is not in the image. A
+  `dotnet publish --no-restore` or an offline `mvn package` after a
+  restore step needs the same mount.
+- **`--no-cache` builds get empty cache mounts.** A build with
+  `docker build --no-cache` (`buildctl --opt no-cache=`) starts its cache
+  mounts empty, so mounts only help builds without that flag.
+
+Common mounts that do nothing:
+
+- apt in Debian and Ubuntu images: the image's
+  `/etc/apt/apt.conf.d/docker-clean` deletes the downloaded packages
+  after every install. Remove it in an earlier step, as the example
+  above does (and Docker's own documentation).
+- apk: mounting `/var/cache/apk` without the `/etc/apk/cache` link, or
+  together with `--no-cache`, keeps nothing.
+- pnpm: `target=/pnpm/store` works only with `ENV PNPM_HOME=/pnpm`.
+  Without it the store is under the user's home.
+- dnf and yum delete packages after an install unless
+  `--setopt=keepcache=1` is set.
+
+The console's build page lists the steps that would gain from a cache
+mount, or whose mount cannot work, in a **Speed-ups** card. It gives the
+fragment to paste and what the step cost in the last 30 days. The
+fragment's paths come from the step as BuildKit recorded it: its user,
+its environment (the base image's variables too) and its working
+folder. When the path depends on something the record does not show,
+such as a non-root user's home, the card names the manager's own
+command that prints it.
 
 ## 4. Be careful with build arguments
 
@@ -293,7 +328,8 @@ minutes is a candidate for a cache mount or a split.
 - [ ] `.dockerignore` excludes `.git`, dependency directories and build
       output.
 - [ ] Dependency manifests are copied and installed before the source.
-- [ ] Package managers use cache mounts (`sharing=locked` for apt).
+- [ ] Package managers use cache mounts (`sharing=locked` for apt), and
+      the console's build page lists no speed-ups.
 - [ ] `ARG`s with per-pipeline values come right before the step that
       needs them.
 - [ ] Secrets use `--mount=type=secret`, never build arguments.

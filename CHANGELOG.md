@@ -9,7 +9,32 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- From 0.4.1, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the daemons, their disk probe
+  and the main runner stay as they are. Nothing changes in the store:
+  the hints are worked out from what it already keeps, also for builds
+  stored before the upgrade.
+
+### Added
+
+- Cache-mount hints in the console ([ADR-0058](docs/adr/0058-cache-mount-hints.md)):
+  a build step that runs a package manager without a cache mount, or
+  with one that cannot work, gets a ready fragment to put in the
+  Dockerfile. The page shows how often the step ran in the last 30 days,
+  how long that took in all, and the median. Covers about thirty
+  managers, among them apt, apk, dnf, zypper, pip, uv, Poetry, conda,
+  npm, Yarn, pnpm, Bun, Go, Cargo, Maven, Gradle, NuGet, Composer,
+  Bundler, pub, Hex and Deno.
+  The hints are shown:
+  - in a Speed-ups card on the build page;
+  - as a marker on the step;
+  - on the Dockerfile tab;
+  - on a Speed-up tab in the step's panel;
+  - as `hints` in `GET /api/v1/builds`.
+- [docs/dockerfile-guide.md](docs/dockerfile-guide.md): cache mounts for
+  non-root steps (`uid`/`mode`), on every later step that uses the
+  packages, empty under `--no-cache`, and the common mounts that do
+  nothing.
 
 ## 0.4.1 - 2026-11-03
 
