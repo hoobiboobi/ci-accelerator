@@ -18,6 +18,9 @@
   gitlabci: { enabled: false },
   "gitlabci-include": { enabled: false },
   "helm-values": { enabled: false },
+  // No .NET code here: the only project file is a test case of the
+  // cache-mount hints, which the nuget manager reads despite ignorePaths.
+  nuget: { enabled: false },
   // No schedule of its own: the workflow's cron decides when Renovate runs.
   // A second window here missed a whole week when GitHub started the
   // Monday run 7 hours late (2026-11-02).
