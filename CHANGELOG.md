@@ -11,8 +11,33 @@ workflow copies them into the GitHub release.
 
 None.
 
+## 0.5.1 - 2026-11-04
+
+### Upgrade notes
+
+- From 0.5.0, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image; the daemons, their disk probe
+  and the main runner stay as they are. Builds stored before the upgrade
+  keep, as a rule, the reasons they were given; new builds get the
+  corrected ones.
+
 ### Fixed
 
+- Rebuild reasons, found on moby/moby's own Dockerfile:
+  - a git or HTTP source (`ADD https://…git`) is fetched again in every
+    build; the console took it for the first rebuilt step and said
+    "Dockerfile changed: … this step changed" with the same text before
+    and after. It now passes over such a source, as it does over a base
+    image, and explains the step that used it;
+  - a step that builds on the build context and on a source fetched
+    from the network was "fed by a remote source" (unclear) even when
+    GitLab's comparison of the commits showed a changed file it copies.
+    The context now comes first, so the comparison can prove the change;
+    with no change in the repository it stays unclear (never the build
+    farm's, whatever `trustGitComparison` says);
+  - a RUN step after a changed `ENV` line read "this step changed" between
+    two equal texts. The page now says its environment changed and shows
+    the two `ENV` lines.
 - `quickstart.sh` no longer ends by saying the console cannot read
   GitLab when a GitLab token was given (with `--gitlab-token-file`, or
   kept from an earlier run).
