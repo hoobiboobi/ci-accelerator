@@ -1138,6 +1138,53 @@ e2e_image() {
   E2E_IMAGE_BUILT=1
 }
 
+# box_speedup: a job whose Dockerfile installs packages without a cache
+# mount gets a speed-up (the build page's card, the Dockerfile tab, the
+# step's panel and the API, with a fragment naming apk's cache); the same
+# install with the right mount gets none.
+box_speedup() {
+  local id fixed inst page=$LOGS/box-speedup-page.html
+  speedup_job() { # <pipeline> <RUN line>
+    python3 - "$IMAGE" "$1" "$2" <<'PY'
+import json, sys
+print(json.dumps({"image": sys.argv[1], "pipeline_id": int(sys.argv[2]), "script": [
+    'mkdir -p ctx && echo "FROM alpine:3.22" > ctx/Dockerfile && echo "ARG BUST" >> ctx/Dockerfile',
+    "echo '%s' >> ctx/Dockerfile" % sys.argv[3],
+    'buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build --frontend dockerfile.v0 --local context=ctx --local dockerfile=ctx --opt build-arg:BUST=$CI_JOB_ID --progress plain',
+]}))
+PY
+  }
+  JOB_SPEC=$(speedup_job 780 'RUN apk add --no-cache jq') run_job box-speedup "$BOX_JOBS_NS"
+  JOB_SPEC=$(speedup_job 781 'RUN --mount=type=cache,target=/etc/apk/cache,sharing=locked apk add jq') run_job box-speedup-fixed "$BOX_JOBS_NS"
+  check "the jobs that install with apk succeed" eval 'test "$(cat "$LOGS/job-box-speedup.state")" = success && test "$(cat "$LOGS/job-box-speedup-fixed.state")" = success'
+  id=$(job_id box-speedup) fixed=$(job_id box-speedup-fixed)
+  inst=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 780 "$id" | cut -c6-11)
+  box_speedup_api() {
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/api/v1/builds?limit=50" \
+      2>/dev/null >"$LOGS/box-speedup.json"
+    python3 -c 'import json,sys
+bs = json.load(open(sys.argv[1]))["builds"]
+b = [x for x in bs if x.get("job") == int(sys.argv[2])]
+f = [x for x in bs if x.get("job") == int(sys.argv[3])]
+if not b or not f: sys.exit(1)
+h = b[0].get("hints") or []
+ok = len(h) == 1 and h[0]["managers"][0]["manager"] == "apk" and h[0]["managers"][0]["problems"][0]["kind"] == "missing" \
+    and "target=/etc/apk/cache,sharing=locked" in h[0]["fragment"] and "--no-cache" not in h[0]["fragment"] and h[0]["runs"] >= 1
+sys.exit(0 if ok and not f[0].get("hints") else 2)' "$LOGS/box-speedup.json" "$id" "$fixed"
+  }
+  check "the API lists the apk step's speed-up with its fragment, and none for the build with the right mount" eventually 60 box_speedup_api
+  box_speedup_page() {
+    local step
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080/jobs/$inst/$id" 2>/dev/null >"$page"
+    grep -q 'Speed-ups for this Dockerfile' "$page" && grep -q 'Add a cache mount for apk' "$page" &&
+      grep -q 'class="spmk" href="#speedup-1"' "$page" && grep -q 'aside class="dfnotes"' "$page" || return 1
+    step=$(grep -o 'href="/builds/[0-9]*/steps/[0-9]*#speed" data-step="[0-9]*" data-dtab-open="speed"' "$page" | head -1 | cut -d'"' -f2 | cut -d'#' -f1)
+    [ -n "$step" ] && kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080$step?part=panel" 2>/dev/null |
+      grep -q 'data-dpane="speed"'
+  }
+  check "the build page shows the speed-up in its card, on the Dockerfile tab and in the step's panel" quiet box_speedup_page
+}
+
 s_box() {
   step "box: charts/ci-accelerator installs daemons, runner, jobs namespace and control plane that work together"
   local node arch box_tid
@@ -1258,6 +1305,7 @@ PY
   }
   check "the build's Resources tab lists its steps by CPU, with memory, against the node's cores" quiet box_resources
   box_live
+  box_speedup
   box_logs
   box_disk
   box_console_policy
