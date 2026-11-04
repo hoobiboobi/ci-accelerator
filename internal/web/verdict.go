@@ -38,8 +38,8 @@ type Received struct {
 func e(s string) string { return html.EscapeString(s) }
 
 func code(s string) string {
-	if len(s) > 90 {
-		s = s[:88] + "…"
+	if r := []rune(s); len(r) > 90 {
+		s = string(r[:88]) + "…"
 	}
 	return "<code>" + e(s) + "</code>"
 }

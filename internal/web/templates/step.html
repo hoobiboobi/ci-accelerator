@@ -9,12 +9,21 @@
   {{with .Src}}<section><h3>{{$.SrcTitle}}</h3><pre class="src">{{range .}}<div><span class="n">{{.N}}</span>{{.HTML}}</div>{{end}}</pre></section>{{end}}
   <dl class="dkv">{{range .Facts}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}{{if .JobName}}<dt>Job</dt><dd><a class="link" href="{{.JobURL}}">{{.JobName}}</a></dd>{{end}}</dl>
   {{with .Hint}}<div class="hint2">{{.}}</div>{{end}}
-  <section><h3>Output</h3>
+  {{if .Speedup}}<nav class="seg drtabs" role="tablist" aria-label="Step"><button type="button" role="tab" data-dtab="out" aria-selected="true">Output</button><button type="button" role="tab" data-dtab="speed" aria-selected="false">Speed-up <span class="spmk{{if .Speedup.Broken}} broken{{end}}" aria-hidden="true">◆</span></button>{{if .Hist}}<button type="button" role="tab" data-dtab="hist" aria-selected="false">History</button>{{end}}</nav>
+  {{with .Speedup}}<section class="drpane spdr" data-dpane="speed">
+    <h3>{{.Title}} <span class="chip spk{{if .Broken}} broken{{end}}">{{.Chip}}</span></h3>
+    {{range .Why}}<p>{{.}}</p>{{end}}
+    <p class="spf">{{.Figures}}</p>
+    {{if .Fragment}}<p class="muted note0">Replace {{.Replace}} with</p><pre class="frag">{{.Fragment}}</pre><p><button class="btn sm" type="button" data-copy="{{.Fragment}}">{{icon "copy" 12}}Copy</button></p>{{end}}
+    {{with .PathCommands}}<p>Not sure where the cache is? {{range $i, $c := .}}{{if $i}}; {{end}}<code>{{$c}}</code>{{end}} in the image prints it.</p>{{end}}
+    {{with .Caveats}}<h4>Keep in mind</h4><ul class="spcav">{{range .}}<li>{{.}}</li>{{end}}<li>Cache mounts are shared by every project that builds on the node, and BuildKit starts them empty for a build with --no-cache.</li></ul>{{end}}
+  </section>{{end}}{{end}}
+  <section{{if .Speedup}} class="drpane" data-dpane="out"{{end}}><h3>Output</h3>
     {{if .Output}}<pre class="logb">{{.Output}}</pre>{{end}}
     <p class="muted note0">{{.OutNote}}</p>
   </section>
   {{if .Hist}}
-  <section><h3>{{.HistTitle}}</h3>
+  <section{{if .Speedup}} class="drpane" data-dpane="hist"{{end}}><h3>{{.HistTitle}}</h3>
     <div class="hist">{{range .Hist}}<a href="{{.URL}}" class="{{if .Cur}}cur{{end}}" data-hist title="{{.SHA}} · {{slabel .State}} · {{.Label}}"><small>{{if .Cached}}{{icon "s_cached" 11}}{{else}}{{.Label}}{{end}}</small><i class="c-{{.State}}" style="height: {{.H}}%"></i></a>{{end}}</div>
     <div class="histx">{{range .Hist}}<span>{{.SHA}}</span>{{end}}</div>
     <p class="muted note0">{{.HistNote}}</p>

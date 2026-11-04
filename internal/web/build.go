@@ -177,6 +177,10 @@ type BuildView struct {
 	// Resources is what the executed steps used; nil when none ran or
 	// BuildKit recorded no usage.
 	Resources *ResourcesView
+	// Speedups are the build's cache-mount hints, the costliest first;
+	// HintOf finds a step's.
+	Speedups []Speedup
+	HintOf   map[int]*Speedup
 }
 
 // Change is one difference from the previous build of the target.
@@ -320,6 +324,10 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v.Blocks = blocksOf(b, d.Views)
+	v.Speedups, v.HintOf = speedups(p.Hints), map[int]*Speedup{}
+	for i := range v.Speedups {
+		v.HintOf[v.Speedups[i].Step] = &v.Speedups[i]
+	}
 	v.Gantt, v.GanttSkip = gantt(v.Blocks)
 	v.StepCount = len(b.Steps)
 	prev, _, err := s.data.Previous(ctx, b)
@@ -562,13 +570,15 @@ type StepData struct {
 	// HasDockerfile: the build page has a Dockerfile tab (a canceled build
 	// has none).
 	HasDockerfile bool
-	Output        string
-	OutNote       string
-	Hist          []HistCol
-	HistTitle     string
-	HistNote      string
-	Prev          int
-	Next          int
+	// Speedup is the step's cache-mount hint; nil without one.
+	Speedup   *Speedup
+	Output    string
+	OutNote   string
+	Hist      []HistCol
+	HistTitle string
+	HistNote  string
+	Prev      int
+	Next      int
 }
 
 // SrcLine is a line of the step's Dockerfile source.
@@ -609,6 +619,12 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 	p, b := d.Page, d.Page.Build
 	st, v := b.Steps[idx], d.Views[idx]
 	sd := StepData{BuildID: id, Step: v, Command: st.Name, Prev: -1, Next: -1, Err: st.Error, HasDockerfile: p.Dockerfile != ""}
+	for _, sp := range speedups(p.Hints) {
+		if sp.Step == idx {
+			sp := sp
+			sd.Speedup = &sp
+		}
+	}
 	if idx > 0 {
 		sd.Prev = idx - 1
 	}

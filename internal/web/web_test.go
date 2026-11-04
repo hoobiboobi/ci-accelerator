@@ -89,7 +89,11 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := history.NewBuild(rec, progress, [][]byte{read(d, "provenance.json")}, read(d, "trace.json"), read(d, "error.bin"), cfg)
+		// The deps step installs with npm (as the record shows it to the
+		// console): its cache mount is not npm's, so the pages show a
+		// speed-up for it.
+		prov := bytes.ReplaceAll(read(d, "provenance.json"), []byte(`"sleep 3 \u0026\u0026 cp deps.txt`), []byte(`"npm ci \u0026\u0026 sleep 3 \u0026\u0026 cp deps.txt`))
+		b, err := history.NewBuild(rec, progress, [][]byte{prov}, read(d, "trace.json"), read(d, "error.bin"), cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

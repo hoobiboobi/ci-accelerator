@@ -351,6 +351,45 @@ async function buildPage(s, pages) {
   check(`${b} no errors`, s.take().length === 0);
 }
 
+// A build whose Dockerfile installs packages without a cache mount: its
+// card of speed-ups opens the step's panel on its Speed-up tab, the tabs
+// switch, and the Dockerfile tab notes the step beside the file (below it
+// on a phone).
+async function speedups(s, pages) {
+  let b = null;
+  for (const p of pages.filter(p => /^\/builds\/\d+$/.test(p))) {
+    await s.go(p);
+    if (await s.eval(`!!document.querySelector(".spd [data-dtab-open]")`)) { b = p; break; }
+  }
+  if (!b) return check("a build page with speed-ups", false, "none found");
+  await s.hover(".spd [data-dtab-open]");
+  check(`${b} a speed-up link shows no step popover`, !(await s.visible("#pop")));
+  await s.click(".spd [data-dtab-open]", 900);
+  const sel = t => s.eval(`(() => { const x = document.querySelector('#drawer [data-dtab="${t}"]'); return !!x && x.getAttribute("aria-selected") === "true"; })()`);
+  const shown = t => s.eval(`(() => { const x = document.querySelector('#drawer [data-dpane="${t}"]'); return !!x && !x.hidden; })()`);
+  check(`${b} the card opens the step's panel on its speed-up`, (await s.visible("#drawer")) && (await sel("speed")) && (await shown("speed")) && !(await shown("out")));
+  check(`${b} the speed-up has its fragment and a copy button`, await s.eval(`!!document.querySelector('#drawer pre.frag') && !!document.querySelector('#drawer [data-copy]')`));
+  await s.click('#drawer [data-dtab="out"]', 200);
+  check(`${b} the Output tab shows the output`, (await sel("out")) && (await shown("out")) && !(await shown("speed")));
+  await s.key("Escape");
+  // From the steps table the panel opens on the output, with the tab there.
+  const step = await s.eval(`document.querySelector('.spmk').closest("[data-step]").dataset.step`);
+  await s.click(`[data-pane="steps"] [data-step="${step}"]`, 900);
+  check(`${b} a step with a speed-up opens on its output, the Speed-up tab beside it`, (await sel("out")) && !!(await s.eval(`document.querySelector('#drawer [data-dtab="speed"]')`)));
+  await s.key("Escape");
+  if (await s.eval(`!!document.querySelector('[data-tab="dockerfile"]')`)) {
+    await s.click('[data-tab="dockerfile"]', 200);
+    const beside = await s.eval(`(() => { const n = document.querySelector('[data-pane="dockerfile"] .dfnotes').getBoundingClientRect(), f = document.querySelector('[data-pane="dockerfile"] .dfbox').getBoundingClientRect(); return n.left >= f.right - 1; })()`);
+    check(`${b} the Dockerfile tab notes the speed-up beside the file and marks its line`, beside && !!(await s.eval(`document.querySelector('[data-pane="dockerfile"] .dl.sphl .dr .spmk')`)));
+    await s.size(390, 844);
+    await s.go(b + "#dockerfile");
+    const below = await s.eval(`(() => { const n = document.querySelector('[data-pane="dockerfile"] .dfnotes').getBoundingClientRect(), f = document.querySelector('[data-pane="dockerfile"] .dfbox').getBoundingClientRect(); return n.top >= f.bottom - 1 && n.right <= innerWidth; })()`);
+    check(`${b} on a phone the note is under the file, inside the screen`, below);
+    await s.size(1400, 900);
+  }
+  check(`${b} speed-ups: no errors`, s.take().length === 0);
+}
+
 // Pipelines that run refresh themselves now and then: the long checks of
 // one page use pipelines that do not.
 const settled = pages => pages.filter(x => /^\/pipelines\/[^/]+\/\d+$/.test(x) && x !== args.running && x !== args["live-pipeline"]);
@@ -908,6 +947,7 @@ try {
   await crawl(s, 390);
   await navigationBurst(s, pages);
   await buildPage(s, pages);
+  await speedups(s, pages);
   await pipelinePage(s, pages);
   await timelineColumn(s, pages);
   await buildsColumn(s);

@@ -1049,3 +1049,49 @@ a.boxh:hover { background: var(--hover); }
 .btn.sm { height: 22px; padding: 0 8px; font-size: 11.5px; }
 .btn.sm[aria-pressed="true"] { background: var(--sel); color: var(--ink); }
 @media (max-width: 760px) { .lt { --lw: 160px; } }
+
+/* ---------- speed-ups (cache-mount hints) ---------- */
+.spd { border-left: 3px solid var(--accent); }
+.spl { list-style: none; margin: 0; padding: 0; }
+.sp { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.sp:first-child { border-top: 0; }
+.spn, .spmk { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 10px; font-size: 11px; font-weight: 600;
+  color: var(--accent); background: color-mix(in oklab, var(--accent) 16%, var(--panel)); flex: none; }
+.spmk { width: 17px; height: 17px; font-size: 10px; margin-left: 8px; vertical-align: middle; }
+.broken .spn, .spmk.broken, .sp.broken .spn { color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, var(--panel)); }
+.spb { display: grid; gap: 6px; min-width: 0; }
+.sph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.sph .spat { margin-left: auto; font-size: 12px; }
+.spk { color: var(--accent); background: color-mix(in oklab, var(--accent) 13%, var(--panel)); }
+.broken .spk, .spk.broken { color: var(--warn); background: color-mix(in oklab, var(--warn) 13%, var(--panel)); }
+.spw, .spf { margin: 0; color: var(--ink-2); }
+.spf { color: var(--ink-3); }
+pre.frag { margin: 0; padding: 10px 12px; background: var(--log-bg); color: var(--log-ink); border-radius: 6px; font-family: var(--mono); font-size: 12px;
+  line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.spa { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 12px; }
+.spfold > summary { cursor: pointer; color: var(--accent); font-size: 12px; list-style: none; display: inline-flex; align-items: center; gap: 4px; }
+.spfold > summary::-webkit-details-marker { display: none; }
+.spfold[open] > summary .chev { transform: rotate(90deg); }
+.spfold pre.frag { margin-top: 6px; }
+.dfwrap.withnotes { grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); align-items: start; }
+.dfwrap.withnotes > .dfbar { grid-column: 1 / -1; }
+.dfnotes { display: grid; gap: 8px; }
+.dfnote { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--raised); font-size: 12px; }
+.dfnote b { display: flex; align-items: center; gap: 6px; }
+.dfnote b .spmk { margin-left: 0; }
+.dfnote .btn { justify-self: start; }
+.dl.sphl { --rowbg: color-mix(in oklab, var(--accent) 10%, var(--panel)); }
+.dl.sphl.broken { --rowbg: color-mix(in oklab, var(--warn) 10%, var(--panel)); }
+.dr .spmk { margin: 0 6px 0 0; text-decoration: none; }
+.drtabs { justify-self: start; }
+.drtabs button[aria-selected="true"] { background: var(--sel); color: var(--ink); font-weight: 500; }
+.drtabs .spmk { width: auto; height: auto; background: none; margin-left: 2px; font-size: 10px; }
+.spdr { display: grid; gap: 8px; }
+.spdr h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.spdr p { margin: 0; color: var(--ink-2); }
+.spdr h4 { margin: 6px 0 0; font-size: 12px; }
+.spcav { margin: 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 4px; }
+@media (max-width: 760px) {
+  .dfwrap.withnotes { grid-template-columns: minmax(0, 1fr); }
+  .sph .spat { margin-left: 0; }
+}

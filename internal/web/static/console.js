@@ -77,6 +77,8 @@
   // ---- per-page setup (run again after a live update) ----
   function setup() {
     setupTabs();
+    setupStepPage();
+    setupSpeedupMarks();
     setupWaterfall();
     setupSteps();
     setupFolds();
@@ -173,6 +175,28 @@
       showTab(t.dataset.tab);
     }));
     showTab(location.hash.slice(1));
+  }
+
+  // A step's own page has the panel's tabs too; #speed opens on its
+  // speed-up.
+  // A speed-up's marker on the Dockerfile tab scrolls to its card without
+  // changing the address: the address names the tab the page shows.
+  function setupSpeedupMarks() {
+    $$('a[href^="#speedup-"]', main).forEach(a => a.addEventListener("click", ev => {
+      const card = document.getElementById(a.getAttribute("href").slice(1));
+      if (!card) return;
+      ev.preventDefault();
+      card.scrollIntoView({ block: "center" });
+    }));
+  }
+
+  function setupStepPage() {
+    if (!$(".drtabs", main) || drawer && drawer.contains($(".drtabs", main))) return;
+    $$("[data-dtab]", main).forEach(t => t.addEventListener("click", () => {
+      history.replaceState(null, "", "#" + t.dataset.dtab);
+      showDTab(t.dataset.dtab, main);
+    }));
+    showDTab(location.hash.slice(1) || "out", main);
   }
 
   // Steps table: stage groups fold; runs of cached stages start folded.
@@ -301,7 +325,7 @@
   }
   function hidePop() { if (pop) pop.hidden = true; popFor = null; }
 
-  async function openPanel(build, step) {
+  async function openPanel(build, step, tab) {
     if (!drawer) return;
     hidePop();
     const res = await fetch("/builds/" + build + "/steps/" + step + "?part=panel");
@@ -311,17 +335,28 @@
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     drawer.replaceChildren(...doc.body.childNodes, dgrip);
     drawer.hidden = false;
+    showDTab(tab || "out");
     opened = build + "/" + step;
     markOpen();
     const h = $("h2", drawer);
     if (h) h.focus();
+  }
+  // The panel's tabs (a step with a speed-up): output, speed-up, history.
+  // Without a script every pane shows, one after another.
+  function showDTab(name, root) {
+    root = root || drawer;
+    const tabs = $$("[data-dtab]", root);
+    if (!tabs.length) return;
+    if (!tabs.some(t => t.dataset.dtab === name)) name = tabs[0].dataset.dtab;
+    tabs.forEach(t => t.setAttribute("aria-selected", String(t.dataset.dtab === name)));
+    $$("[data-dpane]", root).forEach(p => { p.hidden = p.dataset.dpane !== name; });
   }
   function markOpen() {
     $$("[data-step].open", main).forEach(o => o.classList.remove("open"));
     if (!opened) return;
     const ctx = $("#ctx", main);
     const [b, s] = opened.split("/");
-    if (ctx && ctx.dataset.build === b) $$('[data-step="' + s + '"]', main).forEach(el => el.classList.add("open"));
+    if (ctx && ctx.dataset.build === b) $$('[data-step="' + s + '"]:not([data-dtab-open])', main).forEach(el => el.classList.add("open"));
   }
   function closePanel() {
     if (!drawer || drawer.hidden) return false;
@@ -331,7 +366,7 @@
     opened = null;
     markOpen();
     if (was) {
-      const el = $('[data-step="' + was.split("/")[1] + '"]', main);
+      const el = $('[data-step="' + was.split("/")[1] + '"]:not([data-dtab-open])', main);
       if (el && el.offsetParent !== null) el.focus();
     }
     return true;
@@ -400,6 +435,8 @@
 
     drawer.addEventListener("click", ev => {
       if (ev.target.closest("[data-close]")) { closePanel(); return; }
+      const dt = ev.target.closest("[data-dtab]");
+      if (dt) { showDTab(dt.dataset.dtab); return; }
       const nav = ev.target.closest("[data-dstep], [data-hist]");
       if (nav && opened) {
         ev.preventDefault();
@@ -426,21 +463,29 @@
     const ctx = $("#ctx", main);
     const steps = $$("[data-step]", main);
     steps.forEach(el => {
-      el.addEventListener("mouseenter", () => showPop(el));
-      el.addEventListener("mouseleave", hidePop);
-      el.addEventListener("focus", () => showPop(el));
-      el.addEventListener("blur", hidePop);
+      // A link to a step's speed-up opens its panel on that tab, without
+      // the step's popover over the card it sits in.
+      const tab = el.dataset.dtabOpen;
+      if (!tab) {
+        el.addEventListener("mouseenter", () => showPop(el));
+        el.addEventListener("mouseleave", hidePop);
+        el.addEventListener("focus", () => showPop(el));
+        el.addEventListener("blur", hidePop);
+      }
       el.addEventListener("click", ev => {
         if (!ctx) return;
+        // A link opened in a new tab or window stays a link.
+        if (tab && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0)) return;
         ev.preventDefault();
-        openPanel(ctx.dataset.build, el.dataset.step);
+        openPanel(ctx.dataset.build, el.dataset.step, tab);
       });
       el.addEventListener("keydown", ev => {
+        if (tab) return; // a link: Enter clicks it
         if (ev.key === "Enter" && ctx) { ev.preventDefault(); openPanel(ctx.dataset.build, el.dataset.step); }
         if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
           ev.preventDefault();
           const pane = el.closest("[data-pane]");
-          const list = steps.filter(s => s.offsetParent !== null && s.closest("[data-pane]") === pane);
+          const list = steps.filter(s => s.offsetParent !== null && s.closest("[data-pane]") === pane && !s.dataset.dtabOpen);
           const i = list.indexOf(el) + (ev.key === "ArrowDown" ? 1 : -1);
           if (list[i]) list[i].focus();
         }

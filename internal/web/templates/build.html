@@ -34,6 +34,20 @@
   <p class="muted sm pad">Reported by BuildKit's Dockerfile frontend on every build; to silence a check on purpose, add <code># check=skip=&lt;rule&gt;</code> at the top of the Dockerfile.</p>
 </section>{{end}}
 
+{{with .Speedups}}<section class="box spd" aria-labelledby="spT"><div class="boxh"><h2 class="h" id="spT">Speed-ups for this Dockerfile</h2><span class="muted">{{len .}} step{{if ne (len .) 1}}s{{end}} · the costliest first</span></div>
+  <ol class="spl">{{range .}}<li class="sp{{if .Broken}} broken{{end}}" id="speedup-{{.N}}">
+    <span class="spn" aria-hidden="true">{{.N}}</span>
+    <div class="spb">
+      <div class="sph"><b>{{.Title}}</b><span class="chip spk">{{.Chip}}</span><a class="link spat" href="/builds/{{$.ID}}/steps/{{.Step}}#speed" data-step="{{.Step}}" data-dtab-open="speed">step {{.Key}}{{with .LineText}} · {{.}}{{end}}</a></div>
+      {{range .Why}}<p class="spw">{{.}}</p>{{end}}
+      <p class="spf">{{.Figures}}</p>
+      {{if .Fragment}}{{if gt .FragLines 3}}<details class="spfold"><summary>{{icon "chev" 12 "chev"}}Replace {{.Replace}} with ({{.FragLines}} lines)</summary><pre class="frag">{{.Fragment}}</pre></details>{{else}}<pre class="frag">{{.Fragment}}</pre>{{end}}
+      <div class="spa"><button class="btn sm" type="button" data-copy="{{.Fragment}}">{{icon "copy" 12}}Copy</button><a class="link" href="/builds/{{$.ID}}/steps/{{.Step}}#speed" data-step="{{.Step}}" data-dtab-open="speed">Why, and what to keep in mind</a></div>
+      {{with .PathCommands}}<p class="muted sm">The fragment names a folder in &lt;…&gt;: the record does not say where it is in this image; {{range $i, $c := .}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}} prints it.</p>{{end}}{{end}}
+    </div>
+  </li>{{end}}</ol>
+</section>{{end}}
+
 <section class="box" aria-labelledby="stT">
   <div class="boxh"><h2 class="h" id="stT">Steps</h2>
     {{if .Blocks}}<nav class="seg" role="tablist" aria-label="Steps as"><a role="tab" href="#steps" data-tab="steps" aria-selected="true">List</a>{{if .Gantt}}<a role="tab" href="#timeline" data-tab="timeline" aria-selected="false">Timeline</a>{{end}}{{if .Lines}}<a role="tab" href="#dockerfile" data-tab="dockerfile" aria-selected="false">Dockerfile</a>{{end}}{{if .Resources}}<a role="tab" href="#resources" data-tab="resources" aria-selected="false">Resources</a>{{end}}</nav>
@@ -51,7 +65,7 @@
     {{range .Rows}}
     <tr class="st{{if .FirstRebuilt}} mark{{end}}" data-of="{{$bi}}" data-step="{{.Index}}" tabindex="0"{{if eq $blk.Kind "cached"}} hidden{{end}}>
       <td class="ln">{{if .Line}}{{.Line}}{{end}}</td>
-      <td class="cmd"><a class="steplink c" href="/builds/{{$.ID}}/steps/{{.Index}}" tabindex="-1" title="{{.Name}} — output and history">{{.Name}}</a>{{if .FirstRebuilt}}<span class="firstmk blk">↳ first rebuilt step</span>{{end}}</td>
+      <td class="cmd"><a class="steplink c" href="/builds/{{$.ID}}/steps/{{.Index}}" tabindex="-1" title="{{.Name}} — output and history">{{.Name}}</a>{{with index $.HintOf .Index}}<span class="spmk{{if .Broken}} broken{{end}}" title="Speed-up {{.N}}: {{.Chip}}" aria-label="speed-up {{.N}}, {{.Chip}}">{{.N}}</span>{{end}}{{if .FirstRebuilt}}<span class="firstmk blk">↳ first rebuilt step</span>{{end}}</td>
       <td class="res">{{if eq .State "received"}}<span class="chip received">{{icon "s_received" 11}}from {{.From}}</span>{{else}}{{template "stchip" .State}}{{end}}</td>
       <td class="num">{{dur .D}}</td>
     </tr>
@@ -73,8 +87,9 @@
   {{end}}
   {{if .Lines}}
   <div class="tabpane" id="dockerfile" data-pane="dockerfile" role="tabpanel" aria-label="Dockerfile" hidden>
-    <div class="dfwrap">
+    <div class="dfwrap{{if .Speedups}} withnotes{{end}}">
       {{template "dockerfile" .}}
+      {{with .Speedups}}<aside class="dfnotes" aria-label="Speed-ups">{{range .}}<div class="dfnote{{if .Broken}} broken{{end}}"><b><span class="spmk{{if .Broken}} broken{{end}}" aria-hidden="true">{{.N}}</span>{{.LineText}}: {{.Chip}}</b><span>{{.Title}}</span><span class="muted">{{.Figures}}</span>{{if .Fragment}}<button class="btn sm" type="button" data-copy="{{.Fragment}}">{{icon "copy" 12}}Copy the fix</button>{{end}}<a class="link" href="/builds/{{$.ID}}/steps/{{.Step}}#speed" data-step="{{.Step}}" data-dtab-open="speed">More</a></div>{{end}}</aside>{{end}}
       <div class="dfbar"><span class="legend"><span><i class="si built">{{icon "s_built" 11}}</i>built</span><span><i class="si cached">{{icon "s_cached" 11}}</i>from cache</span><span><i class="si received">{{icon "s_received" 11}}</i>from another job</span><span><i class="si image">{{icon "s_image" 11}}</i>base image</span>{{if .Failed}}<span><i class="si failed">{{icon "warn" 11}}</i>failed</span>{{else}}<span>dimmed: not part of this {{if .Target}}target{{else}}build{{end}}</span>{{end}}</span>{{if .Failed}}<span class="muted">A failed build has only its failed step's lines on record.</span>{{end}}</div>
     </div>
   </div>
