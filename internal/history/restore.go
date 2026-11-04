@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Def is one operation of a build's graph as the store keeps it: the
@@ -77,4 +78,62 @@ func Restore(b Build, defs map[string]Def) (*Build, error) {
 	b.Steps = steps
 	b.prov = p
 	return &b, nil
+}
+
+// maxAncestors bounds the operations StepOps walks: a graph is the
+// client's to send.
+const maxAncestors = 4096
+
+// StepOps returns the normalised operation of a build's i-th step and the
+// operations of every step it builds on (in no set order); nil when the
+// build's graph is not known (no provenance, or not restored).
+func (b *Build) StepOps(i int) (json.RawMessage, []json.RawMessage) {
+	if b.prov == nil || i < 0 || i >= len(b.Steps) || b.Steps[i].StepID == "" {
+		return nil, nil
+	}
+	s, ok := b.prov.Steps[b.Steps[i].StepID]
+	if !ok {
+		return nil, nil
+	}
+	var out []json.RawMessage
+	seen := map[string]bool{s.ID: true}
+	queue := append([]string(nil), s.Inputs...)
+	for len(queue) > 0 && len(seen) < maxAncestors {
+		id := queue[0]
+		queue = queue[1:]
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		a, ok := b.prov.Steps[id]
+		if !ok {
+			continue
+		}
+		out = append(out, a.Op)
+		queue = append(queue, a.Inputs...)
+	}
+	return s.Op, out
+}
+
+// LastRun reads a provenance and returns the operation of the step made
+// by the Dockerfile's last line, the operations it builds on, and the
+// step's instruction as written ("RUN ..."), for tools that check hints
+// against real records.
+func LastRun(data []byte) (json.RawMessage, []json.RawMessage, string, error) {
+	p, err := ParseProvenance(data, []byte("test"))
+	if err != nil {
+		return nil, nil, "", err
+	}
+	lines := strings.Split(strings.TrimRight(p.Dockerfile, "\n"), "\n")
+	last := len(lines)
+	for id, rs := range p.Ranges {
+		for _, r := range rs {
+			if r.End == last {
+				b := &Build{prov: p, Steps: []Step{{StepID: id}}}
+				op, anc := b.StepOps(0)
+				return op, anc, strings.Join(lines[r.Start-1:r.End], "\n"), nil
+			}
+		}
+	}
+	return nil, nil, "", fmt.Errorf("no step for line %d", last)
 }
