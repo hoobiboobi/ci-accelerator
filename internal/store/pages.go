@@ -93,6 +93,9 @@ type BuildPage struct {
 	// PrevInJob is when the job's build before this one ended; zero for
 	// the job's first build (a job may build several images).
 	PrevInJob time.Time
+	// Hints are the build's cache-mount hints (see Store.Hints); none when
+	// its graph is past retention.
+	Hints []StepHints
 }
 
 // StepRun is one build's run of a step identity, for its history.
@@ -305,6 +308,11 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 			p.Nodes[name] = node
 		}
 		p.Persists[name] = persists
+	}
+	// A build whose graph is past retention has no operations to read:
+	// no hints.
+	if p.Hints, err = s.Hints(ctx, st); err != nil {
+		return nil, err
 	}
 	return p, nil
 }
