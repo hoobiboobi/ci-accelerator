@@ -57,6 +57,9 @@ while IFS= read -r f; do
     # workflow runs nothing else.
     scripts/update-pins.sh | test/renovate-check.sh) charts=true; renovate=true ;;
     renovate.json5 | .github/renovate-global.js | .github/workflows/renovate.yml | test/renovate-deps.txt) renovate=true ;;
+    # The cache-mount hints' check on real builds: its helper is Go, and
+    # lint checks its script; its projects are read by that script only.
+    test/hints/*) charts=true; go=true ;;
     cmd/* | internal/* | go.mod | go.sum | test/ui/* | .govulncheck-allow | .trivyignore.yaml) go=true ;;
     charts/* | integrations/* | examples/* | scripts/*.sh | test/e2e/* | test/quickstart/* | test/*.sh) charts=true ;;
     *) all=true ;;

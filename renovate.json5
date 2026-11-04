@@ -7,9 +7,10 @@
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
   // config:recommended ignores test directories; the e2e and the
-  // quickstart test carry pins of their own. The Dockerfile guide's examples
-  // and the e2e's fixture Dockerfiles are not pins.
-  ignorePaths: ["**/node_modules/**", "**/vendor/**", "docs/**", "test/e2e/fixtures/**"],
+  // quickstart test carry pins of their own. The Dockerfile guide's examples,
+  // the e2e's fixture Dockerfiles and the cache-mount hints' test projects
+  // (one per package manager, on purpose at a moving tag) are not pins.
+  ignorePaths: ["**/node_modules/**", "**/vendor/**", "docs/**", "test/e2e/fixtures/**", "test/hints/**"],
   // The GitLab CI files are the component and the mirror's pipeline, not
   // images to bump; the charts' values hold no image:tag pairs of the shape
   // helm-values knows (the tag follows appVersion, the digest is written

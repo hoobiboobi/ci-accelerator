@@ -319,7 +319,7 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 	@echo "==> images the weekly scan covers"
 	@test/default-images.sh
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/third-party-images.sh scripts/update-pins.sh test/renovate-check.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/third-party-images.sh scripts/update-pins.sh test/renovate-check.sh test/hints/managers.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
