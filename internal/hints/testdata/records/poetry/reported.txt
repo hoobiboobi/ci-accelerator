@@ -1,0 +1,2 @@
+/root/.cache/pypoetry/cache
+/root/.cache/pypoetry/artifacts

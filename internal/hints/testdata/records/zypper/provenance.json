@@ -1,0 +1,863 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md",
+    "resolvedDependencies": [
+      {
+        "uri": "pkg:docker/opensuse/leap@15.6?platform=linux%2Farm64",
+        "digest": {
+          "sha256": "79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421"
+        }
+      }
+    ],
+    "externalParameters": {
+      "configSource": {},
+      "request": {
+        "frontend": "dockerfile.v0",
+        "args": {
+          "build-arg:BUST": "1",
+          "target": "install"
+        },
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ],
+        "root": {
+          "configSource": {},
+          "request": {
+            "args": {
+              "build-arg:BUST": "1",
+              "target": "install"
+            }
+          }
+        },
+        "compatibilityVersion": 30
+      }
+    },
+    "internalParameters": {
+      "buildConfig": {
+        "digestMapping": {
+          "sha256:3cbee70bae1ac52160d7bfa24d6a92d582f308c889a802de03a6ba05e5df6a3f": "step2",
+          "sha256:745ec5f36e810cacc78d8935c34e6577fd7ccc97e4a30b9f3a609e3c73bf3cb4": "step1",
+          "sha256:feb06b45db7838d4677cea1187935d925dfdd038b951aeb5b319cda37b2bc253": "step0"
+        },
+        "llbDefinition": [
+          {
+            "id": "step0",
+            "op": {
+              "Op": {
+                "source": {
+                  "identifier": "docker-image://docker.io/opensuse/leap:15.6@sha256:79be7751205ea84559990fb76b1bec71e38d6fad41c70a4f6c921b803b58f421"
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "arm64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step1",
+            "inputs": [
+              "step0:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "zypper --non-interactive install tree jq"
+                    ],
+                    "cwd": "/",
+                    "env": [
+                      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "BUST=1"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "arm64",
+                "OS": "linux"
+              }
+            },
+            "resourceUsage": {
+              "samples": [
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 246436000,
+                    "throttledNanos": 0,
+                    "usageNanos": 349471000,
+                    "userNanos": 103035000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 6664192,
+                    "writeIOs": 25
+                  },
+                  "memoryStat": {
+                    "anon": 5464064,
+                    "file": 6766592,
+                    "fileDirty": 159744,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 229376,
+                    "pageTables": 446464,
+                    "pgfault": 16707,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 1406648,
+                    "sock": 4096,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 36
+                  },
+                  "timestamp": "2026-11-03T21:21:06.933304512Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 856899000,
+                    "throttledNanos": 0,
+                    "usageNanos": 3320614000,
+                    "userNanos": 2463714000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 7380992,
+                    "writeIOs": 61
+                  },
+                  "memoryStat": {
+                    "anon": 93134848,
+                    "file": 71061504,
+                    "fileDirty": 63873024,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 245760,
+                    "pageTables": 688128,
+                    "pgfault": 76334,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 3879528,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 73
+                  },
+                  "timestamp": "2026-11-03T21:21:14.93629221Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 1980293000,
+                    "throttledNanos": 0,
+                    "usageNanos": 8498323000,
+                    "userNanos": 6518029000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 88653824,
+                    "writeIOs": 244
+                  },
+                  "memoryStat": {
+                    "anon": 5726208,
+                    "file": 175542272,
+                    "fileDirty": 93347840,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 229376,
+                    "pageTables": 434176,
+                    "pgfault": 167960,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 7200000,
+                    "sock": 548864,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 94
+                  },
+                  "timestamp": "2026-11-03T21:21:22.944670005Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 2422132000,
+                    "throttledNanos": 0,
+                    "usageNanos": 16877759000,
+                    "userNanos": 14455626000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 88666112,
+                    "writeIOs": 247
+                  },
+                  "memoryStat": {
+                    "anon": 84967424,
+                    "file": 256348160,
+                    "fileDirty": 174153728,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 245760,
+                    "pageTables": 671744,
+                    "pgfault": 193957,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 9661096,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 95
+                  },
+                  "timestamp": "2026-11-03T21:21:32.948525218Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 3677995000,
+                    "throttledNanos": 0,
+                    "usageNanos": 21698426000,
+                    "userNanos": 18020431000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 98787328,
+                    "writeIOs": 310
+                  },
+                  "memoryStat": {
+                    "anon": 9003008,
+                    "file": 317485056,
+                    "fileDirty": 231477248,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 229376,
+                    "pageTables": 438272,
+                    "pgfault": 331195,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 11883248,
+                    "sock": 4096,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 131
+                  },
+                  "timestamp": "2026-11-03T21:21:40.954179375Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 4551706000,
+                    "throttledNanos": 0,
+                    "usageNanos": 25443711000,
+                    "userNanos": 20892005000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 100384768,
+                    "writeIOs": 452
+                  },
+                  "memoryStat": {
+                    "anon": 0,
+                    "file": 318902272,
+                    "fileDirty": 232951808,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 0,
+                    "pageTables": 0,
+                    "pgfault": 441810,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 12970496,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 0
+                  },
+                  "timestamp": "2026-11-03T21:21:46.224213169Z"
+                }
+              ],
+              "sysCPUStat": {
+                "guest": 0,
+                "guestNice": 0,
+                "idle": 344.79,
+                "iowait": 0.07,
+                "irq": 0,
+                "nice": 0,
+                "softirq": 1.03,
+                "steal": 0,
+                "system": 16.15,
+                "user": 39.75
+              }
+            }
+          },
+          {
+            "id": "step2",
+            "inputs": [
+              "step1:0"
+            ],
+            "op": {
+              "Op": {}
+            }
+          }
+        ]
+      },
+      "builderPlatform": "linux/arm64",
+      "dockerfileVersion": "1.28.0",
+      "targetPlatform": "linux/arm64"
+    }
+  },
+  "runDetails": {
+    "builder": {
+      "id": ""
+    },
+    "metadata": {
+      "invocationId": "k78ba4r9g3ixei9xyn8fhsphg",
+      "startedOn": "2026-11-03T21:21:04.680724553Z",
+      "finishedOn": "2026-11-03T21:21:46.429207502Z",
+      "buildkit_metadata": {
+        "source": {
+          "locations": {
+            "step0": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 1
+                      },
+                      "end": {
+                        "line": 1
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step1": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 8
+                      },
+                      "end": {
+                        "line": 8
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "infos": [
+            {
+              "filename": "Dockerfile",
+              "language": "Dockerfile",
+              "data": "RlJPTSBvcGVuc3VzZS9sZWFwOjE1LjYgQVMgYmFzZQoKRlJPTSBiYXNlIEFTIHByb2JlClJVTiBlY2hvICJDQUNIRURJUj0vdmFyL2NhY2hlL3p5cHAiCgpGUk9NIGJhc2UgQVMgaW5zdGFsbApBUkcgQlVTVD0wClJVTiB6eXBwZXIgLS1ub24taW50ZXJhY3RpdmUgaW5zdGFsbCB0cmVlIGpxCg==",
+              "llbDefinition": [
+                {
+                  "id": "step0",
+                  "op": {
+                    "Op": {
+                      "source": {
+                        "identifier": "local://dockerfile",
+                        "attrs": {
+                          "local.differ": "none",
+                          "local.followpaths": "[\"Dockerfile\",\"Dockerfile.dockerignore\",\"dockerfile\"]",
+                          "local.sharedkeyhint": "dockerfile"
+                        }
+                      }
+                    },
+                    "constraints": {}
+                  }
+                },
+                {
+                  "id": "step1",
+                  "op": {
+                    "Op": {}
+                  },
+                  "inputs": [
+                    "step0:0"
+                  ]
+                }
+              ],
+              "digestMapping": {
+                "sha256:c6b886ec9675f59562dca26180cbc368e7b4481deee13f8d0919d18da928bd3c": "step1",
+                "sha256:e09b3d4325d02e065a3aa0a80aac37389fa82b40fe9a836db2f09e4430c561b8": "step0"
+              }
+            }
+          ]
+        },
+        "layers": {
+          "step0:0": [
+            [
+              {
+                "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                "digest": "sha256:f3cc6be85f4b59c0eb820b0b632ba4c328e64bbd7aa89b49c9fc4c88df61da68",
+                "size": 45794550
+              }
+            ]
+          ]
+        },
+        "sysUsage": [
+          {
+            "timestamp": "2026-11-03T21:21:05.344833136Z",
+            "cpuStat": {
+              "user": 369910.01,
+              "nice": 0.18,
+              "system": 249044.08,
+              "idle": 7447159.96,
+              "iowait": 3360.19,
+              "irq": 0,
+              "softirq": 11516.7,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12636818227,
+              "processCreated": 18858714,
+              "processesRunning": 5
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1859032,
+              "available": 7798332,
+              "buffers": 1425220,
+              "cached": 3215452,
+              "active": 3957136,
+              "inactive": 3952952,
+              "swap": 1048572,
+              "dirty": 416,
+              "writeback": 0,
+              "slab": 2276452
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:09.348738555Z",
+            "cpuStat": {
+              "user": 369911.85,
+              "nice": 0.18,
+              "system": 249045.28,
+              "idle": 7447196.29,
+              "iowait": 3360.19,
+              "irq": 0,
+              "softirq": 11516.78,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12636903342,
+              "processCreated": 18858859,
+              "processesRunning": 1
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1835868,
+              "available": 7784844,
+              "buffers": 1425224,
+              "cached": 3225188,
+              "active": 3964268,
+              "inactive": 3965780,
+              "swap": 1048572,
+              "dirty": 9408,
+              "writeback": 8,
+              "slab": 2276508
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:13.351097251Z",
+            "cpuStat": {
+              "user": 369913.42,
+              "nice": 0.18,
+              "system": 249046.82,
+              "idle": 7447232.42,
+              "iowait": 3360.19,
+              "irq": 0,
+              "softirq": 11516.9,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637031387,
+              "processCreated": 18858966,
+              "processesRunning": 9
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1779884,
+              "available": 7781660,
+              "buffers": 1425228,
+              "cached": 3278052,
+              "active": 3966892,
+              "inactive": 4024964,
+              "swap": 1048572,
+              "dirty": 62356,
+              "writeback": 4,
+              "slab": 2276084
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:17.353016128Z",
+            "cpuStat": {
+              "user": 369918.63,
+              "nice": 0.18,
+              "system": 249047.65,
+              "idle": 7447265.32,
+              "iowait": 3360.21,
+              "irq": 0,
+              "softirq": 11516.97,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637086116,
+              "processCreated": 18858966,
+              "processesRunning": 9
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1649472,
+              "available": 7651844,
+              "buffers": 1425228,
+              "cached": 3278636,
+              "active": 4008020,
+              "inactive": 4111200,
+              "swap": 1048572,
+              "dirty": 15708,
+              "writeback": 0,
+              "slab": 2275744
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:21.354700255Z",
+            "cpuStat": {
+              "user": 369926.41,
+              "nice": 0.18,
+              "system": 249051.76,
+              "idle": 7447287.85,
+              "iowait": 3360.24,
+              "irq": 0,
+              "softirq": 11517.26,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637163531,
+              "processCreated": 18859126,
+              "processesRunning": 1
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1725352,
+              "available": 7778904,
+              "buffers": 1425244,
+              "cached": 3329864,
+              "active": 4017548,
+              "inactive": 4028196,
+              "swap": 1048572,
+              "dirty": 41100,
+              "writeback": 0,
+              "slab": 2275748
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:25.356067507Z",
+            "cpuStat": {
+              "user": 369928.38,
+              "nice": 0.18,
+              "system": 249053.75,
+              "idle": 7447322.82,
+              "iowait": 3360.24,
+              "irq": 0,
+              "softirq": 11517.47,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637350946,
+              "processCreated": 18859200,
+              "processesRunning": 2
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1595844,
+              "available": 7778584,
+              "buffers": 1425244,
+              "cached": 3459084,
+              "active": 4019532,
+              "inactive": 4151132,
+              "swap": 1048572,
+              "dirty": 170080,
+              "writeback": 0,
+              "slab": 2275808
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:29.357969925Z",
+            "cpuStat": {
+              "user": 369932.92,
+              "nice": 0.18,
+              "system": 249054.36,
+              "idle": 7447357.42,
+              "iowait": 3360.24,
+              "irq": 0,
+              "softirq": 11517.49,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637412014,
+              "processCreated": 18859255,
+              "processesRunning": 2
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1553784,
+              "available": 7737204,
+              "buffers": 1425244,
+              "cached": 3459716,
+              "active": 4078860,
+              "inactive": 4134852,
+              "swap": 1048572,
+              "dirty": 170704,
+              "writeback": 0,
+              "slab": 2275676
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:33.35922776Z",
+            "cpuStat": {
+              "user": 369937.99,
+              "nice": 0.18,
+              "system": 249055.14,
+              "idle": 7447391.11,
+              "iowait": 3360.24,
+              "irq": 0,
+              "softirq": 11517.52,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637475744,
+              "processCreated": 18859335,
+              "processesRunning": 2
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1526360,
+              "available": 7709696,
+              "buffers": 1425244,
+              "cached": 3459724,
+              "active": 4130076,
+              "inactive": 4114940,
+              "swap": 1048572,
+              "dirty": 170704,
+              "writeback": 0,
+              "slab": 2275592
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:37.362319012Z",
+            "cpuStat": {
+              "user": 369943.66,
+              "nice": 0.18,
+              "system": 249056.5,
+              "idle": 7447423.71,
+              "iowait": 3360.24,
+              "irq": 0,
+              "softirq": 11517.57,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637536829,
+              "processCreated": 18859342,
+              "processesRunning": 4
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1554860,
+              "available": 7795896,
+              "buffers": 1425248,
+              "cached": 3517484,
+              "active": 4147584,
+              "inactive": 4065852,
+              "swap": 1048572,
+              "dirty": 224280,
+              "writeback": 248,
+              "slab": 2275284
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:41.364236792Z",
+            "cpuStat": {
+              "user": 369945.32,
+              "nice": 0.18,
+              "system": 249058.13,
+              "idle": 7447459.42,
+              "iowait": 3360.25,
+              "irq": 0,
+              "softirq": 11517.66,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637632978,
+              "processCreated": 18859509,
+              "processesRunning": 2
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1543880,
+              "available": 7786932,
+              "buffers": 1425272,
+              "cached": 3519460,
+              "active": 4155648,
+              "inactive": 4065964,
+              "swap": 1048572,
+              "dirty": 226344,
+              "writeback": 8,
+              "slab": 2275416
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:45.36547596Z",
+            "cpuStat": {
+              "user": 369949.34,
+              "nice": 0.18,
+              "system": 249059.72,
+              "idle": 7447493.05,
+              "iowait": 3360.25,
+              "irq": 0,
+              "softirq": 11517.72,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637700566,
+              "processCreated": 18859580,
+              "processesRunning": 4
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1306900,
+              "available": 7550148,
+              "buffers": 1425276,
+              "cached": 3519672,
+              "active": 4245556,
+              "inactive": 4215720,
+              "swap": 1048572,
+              "dirty": 226396,
+              "writeback": 0,
+              "slab": 2275336
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:21:46.430729086Z",
+            "cpuStat": {
+              "user": 369949.76,
+              "nice": 0.18,
+              "system": 249060.35,
+              "idle": 7447502.39,
+              "iowait": 3360.36,
+              "irq": 0,
+              "softirq": 11517.75,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12637720934,
+              "processCreated": 18859593,
+              "processesRunning": 2
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 1557520,
+              "available": 7801876,
+              "buffers": 1425324,
+              "cached": 3520736,
+              "active": 4247864,
+              "inactive": 3963260,
+              "swap": 1048572,
+              "dirty": 48,
+              "writeback": 0,
+              "slab": 2275420
+            }
+          }
+        ]
+      },
+      "buildkit_completeness": {
+        "request": true,
+        "resolvedDependencies": false
+      }
+    }
+  }
+}
