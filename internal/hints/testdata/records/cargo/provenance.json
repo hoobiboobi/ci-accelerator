@@ -1,0 +1,657 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md",
+    "resolvedDependencies": [
+      {
+        "uri": "pkg:docker/rust@1-slim?platform=linux%2Farm64",
+        "digest": {
+          "sha256": "9daf2b244ccc30523e55cafe32edf8465671ba567d0101620e5612ccb76ea1a7"
+        }
+      }
+    ],
+    "externalParameters": {
+      "configSource": {},
+      "request": {
+        "frontend": "dockerfile.v0",
+        "args": {
+          "build-arg:BUST": "1",
+          "target": "install"
+        },
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ],
+        "root": {
+          "configSource": {},
+          "request": {
+            "args": {
+              "build-arg:BUST": "1",
+              "target": "install"
+            }
+          }
+        },
+        "compatibilityVersion": 30
+      }
+    },
+    "internalParameters": {
+      "buildConfig": {
+        "digestMapping": {
+          "sha256:49698a1158d23fefea7fafab73f0ec2b6cdc031f842742463dae8d4991d1d80d": "step5",
+          "sha256:a024aa8934f2864abcacee569d2298d10cab4dca87bb706537a0d9864e75f4c8": "step4",
+          "sha256:ab81e223ec10813004d9863901ccbb72ccdde8c8aa4bb412a52ce256a3369ebc": "step1",
+          "sha256:ac2e3ad9960f5b8da89ca3e82591e3504c60851fbc28761b7b66d44123442bf6": "step6",
+          "sha256:c25725e8c6b790bbaab6fcec6efb103345becaf1cdeb5224003a7a609237b8d9": "step2",
+          "sha256:cb2eb1e26e2550948edc1d65dd3ff6350a2b7a1e7f4fabfa4b11fb27a2d0b54c": "step0",
+          "sha256:d3cd155fa1c52cb9d02495410cdcf2486a1f7529943b0a4834a396d7a5a3d2bd": "step3"
+        },
+        "llbDefinition": [
+          {
+            "id": "step0",
+            "op": {
+              "Op": {
+                "source": {
+                  "identifier": "docker-image://docker.io/library/rust:1-slim@sha256:9daf2b244ccc30523e55cafe32edf8465671ba567d0101620e5612ccb76ea1a7"
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "arm64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step1",
+            "inputs": [
+              "step0:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "mkdir": {
+                          "makeParents": true,
+                          "mode": 493,
+                          "path": "/app",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step2",
+            "op": {
+              "Op": {
+                "source": {
+                  "attrs": {
+                    "local.followpaths": "[\"Cargo.toml\"]",
+                    "local.sharedkeyhint": "context"
+                  },
+                  "identifier": "local://context"
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step3",
+            "inputs": [
+              "step1:0",
+              "step2:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/app/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/Cargo.toml",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step4",
+            "inputs": [
+              "step3:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "mkdir src \u0026\u0026 echo 'fn main() { println!(\"{}\", itoa::Buffer::new().format(1)); }' \u003e src/main.rs"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "RUSTUP_HOME=/usr/local/rustup",
+                      "CARGO_HOME=/usr/local/cargo",
+                      "RUST_VERSION=1.99.1"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "arm64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step5",
+            "inputs": [
+              "step4:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "cargo build --release"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "RUSTUP_HOME=/usr/local/rustup",
+                      "CARGO_HOME=/usr/local/cargo",
+                      "RUST_VERSION=1.99.1",
+                      "BUST=1"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "arm64",
+                "OS": "linux"
+              }
+            },
+            "resourceUsage": {
+              "samples": [
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 2099207000,
+                    "throttledNanos": 0,
+                    "usageNanos": 3050174000,
+                    "userNanos": 950966000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 159744,
+                    "writeIOs": 11
+                  },
+                  "memoryStat": {
+                    "anon": 117690368,
+                    "file": 10100736,
+                    "fileDirty": 10039296,
+                    "fileMapped": 36864,
+                    "fileWriteback": 0,
+                    "kernelStack": 245760,
+                    "pageTables": 1527808,
+                    "pgfault": 155101,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 2257160,
+                    "sock": 4096,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 15
+                  },
+                  "timestamp": "2026-11-03T21:12:04.611829053Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 2934729000,
+                    "throttledNanos": 0,
+                    "usageNanos": 6965159000,
+                    "userNanos": 4030429000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 159744,
+                    "writeIOs": 11
+                  },
+                  "memoryStat": {
+                    "anon": 102711296,
+                    "file": 32223232,
+                    "fileDirty": 32161792,
+                    "fileMapped": 3186688,
+                    "fileWriteback": 0,
+                    "kernelStack": 147456,
+                    "pageTables": 999424,
+                    "pgfault": 289075,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 2910840,
+                    "sock": 4096,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 9
+                  },
+                  "timestamp": "2026-11-03T21:12:06.613257595Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "systemNanos": 3598261000,
+                    "throttledNanos": 0,
+                    "usageNanos": 9336938000,
+                    "userNanos": 5738677000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "readBytes": 0,
+                    "readIOs": 0,
+                    "writeBytes": 36192256,
+                    "writeIOs": 466
+                  },
+                  "memoryStat": {
+                    "anon": 0,
+                    "file": 38600704,
+                    "fileDirty": 2494464,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 0,
+                    "pageTables": 0,
+                    "pgfault": 380753,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "shmem": 0,
+                    "slab": 2942568,
+                    "sock": 4096,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 0
+                  },
+                  "timestamp": "2026-11-03T21:12:08.472886763Z"
+                }
+              ],
+              "sysCPUStat": {
+                "guest": 0,
+                "guestNice": 0,
+                "idle": 41.71,
+                "iowait": 0.03,
+                "irq": 0,
+                "nice": 0,
+                "softirq": 0.15,
+                "steal": 0,
+                "system": 5.41,
+                "user": 9.63
+              }
+            }
+          },
+          {
+            "id": "step6",
+            "inputs": [
+              "step5:0"
+            ],
+            "op": {
+              "Op": {}
+            }
+          }
+        ]
+      },
+      "builderPlatform": "linux/arm64",
+      "dockerfileVersion": "1.28.0",
+      "targetPlatform": "linux/arm64"
+    }
+  },
+  "runDetails": {
+    "builder": {
+      "id": ""
+    },
+    "metadata": {
+      "invocationId": "4ihsuxdeq69mcyiblbebxg0d5",
+      "startedOn": "2026-11-03T21:12:02.344177343Z",
+      "finishedOn": "2026-11-03T21:12:08.540769513Z",
+      "buildkit_metadata": {
+        "source": {
+          "locations": {
+            "step0": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 1
+                      },
+                      "end": {
+                        "line": 1
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step1": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 2
+                      },
+                      "end": {
+                        "line": 2
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step2": {},
+            "step3": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 3
+                      },
+                      "end": {
+                        "line": 3
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step4": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 4
+                      },
+                      "end": {
+                        "line": 4
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step5": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 11
+                      },
+                      "end": {
+                        "line": 11
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "infos": [
+            {
+              "filename": "Dockerfile",
+              "language": "Dockerfile",
+              "data": "RlJPTSBydXN0OjEtc2xpbSBBUyBiYXNlCldPUktESVIgL2FwcApDT1BZIENhcmdvLnRvbWwgLi8KUlVOIG1rZGlyIHNyYyAmJiBlY2hvICdmbiBtYWluKCkgeyBwcmludGxuISgie30iLCBpdG9hOjpCdWZmZXI6Om5ldygpLmZvcm1hdCgxKSk7IH0nID4gc3JjL21haW4ucnMKCkZST00gYmFzZSBBUyBwcm9iZQpSVU4gZWNobyAiQ0FDSEVESVI9JENBUkdPX0hPTUUvcmVnaXN0cnkiICYmIGVjaG8gIkNBQ0hFRElSPSRDQVJHT19IT01FL2dpdCIKCkZST00gYmFzZSBBUyBpbnN0YWxsCkFSRyBCVVNUPTAKUlVOIGNhcmdvIGJ1aWxkIC0tcmVsZWFzZQo=",
+              "llbDefinition": [
+                {
+                  "id": "step0",
+                  "op": {
+                    "Op": {
+                      "source": {
+                        "identifier": "local://dockerfile",
+                        "attrs": {
+                          "local.differ": "none",
+                          "local.followpaths": "[\"Dockerfile\",\"Dockerfile.dockerignore\",\"dockerfile\"]",
+                          "local.sharedkeyhint": "dockerfile"
+                        }
+                      }
+                    },
+                    "constraints": {}
+                  }
+                },
+                {
+                  "id": "step1",
+                  "op": {
+                    "Op": {}
+                  },
+                  "inputs": [
+                    "step0:0"
+                  ]
+                }
+              ],
+              "digestMapping": {
+                "sha256:3c5126155ef5a17c82bd21bc520a5977552bf886a4f1722307d84133498ce568": "step1",
+                "sha256:5c90ef3ff7d8575e8c2980c0b0750ecdbe5e2c470776a59cb9a057e70dfe566f": "step0"
+              }
+            }
+          ]
+        },
+        "layers": {
+          "step0:0": [
+            [
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:2b70e040f7d132c8d366ee0223462552686510fb372ea5a83822973c30f19e36",
+                "size": 30213496
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:b58f8c9c18849121ab40763b62497bf3350875a2da8b16fa3a18d04404fa2211",
+                "size": 256665155
+              }
+            ]
+          ]
+        },
+        "sysUsage": [
+          {
+            "timestamp": "2026-11-03T21:12:02.838950177Z",
+            "cpuStat": {
+              "user": 369357.26,
+              "nice": 0.18,
+              "system": 248670.95,
+              "idle": 7442833.5,
+              "iowait": 3352.28,
+              "irq": 0,
+              "softirq": 11498.84,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12618816314,
+              "processCreated": 18834534,
+              "processesRunning": 4
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 874596,
+              "available": 7825848,
+              "buffers": 1393316,
+              "cached": 4246584,
+              "active": 3954380,
+              "inactive": 4922472,
+              "swap": 1048572,
+              "dirty": 252,
+              "writeback": 0,
+              "slab": 2290516
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:12:04.839079303Z",
+            "cpuStat": {
+              "user": 369359.66,
+              "nice": 0.18,
+              "system": 248673.52,
+              "idle": 7442848.14,
+              "iowait": 3352.28,
+              "irq": 0,
+              "softirq": 11498.89,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12618863150,
+              "processCreated": 18834645,
+              "processesRunning": 4
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 743196,
+              "available": 7706252,
+              "buffers": 1393328,
+              "cached": 4258076,
+              "active": 4072432,
+              "inactive": 4942240,
+              "swap": 1048572,
+              "dirty": 12376,
+              "writeback": 0,
+              "slab": 2290900
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:12:06.839292554Z",
+            "cpuStat": {
+              "user": 369363.7,
+              "nice": 0.18,
+              "system": 248674.77,
+              "idle": 7442862.27,
+              "iowait": 3352.28,
+              "irq": 0,
+              "softirq": 11498.93,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12618896373,
+              "processCreated": 18834693,
+              "processesRunning": 8
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 738664,
+              "available": 7722580,
+              "buffers": 1393340,
+              "cached": 4278236,
+              "active": 4086792,
+              "inactive": 4929304,
+              "swap": 1048572,
+              "dirty": 32396,
+              "writeback": 0,
+              "slab": 2291544
+            }
+          },
+          {
+            "timestamp": "2026-11-03T21:12:08.54262693Z",
+            "cpuStat": {
+              "user": 369366.64,
+              "nice": 0.18,
+              "system": 248676.05,
+              "idle": 7442874.21,
+              "iowait": 3352.33,
+              "irq": 0,
+              "softirq": 11498.99,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 12618926688,
+              "processCreated": 18834792,
+              "processesRunning": 3
+            },
+            "memoryStat": {
+              "total": 12249824,
+              "free": 851824,
+              "available": 7842044,
+              "buffers": 1393352,
+              "cached": 4284216,
+              "active": 4101328,
+              "inactive": 4799740,
+              "swap": 1048572,
+              "dirty": 784,
+              "writeback": 384,
+              "slab": 2291600
+            }
+          }
+        ]
+      },
+      "buildkit_completeness": {
+        "request": true,
+        "resolvedDependencies": false
+      }
+    }
+  }
+}
