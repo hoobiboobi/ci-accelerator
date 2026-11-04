@@ -78,3 +78,27 @@ func TestOpenAnalyzes(t *testing.T) {
 		t.Fatalf("no statistics for jobs after Open: %d rows, %v", n, err)
 	}
 }
+
+// A build page's speed-ups count their steps' runs in the image's builds
+// of 30 days: by builds_target, not by reading every build.
+func TestStepRunsUseTargetIndex(t *testing.T) {
+	s := open(t, t.TempDir(), &clock{time.Now()})
+	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+stepRunsQuery+stepRunsProject+" AND COALESCE(s.name, sd.name, '') IN (?, ?)",
+		1, 1, "api", 0, "RUN npm ci", "RUN pip install x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if got := strings.Join(plan, " | "); !strings.Contains(got, "builds_target") || strings.Contains(got, "SCAN b") {
+		t.Errorf("plan: %s", got)
+	}
+}
