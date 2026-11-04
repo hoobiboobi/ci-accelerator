@@ -11,6 +11,12 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Fixed
+
+- `quickstart.sh` no longer ends by saying the console cannot read
+  GitLab when a GitLab token was given (with `--gitlab-token-file`, or
+  kept from an earlier run).
+
 ## 0.5.0 - 2026-11-04
 
 ### Upgrade notes

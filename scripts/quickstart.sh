@@ -439,6 +439,15 @@ helm upgrade --install "$REL" "$CHART" -n "$NS" -f "$STATE/values.yaml" ${image_
 # --- done --------------------------------------------------------------------
 
 host=$(hostname -f 2>/dev/null || hostname)
+# What the console can read from GitLab depends on the token in the values
+# (passed now, or kept from an earlier run), not on this run's options.
+gitlab_note="The console also reads GitLab with the token you gave: job results,
+runner waits and the comparison of commits for rebuilds."
+if ! grep -q 'existingSecret: gitlab-api-token' "$STATE/values.yaml"; then
+  gitlab_note="The console shows image builds, their steps and cache verdicts; job results
+and runner waits come from GitLab, which it cannot read yet. To add them,
+run this script again with --gitlab-token-file FILE (a token with read_api)."
+fi
 cat <<EOF
 
 Done. ci-accelerator $VERSION runs on this machine.
@@ -451,9 +460,7 @@ and from your computer:
   ssh -N -L 8080:localhost:8080 $(logname 2>/dev/null || echo you)@$host
 then open http://localhost:8080
 
-The console shows image builds, their steps and cache verdicts; job results
-and runner waits come from GitLab, which it cannot read yet. To add them,
-run this script again with --gitlab-token-file FILE (a token with read_api).
+$gitlab_note
 For sign-in through GitLab, follow "The console" in the README; the values
 are in $STATE/values.yaml, apply changes with
   sudo KUBECONFIG=$KUBECONFIG $HELM upgrade $REL $CHARTS/ci-accelerator --version $VERSION -n $NS -f $STATE/values.yaml --wait --timeout 15m
