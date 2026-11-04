@@ -2,6 +2,7 @@ package history
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,12 +70,15 @@ func TestNoCacheIsTheJobsChoice(t *testing.T) {
 
 // Something fetched from the network can change while every definition
 // stays the same: such a rebuild is unclear, not the farm's, unless a
-// checksum (or a git commit) pins it.
+// checksum (or a git commit) pins it. A step the build context feeds as
+// well is the context's case, so that a changed file can prove the change;
+// the remote source rides along in its paths and keeps it from ever being
+// read as the farm's.
 func TestRemoteSourceRebuild(t *testing.T) {
 	bs := loadFixtures(t)
 	prev := *byJob(t, bs, 1003, "api")
 	prev.Daemon = "daemon-a"
-	with := func(identifier string, attrs map[string]string) Reason {
+	with := func(key, identifier string, attrs map[string]string) Reason {
 		t.Helper()
 		cur := *byJob(t, bs, 1003, "api")
 		cur.Daemon = "daemon-b"
@@ -85,32 +89,39 @@ func TestRemoteSourceRebuild(t *testing.T) {
 		}
 		op, _ := json.Marshal(map[string]any{"Op": map[string]any{"source": map[string]any{"identifier": identifier, "attrs": attrs}}})
 		p.Steps["remote"] = ProvStep{ID: "remote", Op: op}
-		run := step(t, &cur, "[api 2/2]")
+		run := step(t, &cur, key)
 		s := p.Steps[run.StepID]
 		s.Inputs = append(append([]string(nil), s.Inputs...), "remote")
 		p.Steps[run.StepID] = s
 		cur.prov = &p
 		cur.Steps = append([]Step(nil), cur.Steps...)
 		for i := range cur.Steps {
-			if cur.Steps[i].Key != "[api 2/2]" {
-				cur.Steps[i].State = Cached
+			cur.Steps[i].State = Cached
+			if cur.Steps[i].Key == key {
+				cur.Steps[i].State = Built
 			}
 		}
 		r, _ := FirstRebuild(&prev, &cur)
 		return r
 	}
-	r := with("https://user:token@example.com/tool.tar.gz?sig=abc", nil)
+	const net = "[deps 3/6]" // RUN sleep 2 ...: no file of the context below it
+	r := with(net, "https://user:token@example.com/tool.tar.gz?sig=abc", nil)
 	if r.Kind != RemoteSource || strings.Join(r.Paths, ",") != "https://example.com/tool.tar.gz?…" || r.Old != "daemon-a" {
 		t.Errorf("http source: %+v", r)
 	}
-	if r := with("https://example.com/tool.tar.gz", map[string]string{"http.checksum": "sha256:" + strings.Repeat("a", 64)}); r.Kind == RemoteSource {
+	if r := with(net, "https://example.com/tool.tar.gz", map[string]string{"http.checksum": "sha256:" + strings.Repeat("a", 64)}); r.Kind == RemoteSource {
 		t.Errorf("a checksum pins the source: %+v", r)
 	}
-	if r := with("git://github.com/example/tool.git#main", nil); r.Kind != RemoteSource {
+	if r := with(net, "git://github.com/example/tool.git#main", nil); r.Kind != RemoteSource {
 		t.Errorf("git by branch: %+v", r)
 	}
-	if r := with("git://github.com/example/tool.git#"+strings.Repeat("c", 40), nil); r.Kind == RemoteSource {
+	if r := with(net, "git://github.com/example/tool.git#"+strings.Repeat("c", 40), nil); r.Kind == RemoteSource {
 		t.Errorf("git by commit: %+v", r)
+	}
+	// [api 2/2] builds on api/ and deps.txt of the context too.
+	r = with("[api 2/2]", "git://github.com/example/tool.git#main", nil)
+	if r.Kind != CacheElsewhere || !slices.Contains(r.Paths, "api") || !slices.Contains(r.Paths, "git://github.com/example/tool.git#main") {
+		t.Errorf("context and git source: %+v", r)
 	}
 	if contains(FarmKinds(), RemoteSource) || !contains(UnclearKinds(), RemoteSource) {
 		t.Error("a remote source rebuild must count as unclear")

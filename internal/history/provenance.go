@@ -699,6 +699,18 @@ func (p *Provenance) imageSource(id string) string {
 	return ""
 }
 
+// fetchSource says whether a step is itself a git or HTTP source. BuildKit
+// resolves such a source again in every build (a tag or branch can move),
+// so the source shows as run even when what it fetched is the same and the
+// steps that use it come from the cache.
+func (p *Provenance) fetchSource(id string) bool {
+	src := viewOf(p.Steps[id].Op).Op.Source
+	if src == nil {
+		return false
+	}
+	return strings.HasPrefix(src.Identifier, "git://") || strings.HasPrefix(src.Identifier, "https://") || strings.HasPrefix(src.Identifier, "http://")
+}
+
 // env returns an exec step's environment as a map.
 func (p *Provenance) env(id string) map[string]string {
 	out := map[string]string{}
