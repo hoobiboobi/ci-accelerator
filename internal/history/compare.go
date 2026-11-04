@@ -123,6 +123,12 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 			}
 			continue
 		}
+		// A git or HTTP source is fetched again in every build; it explains
+		// nothing by itself. When what it fetched changed, the step that
+		// uses it runs too and is explained as fed by a remote source.
+		if cur.prov.fetchSource(s.StepID) {
+			continue
+		}
 		if prev == nil || prev.prov == nil {
 			return Reason{Kind: FirstBuild, Step: s}, true
 		}
@@ -163,18 +169,22 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		}
 		if p.Identity == s.Identity {
 			crossDaemon := prev.Daemon != "" && cur.Daemon != "" && prev.Daemon != cur.Daemon
-			if rs := cur.prov.remoteSources(s.StepID); len(rs) > 0 {
+			sameGitContext := cur.ContextCommit != "" && prev.ContextCommit == cur.ContextCommit && !cur.prov.localDependent(s.StepID)
+			fromContext := cur.prov.contextDependent(s.StepID) && !sameGitContext
+			if rs := cur.prov.remoteSources(s.StepID); len(rs) > 0 && !fromContext {
 				// Something fetched from the network feeds the step: its
 				// content can change while the definition does not, and no
-				// comparison of commits can tell.
+				// comparison of commits can tell. A step the build context
+				// feeds as well is the context's case below: a changed file
+				// in it proves the change, and no change found leaves it
+				// unclear all the same.
 				r := Reason{Kind: RemoteSource, Step: s, Paths: rs}
 				if crossDaemon {
 					r.Old, r.New = prev.Daemon, cur.Daemon
 				}
 				return r, true
 			}
-			sameGitContext := cur.ContextCommit != "" && prev.ContextCommit == cur.ContextCommit && !cur.prov.localDependent(s.StepID)
-			if cur.prov.contextDependent(s.StepID) && !sameGitContext {
+			if fromContext {
 				// The build context feeds this step or an ancestor (the
 				// file-reading step may itself be cached or received, so
 				// the first executed step says nothing by itself): the
@@ -183,7 +193,10 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				// this step's own sources: the rebuild could have been
 				// caused by any of them. Settle or GitLab's comparison of
 				// the commits decides it.
-				r := Reason{Kind: CacheElsewhere, Step: s, Paths: cur.prov.contextSources(s.StepID)}
+				// A source fetched from the network rides along in Paths
+				// (RemotePath tells it apart): no comparison of commits can
+				// rule it out, so the rebuild never becomes the farm's.
+				r := Reason{Kind: CacheElsewhere, Step: s, Paths: append(cur.prov.contextSources(s.StepID), cur.prov.remoteSources(s.StepID)...)}
 				if crossDaemon {
 					r.Old, r.New = prev.Daemon, cur.Daemon
 				}
@@ -215,6 +228,9 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 					o, n = Masked, Masked
 				}
 				return Reason{Kind: ArgChanged, Step: s, Arg: k, Old: o, New: n}, true
+			}
+			if o, n, ok := envChange(prev, cur, p, s); ok {
+				return Reason{Kind: StepChanged, Step: s, Old: o, New: n}, true
 			}
 			return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: s.Name}, true
 		}
@@ -268,6 +284,9 @@ func changedAncestor(prev, cur *Build, s Step, prevSteps map[string]Step) (Reaso
 					o, n = Masked, Masked
 				}
 				return Reason{Kind: ArgChanged, Step: s, Arg: k, Old: o, New: n}, true
+			}
+			if o, n, ok := envChange(prev, cur, pa, a); ok {
+				return Reason{Kind: StepChanged, Step: s, Old: o, New: n}, true
 			}
 			return Reason{Kind: StepChanged, Step: s, Old: pa.Name, New: a.Name}, true
 		}
@@ -478,6 +497,56 @@ func argChange(prev, cur *Build, prevID, curID string) ([]string, string, string
 	}
 	sort.Strings(changed)
 	return changed, pe[changed[0]], ce[changed[0]], true
+}
+
+// envChange explains a RUN step whose text and command are the same as
+// before but whose environment is not, by an ENV line above it (an ENV is
+// no step of its own: it only changes the environment of the RUN steps
+// after it). Old and new are written as ENV lines ("ENV NAME=value", "ENV
+// NAME" when it was not set); several names are listed without values, and
+// a name that looks like a secret has its value masked. ok is false when
+// the text, the command or nothing in the environment differs.
+func envChange(prev, cur *Build, p, s Step) (string, string, bool) {
+	if p.Name != s.Name {
+		return "", "", false
+	}
+	po, co := viewOf(prev.prov.Steps[p.StepID].Op), viewOf(cur.prov.Steps[s.StepID].Op)
+	if po.Op.Exec == nil || co.Op.Exec == nil || strings.Join(po.Op.Exec.Meta.Args, "\x00") != strings.Join(co.Op.Exec.Meta.Args, "\x00") {
+		return "", "", false
+	}
+	pe, ce := prev.prov.env(p.StepID), cur.prov.env(s.StepID)
+	var changed []string
+	for k := range union(pe, ce) {
+		if pe[k] != ce[k] {
+			changed = append(changed, k)
+		}
+	}
+	if len(changed) == 0 {
+		return "", "", false
+	}
+	sort.Strings(changed)
+	if len(changed) > 1 {
+		names := "ENV " + strings.Join(changed, ", ")
+		return names + " (before)", names + " (now)", true
+	}
+	k := changed[0]
+	line := func(env map[string]string) string {
+		v, ok := env[k]
+		switch {
+		case !ok:
+			return "ENV " + k + " (not set)"
+		case SecretArg(k):
+			return "ENV " + k + "=" + Masked
+		}
+		return "ENV " + k + "=" + v
+	}
+	return line(pe), line(ce), true
+}
+
+// RemotePath says whether a path of a reason is a source fetched from the
+// network (a git or HTTP URL), not a file of the build context.
+func RemotePath(p string) bool {
+	return strings.HasPrefix(p, "git://") || strings.HasPrefix(p, "https://") || strings.HasPrefix(p, "http://")
 }
 
 func union(a, b map[string]string) map[string]bool {

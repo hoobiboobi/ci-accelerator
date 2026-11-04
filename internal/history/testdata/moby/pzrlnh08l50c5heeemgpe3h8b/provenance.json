@@ -1,0 +1,2186 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md",
+    "resolvedDependencies": [
+      {
+        "uri": "pkg:docker/docker/dockerfile@1",
+        "digest": {
+          "sha256": "4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e"
+        }
+      },
+      {
+        "uri": "pkg:docker/golang@1.26.10-trixie?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42"
+        }
+      },
+      {
+        "uri": "pkg:docker/tonistiigi/xx@1.10.0?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "40fe21f44bb8cddf1eb1226db190d0a984118f62ee02a91b77d99448d28264a6"
+        }
+      },
+      {
+        "uri": "https://github.com/tc-hib/go-winres.git#v0.3.1",
+        "digest": {
+          "sha1": "680a280b748f922282c10e6cbc355e19742d45a9"
+        }
+      }
+    ],
+    "externalParameters": {
+      "configSource": {
+        "path": "Dockerfile"
+      },
+      "request": {
+        "frontend": "gateway.v0",
+        "args": {
+          "ci-accelerator.io/context": ".",
+          "ci-accelerator.io/traceparent": "00-019931960000b485d53c000421dc0b3b-0000000421dc0b3b-01",
+          "cmdline": "docker/dockerfile:1",
+          "label:org.opencontainers.image.revision": "59be4fdba7cf4e6d3eefa0137bd24640c910e4c6",
+          "label:org.opencontainers.image.source": "https://gitlab.com/acme/moby-build",
+          "source": "docker/dockerfile:1",
+          "target": "binary"
+        },
+        "secrets": [
+          {
+            "id": "GIT_AUTH_HEADER",
+            "optional": true
+          },
+          {
+            "id": "GIT_AUTH_TOKEN",
+            "optional": true
+          }
+        ],
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ],
+        "root": {
+          "configSource": {
+            "path": "Dockerfile"
+          },
+          "request": {
+            "args": {
+              "ci-accelerator.io/context": ".",
+              "ci-accelerator.io/traceparent": "00-019931960000b485d53c000421dc0b3b-0000000421dc0b3b-01",
+              "label:org.opencontainers.image.revision": "59be4fdba7cf4e6d3eefa0137bd24640c910e4c6",
+              "label:org.opencontainers.image.source": "https://gitlab.com/acme/moby-build",
+              "target": "binary"
+            }
+          }
+        },
+        "compatibilityVersion": 30
+      }
+    },
+    "internalParameters": {
+      "buildConfig": {
+        "digestMapping": {
+          "sha256:07b34b0934b2ddb51674e3c5c177af28bab20e2d530079588926b59ac22a94c6": "step16",
+          "sha256:0a4bec66dcaf0b803d3143be28a3259312444ec1bac3eba7b95f697476e6fb89": "step4",
+          "sha256:1ac776f6919a0be80c0f061d330ed5156431d2c5b0700a753139374933d9620d": "step0",
+          "sha256:1b6c7508b9050e1e13b278c4f29ba76cd9eee5198c2f3ab7162ecec8ad4944e6": "step7",
+          "sha256:2a8a69994922cec92c57541cc5b1767c8da252b85c692bfa42b2287db5a9b4a9": "step2",
+          "sha256:3a2b66eeae6815ac8446383b64ada887157bde9a401f4173de83401a56799cb9": "step15",
+          "sha256:3eb0b767b375a284500be590895543ebd47e4692345c3aee9964954eafc2a5ab": "step12",
+          "sha256:67ed5bd3372ccf82f128b3050da5e8fb05da35c3fb3b4eb90d1fded64a2d7b3a": "step13",
+          "sha256:7d102a9179a1a5e455d73fda26a2f2d75f4bc719402cdce3ba17c5c10e15909b": "step10",
+          "sha256:817fb331def6a3c9ec8501cd9b8a0c5e12ab44f2f051ed161d4cfbe4e0230264": "step9",
+          "sha256:823d8d229160f558b0fdc477989da06532610742bf5d95f6fd00bcb0fe5a0130": "step14",
+          "sha256:90ad508fd937cf391c638a76ad1a5380bc1749ccfc8f159108b1b56c405868b2": "step11",
+          "sha256:a834f798bf291d39de2dfdcdb256d93415af1ed5e64ab5f5fefb3d2ae83ebd95": "step8",
+          "sha256:a972aebfe85c93c16137464a7a18efc3dc223e281aa0470a85849c6fe9259d63": "step17",
+          "sha256:aa0fc7520f3aee8cc8b9de4c9abb4f6539b9db0c28933881580c7447c29a477d": "step5",
+          "sha256:b12dbefd2e5e870af480d31c71539d3598ad3775d034683d492b44866cf6f2ac": "step6",
+          "sha256:c78aa9e7c9871c725353a16ebad2e753a09e5f69da788ce9f09c326f9e4dab77": "step1",
+          "sha256:f0b0cf7a8d94489b36e2f11c6991cc9f92dd913791fb01d70c2517f7d84f7e9d": "step3"
+        },
+        "llbDefinition": [
+          {
+            "id": "step0",
+            "op": {
+              "Op": {
+                "source": {
+                  "identifier": "docker-image://docker.io/library/golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42"
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step1",
+            "op": {
+              "Op": {
+                "source": {
+                  "identifier": "docker-image://docker.io/tonistiigi/xx:1.10.0@sha256:40fe21f44bb8cddf1eb1226db190d0a984118f62ee02a91b77d99448d28264a6"
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step2",
+            "inputs": [
+              "step0:0",
+              "step1:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step3",
+            "inputs": [
+              "step2:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "go telemetry off \u0026\u0026 [ \"$(go telemetry)\" = \"off\" ] || { echo \"Failed to disable Go telemetry\"; exit 1; }"
+                    ],
+                    "cwd": "/go",
+                    "env": [
+                      "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "GOLANG_VERSION=1.26.10",
+                      "GOTOOLCHAIN=local",
+                      "GOPATH=/go",
+                      "CI_ACCELERATOR_CHECK=0.3.3"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step4",
+            "inputs": [
+              "step3:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "echo 'Binary::apt::APT::Keep-Downloaded-Packages \"true\";' \u003e /etc/apt/apt.conf.d/keep-cache"
+                    ],
+                    "cwd": "/go",
+                    "env": [
+                      "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "GOLANG_VERSION=1.26.10",
+                      "GOTOOLCHAIN=local",
+                      "GOPATH=/go",
+                      "CI_ACCELERATOR_CHECK=0.3.3"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step5",
+            "inputs": [
+              "step4:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "apt-get update \u0026\u0026 apt-get install --no-install-recommends -y file"
+                    ],
+                    "cwd": "/go",
+                    "env": [
+                      "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "GOLANG_VERSION=1.26.10",
+                      "GOTOOLCHAIN=local",
+                      "GOPATH=/go",
+                      "CI_ACCELERATOR_CHECK=0.3.3"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step6",
+            "op": {
+              "Op": {
+                "source": {
+                  "attrs": {
+                    "git.authheadersecret": "GIT_AUTH_HEADER",
+                    "git.authtokensecret": "GIT_AUTH_TOKEN",
+                    "git.fullurl": "https://github.com/tc-hib/go-winres.git",
+                    "git.keepgitdir": "true"
+                  },
+                  "identifier": "git://github.com/tc-hib/go-winres.git#v0.3.1"
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step7",
+            "inputs": [
+              "step5:0",
+              "step6:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "createDestPath": true,
+                          "dest": "/go/src/github.com/tc-hib/go-winres",
+                          "mode": -1,
+                          "src": "/",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step8",
+            "inputs": [
+              "step7:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "cd /go/src/github.com/tc-hib/go-winres \u0026\u0026         GOBIN=/build CGO_ENABLED=0 go install .      \u0026\u0026 /build/go-winres --help"
+                    ],
+                    "cwd": "/go",
+                    "env": [
+                      "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "GOLANG_VERSION=1.26.10",
+                      "GOTOOLCHAIN=local",
+                      "GOPATH=/go",
+                      "CI_ACCELERATOR_CHECK=0.3.3",
+                      "GOWINRES_VERSION=v0.3.1"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "//go/pkg/mod"
+                      },
+                      "dest": "/go/pkg/mod",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "//root/.cache/go-build"
+                      },
+                      "dest": "/root/.cache/go-build",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step9",
+            "inputs": [
+              "step5:0",
+              "step8:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/usr/local/bin/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/build",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step10",
+            "inputs": [
+              "step9:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "mkdir": {
+                          "makeParents": true,
+                          "mode": 493,
+                          "path": "/usr/src/moby",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step11",
+            "inputs": [
+              "step10:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "apt-get update \u0026\u0026 apt-get install --no-install-recommends -y             clang             lld             llvm             icoutils"
+                    ],
+                    "cwd": "/usr/src/moby",
+                    "env": [
+                      "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "GOLANG_VERSION=1.26.10",
+                      "GOTOOLCHAIN=local",
+                      "GOPATH=/go",
+                      "CI_ACCELERATOR_CHECK=0.3.3",
+                      "CGO_ENABLED=1"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/moby-build-aptcache",
+                        "sharing": 2
+                      },
+                      "dest": "/var/cache/apt",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/moby-build-aptlib",
+                        "sharing": 2
+                      },
+                      "dest": "/var/lib/apt",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step12",
+            "inputs": [
+              "step11:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "xx-apt-get install --no-install-recommends -y             gcc             libc6-dev             linux-libc-dev             libnftables-dev             libseccomp-dev             libsystemd-dev             pkg-config"
+                    ],
+                    "cwd": "/usr/src/moby",
+                    "env": [
+                      "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "GOLANG_VERSION=1.26.10",
+                      "GOTOOLCHAIN=local",
+                      "GOPATH=/go",
+                      "CI_ACCELERATOR_CHECK=0.3.3",
+                      "CGO_ENABLED=1",
+                      "TARGETPLATFORM=linux/amd64"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/moby-build-aptcache",
+                        "sharing": 2
+                      },
+                      "dest": "/var/cache/apt",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/moby-build-aptlib",
+                        "sharing": 2
+                      },
+                      "dest": "/var/lib/apt",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step13",
+            "inputs": [
+              "step12:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "  set -ex\n  # in bullseye arm64 target does not link with lld so configure it to use ld instead\n  if [ \"$(xx-info arch)\" = \"arm64\" ]; then\n    XX_CC_PREFER_LINKER=ld xx-clang --setup-target-triple\n  fi\n"
+                    ],
+                    "cwd": "/usr/src/moby",
+                    "env": [
+                      "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "GOLANG_VERSION=1.26.10",
+                      "GOTOOLCHAIN=local",
+                      "GOPATH=/go",
+                      "CI_ACCELERATOR_CHECK=0.3.3",
+                      "CGO_ENABLED=1",
+                      "TARGETPLATFORM=linux/amd64",
+                      "DOCKER_GITCOMMIT=HEAD",
+                      "DOCKER_STATIC=1",
+                      "PREFIX=/tmp"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step14",
+            "op": {
+              "Op": {
+                "source": {
+                  "attrs": {
+                    "local.excludepatterns": "[\".git\",\"bundles\",\"cmd/dockerd/winresources/winres.json\",\"cmd/dockerd/*.syso\"]",
+                    "local.sharedkeyhint": "context"
+                  },
+                  "identifier": "local://context"
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step15",
+            "inputs": [
+              "step13:0",
+              "step14:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/sh",
+                      "-c",
+                      "  set -e\n\n  target=dynbinary\n  verify_flags=\n  exe_suffix=\n  if [ \"$DOCKER_STATIC\" = \"1\" ]; then\n      target=binary\n      verify_flags=--static\n  fi\n  if [ \"$(xx-info os)\" = \"windows\" ]; then\n      exe_suffix=.exe\n  fi\n\n  set -x\n  xx-go --wrap\n  PKG_CONFIG=$(xx-go env PKG_CONFIG) ./hack/make.sh \"$target\"\n  xx-verify $verify_flags \"/tmp/bundles/${target}-daemon/dockerd${exe_suffix}\"\n  if [ \"$(xx-info os)\" = \"linux\" ]; then\n      xx-verify $verify_flags \"/tmp/bundles/${target}-daemon/docker-proxy\"\n  fi\n  mkdir /build\n  mv /tmp/bundles/${target}-daemon/* /build/\n"
+                    ],
+                    "cwd": "/usr/src/moby",
+                    "env": [
+                      "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                      "GOLANG_VERSION=1.26.10",
+                      "GOTOOLCHAIN=local",
+                      "GOPATH=/go",
+                      "CI_ACCELERATOR_CHECK=0.3.3",
+                      "CGO_ENABLED=1",
+                      "TARGETPLATFORM=linux/amd64",
+                      "DOCKER_GITCOMMIT=HEAD",
+                      "DOCKER_STATIC=1",
+                      "PREFIX=/tmp"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/moby-build-linux/amd64"
+                      },
+                      "dest": "/root/.cache/go-build",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    },
+                    {
+                      "dest": "/usr/src/moby",
+                      "input": 1,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            },
+            "resourceUsage": {
+              "samples": [
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 57812
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 189438
+                      }
+                    },
+                    "systemNanos": 1653744000,
+                    "throttledNanos": 0,
+                    "usageNanos": 4538743000,
+                    "userNanos": 2884999000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 2071
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 3485
+                      }
+                    },
+                    "readBytes": 36864,
+                    "readIOs": 9,
+                    "writeBytes": 0,
+                    "writeIOs": 0
+                  },
+                  "memoryStat": {
+                    "anon": 369901568,
+                    "file": 9248768,
+                    "fileDirty": 8310784,
+                    "fileMapped": 32768,
+                    "fileWriteback": 0,
+                    "kernelStack": 442368,
+                    "pageTables": 3145728,
+                    "peak": 403812352,
+                    "pgfault": 132306,
+                    "pgmajfault": 0,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      }
+                    },
+                    "shmem": 0,
+                    "slab": 20105952,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 27
+                  },
+                  "timestamp": "2026-11-04T19:09:45.568828826Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0.36,
+                        "avg300": 0.01,
+                        "avg60": 0.06,
+                        "total": 70554
+                      },
+                      "some": {
+                        "avg10": 1.63,
+                        "avg300": 0.06,
+                        "avg60": 0.29,
+                        "total": 232914
+                      }
+                    },
+                    "systemNanos": 2016508000,
+                    "throttledNanos": 0,
+                    "usageNanos": 7218457000,
+                    "userNanos": 5201949000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 2074
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 3487
+                      }
+                    },
+                    "readBytes": 36864,
+                    "readIOs": 9,
+                    "writeBytes": 8294400,
+                    "writeIOs": 1828
+                  },
+                  "memoryStat": {
+                    "anon": 446468096,
+                    "file": 135110656,
+                    "fileDirty": 125857792,
+                    "fileMapped": 32768,
+                    "fileWriteback": 0,
+                    "kernelStack": 491520,
+                    "pageTables": 4034560,
+                    "peak": 622764032,
+                    "pgfault": 215689,
+                    "pgmajfault": 505,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      }
+                    },
+                    "shmem": 0,
+                    "slab": 24005376,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 30
+                  },
+                  "timestamp": "2026-11-04T19:09:47.569164096Z"
+                },
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0.29,
+                        "avg300": 0.01,
+                        "avg60": 0.06,
+                        "total": 79538
+                      },
+                      "some": {
+                        "avg10": 1.69,
+                        "avg300": 0.07,
+                        "avg60": 0.35,
+                        "total": 252547
+                      }
+                    },
+                    "systemNanos": 2866930000,
+                    "throttledNanos": 0,
+                    "usageNanos": 8782243000,
+                    "userNanos": 5915312000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 2082
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 3501
+                      }
+                    },
+                    "readBytes": 36864,
+                    "readIOs": 9,
+                    "writeBytes": 8302592,
+                    "writeIOs": 1830
+                  },
+                  "memoryStat": {
+                    "anon": 0,
+                    "file": 114769920,
+                    "fileDirty": 106102784,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 0,
+                    "pageTables": 176128,
+                    "peak": 777097216,
+                    "pgfault": 306397,
+                    "pgmajfault": 873,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      }
+                    },
+                    "shmem": 0,
+                    "slab": 22155888,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 0
+                  },
+                  "timestamp": "2026-11-04T19:09:48.646430554Z"
+                }
+              ],
+              "sysCPUStat": {
+                "guest": 0,
+                "guestNice": 0,
+                "idle": 13.68,
+                "iowait": 0.3,
+                "irq": 0,
+                "nice": 0,
+                "softirq": 1.5,
+                "steal": 0,
+                "system": 10.51,
+                "user": 13.27
+              }
+            }
+          },
+          {
+            "id": "step16",
+            "inputs": [
+              "step15:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/build",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": -1,
+                      "output": 0,
+                      "secondaryInput": 0
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step17",
+            "inputs": [
+              "step16:0"
+            ],
+            "op": {
+              "Op": {}
+            }
+          }
+        ]
+      },
+      "builderPlatform": "linux/amd64",
+      "targetPlatform": "linux/amd64"
+    }
+  },
+  "runDetails": {
+    "builder": {
+      "id": ""
+    },
+    "metadata": {
+      "invocationId": "p4i3uksdzflmhn9xc1c37v0l4",
+      "startedOn": "2026-11-04T19:09:39.696436607Z",
+      "finishedOn": "2026-11-04T19:09:50.170475729Z",
+      "buildkit_metadata": {
+        "source": {
+          "locations": {
+            "step0": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 57
+                      },
+                      "end": {
+                        "line": 57
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step1": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 47
+                      },
+                      "end": {
+                        "line": 47
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step10": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 540
+                      },
+                      "end": {
+                        "line": 540
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step11": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 542
+                      },
+                      "end": {
+                        "line": 542
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 543
+                      },
+                      "end": {
+                        "line": 543
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 544
+                      },
+                      "end": {
+                        "line": 544
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 545
+                      },
+                      "end": {
+                        "line": 545
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 546
+                      },
+                      "end": {
+                        "line": 546
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 547
+                      },
+                      "end": {
+                        "line": 547
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 548
+                      },
+                      "end": {
+                        "line": 548
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step12": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 550
+                      },
+                      "end": {
+                        "line": 550
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 551
+                      },
+                      "end": {
+                        "line": 551
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 552
+                      },
+                      "end": {
+                        "line": 552
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 553
+                      },
+                      "end": {
+                        "line": 553
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 554
+                      },
+                      "end": {
+                        "line": 554
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 555
+                      },
+                      "end": {
+                        "line": 555
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 556
+                      },
+                      "end": {
+                        "line": 556
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 557
+                      },
+                      "end": {
+                        "line": 557
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 558
+                      },
+                      "end": {
+                        "line": 558
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 559
+                      },
+                      "end": {
+                        "line": 559
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step13": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 573
+                      },
+                      "end": {
+                        "line": 573
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 574
+                      },
+                      "end": {
+                        "line": 574
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 575
+                      },
+                      "end": {
+                        "line": 575
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 576
+                      },
+                      "end": {
+                        "line": 576
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 577
+                      },
+                      "end": {
+                        "line": 577
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 578
+                      },
+                      "end": {
+                        "line": 578
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 579
+                      },
+                      "end": {
+                        "line": 579
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step14": {},
+            "step15": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 580
+                      },
+                      "end": {
+                        "line": 580
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 581
+                      },
+                      "end": {
+                        "line": 581
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 582
+                      },
+                      "end": {
+                        "line": 582
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 583
+                      },
+                      "end": {
+                        "line": 583
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 584
+                      },
+                      "end": {
+                        "line": 584
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 585
+                      },
+                      "end": {
+                        "line": 585
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 586
+                      },
+                      "end": {
+                        "line": 586
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 587
+                      },
+                      "end": {
+                        "line": 587
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 588
+                      },
+                      "end": {
+                        "line": 588
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 589
+                      },
+                      "end": {
+                        "line": 589
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 590
+                      },
+                      "end": {
+                        "line": 590
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 591
+                      },
+                      "end": {
+                        "line": 591
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 592
+                      },
+                      "end": {
+                        "line": 592
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 593
+                      },
+                      "end": {
+                        "line": 593
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 594
+                      },
+                      "end": {
+                        "line": 594
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 595
+                      },
+                      "end": {
+                        "line": 595
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 596
+                      },
+                      "end": {
+                        "line": 596
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 597
+                      },
+                      "end": {
+                        "line": 597
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 598
+                      },
+                      "end": {
+                        "line": 598
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 599
+                      },
+                      "end": {
+                        "line": 599
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 600
+                      },
+                      "end": {
+                        "line": 600
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 601
+                      },
+                      "end": {
+                        "line": 601
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 602
+                      },
+                      "end": {
+                        "line": 602
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 603
+                      },
+                      "end": {
+                        "line": 603
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 604
+                      },
+                      "end": {
+                        "line": 604
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step16": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 613
+                      },
+                      "end": {
+                        "line": 613
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step2": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 58
+                      },
+                      "end": {
+                        "line": 58
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step3": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 65
+                      },
+                      "end": {
+                        "line": 65
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step4": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 66
+                      },
+                      "end": {
+                        "line": 66
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step5": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 67
+                      },
+                      "end": {
+                        "line": 67
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step6": {},
+            "step7": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 134
+                      },
+                      "end": {
+                        "line": 134
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step8": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 135
+                      },
+                      "end": {
+                        "line": 135
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 136
+                      },
+                      "end": {
+                        "line": 136
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 137
+                      },
+                      "end": {
+                        "line": 137
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 138
+                      },
+                      "end": {
+                        "line": 138
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 139
+                      },
+                      "end": {
+                        "line": 139
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step9": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 539
+                      },
+                      "end": {
+                        "line": 539
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "infos": [
+            {
+              "filename": "Dockerfile",
+              "language": "Dockerfile",
+              "data": "IyBzeW50YXg9ZG9ja2VyL2RvY2tlcmZpbGU6MQoKQVJHIEdPX1ZFUlNJT049MS4yNi4xMApBUkcgQkFTRV9ERUJJQU5fRElTVFJPPXRyaXhpZQpBUkcgR09MQU5HX0lNQUdFPSJnb2xhbmc6JHtHT19WRVJTSU9OfS0ke0JBU0VfREVCSUFOX0RJU1RST30iCgojIFhYX1ZFUlNJT04gc3BlY2lmaWVzIHRoZSB2ZXJzaW9uIG9mIHRoZSB4eCB1dGlsaXR5IHRvIHVzZS4KIyBJdCBtdXN0IGJlIGEgdmFsaWQgdGFnIGluIHRoZSBkb2NrZXIuaW8vdG9uaXN0aWlnaS94eCBpbWFnZSByZXBvc2l0b3J5LgpBUkcgWFhfVkVSU0lPTj0xLjEwLjAKCiMgRE9DS0VSQ0xJX1ZFUlNJT04gaXMgdGhlIHZlcnNpb24gb2YgdGhlIENMSSB0byBpbnN0YWxsIGluIHRoZSBkZXYtY29udGFpbmVyLgojIHJlbm92YXRlOiBkYXRhc291cmNlPWdpdGh1Yi10YWdzIGRlcE5hbWU9ZG9ja2VyL2NsaSB2ZXJzaW9uaW5nPXNlbXZlcgpBUkcgRE9DS0VSQ0xJX1ZFUlNJT049djI5LjguMgpBUkcgRE9DS0VSQ0xJX1JFUE9TSVRPUlk9Imh0dHBzOi8vZ2l0aHViLmNvbS9kb2NrZXIvY2xpLmdpdCIKCiMgY2xpIHZlcnNpb24gdXNlZCBmb3IgaW50ZWdyYXRpb24tY2xpIHRlc3RzCkFSRyBET0NLRVJDTElfSU5URUdSQVRJT05fUkVQT1NJVE9SWT0iaHR0cHM6Ly9naXRodWIuY29tL2RvY2tlci9jbGkuZ2l0IgpBUkcgRE9DS0VSQ0xJX0lOVEVHUkFUSU9OX1ZFUlNJT049djI1LjAuNQoKIyBCVUlMRFhfVkVSU0lPTiBpcyB0aGUgdmVyc2lvbiBvZiBidWlsZHggdG8gaW5zdGFsbCBpbiB0aGUgZGV2IGNvbnRhaW5lci4KQVJHIEJVSUxEWF9WRVJTSU9OPTAuMzcuMgoKIyBDT01QT1NFX1ZFUlNJT04gaXMgdGhlIHZlcnNpb24gb2YgY29tcG9zZSB0byBpbnN0YWxsIGluIHRoZSBkZXYgY29udGFpbmVyLgpBUkcgQ09NUE9TRV9WRVJTSU9OPXY1LjYuMAoKQVJHIFNZU1RFTUQ9ImZhbHNlIgpBUkcgRklSRVdBTExEPSJmYWxzZSIKQVJHIERPQ0tFUl9TVEFUSUM9MQoKIyBSRUdJU1RSWV9WRVJTSU9OIGlzIHRoZSB2ZXJzaW9uIG9mIHRoZSByZWdpc3RyeSB0byB1c2UgZm9yIGludGVncmF0aW9uIHRlc3RzLgojIEl0IG11c3QgYmUgYSB2YWxpZCB0YWcgaW4gdGhlIGRvY2tlci5pby9saWJyYXJ5L3JlZ2lzdHJ5IGltYWdlIHJlcG9zaXRvcnkuCkFSRyBSRUdJU1RSWV9WRVJTSU9OPTMuMS4yCgojIGRlbHZlIGlzIGN1cnJlbnRseSBvbmx5IHN1cHBvcnRlZCBvbiBsaW51eC9hbWQ2NCwgbGludXgvYXJtNjQsIGFuZCBsaW51eC9wcGM2NGxlOwojIGh0dHBzOi8vZ2l0aHViLmNvbS9nby1kZWx2ZS9kZWx2ZS9ibG9iL3YxLjI2LjAvcGtnL3Byb2MvbmF0aXZlL3N1cHBvcnRfc2VudGluZWwuZ28jTDEKIyBodHRwczovL2dpdGh1Yi5jb20vZ28tZGVsdmUvZGVsdmUvYmxvYi92MS4yNi4wL3BrZy9wcm9jL25hdGl2ZS9zdXBwb3J0X3NlbnRpbmVsX2xpbnV4LmdvI0wxCiMKIyBSZW1vdmUgc3VwcG9ydGVkLCBub24tZXhwZXJpbWVudGFsIHBsYXRmb3JtczsgaWYgYW55dGhpbmcgcmVtYWlucywgaXQncyB1bnN1cHBvcnRlZC4KQVJHIERFTFZFX1NVUFBPUlRFRD0ke1RBUkdFVFBMQVRGT1JNI2xpbnV4L2FtZDY0fQpBUkcgREVMVkVfU1VQUE9SVEVEPSR7REVMVkVfU1VQUE9SVEVEI2xpbnV4L2FybTY0fQpBUkcgREVMVkVfU1VQUE9SVEVEPSR7REVMVkVfU1VQUE9SVEVEI2xpbnV4L3BwYzY0bGV9CkFSRyBERUxWRV9TVVBQT1JURUQ9JHtERUxWRV9TVVBQT1JURUQjbGludXgvcmlzY3Y2NH0KQVJHIERFTFZFX1NVUFBPUlRFRD0ke0RFTFZFX1NVUFBPUlRFRDorInVuc3VwcG9ydGVkIn0KQVJHIERFTFZFX1NVUFBPUlRFRD0ke0RFTFZFX1NVUFBPUlRFRDotInN1cHBvcnRlZCJ9CgojIGNyb3NzIGNvbXBpbGF0aW9uIGhlbHBlcgpGUk9NIC0tcGxhdGZvcm09JEJVSUxEUExBVEZPUk0gdG9uaXN0aWlnaS94eDoke1hYX1ZFUlNJT059IEFTIHh4CgojIGR1bW15IHN0YWdlIHRvIG1ha2Ugc3VyZSB0aGUgaW1hZ2UgaXMgYnVpbHQgZm9yIGRlcHMgdGhhdCBkb24ndCBzdXBwb3J0IHNvbWUKIyBhcmNoaXRlY3R1cmVzCkZST00gLS1wbGF0Zm9ybT0kQlVJTERQTEFURk9STSBidXN5Ym94IEFTIGJ1aWxkLWR1bW15ClJVTiBta2RpciAtcCAvYnVpbGQKRlJPTSBzY3JhdGNoIEFTIGJpbmFyeS1kdW1teQpDT1BZIC0tZnJvbT1idWlsZC1kdW1teSAvYnVpbGQgL2J1aWxkCgojIGJhc2UKRlJPTSAtLXBsYXRmb3JtPSRCVUlMRFBMQVRGT1JNICR7R09MQU5HX0lNQUdFfSBBUyBiYXNlCkNPUFkgLS1mcm9tPXh4IC8gLwojIENoYW5nZWQgZm9yIHRoZSBjaS1hY2NlbGVyYXRvciAwLjMuMyBjaGVjazogZXZlcnl0aGluZyBmcm9tIHRoZSBiYXNlIHN0YWdlIG9uIGJ1aWxkcyBhZ2Fpbi4KRU5WIENJX0FDQ0VMRVJBVE9SX0NIRUNLPTAuMy4zCiMgRGlzYWJsZSBjb2xsZWN0aW5nIGxvY2FsIHRlbGVtZXRyeSwgYXMgY29sbGVjdGVkIGJ5IEdvIGFuZCBEZWx2ZTsKIwojIC0gaHR0cHM6Ly9naXRodWIuY29tL2dvLWRlbHZlL2RlbHZlL2Jsb2IvdjEuMjQuMS9DSEFOR0VMT0cubWQjMTIzMS0yMDI0LTA5LTIzCiMgLSBodHRwczovL2dvLmRldi9kb2MvdGVsZW1ldHJ5I2JhY2tncm91bmQKUlVOIGdvIHRlbGVtZXRyeSBvZmYgJiYgWyAiJChnbyB0ZWxlbWV0cnkpIiA9ICJvZmYiIF0gfHwgeyBlY2hvICJGYWlsZWQgdG8gZGlzYWJsZSBHbyB0ZWxlbWV0cnkiOyBleGl0IDE7IH0KUlVOIGVjaG8gJ0JpbmFyeTo6YXB0OjpBUFQ6OktlZXAtRG93bmxvYWRlZC1QYWNrYWdlcyAidHJ1ZSI7JyA+IC9ldGMvYXB0L2FwdC5jb25mLmQva2VlcC1jYWNoZQpSVU4gYXB0LWdldCB1cGRhdGUgJiYgYXB0LWdldCBpbnN0YWxsIC0tbm8taW5zdGFsbC1yZWNvbW1lbmRzIC15IGZpbGUKRU5WIEdPVE9PTENIQUlOPWxvY2FsCgpGUk9NIGJhc2UgQVMgY3JpdQpBREQgLS1jaG1vZD0wNjQ0IGh0dHBzOi8vZG93bmxvYWQub3BlbnN1c2Uub3JnL3JlcG9zaXRvcmllcy9kZXZlbDovdG9vbHM6L2NyaXUvRGViaWFuXzExL1JlbGVhc2Uua2V5IC9ldGMvYXB0L3RydXN0ZWQuZ3BnLmQvY3JpdS5ncGcuYXNjClJVTiAtLW1vdW50PXR5cGU9Y2FjaGUsc2hhcmluZz1sb2NrZWQsaWQ9bW9ieS1jcml1LWFwdGxpYix0YXJnZXQ9L3Zhci9saWIvYXB0IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWNyaXUtYXB0Y2FjaGUsdGFyZ2V0PS92YXIvY2FjaGUvYXB0IFwKICAgICAgICBlY2hvICdkZWIgaHR0cHM6Ly9kb3dubG9hZC5vcGVuc3VzZS5vcmcvcmVwb3NpdG9yaWVzL2RldmVsOi90b29sczovY3JpdS9EZWJpYW5fMTIvIC8nID4gL2V0Yy9hcHQvc291cmNlcy5saXN0LmQvY3JpdS5saXN0IFwKICAgICAgICAmJiBhcHQtZ2V0IHVwZGF0ZSBcCiAgICAgICAgJiYgYXB0LWdldCBpbnN0YWxsIC15IC0tbm8taW5zdGFsbC1yZWNvbW1lbmRzIGNyaXUgXAogICAgICAgICYmIGluc3RhbGwgLUQgL3Vzci9zYmluL2NyaXUgL2J1aWxkL2NyaXUgXAogICAgICAgICYmIC9idWlsZC9jcml1IC0tdmVyc2lvbgoKIyByZWdpc3RyeQpGUk9NIGRpc3RyaWJ1dGlvbi9kaXN0cmlidXRpb246JHtSRUdJU1RSWV9WRVJTSU9OfSBBUyByZWdpc3RyeQpSVU4gbWtkaXIgL2J1aWxkICYmIG12IC9iaW4vcmVnaXN0cnkgL2J1aWxkL3JlZ2lzdHJ5CgojIGZyb3plbi1pbWFnZXMKIyBTZWUgYWxzbyBmcm96ZW5JbWFnZXMgaW4gInRlc3R1dGlsL2Vudmlyb25tZW50L3Byb3RlY3QuZ28iICh3aGljaCBuZWVkcyB0bwojIGJlIHVwZGF0ZWQgd2hlbiBhZGRpbmcgaW1hZ2VzIHRvIHRoaXMgbGlzdCkKRlJPTSBkZWJpYW46JHtCQVNFX0RFQklBTl9ESVNUUk99IEFTIGZyb3plbi1pbWFnZXMKUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWZyb3plbi1pbWFnZXMtYXB0bGliLHRhcmdldD0vdmFyL2xpYi9hcHQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktZnJvemVuLWltYWdlcy1hcHRjYWNoZSx0YXJnZXQ9L3Zhci9jYWNoZS9hcHQgXAogICAgICAgYXB0LWdldCB1cGRhdGUgJiYgYXB0LWdldCBpbnN0YWxsIC15IC0tbm8taW5zdGFsbC1yZWNvbW1lbmRzIFwKICAgICAgICAgICBjYS1jZXJ0aWZpY2F0ZXMgXAogICAgICAgICAgIGN1cmwgXAogICAgICAgICAgIGpxCiMgR2V0IHVzZWZ1bCBhbmQgbmVjZXNzYXJ5IEh1YiBpbWFnZXMgc28gd2UgY2FuICJkb2NrZXIgbG9hZCIgbG9jYWxseSBpbnN0ZWFkIG9mIHB1bGxpbmcKQ09QWSBjb250cmliL2Rvd25sb2FkLWZyb3plbi1pbWFnZS12Mi5zaCAvCkFSRyBUQVJHRVRBUkNICkFSRyBUQVJHRVRWQVJJQU5UClJVTiAvZG93bmxvYWQtZnJvemVuLWltYWdlLXYyLnNoIC9idWlsZCBcCiAgICAgICAgYnVzeWJveDpsYXRlc3RAc2hhMjU2Ojk1Y2YwMDRmNTU5ODMxMDE3Y2RmNDYyOGFhZjFiYjMwMTMzNjc3YmU4NzAyYThjNWYyOTk0NjI5ZjYzN2EyMDkgXAogICAgICAgIGJ1c3lib3g6Z2xpYmNAc2hhMjU2OjFmODEyNjM3MDFjZGRmNjQwMmFmZTlmMzNmY2EwMjY2ZDlmZmYzNzllNTliMTc0OGYzM2QzMDcyZGE3MWVlODUgXAogICAgICAgIGRlYmlhbjp0cml4aWUtc2xpbUBzaGEyNTY6Yzg1YTI3MzJlOTc2OTRlYTc3MjM3YzYxMzA0YjNiYjQxMGUwZTk2MWRkNmVlOTQ1OTk3YTA2Yzc4OGM1NDViYiBcCiAgICAgICAgaGVsbG8td29ybGQ6bGF0ZXN0QHNoYTI1NjpkNThlNzUyMjEzYTUxNzg1ODM4ZjllZWQyYjdhNDk4ZmZhMWNiM2FhN2Y5NDZkZGExMWFmMzkyODZjM2RiOWE5IFwKICAgICAgICBhcm0zMnY3L2hlbGxvLXdvcmxkOmxhdGVzdEBzaGEyNTY6NTBiODU2MGFkNTc0Yzc3OTkwOGRhNzFmN2NlMzcwYzBhMjQ3MWMwOThkNDRkMWM4ZjZiNTEzYzVhNTVlZWViMSBcCiAgICAgICAgaGVsbG8td29ybGQ6YW1kNjRAc2hhMjU2OjkwNjU5YmY4MGI0NGNlNmJlODIzNGU2ZmY5MGExYWMzNGFjYmViODI2OTAzYjAyY2ZhMGRhMTFjODJjYmMwNDIgXAogICAgICAgIGhlbGxvLXdvcmxkOmFybTY0QHNoYTI1Njo5NjM2MTJjNTUwM2YzZjE2NzRmMzE1YzY3MDg5ZGVlNTc3ZDhjYzZhZmMxODU2NWUwYjQxODNhZTM1NWZiMzQzCgojIGRlbHZlCkZST00gYmFzZSBBUyBkZWx2ZS1zcmMKV09SS0RJUiAvdXNyL3NyYy9kZWx2ZQojIERFTFZFX1ZFUlNJT04gc3BlY2lmaWVzIHRoZSB2ZXJzaW9uIG9mIHRoZSBEZWx2ZSBkZWJ1Z2dlciBiaW5hcnkKIyBmcm9tIHRoZSBodHRwczovL2dpdGh1Yi5jb20vZ28tZGVsdmUvZGVsdmUgcmVwb3NpdG9yeS4KIyBJdCBjYW4gYmUgdXNlZCB0byBydW4gRG9ja2VyIHdpdGggYSBwb3NzaWJpbGl0eSBvZgojIGF0dGFjaGluZyBkZWJ1Z2dlciB0byBpdC4KQVJHIERFTFZFX1ZFUlNJT049djEuMjYuMwpBREQgaHR0cHM6Ly9naXRodWIuY29tL2dvLWRlbHZlL2RlbHZlLmdpdD9yZWY9JHtERUxWRV9WRVJTSU9OfSZrZWVwLWdpdC1kaXI9MSAuCgpGUk9NIGJhc2UgQVMgZGVsdmUtc3VwcG9ydGVkCldPUktESVIgL3Vzci9zcmMvZGVsdmUKQVJHIFRBUkdFVFBMQVRGT1JNClJVTiAtLW1vdW50PWZyb209ZGVsdmUtc3JjLHNyYz0vdXNyL3NyYy9kZWx2ZSxydyBcCiAgICAtLW1vdW50PXR5cGU9Y2FjaGUsdGFyZ2V0PS9yb290Ly5jYWNoZS9nby1idWlsZCxpZD1kZWx2ZS1idWlsZC0kVEFSR0VUUExBVEZPUk0gXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHRhcmdldD0vZ28vcGtnL21vZCA8PEVPVAogIHNldCAtZXgKICB4eC1nbyBidWlsZCAtbyAvYnVpbGQvZGx2IC4vY21kL2RsdgogIHh4LXZlcmlmeSAvYnVpbGQvZGx2CkVPVAoKRlJPTSBiaW5hcnktZHVtbXkgQVMgZGVsdmUtdW5zdXBwb3J0ZWQKRlJPTSBkZWx2ZS0ke0RFTFZFX1NVUFBPUlRFRH0gQVMgZGVsdmUKCkZST00gYmFzZSBBUyBnb3dpbnJlcwojIEdPV0lOUkVTX1ZFUlNJT04gZGVmaW5lcyBnby13aW5yZXMgdG9vbCB2ZXJzaW9uCkFSRyBHT1dJTlJFU19WRVJTSU9OPXYwLjMuMQpBREQgaHR0cHM6Ly9naXRodWIuY29tL3RjLWhpYi9nby13aW5yZXMuZ2l0P3JlZj0ke0dPV0lOUkVTX1ZFUlNJT059JmtlZXAtZ2l0LWRpcj0xIC9nby9zcmMvZ2l0aHViLmNvbS90Yy1oaWIvZ28td2lucmVzClJVTiAtLW1vdW50PXR5cGU9Y2FjaGUsdGFyZ2V0PS9yb290Ly5jYWNoZS9nby1idWlsZCBcCiAgICAtLW1vdW50PXR5cGU9Y2FjaGUsdGFyZ2V0PS9nby9wa2cvbW9kIFwKICAgICAgICBjZCAvZ28vc3JjL2dpdGh1Yi5jb20vdGMtaGliL2dvLXdpbnJlcyAmJiBcCiAgICAgICAgR09CSU49L2J1aWxkIENHT19FTkFCTEVEPTAgZ28gaW5zdGFsbCAuIFwKICAgICAmJiAvYnVpbGQvZ28td2lucmVzIC0taGVscAoKIyBjb250YWluZXJkCkZST00gYmFzZSBBUyBjb250YWluZXJkLXNyYwpXT1JLRElSIC91c3Ivc3JjL2NvbnRhaW5lcmQKIyBDT05UQUlORVJEX1ZFUlNJT04gaXMgdGhlIHZlcnNpb24gb2YgY29udGFpbmVyZCB0byB1c2UgZm9yIENJIGFuZCBzdGF0aWMgYmluYXJpZXMuCiMgSXQgaXMgdXNlZCB0byBidWlsZCBjb250YWluZXJkIGJpbmFyaWVzLCBhbmQgdXNlZCBmb3IgdGhlIGludGVncmF0aW9uIHRlc3RzLgojIFRoZSBkaXN0cmlidXRlZCBkb2NrZXIgLmRlYiBhbmQgLnJwbSBwYWNrYWdlcyBkZXBlbmQgb24gYSBzZXBhcmF0ZSAoY29udGFpbmVyZC5pbykKIyBwYWNrYWdlLCB3aGljaCBtYXkgYmUgYSBkaWZmZXJlbnQgdmVyc2lvbiB0aGFuIHNwZWNpZmllZCBoZXJlLgpBUkcgQ09OVEFJTkVSRF9WRVJTSU9OPXYyLjQuMgpBREQgaHR0cHM6Ly9naXRodWIuY29tL2NvbnRhaW5lcmQvY29udGFpbmVyZC5naXQ/cmVmPSR7Q09OVEFJTkVSRF9WRVJTSU9OfSZrZWVwLWdpdC1kaXI9MSAuCgpGUk9NIGJhc2UgQVMgY29udGFpbmVyZC1idWlsZApXT1JLRElSIC9nby9zcmMvZ2l0aHViLmNvbS9jb250YWluZXJkL2NvbnRhaW5lcmQKQVJHIFRBUkdFVFBMQVRGT1JNClJVTiAtLW1vdW50PXR5cGU9Y2FjaGUsc2hhcmluZz1sb2NrZWQsaWQ9bW9ieS1jb250YWluZXJkLWFwdGxpYix0YXJnZXQ9L3Zhci9saWIvYXB0IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWNvbnRhaW5lcmQtYXB0Y2FjaGUsdGFyZ2V0PS92YXIvY2FjaGUvYXB0IFwKICAgICAgICBhcHQtZ2V0IHVwZGF0ZSAmJiB4eC1hcHQtZ2V0IGluc3RhbGwgLXkgLS1uby1pbnN0YWxsLXJlY29tbWVuZHMgXAogICAgICAgICAgICBnY2MgXAogICAgICAgICAgICBwa2ctY29uZmlnCkFSRyBET0NLRVJfU1RBVElDClJVTiAtLW1vdW50PWZyb209Y29udGFpbmVyZC1zcmMsc3JjPS91c3Ivc3JjL2NvbnRhaW5lcmQscncgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHRhcmdldD0vcm9vdC8uY2FjaGUvZ28tYnVpbGQsaWQ9Y29udGFpbmVyZC1idWlsZC0kVEFSR0VUUExBVEZPUk0gPDxFT1QKICBzZXQgLWUKCiAgbWFrZV9mbGFncz0KICB2ZXJpZnlfZmxhZ3M9CiAgY2dvX2VuYWJsZWQ9MQogIGlmIFsgIiRET0NLRVJfU1RBVElDIiA9ICIxIiBdOyB0aGVuCiAgICAgIG1ha2VfZmxhZ3M9U1RBVElDPTEKICAgICAgdmVyaWZ5X2ZsYWdzPS0tc3RhdGljCiAgICAgIGNnb19lbmFibGVkPTAKICBmaQoKICBzZXQgLXgKICB4eC1nbyAtLXdyYXAKICBDQz0iJCh4eC1pbmZvKS1nY2MiIENHT19FTkFCTEVEPSRjZ29fZW5hYmxlZCBtYWtlICRtYWtlX2ZsYWdzIGJpbmFyaWVzCiAgeHgtdmVyaWZ5ICR2ZXJpZnlfZmxhZ3MgYmluL2NvbnRhaW5lcmQKICB4eC12ZXJpZnkgJHZlcmlmeV9mbGFncyBiaW4vY29udGFpbmVyZC1zaGltLXJ1bmMtdjIKICB4eC12ZXJpZnkgJHZlcmlmeV9mbGFncyBiaW4vY3RyCiAgbWtkaXIgL2J1aWxkCiAgbXYgYmluL2NvbnRhaW5lcmQgYmluL2NvbnRhaW5lcmQtc2hpbS1ydW5jLXYyIGJpbi9jdHIgL2J1aWxkCkVPVAoKRlJPTSBjb250YWluZXJkLWJ1aWxkIEFTIGNvbnRhaW5lcmQtbGludXgKRlJPTSBiaW5hcnktZHVtbXkgQVMgY29udGFpbmVyZC13aW5kb3dzCkZST00gY29udGFpbmVyZC0ke1RBUkdFVE9TfSBBUyBjb250YWluZXJkCgpGUk9NIGJhc2UgQVMgZ29sYW5nY2lfbGludApBUkcgR09MQU5HQ0lfTElOVF9WRVJTSU9OPXYyLjguMApBREQgaHR0cHM6Ly9naXRodWIuY29tL2dvbGFuZ2NpL2dvbGFuZ2NpLWxpbnQuZ2l0P3JlZj0ke0dPTEFOR0NJX0xJTlRfVkVSU0lPTn0ma2VlcC1naXQtZGlyPTEgL2dvL3NyYy9naXRodWIuY29tL2dvbGFuZ2NpL2dvbGFuZ2NpLWxpbnQKUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L3Jvb3QvLmNhY2hlL2dvLWJ1aWxkIFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L2dvL3BrZy9tb2QgXAogICAgICAgIGNkIC9nby9zcmMvZ2l0aHViLmNvbS9nb2xhbmdjaS9nb2xhbmdjaS1saW50ICYmIFwKICAgICAgICBHT0JJTj0vYnVpbGQgQ0dPX0VOQUJMRUQ9MCBnbyBpbnN0YWxsIC4vY21kL2dvbGFuZ2NpLWxpbnQgXAogICAgICYmIC9idWlsZC9nb2xhbmdjaS1saW50IC0tdmVyc2lvbgoKRlJPTSBiYXNlIEFTIGdvdGVzdHN1bQojIEdPVEVTVFNVTV9WRVJTSU9OIGlzIHRoZSB2ZXJzaW9uIG9mIGdvdGVzdC50b29scy9nb3Rlc3RzdW0gdG8gaW5zdGFsbC4KQVJHIEdPVEVTVFNVTV9WRVJTSU9OPXYxLjEzLjAKQUREIGh0dHBzOi8vZ2l0aHViLmNvbS9nb3Rlc3R5b3Vyc2VsZi9nb3Rlc3RzdW0uZ2l0P3JlZj0ke0dPVEVTVFNVTV9WRVJTSU9OfSZrZWVwLWdpdC1kaXI9MSAvZ28vc3JjL2dvdGVzdC50b29scy9nb3Rlc3RzdW0KUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L3Jvb3QvLmNhY2hlL2dvLWJ1aWxkIFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L2dvL3BrZy9tb2QgXAogICAgICAgIGNkIC9nby9zcmMvZ290ZXN0LnRvb2xzL2dvdGVzdHN1bSAmJiBcCiAgICAgICAgR09CSU49L2J1aWxkIENHT19FTkFCTEVEPTAgZ28gaW5zdGFsbCAuIFwKICAgICAmJiAvYnVpbGQvZ290ZXN0c3VtIC0tdmVyc2lvbgoKRlJPTSBiYXNlIEFTIHNoZm10CkFSRyBTSEZNVF9WRVJTSU9OPXYzLjE0LjEKQUREIGh0dHBzOi8vZ2l0aHViLmNvbS9tdmRhbi9zaC5naXQ/cmVmPSR7U0hGTVRfVkVSU0lPTn0ma2VlcC1naXQtZGlyPTEgL2dvL3NyYy9tdmRhbi5jYy9zaApSVU4gLS1tb3VudD10eXBlPWNhY2hlLHRhcmdldD0vcm9vdC8uY2FjaGUvZ28tYnVpbGQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHRhcmdldD0vZ28vcGtnL21vZCBcCiAgICAgICAgY2QgL2dvL3NyYy9tdmRhbi5jYy9zaCAmJiBcCiAgICAgICAgR09CSU49L2J1aWxkIENHT19FTkFCTEVEPTAgZ28gaW5zdGFsbCAuL2NtZC9zaGZtdCBcCiAgICAgJiYgL2J1aWxkL3NoZm10IC0tdmVyc2lvbgoKRlJPTSBiYXNlIEFTIGdvcGxzCiMgTm8gQVJHIEdPUExTX1ZFUlNJT04sIGFzIGdvcGxzIGlzIG9ubHkgdXNlZCBmb3IgZGV2Y29udGFpbmVyClJVTiAtLW1vdW50PXR5cGU9Y2FjaGUsdGFyZ2V0PS9yb290Ly5jYWNoZS9nby1idWlsZCBcCiAgICAtLW1vdW50PXR5cGU9Y2FjaGUsdGFyZ2V0PS9nby9wa2cvbW9kIFwKICAgICAgICBHT0JJTj0vYnVpbGQgQ0dPX0VOQUJMRUQ9MCBnbyBpbnN0YWxsICJnb2xhbmcub3JnL3gvdG9vbHMvZ29wbHNAbGF0ZXN0IiBcCiAgICAgJiYgL2J1aWxkL2dvcGxzIHZlcnNpb24KCkZST00gYmFzZSBBUyBkb2NrZXJjbGkKV09SS0RJUiAvZ28vc3JjL2dpdGh1Yi5jb20vZG9ja2VyL2NsaQpBUkcgRE9DS0VSQ0xJX1JFUE9TSVRPUlkKQVJHIERPQ0tFUkNMSV9WRVJTSU9OCkFSRyBUQVJHRVRQTEFURk9STQpSVU4gLS1tb3VudD1zb3VyY2U9aGFjay9kb2NrZXJmaWxlL2NsaS5zaCx0YXJnZXQ9L2Rvd25sb2FkLW9yLWJ1aWxkLWNsaS5zaCBcCiAgICAtLW1vdW50PXR5cGU9Y2FjaGUsaWQ9ZG9ja2VyY2xpLWdpdC0kVEFSR0VUUExBVEZPUk0sc2hhcmluZz1sb2NrZWQsdGFyZ2V0PS4vLmdpdCBcCiAgICAtLW1vdW50PXR5cGU9Y2FjaGUsdGFyZ2V0PS9yb290Ly5jYWNoZS9nby1idWlsZCxpZD1kb2NrZXJjbGktYnVpbGQtJFRBUkdFVFBMQVRGT1JNIFwKICAgICAgICBybSAtZiAuLy5naXQvKi5sb2NrIFwKICAgICAmJiAvZG93bmxvYWQtb3ItYnVpbGQtY2xpLnNoICR7RE9DS0VSQ0xJX1ZFUlNJT059ICR7RE9DS0VSQ0xJX1JFUE9TSVRPUll9IC9idWlsZCBcCiAgICAgJiYgL2J1aWxkL2RvY2tlciAtLXZlcnNpb24gXAogICAgICYmIC9idWlsZC9kb2NrZXIgY29tcGxldGlvbiBiYXNoID4vY29tcGxldGlvbi5iYXNoCgpGUk9NIGJhc2UgQVMgZG9ja2VyY2xpLWludGVncmF0aW9uCldPUktESVIgL2dvL3NyYy9naXRodWIuY29tL2RvY2tlci9jbGkKQVJHIERPQ0tFUkNMSV9JTlRFR1JBVElPTl9SRVBPU0lUT1JZCkFSRyBET0NLRVJDTElfSU5URUdSQVRJT05fVkVSU0lPTgpBUkcgVEFSR0VUUExBVEZPUk0KUlVOIC0tbW91bnQ9c291cmNlPWhhY2svZG9ja2VyZmlsZS9jbGkuc2gsdGFyZ2V0PS9kb3dubG9hZC1vci1idWlsZC1jbGkuc2ggXAogICAgLS1tb3VudD10eXBlPWNhY2hlLGlkPWRvY2tlcmNsaS1naXQtJFRBUkdFVFBMQVRGT1JNLHNoYXJpbmc9bG9ja2VkLHRhcmdldD0uLy5naXQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHRhcmdldD0vcm9vdC8uY2FjaGUvZ28tYnVpbGQsaWQ9ZG9ja2VyY2xpLWJ1aWxkLSRUQVJHRVRQTEFURk9STSBcCiAgICAgICAgcm0gLWYgLi8uZ2l0LyoubG9jayBcCiAgICAgJiYgL2Rvd25sb2FkLW9yLWJ1aWxkLWNsaS5zaCAke0RPQ0tFUkNMSV9JTlRFR1JBVElPTl9WRVJTSU9OfSAke0RPQ0tFUkNMSV9JTlRFR1JBVElPTl9SRVBPU0lUT1JZfSAvYnVpbGQgXAogICAgICYmIC9idWlsZC9kb2NrZXIgLS12ZXJzaW9uCgojIHJ1bmMKRlJPTSBiYXNlIEFTIHJ1bmMtc3JjCldPUktESVIgL3Vzci9zcmMvcnVuYwojIFJVTkNfVkVSU0lPTiBzZXRzIHRoZSB2ZXJzaW9uIG9mIHJ1bmMgdG8gaW5zdGFsbCBpbiB0aGUgZGV2LWNvbnRhaW5lci4KIyBUaGlzIHZlcnNpb24gc2hvdWxkIHVzdWFsbHkgbWF0Y2ggdGhlIHZlcnNpb24gdGhhdCBpcyB1c2VkIGJ5IHRoZSBjb250YWluZXJkIHZlcnNpb24KIyB0aGF0IGlzIHVzZWQuIElmIHlvdSBuZWVkIHRvIHVwZGF0ZSBydW5jLCBvcGVuIGEgcHVsbCByZXF1ZXN0IGluIHRoZSBjb250YWluZXJkCiMgcHJvamVjdCBmaXJzdCwgYW5kIHVwZGF0ZSBib3RoIGFmdGVyIHRoYXQgaXMgbWVyZ2VkLgpBUkcgUlVOQ19WRVJTSU9OPXYxLjUuMgpBREQgaHR0cHM6Ly9naXRodWIuY29tL29wZW5jb250YWluZXJzL3J1bmMuZ2l0P3JlZj0ke1JVTkNfVkVSU0lPTn0ma2VlcC1naXQtZGlyPTEgLgoKRlJPTSBiYXNlIEFTIHJ1bmMtYnVpbGQKV09SS0RJUiAvZ28vc3JjL2dpdGh1Yi5jb20vb3BlbmNvbnRhaW5lcnMvcnVuYwpBUkcgVEFSR0VUUExBVEZPUk0KUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LXJ1bmMtYXB0bGliLHRhcmdldD0vdmFyL2xpYi9hcHQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktcnVuYy1hcHRjYWNoZSx0YXJnZXQ9L3Zhci9jYWNoZS9hcHQgXAogICAgICAgIGFwdC1nZXQgdXBkYXRlICYmIHh4LWFwdC1nZXQgaW5zdGFsbCAteSAtLW5vLWluc3RhbGwtcmVjb21tZW5kcyBcCiAgICAgICAgICAgIGdjYyBcCiAgICAgICAgICAgIGxpYmM2LWRldiBcCiAgICAgICAgICAgIGxpbnV4LWxpYmMtZGV2IFwKICAgICAgICAgICAgbGlic2VjY29tcC1kZXYgXAogICAgICAgICAgICBwa2ctY29uZmlnCkFSRyBET0NLRVJfU1RBVElDClJVTiAtLW1vdW50PWZyb209cnVuYy1zcmMsc3JjPS91c3Ivc3JjL3J1bmMscncgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHRhcmdldD0vcm9vdC8uY2FjaGUvZ28tYnVpbGQsaWQ9cnVuYy1idWlsZC0kVEFSR0VUUExBVEZPUk0gPDxFT1QKICBzZXQgLWUKICB4eC1nbyAtLXdyYXAKCiAgdGFyZ2V0PXJ1bmMKICB2ZXJpZnlfZmxhZ3M9CiAgaWYgWyAiJERPQ0tFUl9TVEFUSUMiID0gIjEiIF07IHRoZW4KICAgIHRhcmdldD1zdGF0aWMKICAgIHZlcmlmeV9mbGFncz0tLXN0YXRpYwogIGZpCgogIHNldCAteAogIENHT19FTkFCTEVEPTEgbWFrZSBSVU5DX0JVSUxEVEFHUz0iLWxpYnBhdGhycyIgIiR0YXJnZXQiCiAgeHgtdmVyaWZ5ICR2ZXJpZnlfZmxhZ3MgcnVuYwogIG1rZGlyIC9idWlsZAogIG12IHJ1bmMgL2J1aWxkLwpFT1QKCkZST00gcnVuYy1idWlsZCBBUyBydW5jLWxpbnV4CkZST00gYmluYXJ5LWR1bW15IEFTIHJ1bmMtd2luZG93cwpGUk9NIHJ1bmMtJHtUQVJHRVRPU30gQVMgcnVuYwoKIyB0aW5pCkZST00gYmFzZSBBUyB0aW5pLXNyYwpXT1JLRElSIC91c3Ivc3JjL3RpbmkKIyBUSU5JX1ZFUlNJT04gc3BlY2lmaWVzIHRoZSB2ZXJzaW9uIG9mIHRpbmkgKGRvY2tlci1pbml0KSB0byBidWlsZC4gVGhpcwojIGJpbmFyeSBpcyB1c2VkIHdoZW4gc3RhcnRpbmcgY29udGFpbmVycyB3aXRoIHRoZSBgLS1pbml0YCBvcHRpb24uCkFSRyBUSU5JX1ZFUlNJT049djAuMTkuMApBREQgaHR0cHM6Ly9naXRodWIuY29tL2tyYWxsaW4vdGluaS5naXQ/cmVmPSR7VElOSV9WRVJTSU9OfSZrZWVwLWdpdC1kaXI9MSAuCgpGUk9NIGJhc2UgQVMgdGluaS1idWlsZApXT1JLRElSIC9nby9zcmMvZ2l0aHViLmNvbS9rcmFsbGluL3RpbmkKUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LXRpbmktYXB0bGliLHRhcmdldD0vdmFyL2xpYi9hcHQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktdGluaS1hcHRjYWNoZSx0YXJnZXQ9L3Zhci9jYWNoZS9hcHQgXAogICAgICAgIGFwdC1nZXQgdXBkYXRlICYmIGFwdC1nZXQgaW5zdGFsbCAteSAtLW5vLWluc3RhbGwtcmVjb21tZW5kcyBjbWFrZQpBUkcgVEFSR0VUUExBVEZPUk0KUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LXRpbmktYXB0bGliLHRhcmdldD0vdmFyL2xpYi9hcHQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktdGluaS1hcHRjYWNoZSx0YXJnZXQ9L3Zhci9jYWNoZS9hcHQgXAogICAgICAgIHh4LWFwdC1nZXQgaW5zdGFsbCAteSAtLW5vLWluc3RhbGwtcmVjb21tZW5kcyBcCiAgICAgICAgICAgIGdjYyBcCiAgICAgICAgICAgIGxpYmM2LWRldiBcCiAgICAgICAgICAgIGxpbnV4LWxpYmMtZGV2IFwKICAgICAgICAgICAgcGtnLWNvbmZpZwpSVU4gLS1tb3VudD1mcm9tPXRpbmktc3JjLHNyYz0vdXNyL3NyYy90aW5pLHJ3IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L3Jvb3QvLmNhY2hlL2dvLWJ1aWxkLGlkPXRpbmktYnVpbGQtJFRBUkdFVFBMQVRGT1JNIDw8RU9UCiAgc2V0IC1leAogIENDPSQoeHgtaW5mbyktZ2NjIGNtYWtlIC4KICBtYWtlIHRpbmktc3RhdGljCiAgeHgtdmVyaWZ5IC0tc3RhdGljIHRpbmktc3RhdGljCiAgbWtkaXIgL2J1aWxkCiAgbXYgdGluaS1zdGF0aWMgL2J1aWxkL2RvY2tlci1pbml0CkVPVAoKRlJPTSB0aW5pLWJ1aWxkIEFTIHRpbmktbGludXgKRlJPTSBiaW5hcnktZHVtbXkgQVMgdGluaS13aW5kb3dzCkZST00gdGluaS0ke1RBUkdFVE9TfSBBUyB0aW5pCgojIHJvb3RsZXNza2l0CkZST00gYmFzZSBBUyByb290bGVzc2tpdC1zcmMKV09SS0RJUiAvdXNyL3NyYy9yb290bGVzc2tpdAoKIyBST09UTEVTU0tJVF9WRVJTSU9OIGlzIHRoZSB2ZXJzaW9uIG9mIHJvb3RsZXNza2l0IHRvIGluc3RhbGwgaW4gdGhlIGRldi1jb250YWluZXIuCiMgcmVub3ZhdGU6IGRhdGFzb3VyY2U9Z2l0aHViLXRhZ3MgZGVwTmFtZT1yb290bGVzcy1jb250YWluZXJzL3Jvb3RsZXNza2l0CkFSRyBST09UTEVTU0tJVF9WRVJTSU9OPXYzLjMuMApBREQgaHR0cHM6Ly9naXRodWIuY29tL3Jvb3RsZXNzLWNvbnRhaW5lcnMvcm9vdGxlc3NraXQuZ2l0P3JlZj0ke1JPT1RMRVNTS0lUX1ZFUlNJT059JmtlZXAtZ2l0LWRpcj0xIC4KCkZST00gYmFzZSBBUyByb290bGVzc2tpdC1idWlsZApXT1JLRElSIC9nby9zcmMvZ2l0aHViLmNvbS9yb290bGVzcy1jb250YWluZXJzL3Jvb3RsZXNza2l0CkFSRyBUQVJHRVRQTEFURk9STQpSVU4gLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktcm9vdGxlc3NraXQtYXB0bGliLHRhcmdldD0vdmFyL2xpYi9hcHQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktcm9vdGxlc3NraXQtYXB0Y2FjaGUsdGFyZ2V0PS92YXIvY2FjaGUvYXB0IFwKICAgICAgICBhcHQtZ2V0IHVwZGF0ZSAmJiB4eC1hcHQtZ2V0IGluc3RhbGwgLXkgLS1uby1pbnN0YWxsLXJlY29tbWVuZHMgXAogICAgICAgICAgICBnY2MgXAogICAgICAgICAgICBsaWJjNi1kZXYgXAogICAgICAgICAgICBsaW51eC1saWJjLWRldiBcCiAgICAgICAgICAgIHBrZy1jb25maWcKQVJHIERPQ0tFUl9TVEFUSUMKUlVOIC0tbW91bnQ9ZnJvbT1yb290bGVzc2tpdC1zcmMsc3JjPS91c3Ivc3JjL3Jvb3RsZXNza2l0LHJ3IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L2dvL3BrZy9tb2QgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHRhcmdldD0vcm9vdC8uY2FjaGUvZ28tYnVpbGQsaWQ9cm9vdGxlc3NraXQtYnVpbGQtJFRBUkdFVFBMQVRGT1JNIDw8RU9UCiAgc2V0IC1lCgogIGlmIFsgIiRET0NLRVJfU1RBVElDIiA9ICIxIiBdOyB0aGVuCiAgICAgIHNldCAteAogICAgICBleHBvcnQgQ0dPX0VOQUJMRUQ9MAogICAgICB4eC1nbyBidWlsZCAtbyAvYnVpbGQvcm9vdGxlc3NraXQgLi9jbWQvcm9vdGxlc3NraXQKICAgICAgeHgtdmVyaWZ5IC0tc3RhdGljIC9idWlsZC9yb290bGVzc2tpdAogIGVsc2UKICAgICAgc2V0IC14CiAgICAgIGV4cG9ydCBDR09fRU5BQkxFRD0xCiAgICAgIHh4LWdvIGJ1aWxkIC1vIC9idWlsZC9yb290bGVzc2tpdCAtbGRmbGFncz0nLWxpbmttb2RlPWV4dGVybmFsJyAuL2NtZC9yb290bGVzc2tpdAogICAgICB4eC12ZXJpZnkgL2J1aWxkL3Jvb3RsZXNza2l0CiAgZmkKRU9UCkNPUFkgLS1saW5rIC4vY29udHJpYi9kb2NrZXJkLXJvb3RsZXNzLnNoIC9idWlsZC8KQ09QWSAtLWxpbmsgLi9jb250cmliL2RvY2tlcmQtcm9vdGxlc3Mtc2V0dXB0b29sLnNoIC9idWlsZC8KCkZST00gcm9vdGxlc3NraXQtYnVpbGQgQVMgcm9vdGxlc3NraXQtbGludXgKRlJPTSBiaW5hcnktZHVtbXkgQVMgcm9vdGxlc3NraXQtd2luZG93cwpGUk9NIHJvb3RsZXNza2l0LSR7VEFSR0VUT1N9IEFTIHJvb3RsZXNza2l0CgpGUk9NIGJhc2UgQVMgY3J1bgojIENSVU5fVkVSU0lPTiBpcyB0aGUgdmVyc2lvbiBvZiBjcnVuIHRvIGluc3RhbGwgaW4gdGhlIGRldi1jb250YWluZXIuCkFSRyBDUlVOX1ZFUlNJT049MS4yOS4xClJVTiAtLW1vdW50PXR5cGU9Y2FjaGUsc2hhcmluZz1sb2NrZWQsaWQ9bW9ieS1jcnVuLWFwdGxpYix0YXJnZXQ9L3Zhci9saWIvYXB0IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWNydW4tYXB0Y2FjaGUsdGFyZ2V0PS92YXIvY2FjaGUvYXB0IFwKICAgICAgICBhcHQtZ2V0IHVwZGF0ZSAmJiBhcHQtZ2V0IGluc3RhbGwgLXkgLS1uby1pbnN0YWxsLXJlY29tbWVuZHMgXAogICAgICAgICAgICBhdXRvY29uZiBcCiAgICAgICAgICAgIGF1dG9tYWtlIFwKICAgICAgICAgICAgYnVpbGQtZXNzZW50aWFsIFwKICAgICAgICAgICAgbGliY2FwLWRldiBcCiAgICAgICAgICAgIGxpYmpzb24tYy1kZXYgXAogICAgICAgICAgICBsaWJwcm90b2J1Zi1jLWRldiBcCiAgICAgICAgICAgIGxpYnNlY2NvbXAtZGV2IFwKICAgICAgICAgICAgbGlic3lzdGVtZC1kZXYgXAogICAgICAgICAgICBsaWJ0b29sIFwKICAgICAgICAgICAgcGtnY29uZiBcCiAgICAgICAgICAgIHB5dGhvbjMgXAogICAgICAgICAgICA7CldPUktESVIgL3RtcC9jcnVuLWJ1aWxkCkFERCBodHRwczovL2dpdGh1Yi5jb20vY29udGFpbmVycy9jcnVuLmdpdD9yZWY9JHtDUlVOX1ZFUlNJT059JmtlZXAtZ2l0LWRpcj0xIC4KUlVOIC4vYXV0b2dlbi5zaCAmJiBcCiAgICAuL2NvbmZpZ3VyZSAtLWJpbmRpcj0vYnVpbGQgJiYgXAogICAgbWFrZSAtaiBpbnN0YWxsCgojIGNvbnRhaW5lcnV0aWxpdHkKRlJPTSBiYXNlIEFTIGNvbnRhaW5lcnV0aWwtc3JjCldPUktESVIgL3Vzci9zcmMvY29udGFpbmVydXRpbApBUkcgQ09OVEFJTkVSVVRJTElUWV9WRVJTSU9OPWFhMWJhODdlOTliNjhlMDExM2JkMjdlYzI2YzYwYjg4ZjlkNGNjZDkKQUREIGh0dHBzOi8vZ2l0aHViLmNvbS9kb2NrZXItYXJjaGl2ZS93aW5kb3dzLWNvbnRhaW5lci11dGlsaXR5LmdpdD9jb21taXQ9JHtDT05UQUlORVJVVElMSVRZX1ZFUlNJT059JmtlZXAtZ2l0LWRpcj0xIC4KCkZST00gYmFzZSBBUyBjb250YWluZXJ1dGlsLWJ1aWxkCldPUktESVIgL3Vzci9zcmMvY29udGFpbmVydXRpbApBUkcgVEFSR0VUUExBVEZPUk0KUlVOIHh4LWFwdC1nZXQgaW5zdGFsbCAteSAtLW5vLWluc3RhbGwtcmVjb21tZW5kcyBcCiAgICAgICAgZ2NjIFwKICAgICAgICBnKysgXAogICAgICAgIGxpYmM2LWRldiBcCiAgICAgICAgcGtnLWNvbmZpZwpSVU4gLS1tb3VudD1mcm9tPWNvbnRhaW5lcnV0aWwtc3JjLHNyYz0vdXNyL3NyYy9jb250YWluZXJ1dGlsLHJ3IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L3Jvb3QvLmNhY2hlL2dvLWJ1aWxkLGlkPWNvbnRhaW5lcnV0aWwtYnVpbGQtJFRBUkdFVFBMQVRGT1JNIDw8RU9UCiAgc2V0IC1leAogIENDPSIkKHh4LWluZm8pLWdjYyIgQ1hYPSIkKHh4LWluZm8pLWcrKyIgbWFrZQogIHh4LXZlcmlmeSAtLXN0YXRpYyBjb250YWluZXJ1dGlsaXR5LmV4ZQogIG1rZGlyIC9idWlsZAogIG12IGNvbnRhaW5lcnV0aWxpdHkuZXhlIC9idWlsZC8KRU9UCgpGUk9NIGJpbmFyeS1kdW1teSBBUyBjb250YWluZXJ1dGlsLWxpbnV4CkZST00gY29udGFpbmVydXRpbC1idWlsZCBBUyBjb250YWluZXJ1dGlsLXdpbmRvd3MtYW1kNjQKRlJPTSBjb250YWluZXJ1dGlsLXdpbmRvd3MtJHtUQVJHRVRBUkNIfSBBUyBjb250YWluZXJ1dGlsLXdpbmRvd3MKRlJPTSBjb250YWluZXJ1dGlsLSR7VEFSR0VUT1N9IEFTIGNvbnRhaW5lcnV0aWwKRlJPTSBkb2NrZXIvYnVpbGR4LWJpbjoke0JVSUxEWF9WRVJTSU9OfSBBUyBidWlsZHgKRlJPTSBkb2NrZXIvY29tcG9zZS1iaW46JHtDT01QT1NFX1ZFUlNJT059IEFTIGNvbXBvc2UKCkZST00gYmFzZSBBUyBkZXYtc3lzdGVtZC1mYWxzZQpDT1BZIC0tbGluayAtLWZyb209ZnJvemVuLWltYWdlcyAvYnVpbGQvIC9kb2NrZXItZnJvemVuLWltYWdlcwpDT1BZIC0tbGluayAtLWZyb209ZGVsdmUgICAgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209Z293aW5yZXMgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209dGluaSAgICAgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209cmVnaXN0cnkgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwoKIyBTa2lwIHRoZSBDUklVIHN0YWdlIGZvciBub3csIGFzIHRoZSBvcGVuc3VzZSBwYWNrYWdlIHJlcG9zaXRvcnkgaXMgc29tZXRpbWVzCiMgdW5zdGFibGUsIGFuZCB3ZSdyZSBjdXJyZW50bHkgbm90IHVzaW5nIGl0IGluIENJLgojCiMgRklYTUUodGhhSmV6dGFoKTogcmUtZW5hYmxlIHRoaXMgc3RhZ2Ugd2hlbiBodHRwczovL2dpdGh1Yi5jb20vbW9ieS9tb2J5L2lzc3Vlcy8zODk2MyBpcyByZXNvbHZlZCAoc2VlIGh0dHBzOi8vZ2l0aHViLmNvbS9tb2J5L21vYnkvcHVsbC8zODk4NCkKIyBDT1BZIC0tbGluayAtLWZyb209Y3JpdSAgICAgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209Z290ZXN0c3VtICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209Z29sYW5nY2lfbGludCAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209c2hmbXQgICAgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209cnVuYyAgICAgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209Y29udGFpbmVyZCAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209cm9vdGxlc3NraXQgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209Y29udGFpbmVydXRpbCAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209Y3J1biAgICAgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayBoYWNrL2RvY2tlcmZpbGUvZXRjL2RvY2tlci8gIC9ldGMvZG9ja2VyLwpDT1BZIC0tbGluayAtLWZyb209YnVpbGR4ICAgICAgICAvYnVpbGR4IC91c3IvbG9jYWwvbGliZXhlYy9kb2NrZXIvY2xpLXBsdWdpbnMvZG9ja2VyLWJ1aWxkeApDT1BZIC0tbGluayAtLWZyb209Y29tcG9zZSAgICAgICAvZG9ja2VyLWNvbXBvc2UgL3Vzci9saWJleGVjL2RvY2tlci9jbGktcGx1Z2lucy9kb2NrZXItY29tcG9zZQoKRU5WIFBBVEg9L3Vzci9sb2NhbC9jbGk6JFBBVEgKRU5WIFRFU1RfQ0xJRU5UX0JJTkFSWT0vdXNyL2xvY2FsL2NsaS1pbnRlZ3JhdGlvbi9kb2NrZXIKRU5WIENPTlRBSU5FUkRfQUREUkVTUz0vcnVuL2RvY2tlci9jb250YWluZXJkL2NvbnRhaW5lcmQuc29jawpFTlYgQ09OVEFJTkVSRF9OQU1FU1BBQ0U9bW9ieQpXT1JLRElSIC91c3Ivc3JjL21vYnkKVk9MVU1FIC92YXIvbGliL2RvY2tlcgpWT0xVTUUgL2hvbWUvdW5wcml2aWxlZ2VkdXNlci8ubG9jYWwvc2hhcmUvZG9ja2VyCiMgV3JhcCBhbGwgY29tbWFuZHMgaW4gdGhlICJkb2NrZXItaW4tZG9ja2VyIiBzY3JpcHQgdG8gYWxsb3cgbmVzdGVkIGNvbnRhaW5lcnMKRU5UUllQT0lOVCBbImhhY2svZGluZCJdCgpGUk9NIGRldi1zeXN0ZW1kLWZhbHNlIEFTIGRldi1zeXN0ZW1kLXRydWUKUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWRldi1hcHRsaWIsdGFyZ2V0PS92YXIvbGliL2FwdCBcCiAgICAtLW1vdW50PXR5cGU9Y2FjaGUsc2hhcmluZz1sb2NrZWQsaWQ9bW9ieS1kZXYtYXB0Y2FjaGUsdGFyZ2V0PS92YXIvY2FjaGUvYXB0IFwKICAgICAgICBhcHQtZ2V0IHVwZGF0ZSAmJiBhcHQtZ2V0IGluc3RhbGwgLXkgLS1uby1pbnN0YWxsLXJlY29tbWVuZHMgXAogICAgICAgICAgICBkYnVzIFwKICAgICAgICAgICAgZGJ1cy11c2VyLXNlc3Npb24gXAogICAgICAgICAgICBzeXN0ZW1kIFwKICAgICAgICAgICAgc3lzdGVtZC1zeXN2CkVOVFJZUE9JTlQgWyJoYWNrL2RpbmQtc3lzdGVtZCJdCgpGUk9NIGRldi1zeXN0ZW1kLSR7U1lTVEVNRH0gQVMgZGV2LWZpcmV3YWxsZC1mYWxzZQoKRlJPTSBkZXYtc3lzdGVtZC10cnVlIEFTIGRldi1maXJld2FsbGQtdHJ1ZQpSVU4gLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktZGV2LWFwdGxpYix0YXJnZXQ9L3Zhci9saWIvYXB0IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWRldi1hcHRjYWNoZSx0YXJnZXQ9L3Zhci9jYWNoZS9hcHQgXAogICAgICAgIGFwdC1nZXQgdXBkYXRlICYmIGFwdC1nZXQgaW5zdGFsbCAteSAtLW5vLWluc3RhbGwtcmVjb21tZW5kcyBcCiAgICAgICAgICAgIGZpcmV3YWxsZAoKRlJPTSBkZXYtZmlyZXdhbGxkLSR7RklSRVdBTExEfSBBUyBkZXYtYmFzZQpSVU4gZ3JvdXBhZGQgLXIgZG9ja2VyClJVTiB1c2VyYWRkIC0tY3JlYXRlLWhvbWUgLS1naWQgZG9ja2VyIHVucHJpdmlsZWdlZHVzZXIgXAogJiYgbWtkaXIgLXAgL2hvbWUvdW5wcml2aWxlZ2VkdXNlci8ubG9jYWwvc2hhcmUvZG9ja2VyIFwKICYmIGNob3duIC1SIHVucHJpdmlsZWdlZHVzZXIgL2hvbWUvdW5wcml2aWxlZ2VkdXNlcgojIExldCB1cyB1c2UgYSAuYmFzaHJjIGZpbGUKUlVOIGxuIC1zZnYgL3Vzci9zcmMvbW9ieS8uYmFzaHJjIH4vLmJhc2hyYwojIEFjdGl2YXRlIGJhc2ggY29tcGxldGlvbgpSVU4gZWNobyAic291cmNlIC91c3Ivc2hhcmUvYmFzaC1jb21wbGV0aW9uL2Jhc2hfY29tcGxldGlvbiIgPj4gL2V0Yy9iYXNoLmJhc2hyYwpSVU4gbGRjb25maWcKIyBTZXQgZGV2IGVudmlyb25tZW50IGFzIHNhZmUgZ2l0IGRpcmVjdG9yeSB0byBwcmV2ZW50ICJkdWJpb3VzIG93bmVyc2hpcCIgZXJyb3JzCiMgd2hlbiBiaW5kLW1vdW50aW5nIHRoZSBzb3VyY2UgaW50byB0aGUgZGV2LWNvbnRhaW5lci4gU2VlIGh0dHBzOi8vZ2l0aHViLmNvbS9tb2J5L21vYnkvcHVsbC80NDkzMApSVU4gZ2l0IGNvbmZpZyAtLWdsb2JhbCAtLWFkZCBzYWZlLmRpcmVjdG9yeSAvdXNyL3NyYy9tb2J5CiMgVGhpcyBzaG91bGQgb25seSBpbnN0YWxsIHBhY2thZ2VzIHRoYXQgYXJlIHNwZWNpZmljYWxseSBuZWVkZWQgZm9yIHRoZSBkZXYgZW52aXJvbm1lbnQgYW5kIG5vdGhpbmcgZWxzZQojIERvIHlvdSByZWFsbHkgbmVlZCB0byBhZGQgYW5vdGhlciBwYWNrYWdlIGhlcmU/IENhbiBpdCBiZSBkb25lIGluIGEgZGlmZmVyZW50IGJ1aWxkIHN0YWdlPwpSVU4gLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktZGV2LWFwdGxpYix0YXJnZXQ9L3Zhci9saWIvYXB0IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWRldi1hcHRjYWNoZSx0YXJnZXQ9L3Zhci9jYWNoZS9hcHQgXAogICAgICAgIGFwdC1nZXQgdXBkYXRlICYmIGFwdC1nZXQgaW5zdGFsbCAteSAtLW5vLWluc3RhbGwtcmVjb21tZW5kcyBcCiAgICAgICAgICAgIGFwcGFybW9yIFwKICAgICAgICAgICAgYmFzaC1jb21wbGV0aW9uIFwKICAgICAgICAgICAgYnppcDIgXAogICAgICAgICAgICBlMmZzcHJvZ3MgXAogICAgICAgICAgICBmdXNlLW92ZXJsYXlmcyBcCiAgICAgICAgICAgIGluZXR1dGlscy1waW5nIFwKICAgICAgICAgICAgaXByb3V0ZTIgXAogICAgICAgICAgICBpcHRhYmxlcyBcCiAgICAgICAgICAgIG5mdGFibGVzIFwKICAgICAgICAgICAganEgXAogICAgICAgICAgICBsaWJjYXAyLWJpbiBcCiAgICAgICAgICAgIGxpYm5ldDEgXAogICAgICAgICAgICBsaWJuZnRhYmxlcy1kZXYgXAogICAgICAgICAgICBsaWJubC0zLTIwMCBcCiAgICAgICAgICAgIGxpYnByb3RvYnVmLWMxIFwKICAgICAgICAgICAgbGlieWFqbDIgXAogICAgICAgICAgICBuYW5vIFwKICAgICAgICAgICAgbmV0LXRvb2xzIFwKICAgICAgICAgICAgbmV0Y2F0LW9wZW5ic2QgXAogICAgICAgICAgICBwYXRjaCBcCiAgICAgICAgICAgIHBpZ3ogXAogICAgICAgICAgICBzdWRvIFwKICAgICAgICAgICAgc3lzdGVtZC1qb3VybmFsLXJlbW90ZSBcCiAgICAgICAgICAgIHRoaW4tcHJvdmlzaW9uaW5nLXRvb2xzIFwKICAgICAgICAgICAgdWlkbWFwIFwKICAgICAgICAgICAgdmltIFwKICAgICAgICAgICAgdmltLWNvbW1vbiBcCiAgICAgICAgICAgIHhmc3Byb2dzIFwKICAgICAgICAgICAgeHotdXRpbHMgXAogICAgICAgICAgICB6aXAgXAogICAgICAgICAgICB6c3RkClJVTiAtLW1vdW50PXR5cGU9Y2FjaGUsc2hhcmluZz1sb2NrZWQsaWQ9bW9ieS1kZXYtYXB0bGliLHRhcmdldD0vdmFyL2xpYi9hcHQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktZGV2LWFwdGNhY2hlLHRhcmdldD0vdmFyL2NhY2hlL2FwdCBcCiAgICAgICAgYXB0LWdldCB1cGRhdGUgJiYgYXB0LWdldCBpbnN0YWxsIC0tbm8taW5zdGFsbC1yZWNvbW1lbmRzIC15IFwKICAgICAgICAgICAgZ2NjIFwKICAgICAgICAgICAgcGtnLWNvbmZpZyBcCiAgICAgICAgICAgIGxpYnNlY2NvbXAtZGV2IFwKICAgICAgICAgICAgbGlic3lzdGVtZC1kZXYgXAogICAgICAgICAgICB5YW1sbGludApDT1BZIC0tbGluayAtLWZyb209ZG9ja2VyY2xpICAgICAgICAgICAgIC9idWlsZC8gL3Vzci9sb2NhbC9jbGkKQ09QWSAtLWxpbmsgLS1mcm9tPWRvY2tlcmNsaSAgICAgICAgICAgICAvY29tcGxldGlvbi5iYXNoIC9ldGMvYmFzaF9jb21wbGV0aW9uLmQvZG9ja2VyCkNPUFkgLS1saW5rIC0tZnJvbT1kb2NrZXJjbGktaW50ZWdyYXRpb24gL2J1aWxkLyAvdXNyL2xvY2FsL2NsaS1pbnRlZ3JhdGlvbgoKRlJPTSBiYXNlIEFTIGJ1aWxkCkNPUFkgLS1mcm9tPWdvd2lucmVzIC9idWlsZC8gL3Vzci9sb2NhbC9iaW4vCldPUktESVIgL3Vzci9zcmMvbW9ieQpFTlYgQ0dPX0VOQUJMRUQ9MQpSVU4gLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktYnVpbGQtYXB0bGliLHRhcmdldD0vdmFyL2xpYi9hcHQgXAogICAgLS1tb3VudD10eXBlPWNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPW1vYnktYnVpbGQtYXB0Y2FjaGUsdGFyZ2V0PS92YXIvY2FjaGUvYXB0IFwKICAgICAgICBhcHQtZ2V0IHVwZGF0ZSAmJiBhcHQtZ2V0IGluc3RhbGwgLS1uby1pbnN0YWxsLXJlY29tbWVuZHMgLXkgXAogICAgICAgICAgICBjbGFuZyBcCiAgICAgICAgICAgIGxsZCBcCiAgICAgICAgICAgIGxsdm0gXAogICAgICAgICAgICBpY291dGlscwpBUkcgVEFSR0VUUExBVEZPUk0KUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWJ1aWxkLWFwdGxpYix0YXJnZXQ9L3Zhci9saWIvYXB0IFwKICAgIC0tbW91bnQ9dHlwZT1jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1tb2J5LWJ1aWxkLWFwdGNhY2hlLHRhcmdldD0vdmFyL2NhY2hlL2FwdCBcCiAgICAgICAgeHgtYXB0LWdldCBpbnN0YWxsIC0tbm8taW5zdGFsbC1yZWNvbW1lbmRzIC15IFwKICAgICAgICAgICAgZ2NjIFwKICAgICAgICAgICAgbGliYzYtZGV2IFwKICAgICAgICAgICAgbGludXgtbGliYy1kZXYgXAogICAgICAgICAgICBsaWJuZnRhYmxlcy1kZXYgXAogICAgICAgICAgICBsaWJzZWNjb21wLWRldiBcCiAgICAgICAgICAgIGxpYnN5c3RlbWQtZGV2IFwKICAgICAgICAgICAgcGtnLWNvbmZpZwpBUkcgRE9DS0VSX0JVSUxEVEFHUwpBUkcgRE9DS0VSX0RFQlVHCkFSRyBET0NLRVJfR0lUQ09NTUlUPUhFQUQKQVJHIERPQ0tFUl9MREZMQUdTCkFSRyBET0NLRVJfU1RBVElDCkFSRyBWRVJTSU9OCkFSRyBQTEFURk9STQpBUkcgUFJPRFVDVApBUkcgREVGQVVMVF9QUk9EVUNUX0xJQ0VOU0UKQVJHIFBBQ0tBR0VSX05BTUUKIyBQUkVGSVggb3ZlcnJpZGVzIERFU1QgZGlyIGluIG1ha2Uuc2ggc2NyaXB0IG90aGVyd2lzZSBpdCBmYWlscyBiZWNhdXNlIG9mCiMgcmVhZCBvbmx5IG1vdW50IGluIGN1cnJlbnQgd29yayBkaXIKRU5WIFBSRUZJWD0vdG1wClJVTiA8PEVPVAogIHNldCAtZXgKICAjIGluIGJ1bGxzZXllIGFybTY0IHRhcmdldCBkb2VzIG5vdCBsaW5rIHdpdGggbGxkIHNvIGNvbmZpZ3VyZSBpdCB0byB1c2UgbGQgaW5zdGVhZAogIGlmIFsgIiQoeHgtaW5mbyBhcmNoKSIgPSAiYXJtNjQiIF07IHRoZW4KICAgIFhYX0NDX1BSRUZFUl9MSU5LRVI9bGQgeHgtY2xhbmcgLS1zZXR1cC10YXJnZXQtdHJpcGxlCiAgZmkKRU9UClJVTiAtLW1vdW50PXR5cGU9YmluZCx0YXJnZXQ9LixydyBcCiAgICAtLW1vdW50PXR5cGU9Y2FjaGUsdGFyZ2V0PS9yb290Ly5jYWNoZS9nby1idWlsZCxpZD1tb2J5LWJ1aWxkLSRUQVJHRVRQTEFURk9STSA8PEVPVAogIHNldCAtZQoKICB0YXJnZXQ9ZHluYmluYXJ5CiAgdmVyaWZ5X2ZsYWdzPQogIGV4ZV9zdWZmaXg9CiAgaWYgWyAiJERPQ0tFUl9TVEFUSUMiID0gIjEiIF07IHRoZW4KICAgICAgdGFyZ2V0PWJpbmFyeQogICAgICB2ZXJpZnlfZmxhZ3M9LS1zdGF0aWMKICBmaQogIGlmIFsgIiQoeHgtaW5mbyBvcykiID0gIndpbmRvd3MiIF07IHRoZW4KICAgICAgZXhlX3N1ZmZpeD0uZXhlCiAgZmkKCiAgc2V0IC14CiAgeHgtZ28gLS13cmFwCiAgUEtHX0NPTkZJRz0kKHh4LWdvIGVudiBQS0dfQ09ORklHKSAuL2hhY2svbWFrZS5zaCAiJHRhcmdldCIKICB4eC12ZXJpZnkgJHZlcmlmeV9mbGFncyAiL3RtcC9idW5kbGVzLyR7dGFyZ2V0fS1kYWVtb24vZG9ja2VyZCR7ZXhlX3N1ZmZpeH0iCiAgaWYgWyAiJCh4eC1pbmZvIG9zKSIgPSAibGludXgiIF07IHRoZW4KICAgICAgeHgtdmVyaWZ5ICR2ZXJpZnlfZmxhZ3MgIi90bXAvYnVuZGxlcy8ke3RhcmdldH0tZGFlbW9uL2RvY2tlci1wcm94eSIKICBmaQogIG1rZGlyIC9idWlsZAogIG12IC90bXAvYnVuZGxlcy8ke3RhcmdldH0tZGFlbW9uLyogL2J1aWxkLwpFT1QKCiMgdXNhZ2U6CiMgPiBkb2NrZXIgYnVpbGR4IGJha2UgYmluYXJ5CiMgPiBET0NLRVJfU1RBVElDPTAgZG9ja2VyIGJ1aWxkeCBiYWtlIGJpbmFyeQojIG9yCiMgPiBtYWtlIGJpbmFyeQojID4gbWFrZSBkeW5iaW5hcnkKRlJPTSBzY3JhdGNoIEFTIGJpbmFyeQpDT1BZIC0tZnJvbT1idWlsZCAvYnVpbGQvIC8KCiMgdXNhZ2U6CiMgPiBkb2NrZXIgYnVpbGR4IGJha2UgYWxsCkZST00gc2NyYXRjaCBBUyBhbGwKQ09QWSAtLWxpbmsgLS1mcm9tPXRpbmkgICAgICAgICAgL2J1aWxkLyAvCkNPUFkgLS1saW5rIC0tZnJvbT1ydW5jICAgICAgICAgIC9idWlsZC8gLwpDT1BZIC0tbGluayAtLWZyb209Y29udGFpbmVyZCAgICAvYnVpbGQvIC8KQ09QWSAtLWxpbmsgLS1mcm9tPXJvb3RsZXNza2l0ICAgL2J1aWxkLyAvCkNPUFkgLS1saW5rIC0tZnJvbT1jb250YWluZXJ1dGlsIC9idWlsZC8gLwpDT1BZIC0tbGluayAtLWZyb209YnVpbGQgICAgICAgICAvYnVpbGQgIC8KCiMgVG9vbHMgYW5kIGZpeHR1cmVzIGZvciBydW5uaW5nIGludGVncmF0aW9uIHRlc3RzIGRpcmVjdGx5IG9uIGEgTGludXggaG9zdC4KIyBCdWlsZCB0aGlzIGZvciB0aGUgaG9zdCBhcmNoaXRlY3R1cmU7IHRoZSBHbyB0b29sY2hhaW4gYW5kIGdvdGVzdHN1bSBydW4gdGhlcmUuCiMgVGhlIGRhZW1vbiBhbmQgdGVzdHMgYXJlIGNvbXBpbGVkIG9uIHRoZSBob3N0IGJ5IGhhY2svbWFrZS5zaC4KRlJPTSBzY3JhdGNoIEFTIHRlc3QtaW50ZWdyYXRpb24tZGVwcwpDT1BZIC0tbGluayAtLWZyb209YmFzZSAgICAgICAgICAvdXNyL2xvY2FsL2dvLyAvdXNyL2xvY2FsL2dvLwpDT1BZIC0tbGluayAtLWZyb209dGluaSAgICAgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209cnVuYyAgICAgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209Y29udGFpbmVyZCAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209cm9vdGxlc3NraXQgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209ZG9ja2VyY2xpICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209Z290ZXN0c3VtICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209cmVnaXN0cnkgICAgICAvYnVpbGQvIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209ZnJvemVuLWltYWdlcyAvYnVpbGQvIC9kb2NrZXItZnJvemVuLWltYWdlcy8KCiMgc21va2UgdGVzdHMKIyB1c2FnZToKIyA+IGRvY2tlciBidWlsZHggYmFrZSBiaW5hcnktc21va2V0ZXN0CkZST00gYmFzZSBBUyBzbW9rZXRlc3QKV09SS0RJUiAvdXNyL2xvY2FsL2JpbgpDT1BZIC0tZnJvbT1idWlsZCAvYnVpbGQgLgpSVU4gPDxFT1QKICBzZXQgLWV4CiAgZmlsZSBkb2NrZXJkCiAgZG9ja2VyZCAtLXZlcnNpb24KICBmaWxlIGRvY2tlci1wcm94eQogIGRvY2tlci1wcm94eSAtLXZlcnNpb24KRU9UCgojIGRldmNvbnRhaW5lciBpcyBhIHN0YWdlIHVzZWQgYnkgLmRldmNvbnRhaW5lci9kZXZjb250YWluZXIuanNvbgpGUk9NIGRldi1iYXNlIEFTIGRldmNvbnRhaW5lcgpDT1BZIC0tbGluayAuIC4KQ09QWSAtLWxpbmsgLS1mcm9tPWdvcGxzICAgICAgICAgL2J1aWxkLyAvdXNyL2xvY2FsL2Jpbi8KCiMgdXNhZ2U6CiMgPiBkb2NrZXIgYnVpbGR4IGJha2UgZGluZAojID4gZG9ja2VyIHJ1biAtZCAtLXJlc3RhcnQgYWx3YXlzIC0tcHJpdmlsZWdlZCAtLW5hbWUgZGV2ZGluZCAtcCAxMjM3NToyMzc1IGRvY2tlci1kaW5kIC0tZGVidWcgLS1ob3N0PXRjcDovLzAuMC4wLjA6MjM3NSAtLXRsc3ZlcmlmeT1mYWxzZQpGUk9NIGRvY2tlcjpkaW5kIEFTIGRpbmQKQ09QWSAtLWxpbmsgLS1mcm9tPWRvY2tlcmNsaSAvYnVpbGQvZG9ja2VyIC91c3IvbG9jYWwvYmluLwpDT1BZIC0tbGluayAtLWZyb209YnVpbGR4ICAgIC9idWlsZHggL3Vzci9sb2NhbC9saWJleGVjL2RvY2tlci9jbGktcGx1Z2lucy9kb2NrZXItYnVpbGR4CkNPUFkgLS1saW5rIC0tZnJvbT1jb21wb3NlICAgL2RvY2tlci1jb21wb3NlIC91c3IvbG9jYWwvbGliZXhlYy9kb2NrZXIvY2xpLXBsdWdpbnMvZG9ja2VyLWNvbXBvc2UKQ09QWSAtLWxpbmsgLS1mcm9tPWFsbCAgICAgICAvIC91c3IvbG9jYWwvYmluLwoKIyB1c2FnZToKIyA+IG1ha2Ugc2hlbGwKIyA+IFNZU1RFTUQ9dHJ1ZSBtYWtlIHNoZWxsCkZST00gZGV2LWJhc2UgQVMgZGV2CkNPUFkgLS1saW5rIC4gLgo=",
+              "llbDefinition": [
+                {
+                  "id": "step0",
+                  "op": {
+                    "Op": {
+                      "source": {
+                        "identifier": "local://dockerfile",
+                        "attrs": {
+                          "local.differ": "none",
+                          "local.followpaths": "[\"Dockerfile\",\"Dockerfile.dockerignore\",\"dockerfile\"]",
+                          "local.sharedkeyhint": "dockerfile"
+                        }
+                      }
+                    },
+                    "constraints": {}
+                  }
+                },
+                {
+                  "id": "step1",
+                  "op": {
+                    "Op": {}
+                  },
+                  "inputs": [
+                    "step0:0"
+                  ]
+                }
+              ],
+              "digestMapping": {
+                "sha256:49f5ec38d9d907da88e30d8904a24b727def7271277ee1c97a7400673096ac3e": "step1",
+                "sha256:ecdc0613e997ff4c513db6b54be1b8b0547b00796377f3eb354651baeb597b8e": "step0"
+              }
+            }
+          ]
+        },
+        "layers": {
+          "step0:0": [
+            [
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:a1d156b0aab5fb07d822a7f4681f6d3ed1689073531c34f5668818c233633f11",
+                "size": 49407895
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:7fac3b752bd4f060dcf33c0f54d1fad29fce8ff42b8fb544f9ec95372f0933bf",
+                "size": 25634411
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:c0168c6e6744fc499abc90618818f9e4aaf652a587fb6345b3882dc57de1495c",
+                "size": 67818749
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:81d6574d3eda147c3ba9528bcdf50d8c802a55f48f25f131fd76f1b977174120",
+                "size": 102445200
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:f64d732997a02e45cca29ef334d56f89f7599c8937c2617b6467edd19bc037d6",
+                "size": 67351922
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:99bf03b37d834376c8009b5447cc42a1da9546a9d1e12f5dc1e00c9a77a54598",
+                "size": 126
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+                "size": 32
+              }
+            ]
+          ],
+          "step1:0": [
+            [
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:2850935e4794f381b58d27a1e5bde3eaa0d9eb442b9b1824ce943ca1e85c05e3",
+                "size": 18390
+              }
+            ]
+          ]
+        },
+        "sysUsage": [
+          {
+            "timestamp": "2026-11-04T19:09:40.819977052Z",
+            "cpuStat": {
+              "user": 998.11,
+              "nice": 0,
+              "system": 375.56,
+              "idle": 4375.27,
+              "iowait": 18.3,
+              "irq": 0,
+              "softirq": 17.1,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 10402575,
+              "processCreated": 89731,
+              "processesRunning": 7
+            },
+            "memoryStat": {
+              "total": 15977660,
+              "free": 2661816,
+              "available": 13771884,
+              "buffers": 404192,
+              "cached": 10307064,
+              "active": 1809752,
+              "inactive": 10298364,
+              "swap": 0,
+              "dirty": 74948,
+              "writeback": 736,
+              "slab": 1054524
+            },
+            "cpuPressure": {
+              "some": {
+                "avg10": 1.26,
+                "avg60": 22.56,
+                "avg300": 27.2,
+                "total": 135238497
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 0
+              }
+            },
+            "memoryPressure": {
+              "some": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 82204
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 67488
+              }
+            },
+            "ioPressure": {
+              "some": {
+                "avg10": 0.29,
+                "avg60": 0.8,
+                "avg300": 1.4,
+                "total": 12255797
+              },
+              "full": {
+                "avg10": 0.29,
+                "avg60": 0.1,
+                "avg300": 0.24,
+                "total": 5551499
+              }
+            }
+          },
+          {
+            "timestamp": "2026-11-04T19:09:42.820022161Z",
+            "cpuStat": {
+              "user": 1002.45,
+              "nice": 0,
+              "system": 379.84,
+              "idle": 4380.91,
+              "iowait": 18.55,
+              "irq": 0,
+              "softirq": 17.92,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 10545651,
+              "processCreated": 89898,
+              "processesRunning": 11
+            },
+            "memoryStat": {
+              "total": 15977660,
+              "free": 2334768,
+              "available": 13728700,
+              "buffers": 423420,
+              "cached": 10538592,
+              "active": 1857788,
+              "inactive": 10548952,
+              "swap": 0,
+              "dirty": 172876,
+              "writeback": 412,
+              "slab": 1089280
+            },
+            "cpuPressure": {
+              "some": {
+                "avg10": 4.11,
+                "avg60": 22.37,
+                "avg300": 27.13,
+                "total": 135742894
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 0
+              }
+            },
+            "memoryPressure": {
+              "some": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 82204
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 67488
+              }
+            },
+            "ioPressure": {
+              "some": {
+                "avg10": 0.42,
+                "avg60": 0.81,
+                "avg300": 1.39,
+                "total": 12311554
+              },
+              "full": {
+                "avg10": 0.42,
+                "avg60": 0.13,
+                "avg300": 0.25,
+                "total": 5584837
+              }
+            }
+          },
+          {
+            "timestamp": "2026-11-04T19:09:44.82006211Z",
+            "cpuStat": {
+              "user": 1008.35,
+              "nice": 0,
+              "system": 385.87,
+              "idle": 4383.54,
+              "iowait": 18.85,
+              "irq": 0,
+              "softirq": 18.57,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 10690497,
+              "processCreated": 90343,
+              "processesRunning": 11
+            },
+            "memoryStat": {
+              "total": 15977660,
+              "free": 1793140,
+              "available": 13481100,
+              "buffers": 446004,
+              "cached": 10755740,
+              "active": 2063268,
+              "inactive": 10788768,
+              "swap": 0,
+              "dirty": 26568,
+              "writeback": 0,
+              "slab": 1149488
+            },
+            "cpuPressure": {
+              "some": {
+                "avg10": 10.61,
+                "avg60": 22.95,
+                "avg300": 27.21,
+                "total": 136620523
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 0
+              }
+            },
+            "memoryPressure": {
+              "some": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 82205
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 67489
+              }
+            },
+            "ioPressure": {
+              "some": {
+                "avg10": 1.61,
+                "avg60": 1.01,
+                "avg300": 1.43,
+                "total": 12472362
+              },
+              "full": {
+                "avg10": 0.71,
+                "avg60": 0.19,
+                "avg300": 0.26,
+                "total": 5625824
+              }
+            }
+          },
+          {
+            "timestamp": "2026-11-04T19:09:46.820368479Z",
+            "cpuStat": {
+              "user": 1013.2,
+              "nice": 0,
+              "system": 388.97,
+              "idle": 4390.25,
+              "iowait": 18.95,
+              "irq": 0,
+              "softirq": 19.23,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 10819517,
+              "processCreated": 90518,
+              "processesRunning": 10
+            },
+            "memoryStat": {
+              "total": 15977660,
+              "free": 1445892,
+              "available": 13262680,
+              "buffers": 455912,
+              "cached": 10858356,
+              "active": 2297656,
+              "inactive": 10901048,
+              "swap": 0,
+              "dirty": 51968,
+              "writeback": 0,
+              "slab": 1168000
+            },
+            "cpuPressure": {
+              "some": {
+                "avg10": 13.04,
+                "avg60": 22.99,
+                "avg300": 27.19,
+                "total": 137028486
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 0
+              }
+            },
+            "memoryPressure": {
+              "some": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 82205
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 67489
+              }
+            },
+            "ioPressure": {
+              "some": {
+                "avg10": 1.68,
+                "avg60": 1.04,
+                "avg300": 1.43,
+                "total": 12487293
+              },
+              "full": {
+                "avg10": 0.76,
+                "avg60": 0.21,
+                "avg300": 0.27,
+                "total": 5637117
+              }
+            }
+          },
+          {
+            "timestamp": "2026-11-04T19:09:48.821053579Z",
+            "cpuStat": {
+              "user": 1017.49,
+              "nice": 0,
+              "system": 392.96,
+              "idle": 4396.74,
+              "iowait": 19.05,
+              "irq": 0,
+              "softirq": 19.82,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 10935817,
+              "processCreated": 90814,
+              "processesRunning": 4
+            },
+            "memoryStat": {
+              "total": 15977660,
+              "free": 1362216,
+              "available": 13517752,
+              "buffers": 477284,
+              "cached": 11146880,
+              "active": 1999480,
+              "inactive": 11108064,
+              "swap": 0,
+              "dirty": 230084,
+              "writeback": 1444,
+              "slab": 1199780
+            },
+            "cpuPressure": {
+              "some": {
+                "avg10": 15.57,
+                "avg60": 23.12,
+                "avg300": 27.19,
+                "total": 137426607
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 0
+              }
+            },
+            "memoryPressure": {
+              "some": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 82205
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 67489
+              }
+            },
+            "ioPressure": {
+              "some": {
+                "avg10": 1.38,
+                "avg60": 1.01,
+                "avg300": 1.42,
+                "total": 12505178
+              },
+              "full": {
+                "avg10": 0.62,
+                "avg60": 0.21,
+                "avg300": 0.26,
+                "total": 5652767
+              }
+            }
+          },
+          {
+            "timestamp": "2026-11-04T19:09:50.196186878Z",
+            "cpuStat": {
+              "user": 1018.49,
+              "nice": 0,
+              "system": 394.77,
+              "idle": 4404.34,
+              "iowait": 19.26,
+              "irq": 0,
+              "softirq": 19.96,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 10962681,
+              "processCreated": 90886,
+              "processesRunning": 2
+            },
+            "memoryStat": {
+              "total": 15977660,
+              "free": 1221800,
+              "available": 13533672,
+              "buffers": 481640,
+              "cached": 11293324,
+              "active": 1993944,
+              "inactive": 11258836,
+              "swap": 0,
+              "dirty": 104176,
+              "writeback": 0,
+              "slab": 1205748
+            },
+            "cpuPressure": {
+              "some": {
+                "avg10": 15.57,
+                "avg60": 23.12,
+                "avg300": 27.19,
+                "total": 137455340
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 0
+              }
+            },
+            "memoryPressure": {
+              "some": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 82205
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 67489
+              }
+            },
+            "ioPressure": {
+              "some": {
+                "avg10": 1.38,
+                "avg60": 1.01,
+                "avg300": 1.42,
+                "total": 12540636
+              },
+              "full": {
+                "avg10": 0.62,
+                "avg60": 0.21,
+                "avg300": 0.26,
+                "total": 5686219
+              }
+            }
+          }
+        ]
+      },
+      "buildkit_completeness": {
+        "request": true,
+        "resolvedDependencies": false
+      }
+    }
+  }
+}

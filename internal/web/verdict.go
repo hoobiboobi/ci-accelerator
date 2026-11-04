@@ -148,6 +148,8 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 		switch {
 		case r.Kind == history.NewStep:
 			what = "this step is new"
+		case strings.HasPrefix(r.Old, "ENV ") && strings.HasPrefix(r.New, "ENV "):
+			what = "its environment changed by an ENV line above it"
 		case r.Old == "":
 			// The previous build did not report the step (its top came
 			// from the cache), and its records hold no step like it.

@@ -19,6 +19,9 @@ import (
 func TestDecideByDiff(t *testing.T) {
 	cross := store.Elsewhere{ID: 1, SHA: "b", PrevSHA: "a", Paths: []string{"api"}, Old: "node-a"}
 	same := store.Elsewhere{ID: 2, SHA: "b", PrevSHA: "a", Paths: []string{"api"}}
+	// The step also builds on a git source fetched at a tag (moby's ADD of
+	// go-winres): no change in the repository leaves it unclear.
+	fetched := store.Elsewhere{ID: 3, SHA: "b", PrevSHA: "a", Paths: []string{"api", "git://github.com/tc-hib/go-winres.git#v0.3.1"}, Old: "node-a"}
 	for _, c := range []struct {
 		name     string
 		e        store.Elsewhere
@@ -32,6 +35,8 @@ func TestDecideByDiff(t *testing.T) {
 		{"no hit, previous build here", same, []string{"docs/x.md"}, true, nil, history.NotInCache},
 		{"incomplete stays unclear", same, nil, false, nil, history.CacheElsewhere},
 		{"error stays unclear", cross, nil, false, errors.New("boom"), history.CacheElsewhere},
+		{"hit with a remote source", fetched, []string{"api/main.go"}, true, nil, history.FilesChanged},
+		{"no hit with a remote source stays unclear", fetched, []string{"docs/x.md"}, true, nil, history.CacheElsewhere},
 	} {
 		got := decideByDiff(c.e, c.changed, c.complete, c.err)
 		if got.Kind != c.kind {
@@ -427,6 +432,17 @@ func TestNoCacheAndRemoteSourceVerdicts(t *testing.T) {
 	rs := verdictFor(b, history.Reason{Kind: history.RemoteSource, Step: step, Paths: []string{"https://example.com/tool.tar.gz?…"}, Old: "bk-a", New: "bk-b"}, "", 3, 0, nil)
 	if rs.Tone != "unknown" || !strings.Contains(string(rs.Detail), "example.com/tool.tar.gz") || !strings.Contains(string(rs.Hint), "--checksum") {
 		t.Errorf("remote source verdict: %+v", rs)
+	}
+}
+
+// An ENV line above a RUN changed: the page says so and shows the two
+// ENV lines, not "this step changed" between two equal texts.
+func TestEnvLineVerdict(t *testing.T) {
+	b := &history.Build{Target: "all"}
+	step := history.Step{Name: "RUN go telemetry off", Line: 65}
+	v := verdictFor(b, history.Reason{Kind: history.StepChanged, Step: step, Old: "ENV CI_ACCELERATOR_CHECK=0.3.3", New: "ENV CI_ACCELERATOR_CHECK=0.5.0"}, "", 3, 0, nil)
+	if !strings.Contains(string(v.Title), "its environment changed") || len(v.Diff) != 2 || v.Diff[1] != "ENV CI_ACCELERATOR_CHECK=0.5.0" {
+		t.Errorf("env verdict: %+v", v)
 	}
 }
 

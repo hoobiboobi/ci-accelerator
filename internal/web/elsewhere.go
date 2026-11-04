@@ -253,6 +253,13 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 	case len(hit) > 0:
 		return store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: clipList(hit, 20), Via: via}
 	case complete && len(e.Paths) > 0:
+		for _, src := range e.Paths {
+			if history.RemotePath(src) {
+				// The repository did not change, but the step also builds
+				// on something fetched from the network: still unclear.
+				return store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: via}
+			}
+		}
 		return store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: via}
 	}
 	return store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: GitLab's comparison was cut short"}
