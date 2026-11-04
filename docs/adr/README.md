@@ -61,3 +61,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0055](0055-renovate.md) | Renovate, self-hosted as a GitHub App, keeps the pins current; the checksums are recomputed from upstream |
 | [0056](0056-build-farm-only-when-proven.md) | "Build farm" only when it is proven: no change in the repository is not no change in the context, witnesses need the same context folder |
 | [0057](0057-builds-from-a-git-context.md) | Builds from a git context: the component's `context-source: git` lets the build node fetch the commit; the console reads the commit as the build context |
+| [0058](0058-cache-mount-hints.md) | Cache-mount hints: steps that install packages without a working cache mount get a ready fragment, with measured figures; read from BuildKit's records |
