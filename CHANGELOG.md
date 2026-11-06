@@ -11,6 +11,11 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Changed
+
+- The ci-accelerator image is built on a newer digest of its distroless base
+  (static-debian13:nonroot). Nothing changes for a user.
+
 ## 0.5.1 - 2026-11-04
 
 ### Upgrade notes
