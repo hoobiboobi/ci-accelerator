@@ -161,6 +161,15 @@ async function page(port, { width = 1400, height = 900 } = {}) {
     await sleep(wait);
     return true;
   };
+  // Polls a page expression until it is true or the time is up; the
+  // result of the last evaluation.
+  s.until = async (expr, ms = 5000) => {
+    for (const end = Date.now() + ms; ;) {
+      if (await s.eval(expr)) return true;
+      if (Date.now() > end) return false;
+      await sleep(100);
+    }
+  };
   s.hover = async sel => {
     const p = await s.at(sel);
     if (!p) return false;
@@ -299,7 +308,9 @@ async function buildPage(s, pages) {
   if (!b) return check("a build with visible steps", false, "none found");
   for (const tab of await s.eval(`[...document.querySelectorAll("[data-tab]")].map(t => t.dataset.tab)`)) {
     await s.click(`[data-tab="${tab}"]`);
-    const ok = await s.eval(`!document.querySelector('[data-pane="${tab}"]').hidden && location.hash === "#${tab}"`);
+    // A large pane (the Dockerfile) may take longer than the click's pause
+    // on a slow runner: wait for it rather than look once.
+    const ok = await s.until(`!document.querySelector('[data-pane="${tab}"]').hidden && location.hash === "#${tab}"`);
     check(`${b} tab ${tab}`, ok);
   }
   await s.click('[data-tab="steps"]');
