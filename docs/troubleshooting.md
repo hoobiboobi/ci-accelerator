@@ -360,7 +360,7 @@ config:
 ```
 
 The filesystem matters too: XFS (dynamic inodes, no root reserve) is the
-tested choice; the README's [Where the cache lives](../README.md#where-the-cache-lives)
+tested choice; [Where the cache lives](install.md#where-the-cache-lives)
 says why and how to prepare the disk.
 
 Keep headroom beyond `maxUsedSpace`. Two reasons:
