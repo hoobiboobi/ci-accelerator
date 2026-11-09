@@ -13,6 +13,8 @@ COPY cmd cmd
 COPY internal internal
 
 FROM src AS test
+# The API test holds the responses to the contract (src stays the image's).
+COPY docs/api docs/api
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go test ./...
 
