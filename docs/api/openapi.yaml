@@ -8,10 +8,11 @@ info:
     its own: with sign-in, only the console's admins reach it; without
     sign-in it is as open as the console's pages (see "Limitations").
 
-    Changes within v1 only add: a new field or a new value may appear, and
-    a client should ignore what it does not know. Removing or renaming
-    anything needs a new version. The project's CI checks this file against
-    the last release's with oasdiff and the responses against this file.
+    Within v1 no field is removed or renamed, no type changes and no
+    parameter gets stricter; new fields and new values may appear, and a
+    client should ignore what it does not know. The project's CI checks
+    this file against the last release's with oasdiff, and the console's
+    responses against this file.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0

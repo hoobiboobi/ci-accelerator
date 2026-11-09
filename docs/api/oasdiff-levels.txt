@@ -1,0 +1,2 @@
+response-optional-property-removed ERR
+response-property-enum-value-added INFO
