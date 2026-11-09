@@ -106,35 +106,56 @@ func TestGitSourceFetchedAgainRanNothing(t *testing.T) {
 	}
 }
 
-// COPY --link is two operations under one key and one line, a copy
-// ("LINK COPY ...") and a merge ("COPY ..."), and a build lists one of
-// them, not always the same: between two dev builds of one base stage
-// several keys changed sides. A step is compared with the previous build's operation
-// of its own kind, never a copy with a merge.
+// restored is a build as the console reads it back from its store: its
+// listed steps and the graph below them, not the whole provenance.
+func restored(t *testing.T, b *Build) *Build {
+	t.Helper()
+	defs := map[string]Def{}
+	for _, d := range b.Defs() {
+		defs[d.Identity] = d
+	}
+	r, err := Restore(Build{Ref: b.Ref, Daemon: b.Daemon, Target: b.Target, Steps: b.Steps, Started: b.Started}, defs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// COPY --link is two operations under one key, a copy onto an empty
+// layer ("LINK COPY ...") and the merge that lays it onto the stage
+// ("COPY ..."), and a build lists one of them, not always the same:
+// between two dev builds of one base stage several keys changed sides. A
+// step is compared with the previous build's operation of its own kind,
+// whether the previous build was just read or comes back from the store.
 func TestCopyLinkComparedWithItsOwnKind(t *testing.T) {
-	prev, cur := loadMoby(t, "0upbxwq1irnwiln0cvj1ojdm2"), loadMoby(t, "o0196ecatampo7br2dh677y5b")
-	idx := stepsByKey(prev, cur)
-	listed := map[string]Step{}
-	for _, s := range prev.Steps {
-		listed[s.Key] = s
-	}
-	swapped := 0
-	for _, s := range cur.Steps {
-		ps, ok := listed[s.Key]
-		if !ok || s.StepID == "" || !strings.Contains(s.Name, "--link") || prev.prov.opKind(ps.StepID) == cur.prov.opKind(s.StepID) {
-			continue
+	cur := loadMoby(t, "o0196ecatampo7br2dh677y5b")
+	full := loadMoby(t, "0upbxwq1irnwiln0cvj1ojdm2")
+	for name, prev := range map[string]*Build{"read": full, "restored": restored(t, full)} {
+		idx := stepsByKey(prev, cur)
+		swapped := map[string]int{}
+		for _, s := range cur.Steps {
+			ps, ok := idx.byKey[s.Key]
+			if !ok || s.StepID == "" || ps.StepID == "" || !strings.Contains(s.Name, "--link") {
+				continue
+			}
+			pk, ck := prev.prov.opKind(ps.StepID), cur.prov.opKind(s.StepID)
+			if pk == ck {
+				continue
+			}
+			swapped[ck]++
+			p, cmp, _ := idx.of(s)
+			if prev.prov.opKind(p.StepID) != cur.prov.opKind(cmp.StepID) {
+				t.Errorf("%s: %s: a %s compared with a %s", name, s.Key, cur.prov.opKind(cmp.StepID), prev.prov.opKind(p.StepID))
+			}
+			if p.Identity != cmp.Identity {
+				t.Errorf("%s: %s: an unchanged line, another identity (%s vs %s)", name, s.Key, p.Name, cmp.Name)
+			}
 		}
-		swapped++
-		p, _ := idx.of(s)
-		if prev.prov.opKind(p.StepID) != cur.prov.opKind(s.StepID) {
-			t.Errorf("%s: %s compared with a %s", s.Key, cur.prov.opKind(s.StepID), prev.prov.opKind(p.StepID))
+		// Both directions: cur lists the copy where the previous build
+		// listed the merge, and the other way round.
+		if swapped["file"] == 0 || swapped["merge"] == 0 {
+			t.Fatalf("%s: keys that changed sides by cur's kind %v: the records no longer show both cases", name, swapped)
 		}
-		if p.Identity != s.Identity {
-			t.Errorf("%s: an unchanged line, another identity (%s vs %s)", s.Key, p.Name, s.Name)
-		}
-	}
-	if swapped == 0 {
-		t.Fatal("no COPY --link step listed as the other operation: the records no longer show the case")
 	}
 }
 
@@ -142,43 +163,50 @@ func TestCopyLinkComparedWithItsOwnKind(t *testing.T) {
 // received from a parallel job, so the first step this build executed is
 // the COPY itself, and the previous build listed its key as the other
 // operation. The reason was "Dockerfile changed: LINK COPY ... -> COPY
-// ..." for a line that did not change.
+// ..." for a line that did not change. Both directions, against the
+// previous build as read and as restored from the store.
 func TestCopyLinkFirstExecutedIsNotAChangedLine(t *testing.T) {
-	prev, cur := loadMoby(t, "0upbxwq1irnwiln0cvj1ojdm2"), loadMoby(t, "o0196ecatampo7br2dh677y5b")
-	listed := map[string]Step{}
-	for _, s := range prev.Steps {
-		listed[s.Key] = s
-	}
-	target := -1
-	for i, s := range cur.Steps {
-		ps, ok := listed[s.Key]
-		if ok && s.StepID != "" && strings.Contains(s.Name, "--link --from=") && prev.prov.opKind(ps.StepID) != cur.prov.opKind(s.StepID) {
-			target = i
-			break
+	cur := loadMoby(t, "o0196ecatampo7br2dh677y5b")
+	full := loadMoby(t, "0upbxwq1irnwiln0cvj1ojdm2")
+	for name, prev := range map[string]*Build{"read": full, "restored": restored(t, full)} {
+		listed := map[string]Step{}
+		for _, s := range prev.Steps {
+			listed[s.Key] = s
 		}
-	}
-	if target < 0 {
-		t.Fatal("every COPY --link --from is listed as the same operation in both builds: the records no longer show the case")
-	}
-	// Everything else came from the cache or the other job; the COPY ran.
-	b := *cur
-	b.Steps = append([]Step(nil), cur.Steps...)
-	for i := range b.Steps {
-		switch {
-		case i == target:
-			b.Steps[i].State = Built
-		case b.Steps[i].State == Built:
-			b.Steps[i].State = Received
+		for _, kind := range []string{"file", "merge"} {
+			target := -1
+			for i, s := range cur.Steps {
+				ps, ok := listed[s.Key]
+				if ok && s.StepID != "" && strings.Contains(s.Name, "--link --from=") && cur.prov.opKind(s.StepID) == kind &&
+					prev.prov.opKind(ps.StepID) != kind {
+					target = i
+					break
+				}
+			}
+			if target < 0 {
+				t.Fatalf("%s: no COPY --link --from listed as a %s here and the other operation before", name, kind)
+			}
+			// Everything else came from the cache or the other job; the COPY ran.
+			b := *cur
+			b.Steps = append([]Step(nil), cur.Steps...)
+			for i := range b.Steps {
+				switch {
+				case i == target:
+					b.Steps[i].State = Built
+				case b.Steps[i].State == Built:
+					b.Steps[i].State = Received
+				}
+			}
+			r, ok := FirstRebuild(prev, &b)
+			if !ok {
+				t.Fatalf("%s, %s: no reason for a build that ran a step", name, kind)
+			}
+			if r.Step.Key != cur.Steps[target].Key {
+				t.Fatalf("%s, %s: first rebuilt step %s, want %s", name, kind, r.Step.Key, cur.Steps[target].Key)
+			}
+			if r.Kind == StepChanged || r.Kind == NewStep {
+				t.Errorf("%s, %s: an unchanged COPY --link line reads as changed: %s %q -> %q", name, kind, r.Kind, r.Old, r.New)
+			}
 		}
-	}
-	r, ok := FirstRebuild(prev, &b)
-	if !ok {
-		t.Fatal("no reason for a build that ran a step")
-	}
-	if r.Step.Key != cur.Steps[target].Key {
-		t.Fatalf("first rebuilt step %s, want %s", r.Step.Key, cur.Steps[target].Key)
-	}
-	if r.Kind == StepChanged || r.Kind == NewStep {
-		t.Fatalf("an unchanged COPY --link line reads as changed: %s %q -> %q", r.Kind, r.Old, r.New)
 	}
 }

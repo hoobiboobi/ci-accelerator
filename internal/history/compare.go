@@ -106,7 +106,7 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				continue
 			}
 			old := ""
-			if p, ok := prevSteps.of(s); ok && p.StepID != "" {
+			if p, _, ok := prevSteps.of(s); ok && p.StepID != "" {
 				old = prev.prov.imageSource(p.StepID)
 			} else {
 				// Not reported (below a cache hit): the image the previous
@@ -130,7 +130,7 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		if cur.noCacheFor(s.Key) {
 			return Reason{Kind: NoCache, Step: s}, true
 		}
-		p, ok := prevSteps.of(s)
+		p, cmp, ok := prevSteps.of(s)
 		if !ok || p.StepID == "" {
 			// A build whose last steps came from the cache reports only
 			// those: BuildKit never loads the steps below a cache hit. Its
@@ -162,7 +162,14 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 			}
 			p = Step{Identity: s.Identity}
 		}
-		if p.Identity == s.Identity {
+		if p.Identity == cmp.Identity {
+			if cmp.StepID != s.StepID {
+				// The layer did not change: the merge ran because the stage
+				// under it did, or for want of cache.
+				if r, ok := changedAncestor(prev, cur, s, prevSteps); ok {
+					return r, true
+				}
+			}
 			crossDaemon := prev.Daemon != "" && cur.Daemon != "" && prev.Daemon != cur.Daemon
 			sameGitContext := cur.ContextCommit != "" && prev.ContextCommit == cur.ContextCommit && !cur.prov.localDependent(s.StepID)
 			fromContext := cur.prov.contextDependent(s.StepID) && !sameGitContext
@@ -206,9 +213,9 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 			}
 			return Reason{Kind: NotInCache, Step: s}, true
 		}
-		oldOp, newOp := prev.prov.Steps[p.StepID].Op, cur.prov.Steps[s.StepID].Op
+		oldOp, newOp := prev.prov.Steps[p.StepID].Op, cur.prov.Steps[cmp.StepID].Op
 		if !bytes.Equal(oldOp, newOp) {
-			if args, o, n, ok := argChange(prev, cur, p.StepID, s.StepID); ok {
+			if args, o, n, ok := argChange(prev, cur, p.StepID, cmp.StepID); ok {
 				if len(args) > 1 {
 					// Several arguments: their names, not their values.
 					return Reason{Kind: ArgChanged, Step: s, Arg: strings.Join(args, ", ")}, true
@@ -218,16 +225,16 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				}
 				return Reason{Kind: ArgChanged, Step: s, Arg: args[0], Old: o, New: n}, true
 			}
-			if k, o, n, ok := argInText(prev, cur, p.Name, s.Name); ok && sameCommand(prev.prov, cur.prov, p.StepID, s.StepID) {
+			if k, o, n, ok := argInText(prev, cur, p.Name, cmp.Name); ok && sameCommand(prev.prov, cur.prov, p.StepID, cmp.StepID) {
 				if SecretArg(k) {
 					o, n = Masked, Masked
 				}
 				return Reason{Kind: ArgChanged, Step: s, Arg: k, Old: o, New: n}, true
 			}
-			if o, n, ok := envChange(prev, cur, p, s); ok {
+			if o, n, ok := envChange(prev, cur, p, cmp); ok {
 				return Reason{Kind: StepChanged, Step: s, Old: o, New: n}, true
 			}
-			return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: s.Name}, true
+			return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: cmp.Name}, true
 		}
 		// Same operation, different inputs: a step it builds on changed, but
 		// came from the cache or another job (a stage shared by parallel
@@ -236,19 +243,23 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		if r, ok := changedAncestor(prev, cur, s, prevSteps); ok {
 			return r, true
 		}
-		return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: s.Name}, true
+		return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: cmp.Name}, true
 	}
 	return Reason{}, false
 }
 
 // prevIndex finds the previous build's step for each of cur's steps, by
-// key. COPY --link is two operations under one key and one Dockerfile
-// line: a copy onto an empty layer ("LINK COPY ...") and the merge that
-// lays it onto the stage ("COPY ..."). A build lists one of the two, not
-// always the same one, so the step the previous build listed may be the
-// other operation; its pair (same line, same kind of operation as cur's)
-// is then taken from the previous build's provenance. A copy compared
-// with a merge reads as a changed line ("LINK COPY ... -> COPY ...").
+// key. COPY --link is two operations under one key: a copy onto an empty
+// layer ("LINK COPY ...") and the merge that lays that layer onto the stage
+// ("COPY ..."), the layer being the merge's last input. A build lists one
+// of the two, not always the same one, and a copy compared with a merge
+// reads as a changed line ("LINK COPY ... -> COPY ..."). The graph decides
+// instead of the text, and works on a build restored from the store, whose
+// graph holds the steps it listed and what they build on:
+//   - cur lists the copy, the previous build the merge: the merge's layer
+//     is the previous copy;
+//   - cur lists the merge, the previous build the copy: cur's layer is
+//     compared with it (the previous merge is not in its graph).
 type prevIndex struct {
 	prev, cur *Build
 	byKey     map[string]Step
@@ -264,50 +275,42 @@ func stepsByKey(prev, cur *Build) prevIndex {
 	return m
 }
 
-// of returns the previous build's step for cur's step s.
-func (m prevIndex) of(s Step) (Step, bool) {
-	p, ok := m.byKey[s.Key]
+// of returns the previous build's step p for cur's step s, and the step of
+// cur to compare it with: s itself, or s's layer when s is a COPY --link
+// merge and p its copy.
+func (m prevIndex) of(s Step) (p, cmp Step, ok bool) {
+	p, ok = m.byKey[s.Key]
 	if !ok || p.StepID == "" || s.StepID == "" || m.prev.prov == nil || m.cur.prov == nil {
-		return p, ok
+		return p, s, ok
 	}
-	want := m.cur.prov.opKind(s.StepID)
-	if want == "" || m.prev.prov.opKind(p.StepID) == want {
-		return p, ok
+	cur, prev := m.cur.prov.opKind(s.StepID), m.prev.prov.opKind(p.StepID)
+	switch {
+	case cur == "file" && prev == "merge":
+		if l, found := m.prev.layer(p); found {
+			return l, s, true
+		}
+	case cur == "merge" && prev == "file":
+		if l, found := m.cur.layer(s); found {
+			return p, l, true
+		}
 	}
-	if pair, found := m.prev.pairOf(p, want); found {
-		return pair, true
-	}
-	return p, ok
+	return p, s, ok
 }
 
-// pairOf returns the other operation of a COPY --link step: the one step
-// of the provenance on p's Dockerfile line whose operation is of the kind
-// asked for.
-func (b *Build) pairOf(p Step, kind string) (Step, bool) {
-	line, ok := b.prov.Lines[p.StepID]
-	if !ok {
+// layer returns the copy of a COPY --link merge step: its last input, when
+// that is a file operation, under the merge's key and line.
+func (b *Build) layer(merge Step) (Step, bool) {
+	in := b.prov.Steps[merge.StepID].Inputs
+	if len(in) == 0 || b.prov.opKind(in[len(in)-1]) != "file" {
 		return Step{}, false
 	}
-	var found []string
-	for id := range b.prov.Steps {
-		if id != p.StepID && b.prov.Lines[id] == line && b.prov.opKind(id) == kind {
-			found = append(found, id)
-		}
+	l := merge
+	l.StepID = in[len(in)-1]
+	l.Identity = b.prov.Identity[l.StepID]
+	if !strings.HasPrefix(l.Name, "LINK ") {
+		l.Name = "LINK " + l.Name
 	}
-	if len(found) != 1 {
-		return Step{}, false
-	}
-	pair := p
-	pair.StepID, pair.Identity = found[0], b.prov.Identity[found[0]]
-	switch kind {
-	case "file":
-		if !strings.HasPrefix(pair.Name, "LINK ") {
-			pair.Name = "LINK " + pair.Name
-		}
-	case "merge":
-		pair.Name = strings.TrimPrefix(pair.Name, "LINK ")
-	}
-	return pair, true
+	return l, true
 }
 
 // changedAncestor explains a rebuilt step whose own operation did not
@@ -323,8 +326,9 @@ func changedAncestor(prev, cur *Build, s Step, prevSteps prevIndex) (Reason, boo
 		if a.StepID == "" || a.StepID == s.StepID || !cone[a.StepID] || prev.prov.has(a.Identity) {
 			continue
 		}
-		pa, ok := prevSteps.of(a)
-		if !ok || pa.StepID == "" {
+		pa, ca, ok := prevSteps.of(a)
+		if !ok || pa.StepID == "" || (ca.StepID != a.StepID && pa.Identity == ca.Identity) {
+			// Not listed before, or a COPY --link whose layer is the same.
 			continue
 		}
 		if img := cur.prov.imageSource(a.StepID); img != "" {
@@ -333,8 +337,8 @@ func changedAncestor(prev, cur *Build, s Step, prevSteps prevIndex) (Reason, boo
 			}
 			continue
 		}
-		if !bytes.Equal(prev.prov.Steps[pa.StepID].Op, cur.prov.Steps[a.StepID].Op) {
-			if args, o, n, ok := argChange(prev, cur, pa.StepID, a.StepID); ok {
+		if !bytes.Equal(prev.prov.Steps[pa.StepID].Op, cur.prov.Steps[ca.StepID].Op) {
+			if args, o, n, ok := argChange(prev, cur, pa.StepID, ca.StepID); ok {
 				if len(args) > 1 {
 					return Reason{Kind: ArgChanged, Step: s, Arg: strings.Join(args, ", ")}, true
 				}
@@ -343,16 +347,16 @@ func changedAncestor(prev, cur *Build, s Step, prevSteps prevIndex) (Reason, boo
 				}
 				return Reason{Kind: ArgChanged, Step: s, Arg: args[0], Old: o, New: n}, true
 			}
-			if k, o, n, ok := argInText(prev, cur, pa.Name, a.Name); ok && sameCommand(prev.prov, cur.prov, pa.StepID, a.StepID) {
+			if k, o, n, ok := argInText(prev, cur, pa.Name, ca.Name); ok && sameCommand(prev.prov, cur.prov, pa.StepID, ca.StepID) {
 				if SecretArg(k) {
 					o, n = Masked, Masked
 				}
 				return Reason{Kind: ArgChanged, Step: s, Arg: k, Old: o, New: n}, true
 			}
-			if o, n, ok := envChange(prev, cur, pa, a); ok {
+			if o, n, ok := envChange(prev, cur, pa, ca); ok {
 				return Reason{Kind: StepChanged, Step: s, Old: o, New: n}, true
 			}
-			return Reason{Kind: StepChanged, Step: s, Old: pa.Name, New: a.Name}, true
+			return Reason{Kind: StepChanged, Step: s, Old: pa.Name, New: ca.Name}, true
 		}
 	}
 	return Reason{}, false
