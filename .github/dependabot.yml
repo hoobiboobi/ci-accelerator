@@ -1,0 +1,86 @@
+# Dependabot here only raises security updates (version updates come from
+# Renovate: renovate.json5). Every entry sets open-pull-requests-limit 0,
+# which turns version updates off for its ecosystem, and exists to keep
+# test/hints/cases out of the scan: those are test fixtures, one small
+# project per package manager, pinned on purpose (internal/hints/testdata
+# was recorded from exactly these files) and built only by
+# test/hints/managers.sh, never shipped.
+version: 2
+updates:
+  - package-ecosystem: "bun"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "bundler"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "cargo"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "composer"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "gomod"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "gradle"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "maven"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "npm"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "nuget"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "pip"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
+  - package-ecosystem: "pub"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    exclude-paths:
+      - "test/hints/cases/**"
