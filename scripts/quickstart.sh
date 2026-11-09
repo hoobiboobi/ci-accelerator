@@ -461,7 +461,7 @@ and from your computer:
 then open http://localhost:8080
 
 $gitlab_note
-For sign-in through GitLab, follow "The console" in the README; the values
+For sign-in through GitLab, see https://ci-accelerator.io/docs/console/; the values
 are in $STATE/values.yaml, apply changes with
   sudo KUBECONFIG=$KUBECONFIG $HELM upgrade $REL $CHARTS/ci-accelerator --version $VERSION -n $NS -f $STATE/values.yaml --wait --timeout 15m
 To upgrade to a later release, run that release's quickstart.sh: see

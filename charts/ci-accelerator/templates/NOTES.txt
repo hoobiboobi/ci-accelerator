@@ -93,8 +93,8 @@ whoever reaches it, so keep it inside the cluster:
 {{- $cu := trimSuffix "/" (dig "console" "url" "" (default (dict) .Values.global)) }}
 {{- if not (dig "gitlab" "token" "existingSecret" "" $cp) }}
 Without GitLab access it shows image builds, their steps and cache
-verdicts, but no job results or runner waits. More (README, "Setting up
-the console"):
+verdicts, but no job results or runner waits. More (docs/console.md,
+"Setting up the console"):
   - a GitLab token with read_api (control-plane.gitlab.token.existingSecret):
     job results, runner waits, "files or node" by comparing commits;
   - sign-in through GitLab (control-plane.signIn): each person sees the
@@ -103,7 +103,7 @@ the console"):
 {{- else }}
 With its GitLab token it also shows job results and runner waits and
 settles "files or node" by comparing commits. Sign-in through GitLab
-(control-plane.signIn; README, "Setting up the console") would show each
+(control-plane.signIn; docs/console.md, "Setting up the console") would show each
 person only the projects GitLab lets them read; its redirect URI would be
   {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
 {{- end }}
@@ -114,7 +114,7 @@ person only the projects GitLab lets them read; its redirect URI would be
 
 The build cache is an emptyDir on each build node's root disk: every rollout
 starts with an empty cache. For production, point the daemons at a dedicated
-disk (buildkit.storage.type=hostPath; README, "Where the cache lives").
+disk (buildkit.storage.type=hostPath; docs/install.md, "Where the cache lives").
 {{- end }}
 
 Builds share the daemons' cache: a build's RUN steps can read and write what

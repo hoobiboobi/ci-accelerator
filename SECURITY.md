@@ -55,7 +55,7 @@ What the design relies on, so that a way around it is a vulnerability:
 
 Out of scope: BuildKit, cert-manager, the GitLab runner and Kubernetes
 themselves (report to their projects), and the deliberate limits listed
-under *Limitations* in the [README](README.md): a build daemon is one trust
+in [docs/limitations.md](docs/limitations.md): a build daemon is one trust
 domain (builds share its cache mounts), RUN steps share its network
 identity, any certificate from the installation's CA reaches the daemons,
 the disk probe's numbers are readable by builds, and the console without

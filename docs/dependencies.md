@@ -89,8 +89,8 @@ before committing: the old version it replaces elsewhere is the one `HEAD`
 has. For BuildKit it also writes the CI component's integrity and adds the
 previous default digest to the chart's list of earlier defaults (or name
 it: `buildkit sha256:<previous default digest>`). Prose that names a
-version (the README's "What gets installed", the troubleshooting guide's
-upstream issues) stays for the reviewer: the pull request says so.
+version (the README's and docs/install.md's "What gets installed", the
+troubleshooting guide's upstream issues) stays for the reviewer: the pull request says so.
 
 ## Checking the setup
 

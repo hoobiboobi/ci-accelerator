@@ -62,7 +62,7 @@ tests:
       - notMatchRegexRaw:
           pattern: 'preview'
       - matchRegexRaw:
-          pattern: 'Without GitLab access it shows image builds, their steps and cache\nverdicts, but no job results or runner waits\. More \(README, "Setting up\nthe console"\):\n  - a GitLab token with read_api \(control-plane\.gitlab\.token\.existingSecret\):'
+          pattern: 'Without GitLab access it shows image builds, their steps and cache\nverdicts, but no job results or runner waits\. More \(docs/console\.md,\n"Setting up the console"\):\n  - a GitLab token with read_api \(control-plane\.gitlab\.token\.existingSecret\):'
       # Without global.console.url the redirect URI shows where the address goes.
       - matchRegexRaw:
           pattern: '      <global\.console\.url>/auth/callback/051b90\n'
@@ -116,7 +116,7 @@ tests:
   - it: says where the cache lives while it is an emptyDir
     asserts:
       - matchRegexRaw:
-          pattern: 'The build cache is an emptyDir on each build node.s root disk: every rollout\nstarts with an empty cache\. For production, point the daemons at a dedicated\ndisk \(buildkit\.storage\.type=hostPath; README, "Where the cache lives"\)\.'
+          pattern: 'The build cache is an emptyDir on each build node.s root disk: every rollout\nstarts with an empty cache\. For production, point the daemons at a dedicated\ndisk \(buildkit\.storage\.type=hostPath; docs/install\.md, "Where the cache lives"\)\.'
 
   - it: is quiet about the cache on a dedicated disk
     set:

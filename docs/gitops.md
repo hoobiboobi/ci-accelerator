@@ -336,8 +336,8 @@ daemons directly: leave out `--router` and admit the jobs namespace in
   annotate it `helm.sh/resource-policy=keep` first (the chart refuses the
   change until then).
 - An upgrade that changes the daemons' pod template rolls the DaemonSet one
-  node at a time; `emptyDir` caches are lost then (README, "Where the
-  cache lives"). A chart release that changes nothing in that template
+  node at a time; `emptyDir` caches are lost then ([where the
+  cache lives](install.md#where-the-cache-lives)). A chart release that changes nothing in that template
   restarts no daemon.
 - The daemons read their certificate only at start. The DaemonSet carries
   Stakater Reloader's annotation (`buildkit.tls.reloader`), so with
