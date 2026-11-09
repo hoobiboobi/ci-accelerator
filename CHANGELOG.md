@@ -15,6 +15,8 @@ None.
 
 - The ci-accelerator image is built on a newer digest of its distroless base
   (static-debian13:nonroot). Nothing changes for a user.
+- CI: actions/upload-artifact v7.0.2 (retries when the artifact service
+  rate-limits). Nothing changes for a user.
 
 ### Security
 
