@@ -62,3 +62,5 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0056](0056-build-farm-only-when-proven.md) | "Build farm" only when it is proven: no change in the repository is not no change in the context, witnesses need the same context folder |
 | [0057](0057-builds-from-a-git-context.md) | Builds from a git context: the component's `context-source: git` lets the build node fetch the commit; the console reads the commit as the build context |
 | [0058](0058-cache-mount-hints.md) | Cache-mount hints: steps that install packages without a working cache mount get a ready fragment, with measured figures; read from BuildKit's records |
+| [0059](0059-api-contract.md) | An OpenAPI contract for the console API: written by hand, the responses checked against it, breaking changes against the last release's caught by oasdiff |
+| [0060](0060-sbom.md) | An SBOM on the ci-accelerator image: SPDX per platform from BuildKit, checked before the release signs |
