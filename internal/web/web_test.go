@@ -214,8 +214,6 @@ var (
 	styleAttr = regexp.MustCompile(`\sstyle="([^"]*)"`)
 	safeStyle = regexp.MustCompile(`^((left|right|width|height|top|flex): -?[0-9]+(\.[0-9]+)?(%|px)?(; )?)+$`)
 	handlers  = regexp.MustCompile(`(?i)<[^>]*\son[a-z]+\s*=`)
-	// A step's span in the steps table: "1.1 s–2.3 s after start".
-	stepSpan = regexp.MustCompile(`· ([^<·–]+)–([^<·–]+) after start`)
 	// Attribute values: quotes inside them are escaped, so this is exact.
 	quoted = regexp.MustCompile(`"[^"]*"`)
 	links  = regexp.MustCompile(`href="(/[^"#?]*)`)

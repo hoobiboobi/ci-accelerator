@@ -62,13 +62,6 @@ func sameImage(targetA string, imagesA []string, targetB string, imagesB []strin
 	return store.SameImage(targetA, imagesA, targetB, imagesB)
 }
 
-func firstRepository(images []string) string {
-	if rs := history.Repositories(images); len(rs) > 0 {
-		return rs[0]
-	}
-	return ""
-}
-
 // imageNames is imageName for a project's targets; without the names (an
 // older controller) the targets name themselves.
 func (s *Server) imageNames(ctx context.Context, p store.ProjectKey, since time.Time) map[string][]string {

@@ -113,7 +113,7 @@ func expires(r types.LifecycleRule, prefix string) bool {
 		return false
 	}
 	// A rule has either a filter or (older rules) a prefix of its own.
-	rulePrefix := aws.ToString(r.Prefix)
+	rulePrefix := aws.ToString(r.Prefix) //nolint:staticcheck // deprecated in the API, still what older rules carry
 	if f := r.Filter; f != nil {
 		if f.Tag != nil || f.ObjectSizeGreaterThan != nil || f.ObjectSizeLessThan != nil {
 			return false

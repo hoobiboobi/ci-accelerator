@@ -68,16 +68,11 @@ func (s *Store) Previous(ctx context.Context, b *history.Build) (prev *Stored, k
 	return prev, true, err
 }
 
-// imageKey tells a project's images apart: the target, or for a build of a
-// Dockerfile's last stage (no target) the repository it pushed to first, so
-// that two Dockerfiles without targets (services/api, services/worker) are
-// not compared with each other; "" for a build that pushed nothing.
-func imageKey(b *history.Build) string {
-	return ImageKey(b.Target, b.Images)
-}
-
-// ImageKey is imageKey of a build's target and images, for the figures
-// that are each image's own (usual times).
+// ImageKey tells a project's images apart, for the figures that are each
+// image's own (usual times): the target, or for a build of a Dockerfile's
+// last stage (no target) the repository it pushed to first, so that two
+// Dockerfiles without targets (services/api, services/worker) are not
+// compared with each other; "" for a build that pushed nothing.
 func ImageKey(target string, images []string) string {
 	if target != "" {
 		return target

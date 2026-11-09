@@ -19,7 +19,6 @@ github-actions	.github/workflows/quickstart.yml	actions/cache	digest
 github-actions	.github/workflows/quickstart.yml	actions/checkout	digest
 github-actions	.github/workflows/quickstart.yml	actions/upload-artifact	digest
 github-actions	.github/workflows/quickstart.yml	ubuntu	-
-github-actions	.github/workflows/release.yml	actions/cache	digest
 github-actions	.github/workflows/release.yml	actions/checkout	digest
 github-actions	.github/workflows/release.yml	sigstore/cosign	-
 github-actions	.github/workflows/release.yml	sigstore/cosign-installer	digest
@@ -39,9 +38,11 @@ regex	.github/workflows/release.yml	helm/helm	-
 regex	.github/workflows/renovate.yml	ghcr.io/renovatebot/renovate	digest
 regex	Makefile	aquasecurity/trivy	-
 regex	Makefile	ghcr.io/renovatebot/renovate	digest
+regex	Makefile	ghcr.io/zizmorcore/zizmor	digest
 regex	Makefile	gitlab-runner	-
 regex	Makefile	go	-
 regex	Makefile	golang.org/x/vuln	-
+regex	Makefile	golangci/golangci-lint	-
 regex	Makefile	helm-unittest/helm-unittest	-
 regex	Makefile	helm/helm	-
 regex	Makefile	koalaman/shellcheck	-
@@ -49,7 +50,9 @@ regex	Makefile	kubernetes-sigs/kind	-
 regex	Makefile	kubernetes/kubernetes	-
 regex	Makefile	node	-
 regex	Makefile	norwoodj/helm-docs	-
+regex	Makefile	oasdiff/oasdiff	-
 regex	Makefile	oras-project/oras	-
+regex	Makefile	rhysd/actionlint	-
 regex	Makefile	yannh/kubeconform	-
 regex	charts/buildkit/Chart.yaml	moby/buildkit	-
 regex	charts/buildkit/values.yaml	moby/buildkit	digest

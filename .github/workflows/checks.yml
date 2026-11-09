@@ -86,6 +86,9 @@ jobs:
       - name: gofmt, go vet, go test
         run: make go-test
 
+      - name: golangci-lint
+        run: make go-lint
+
       - name: govulncheck, both release targets
         run: make vulncheck
 

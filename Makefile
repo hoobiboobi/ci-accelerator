@@ -79,6 +79,14 @@ HELM_DOCS_VERSION := 1.14.2
 # installed with Go like helm-docs.
 # renovate: datasource=github-releases depName=oasdiff/oasdiff extractVersion=^v(?<version>.+)$
 OASDIFF_VERSION := 1.34.1
+# Linters (make go-lint, make workflows-lint): golangci-lint and actionlint
+# installed with Go, zizmor from its image.
+# renovate: datasource=github-releases depName=golangci/golangci-lint extractVersion=^v(?<version>.+)$
+GOLANGCI_LINT_VERSION := 2.15.0
+# renovate: datasource=github-releases depName=rhysd/actionlint extractVersion=^v(?<version>.+)$
+ACTIONLINT_VERSION := 1.7.12
+# renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
+ZIZMOR_IMAGE := ghcr.io/zizmorcore/zizmor:1.31.1@sha256:42d409dbb851d4c5d35a058cf042b828bea1e3f2884378c526eb0974780e18d9
 # renovate: datasource=github-releases depName=oras-project/oras extractVersion=^v(?<version>.+)$
 ORAS_VERSION := 1.3.4
 ORAS_SHA256_linux_amd64  := f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454
@@ -185,6 +193,8 @@ GOVULNCHECK := $(TOOLS)/govulncheck-$(GOVULNCHECK_VERSION)/govulncheck
 TRIVY       := $(TOOLS)/trivy-$(TRIVY_VERSION)/trivy
 HELM_DOCS   := $(TOOLS)/helm-docs-$(HELM_DOCS_VERSION)/helm-docs
 OASDIFF     := $(TOOLS)/oasdiff-$(OASDIFF_VERSION)/oasdiff
+GOLANGCI_LINT := $(TOOLS)/golangci-lint-$(GOLANGCI_LINT_VERSION)/golangci-lint
+ACTIONLINT  := $(TOOLS)/actionlint-$(ACTIONLINT_VERSION)/actionlint
 ORAS        := $(TOOLS)/oras-$(ORAS_VERSION)/oras
 
 $(HELM_DOCS):
@@ -194,6 +204,14 @@ $(HELM_DOCS):
 $(OASDIFF):
 	@mkdir -p $(dir $@)
 	GOBIN=$(dir $@) $(GO_RUN) install github.com/oasdiff/oasdiff@v$(OASDIFF_VERSION)
+
+$(GOLANGCI_LINT):
+	@mkdir -p $(dir $@)
+	GOBIN=$(dir $@) $(GO_RUN) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_VERSION)
+
+$(ACTIONLINT):
+	@mkdir -p $(dir $@)
+	GOBIN=$(dir $@) $(GO_RUN) install github.com/rhysd/actionlint/cmd/actionlint@v$(ACTIONLINT_VERSION)
 
 $(ORAS):
 	$(call fetch,https://github.com/oras-project/oras/releases/download/v$(ORAS_VERSION)/oras_$(ORAS_VERSION)_$(OS)_$(ARCH).tar.gz,$(TOOLS)/dl/oras-$(ORAS_VERSION).tgz,$(ORAS_SHA256_$(OS)_$(ARCH)))
@@ -302,7 +320,7 @@ deps: $(RUNNER_CHART) ## Vendor the umbrella chart's dependencies into charts/ci
 	@cp $(RUNNER_CHART) $(UMBRELLA)/charts/
 
 .PHONY: lint
-lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and example values), chart LICENSE copies, READMEs up to date, the release check, shellcheck
+lint: $(SHELLCHECK) deps chart-docs-check workflows-lint ## helm lint --strict (default and example values), chart LICENSE copies, READMEs up to date, the release check, shellcheck
 	@for c in $(CHARTS); do \
 		echo "==> lint $$c"; \
 		cmp -s LICENSE $$c/LICENSE || { echo "$$c/LICENSE differs from LICENSE (the packaged chart must carry the license text)"; exit 1; }; \
@@ -389,6 +407,15 @@ go-test: ## Go: gofmt, go vet and the tests with the race detector (the pages tw
 	@WEB_TEST_SPLIT=1 $(GO_RUN) test -count=1 ./internal/web/
 
 .PHONY: quick
+.PHONY: go-lint
+go-lint: $(GOLANGCI_LINT) ## golangci-lint over the Go code (.golangci.yml: govet, staticcheck, unused, ineffassign)
+	@GOTOOLCHAIN=go$(GO_VERSION) $(GOLANGCI_LINT) run --timeout 10m ./...
+
+.PHONY: workflows-lint
+workflows-lint: $(ACTIONLINT) ## The GitHub Actions workflows: actionlint (correctness) and zizmor (security, medium and above; needs docker)
+	@$(ACTIONLINT) -color=false
+	@docker run --rm -v "$(CURDIR)":/repo:ro -w /repo $(ZIZMOR_IMAGE) --offline --no-progress --min-severity medium .github/workflows
+
 .PHONY: api-check
 api-check: $(OASDIFF) ## The console API's contract (docs/api/openapi.yaml): no breaking change against the newest release that has one
 	@scripts/api-check.sh $(OASDIFF)
@@ -401,7 +428,7 @@ pins-check: ## Every pinned checksum against where its project publishes it (net
 renovate-check: ## Renovate's view of the tree (docker): the configs are valid, every pin is found (test/renovate-deps.txt)
 	@test/renovate-check.sh $(RENOVATE_IMAGE)
 
-quick: lint unittest go-test ## The checks to run before every push (validate, e2e and the browser checks run in CI)
+quick: lint unittest go-test go-lint ## The checks to run before every push (validate, e2e and the browser checks run in CI)
 
 .PHONY: validate
 validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (our charts, gitlab-runner + fragment) against Kubernetes schemas
