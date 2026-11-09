@@ -94,12 +94,7 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 	if cur.prov == nil || !rebuiltAny(cur) {
 		return Reason{}, false
 	}
-	prevSteps := map[string]Step{}
-	if prev != nil {
-		for _, s := range prev.Steps {
-			prevSteps[s.Key] = s
-		}
-	}
+	prevSteps := stepsByKey(prev, cur)
 	for _, s := range cur.Steps {
 		if s.State != Built || s.StepID == "" {
 			continue
@@ -111,7 +106,7 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				continue
 			}
 			old := ""
-			if p, ok := prevSteps[s.Key]; ok && p.StepID != "" {
+			if p, ok := prevSteps.of(s); ok && p.StepID != "" {
 				old = prev.prov.imageSource(p.StepID)
 			} else {
 				// Not reported (below a cache hit): the image the previous
@@ -135,7 +130,7 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		if cur.noCacheFor(s.Key) {
 			return Reason{Kind: NoCache, Step: s}, true
 		}
-		p, ok := prevSteps[s.Key]
+		p, ok := prevSteps.of(s)
 		if !ok || p.StepID == "" {
 			// A build whose last steps came from the cache reports only
 			// those: BuildKit never loads the steps below a cache hit. Its
@@ -246,20 +241,89 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 	return Reason{}, false
 }
 
+// prevIndex finds the previous build's step for each of cur's steps, by
+// key. COPY --link is two operations under one key and one Dockerfile
+// line: a copy onto an empty layer ("LINK COPY ...") and the merge that
+// lays it onto the stage ("COPY ..."). A build lists one of the two, not
+// always the same one, so the step the previous build listed may be the
+// other operation; its pair (same line, same kind of operation as cur's)
+// is then taken from the previous build's provenance. A copy compared
+// with a merge reads as a changed line ("LINK COPY ... -> COPY ...").
+type prevIndex struct {
+	prev, cur *Build
+	byKey     map[string]Step
+}
+
+func stepsByKey(prev, cur *Build) prevIndex {
+	m := prevIndex{prev: prev, cur: cur, byKey: map[string]Step{}}
+	if prev != nil {
+		for _, s := range prev.Steps {
+			m.byKey[s.Key] = s
+		}
+	}
+	return m
+}
+
+// of returns the previous build's step for cur's step s.
+func (m prevIndex) of(s Step) (Step, bool) {
+	p, ok := m.byKey[s.Key]
+	if !ok || p.StepID == "" || s.StepID == "" || m.prev.prov == nil || m.cur.prov == nil {
+		return p, ok
+	}
+	want := m.cur.prov.opKind(s.StepID)
+	if want == "" || m.prev.prov.opKind(p.StepID) == want {
+		return p, ok
+	}
+	if pair, found := m.prev.pairOf(p, want); found {
+		return pair, true
+	}
+	return p, ok
+}
+
+// pairOf returns the other operation of a COPY --link step: the one step
+// of the provenance on p's Dockerfile line whose operation is of the kind
+// asked for.
+func (b *Build) pairOf(p Step, kind string) (Step, bool) {
+	line, ok := b.prov.Lines[p.StepID]
+	if !ok {
+		return Step{}, false
+	}
+	var found []string
+	for id := range b.prov.Steps {
+		if id != p.StepID && b.prov.Lines[id] == line && b.prov.opKind(id) == kind {
+			found = append(found, id)
+		}
+	}
+	if len(found) != 1 {
+		return Step{}, false
+	}
+	pair := p
+	pair.StepID, pair.Identity = found[0], b.prov.Identity[found[0]]
+	switch kind {
+	case "file":
+		if !strings.HasPrefix(pair.Name, "LINK ") {
+			pair.Name = "LINK " + pair.Name
+		}
+	case "merge":
+		pair.Name = strings.TrimPrefix(pair.Name, "LINK ")
+	}
+	return pair, true
+}
+
 // changedAncestor explains a rebuilt step whose own operation did not
 // change by the earliest step it builds on (in the Dockerfile's order)
 // that the previous build did not have and that was not executed here:
 // received from another job or found in the cache. Its change is the
 // reason, s stays the step named. ok is false when no such step explains
 // it.
-func changedAncestor(prev, cur *Build, s Step, prevSteps map[string]Step) (Reason, bool) {
+func changedAncestor(prev, cur *Build, s Step, prevSteps prevIndex) (Reason, bool) {
 	cone := map[string]bool{}
 	cur.prov.walkCone(s.StepID, cone, map[string]bool{})
 	for _, a := range cur.Steps {
 		if a.StepID == "" || a.StepID == s.StepID || !cone[a.StepID] || prev.prov.has(a.Identity) {
 			continue
 		}
-		pa, ok := prevSteps[a.Key]
+		pa, ok := prevSteps.of(a)
 		if !ok || pa.StepID == "" {
 			continue
 		}
@@ -463,12 +527,28 @@ func (b *Build) complete() bool {
 // an image (which happens in every build): only then is there a rebuild to
 // explain.
 func rebuiltAny(b *Build) bool {
-	for _, s := range b.Steps {
-		if s.State == Built && s.StepID != "" && b.prov.imageSource(s.StepID) == "" {
+	for i, s := range b.Steps {
+		if s.StepID != "" && b.Ran(i) {
 			return true
 		}
 	}
 	return false
+}
+
+// Ran reports whether the build executed step i itself. A base image and
+// a git or HTTP source are resolved again in every build and show as run
+// even when nothing was built (the steps that use them come from the
+// cache), so they do not count. Without provenance only a FROM line is
+// told apart, by its text.
+func (b *Build) Ran(i int) bool {
+	s := b.Steps[i]
+	if s.State != Built {
+		return false
+	}
+	if b.prov != nil && s.StepID != "" {
+		return b.prov.imageSource(s.StepID) == "" && !b.prov.fetchSource(s.StepID)
+	}
+	return !strings.HasPrefix(s.Name, "FROM ")
 }
 
 // argChange reports a change that is only in environment variables set by

@@ -175,8 +175,8 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 	}
 	paths, _ := json.Marshal(nonNil(r.Paths))
 	var built int64
-	for _, st := range b.Steps {
-		if st.State == history.Built && !strings.HasPrefix(st.Name, "FROM ") {
+	for i := range b.Steps {
+		if b.Ran(i) {
 			built++
 		}
 	}
