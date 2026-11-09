@@ -152,7 +152,7 @@
     },
     {
       description: "The test tools of the Makefile; their sums follow (ShellCheck publishes none: computed from the download).",
-      matchPackageNames: ["helm-unittest/helm-unittest", "yannh/kubeconform", "koalaman/shellcheck", "norwoodj/helm-docs", "golang.org/x/vuln", "oras-project/oras", "aquasecurity/trivy"],
+      matchPackageNames: ["helm-unittest/helm-unittest", "yannh/kubeconform", "koalaman/shellcheck", "norwoodj/helm-docs", "golang.org/x/vuln", "oras-project/oras", "aquasecurity/trivy", "oasdiff/oasdiff", "golangci/golangci-lint", "rhysd/actionlint", "ghcr.io/zizmorcore/zizmor", "docker/buildkit-syft-scanner"],
       groupName: "test tools",
       postUpgradeTasks: {
         commands: ["scripts/update-pins.sh helm-unittest kubeconform shellcheck oras trivy"],

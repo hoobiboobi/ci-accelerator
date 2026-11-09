@@ -521,10 +521,3 @@ func union(in []Span) ([]Span, time.Duration) {
 	}
 	return out, d
 }
-
-func clamp(d time.Duration) time.Duration {
-	if d < 0 {
-		return 0
-	}
-	return d
-}

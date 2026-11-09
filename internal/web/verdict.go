@@ -251,7 +251,7 @@ func withVia(v Verdict, r history.Reason, via string) Verdict {
 	cmp, ok := strings.CutPrefix(via, "gitlab ")
 	switch {
 	case strings.HasPrefix(via, "same commit"):
-		cmp, ok = "", true
+		cmp = ""
 	case !ok:
 		return v
 	}

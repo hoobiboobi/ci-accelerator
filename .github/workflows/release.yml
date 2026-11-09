@@ -36,10 +36,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .tools
-          key: tools-${{ runner.os }}-${{ runner.arch }}-v4.3.1-${{ hashFiles('Makefile') }}
+      # No cache: pull requests' workflows write the same caches, and a tool
+      # restored from one is run without the checksum check it had when it
+      # was downloaded. A release downloads and checks every tool itself.
 
       - name: Check the tag against the charts
         id: version

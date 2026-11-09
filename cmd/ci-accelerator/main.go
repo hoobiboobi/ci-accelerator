@@ -252,10 +252,7 @@ func controllerMain(args []string, splitRole bool) error {
 
 func split(s string) []string {
 	var out []string
-	for _, p := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '\n' || r == ' ' }) {
-		out = append(out, p)
-	}
-	return out
+	return append(out, strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '\n' || r == ' ' })...)
 }
 
 func run(c config, log *slog.Logger) error {
@@ -666,7 +663,7 @@ func scanCache(ctx context.Context, s runnercache.Store, ns string, kube kuberne
 	}
 	ak, sk := strings.TrimSpace(string(sec.Data["accesskey"])), strings.TrimSpace(string(sec.Data["secretkey"]))
 	if ak == "" || sk == "" {
-		return runnercache.Scan{}, fmt.Errorf("Secret %s has no accesskey or secretkey", s.Secret)
+		return runnercache.Scan{}, fmt.Errorf("the Secret %s has no accesskey or secretkey", s.Secret)
 	}
 	keys := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 		return aws.Credentials{AccessKeyID: ak, SecretAccessKey: sk, Source: "secret " + s.Secret}, nil

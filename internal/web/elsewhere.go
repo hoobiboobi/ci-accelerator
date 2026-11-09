@@ -233,10 +233,11 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 			hit = append(hit, f)
 			continue
 		}
-		in, rel := f, ""
+		rel := ""
 		if e.GitFolder != "" {
 			// A git context is the repository's folder at the commit:
 			// only files inside it count, by their path in it.
+			var in string
 			if rel, in = inFolder(f, e.GitFolder); in == "" {
 				continue
 			}

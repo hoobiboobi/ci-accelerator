@@ -34,6 +34,7 @@ want "Artifact Hub metadata alone" "$NONE" artifacthub/buildkit.yml
 want "the license (lint compares the charts' copies with it)" "$CHARTS" LICENSE
 want "go code" "$GO" internal/web/nodes.go cmd/ci-accelerator/main.go go.sum
 want "the browser checks" "$GO" test/ui/ui.mjs
+want "the Go linters' config" "$GO" .golangci.yml
 want "a chart" "$CHARTS" charts/buildkit/values.yaml
 want "a chart README (generated)" "$CHARTS" charts/buildkit/README.md
 want "the CI component: a real GitLab too" "$COMPONENT" ci/gitlab/build.yml
