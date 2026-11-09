@@ -480,8 +480,11 @@ func TestRefreshFailureShared(t *testing.T) {
 	if n := e.gl.tokenHits.Load() - hits; n != 1 {
 		t.Errorf("asked GitLab %d times", n)
 	}
-	if d := time.Since(start); d > 600*time.Millisecond {
-		t.Errorf("the probes took %s", d)
+	// One GitLab request is the proof; the time only confirms that the
+	// probes did not wait one timeout each in turn (8 x 200 ms). Under the
+	// race detector on a busy CI runner they took 1.13 s once.
+	if d := time.Since(start); d >= 7*200*time.Millisecond {
+		t.Errorf("the probes took %s, as long as one timeout each", d)
 	}
 	// After a while GitLab is asked again; once it answers, the person
 	// is still signed in.
