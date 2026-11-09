@@ -11,6 +11,21 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Security
+
+- The control plane is built with github.com/klauspost/compress v1.20.2
+  (was v1.19.2): it fixes a panic on crafted zstd frames (GO-2026-6865,
+  GHSA-fpmh-frq8-7rj8), which govulncheck reports reachable through the
+  store of step output. The store only decodes what it compressed itself.
+- CVE-2026-78661 in golang.org/x/net/html v0.61.0 (in the image; govulncheck
+  finds no call path) is accepted until 2026-11-24: v0.62.0 with the fix
+  is taken once it is two weeks old.
+- The default BuildKit v0.34.2 and gitlab-runner alpine-v19.4.2 images
+  carry CVE-2026-123158 (openssh), CVE-2026-113351 and CVE-2026-115506
+  (libexpat) and CVE-2026-78661 (golang.org/x/net/html), with no release of
+  either that fixes them yet (gitlab-runner alpine-v19.5.3 has the same):
+  accepted until 2026-12-01 and looked at again then.
+
 ## 0.5.1 - 2026-11-04
 
 ### Upgrade notes
