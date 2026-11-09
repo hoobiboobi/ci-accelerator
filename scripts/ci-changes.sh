@@ -49,10 +49,12 @@ while IFS= read -r f; do
     cmd/ci-accelerator/Dockerfile | scripts/build-image.sh | .dockerignore) all=true ;;
     # .gitlab-ci.yml and ci/showcase/ are the mirror's pipeline at
     # gitlab.com: GitLab is their check.
+    # The console API's contract: its test and api-check run in the Go job.
+    docs/api/*) go=true ;;
     docs/* | *.md) docs=true ;;
     artifacthub/* | .github/ISSUE_TEMPLATE/* | .gitignore | .editorconfig | .gitlab-ci.yml | ci/showcase/*) ;;
     # The Go job runs the vulnerability gate, lint shellchecks it.
-    scripts/vulncheck.sh) charts=true; go=true ;;
+    scripts/vulncheck.sh | scripts/api-check.sh) charts=true; go=true ;;
     # Renovate's configs and its checks (lint shellchecks the scripts); its
     # workflow runs nothing else.
     scripts/update-pins.sh | test/renovate-check.sh) charts=true; renovate=true ;;
