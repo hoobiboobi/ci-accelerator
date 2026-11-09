@@ -49,6 +49,8 @@ want "the image recipe" "$EVERY" cmd/ci-accelerator/Dockerfile
 want "the image build's context" "$EVERY" .dockerignore
 want "the cache-mount hints' check on real builds (Go helper, shellchecked script)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" test/hints/managers.sh test/hints/cases/npm/Dockerfile
 want "the vulnerability gate (run by the Go job, shellchecked by lint)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" scripts/vulncheck.sh
+want "the API contract (its test and api-check in the Go job)" "$GO" docs/api/openapi.yaml
+want "the API contract's check (run by the Go job, shellchecked by lint)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" scripts/api-check.sh
 want "the release gate (lint runs it on copies of the tree)" "$CHARTS" scripts/check-release-version.sh scripts/changelog-section.sh
 want "nothing known: everything, a real GitLab too" "charts=true go=true component=true renovate=true docs=false e2e_matrix=[$ALL,$COMP]"
 want "go and a chart" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" internal/web/nodes.go charts/control-plane/values.yaml

@@ -1,0 +1,298 @@
+openapi: 3.0.3
+info:
+  title: ci-accelerator console API
+  version: v1
+  description: |
+    The console's read-only JSON API, served by the console (the Service
+    `<release>-web`, port 8080) under `/api/v1`. It has no authentication of
+    its own: with sign-in, only the console's admins reach it; without
+    sign-in it is as open as the console's pages (see "Limitations").
+
+    Changes within v1 only add: a new field or a new value may appear, and
+    a client should ignore what it does not know. Removing or renaming
+    anything needs a new version. The project's CI checks this file against
+    the last release's with oasdiff and the responses against this file.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:8080
+    description: the console through `kubectl port-forward svc/<release>-web 8080:8080`
+paths:
+  /api/v1/builds:
+    get:
+      operationId: listBuilds
+      summary: The newest image builds, newest first
+      description: |
+        Every image build the console stored, newest first, with why its
+        first rebuilt step ran and its cache-mount hints. A build of a
+        project the console has no job for is listed too (without
+        `pipeline` and `job`).
+      parameters:
+        - name: limit
+          in: query
+          description: How many builds, from 1 to 1000.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+      responses:
+        "200":
+          description: The builds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildList"
+        "400":
+          description: "`limit` is not a number from 1 to 1000."
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: The console's store could not be read.
+          content:
+            text/plain:
+              schema:
+                type: string
+components:
+  schemas:
+    BuildList:
+      type: object
+      additionalProperties: false
+      required: [builds]
+      properties:
+        builds:
+          type: array
+          items:
+            $ref: "#/components/schemas/Build"
+        hintsNote:
+          type: string
+          description: |
+            Set when the hints are not complete: "unavailable" when they
+            could not be read (the builds are still listed, without hints),
+            or a note that only the newest builds carry them.
+    Build:
+      type: object
+      additionalProperties: false
+      required: [id, ref, daemon, target, started, steps]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: The console's id of the build (its page is /builds/{id}).
+        ref:
+          type: string
+          description: BuildKit's reference of the build.
+        daemon:
+          type: string
+          description: The daemon (pod) that ran it.
+        target:
+          type: string
+          description: The Dockerfile target; empty for the last stage.
+        instance:
+          type: string
+          description: The GitLab instance's key, when the build is a CI job's.
+        pipeline:
+          type: integer
+          format: int64
+          description: The GitLab pipeline's id, when the build is a CI job's.
+        job:
+          type: integer
+          format: int64
+          description: The GitLab job's id, when the build is a CI job's.
+        started:
+          type: string
+          format: date-time
+        completed:
+          type: string
+          format: date-time
+          description: Absent while the build runs.
+        error:
+          type: string
+          description: BuildKit's error, when the build failed.
+        reason:
+          $ref: "#/components/schemas/Reason"
+        steps:
+          type: object
+          description: |
+            How many steps ended how: `built` (this build ran it; a git or
+            HTTP source resolved again counts here), `cached`, `received`
+            (another build of the same time ran it), `image` (a base image
+            resolved), `failed`, `canceled`.
+          additionalProperties:
+            type: integer
+        images:
+          type: array
+          items:
+            type: string
+          description: The image names the build pushed or exported.
+        buildArgs:
+          type: object
+          additionalProperties:
+            type: string
+          description: The build arguments, secrets masked.
+        hints:
+          type: array
+          items:
+            $ref: "#/components/schemas/Hint"
+          description: The build's cache-mount hints, the costliest first.
+    Reason:
+      type: object
+      additionalProperties: false
+      required: [kind, step]
+      description: Why the build's first rebuilt step ran.
+      properties:
+        kind:
+          type: string
+          enum:
+            - first-build
+            - step-changed
+            - arg-changed
+            - base-image-changed
+            - files-changed
+            - not-in-cache
+            - cache-elsewhere
+            - other-node
+            - new-step
+            - no-cache
+            - remote-source
+        step:
+          type: string
+          description: The step's key, such as "[api 2/4]".
+        old:
+          type: string
+          description: The previous line, argument value or image.
+        new:
+          type: string
+          description: The current one.
+        arg:
+          type: string
+          description: The build argument that changed, or several, comma-separated.
+        paths:
+          type: array
+          items:
+            type: string
+          description: What the step reads from the build context (or downloads).
+        by:
+          type: string
+          description: The build of the same pipeline that settled the reason.
+    Hint:
+      type: object
+      additionalProperties: false
+      required: [step, name, managers, runs, runSeconds, medianSeconds, since]
+      description: One step's cache-mount hint.
+      properties:
+        step:
+          type: string
+          description: The step's key.
+        name:
+          type: string
+          description: The step's instruction.
+        line:
+          type: integer
+          description: Its first Dockerfile line.
+        managers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Manager"
+        fragment:
+          type: string
+          description: The instruction to put in the step's place.
+        runs:
+          type: integer
+          description: How often the image's builds ran the step since `since`.
+        runSeconds:
+          type: number
+          description: Their time together, in seconds.
+        medianSeconds:
+          type: number
+          description: The middle one, in seconds.
+        since:
+          type: string
+          format: date-time
+    Manager:
+      type: object
+      additionalProperties: false
+      required: [manager, problems, caches]
+      description: One package manager the step runs, and what is wrong with its cache.
+      properties:
+        manager:
+          type: string
+          description: The package manager, such as "apt", "npm" or "go".
+        problems:
+          type: array
+          items:
+            $ref: "#/components/schemas/Problem"
+        caches:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/Cache"
+          description: The manager's cache folders the step needs.
+        pathCommand:
+          type: string
+          description: The manager's own command that prints its cache folder.
+        before:
+          type: array
+          items:
+            type: string
+          description: Instructions to add before the step.
+        drop:
+          type: array
+          items:
+            type: string
+          description: Words to take out of the step's command.
+        insert:
+          type: array
+          items:
+            $ref: "#/components/schemas/Insert"
+        caveats:
+          type: array
+          items:
+            type: string
+        owner:
+          type: string
+          description: The mount option that lets the step's user write ("uid=1000,gid=1000").
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [missing, disabled, wrong-path, image-needs, not-locked, not-writable]
+        mount:
+          type: string
+          description: The cache mount's target the problem is about.
+        setting:
+          type: string
+          description: What switches the cache off.
+        cache:
+          type: string
+          description: The cache folder's label.
+    Cache:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label:
+          type: string
+        path:
+          type: string
+        locked:
+          type: boolean
+        id:
+          type: string
+          description: The cache mount id to use when the path depends on the step.
+    Insert:
+      type: object
+      additionalProperties: false
+      required: [after, add]
+      properties:
+        after:
+          type: string
+        add:
+          type: string

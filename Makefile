@@ -75,6 +75,10 @@ GOVULNCHECK_VERSION := 1.8.0
 # Artifact Hub metadata push (oras; checksums from its release's checksums file).
 # renovate: datasource=github-releases depName=norwoodj/helm-docs extractVersion=^v(?<version>.+)$
 HELM_DOCS_VERSION := 1.14.2
+# Breaking changes of the console API's contract (docs/api/openapi.yaml),
+# installed with Go like helm-docs.
+# renovate: datasource=github-releases depName=oasdiff/oasdiff extractVersion=^v(?<version>.+)$
+OASDIFF_VERSION := 1.34.1
 # renovate: datasource=github-releases depName=oras-project/oras extractVersion=^v(?<version>.+)$
 ORAS_VERSION := 1.3.4
 ORAS_SHA256_linux_amd64  := f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454
@@ -180,11 +184,16 @@ $(RUNNER_CHART):
 GOVULNCHECK := $(TOOLS)/govulncheck-$(GOVULNCHECK_VERSION)/govulncheck
 TRIVY       := $(TOOLS)/trivy-$(TRIVY_VERSION)/trivy
 HELM_DOCS   := $(TOOLS)/helm-docs-$(HELM_DOCS_VERSION)/helm-docs
+OASDIFF     := $(TOOLS)/oasdiff-$(OASDIFF_VERSION)/oasdiff
 ORAS        := $(TOOLS)/oras-$(ORAS_VERSION)/oras
 
 $(HELM_DOCS):
 	@mkdir -p $(dir $@)
 	GOBIN=$(dir $@) $(GO_RUN) install github.com/norwoodj/helm-docs/cmd/helm-docs@v$(HELM_DOCS_VERSION)
+
+$(OASDIFF):
+	@mkdir -p $(dir $@)
+	GOBIN=$(dir $@) $(GO_RUN) install github.com/oasdiff/oasdiff@v$(OASDIFF_VERSION)
 
 $(ORAS):
 	$(call fetch,https://github.com/oras-project/oras/releases/download/v$(ORAS_VERSION)/oras_$(ORAS_VERSION)_$(OS)_$(ARCH).tar.gz,$(TOOLS)/dl/oras-$(ORAS_VERSION).tgz,$(ORAS_SHA256_$(OS)_$(ARCH)))
@@ -319,7 +328,7 @@ lint: $(SHELLCHECK) deps chart-docs-check ## helm lint --strict (default and exa
 	@echo "==> images the weekly scan covers"
 	@test/default-images.sh
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/check-sbom.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/third-party-images.sh scripts/update-pins.sh test/renovate-check.sh test/hints/managers.sh
+	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/check-sbom.sh scripts/api-check.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/third-party-images.sh scripts/update-pins.sh test/renovate-check.sh test/hints/managers.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -380,6 +389,10 @@ go-test: ## Go: gofmt, go vet and the tests with the race detector (the pages tw
 	@WEB_TEST_SPLIT=1 $(GO_RUN) test -count=1 ./internal/web/
 
 .PHONY: quick
+.PHONY: api-check
+api-check: $(OASDIFF) ## The console API's contract (docs/api/openapi.yaml): no breaking change against the newest release that has one
+	@scripts/api-check.sh $(OASDIFF)
+
 .PHONY: pins-check
 pins-check: ## Every pinned checksum against where its project publishes it (network)
 	@scripts/update-pins.sh --check all
