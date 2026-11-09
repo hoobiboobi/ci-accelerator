@@ -13,10 +13,11 @@ workflow copies them into the GitHub release.
   routers restart once for the new image, and the main runner's pod once
   for gitlab-runner 19.5.1 (the official chart 0.94.1); the daemons, the
   control plane's store and the cache stay as they are.
-- The fixed step count (see Fixed) reaches builds stored before: the
-  controller reads the daemons' build histories again when it restarts
-  and stores those builds again. A build whose record a daemon no longer
-  keeps keeps the count it was stored with.
+- The fixed step count (see Fixed) applies to builds stored from now on,
+  and to those of the last two hours or so, which the controller reads
+  again from the daemons when it restarts. Older builds keep the count
+  they were stored with: one whose only executed steps were git sources
+  fetched again still reads "Unclear: 1 step ran".
 
 ### Fixed
 
