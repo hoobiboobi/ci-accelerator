@@ -22,7 +22,9 @@ import (
 //     its last step received from the job building "all";
 //   - 0upbxwq… dev, after that same one-line change;
 //   - o0196ec… dev, after a change in hack/dockerfile/etc/docker/
-//     daemon.json, which its stage copies with COPY --link.
+//     daemon.json, which its stage copies with COPY --link;
+//   - u49v4tl… dev, built again with no change, and zmjkx4x… dev after
+//     the base stage's ENV CI_ACCELERATOR_CHECK changed from 0.5.1 to 0.5.2.
 func loadMoby(t *testing.T, ref string) *Build {
 	t.Helper()
 	d := filepath.Join("testdata/moby", ref)
@@ -207,6 +209,49 @@ func TestCopyLinkFirstExecutedIsNotAChangedLine(t *testing.T) {
 			if r.Kind == StepChanged || r.Kind == NewStep {
 				t.Errorf("%s, %s: an unchanged COPY --link line reads as changed: %s %q -> %q", name, kind, r.Kind, r.Old, r.New)
 			}
+		}
+	}
+}
+
+// A COPY --link whose layer did not change runs again because the stage
+// under it did: the base stage's ENV changed, its steps came from another
+// job, and the first step this build executed is the merge of
+// [rootlesskit-build 5/5], listed as the copy in the previous build. The
+// reason is the ENV line, not a cache that was missing.
+func TestCopyLinkUnchangedLayerOnAChangedStage(t *testing.T) {
+	full, cur := loadMoby(t, "u49v4tlxc8ctbcwiro03cbme0"), loadMoby(t, "zmjkx4xk7i00ou9yfvnedavw9")
+	for name, prev := range map[string]*Build{"read": full, "restored": restored(t, full)} {
+		idx := stepsByKey(prev, cur)
+		target := -1
+		for i, s := range cur.Steps {
+			if s.Key != "[rootlesskit-build 5/5]" || s.StepID == "" {
+				continue
+			}
+			p, cmp, _ := idx.of(s)
+			if cur.prov.opKind(s.StepID) != "merge" || cmp.StepID == s.StepID || p.Identity != cmp.Identity {
+				t.Fatalf("%s: [rootlesskit-build 5/5] is no longer a merge on an unchanged layer: the records no longer show the case", name)
+			}
+			target = i
+		}
+		if target < 0 {
+			t.Fatalf("%s: no [rootlesskit-build 5/5]", name)
+		}
+		b := *cur
+		b.Steps = append([]Step(nil), cur.Steps...)
+		for i := range b.Steps {
+			switch {
+			case i == target:
+				b.Steps[i].State = Built
+			case b.Steps[i].State == Built:
+				b.Steps[i].State = Received
+			}
+		}
+		r, ok := FirstRebuild(prev, &b)
+		if !ok {
+			t.Fatalf("%s: no reason", name)
+		}
+		if r.Kind != StepChanged || r.Old != "ENV CI_ACCELERATOR_CHECK=0.5.1" || r.New != "ENV CI_ACCELERATOR_CHECK=0.5.2" {
+			t.Errorf("%s: reason %s %q -> %q (step %s), want the ENV line's change", name, r.Kind, r.Old, r.New, r.Step.Key)
 		}
 	}
 }
