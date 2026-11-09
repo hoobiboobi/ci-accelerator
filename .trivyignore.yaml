@@ -1,3 +1,6 @@
 # Findings trivy may ignore for a while (an expired entry counts again).
 # Every entry says why and until when; drop it with the fix.
-vulnerabilities: []
+vulnerabilities:
+  - id: CVE-2026-78661
+    statement: "golang.org/x/net v0.61.0 (html): govulncheck finds no call path; v0.62.0 with the fix is two weeks old on 2026-11-10 and is taken then"
+    expired_at: 2026-11-24

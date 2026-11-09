@@ -6,7 +6,8 @@
 # has it waits for the two-week rule (Renovate opens it). Not analysed for
 # reachability. Each entry expires: the weekly scan (make third-party-scan)
 # fails on it again, and it is looked at again then. Listed 2026-11-01 with
-# trivy 0.75.0; BuildKit v0.34.2 and libexpat added 2026-11-03.
+# trivy 0.75.0; BuildKit v0.34.2 and libexpat added 2026-11-03, openssh,
+# libexpat and x/net 2026-11-09.
 vulnerabilities:
   - id: CVE-2026-111943
     statement: "moby/buildkit v0.34.2 (buildkitd, its CNI plugins): no BuildKit release with the fix"
@@ -115,4 +116,16 @@ vulnerabilities:
     expired_at: 2026-12-01
   - id: CVE-2026-118370
     statement: "gitlab-runner alpine-v19.4.2 (libexpat): a newer runner comes with Renovate's gitlab-runner group"
+    expired_at: 2026-12-01
+  - id: CVE-2026-113351
+    statement: "gitlab-runner alpine-v19.4.2 (libexpat): no runner release with the fix yet (alpine-v19.5.3 has it too)"
+    expired_at: 2026-12-01
+  - id: CVE-2026-115506
+    statement: "gitlab-runner alpine-v19.4.2 (libexpat): no runner release with the fix yet (alpine-v19.5.3 has it too)"
+    expired_at: 2026-12-01
+  - id: CVE-2026-123158
+    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.4.2 (openssh): no release of either with the fix yet"
+    expired_at: 2026-12-01
+  - id: CVE-2026-78661
+    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.4.2 (golang.org/x/net/html): no release of either with the fix yet"
     expired_at: 2026-12-01
