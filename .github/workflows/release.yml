@@ -113,7 +113,7 @@ jobs:
         if: ${{ !github.event.repository.private }}
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
-          cosign-release: v3.1.3
+          cosign-release: v3.1.4
 
       # The ci-accelerator image (the control plane's roles and the disk
       # probe), the default of the control-plane chart (v<appVersion>), for
