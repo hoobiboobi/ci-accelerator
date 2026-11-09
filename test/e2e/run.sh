@@ -1179,10 +1179,13 @@ sys.exit(0 if ok and not f[0].get("hints") else 2)' "$LOGS/box-speedup.json" "$i
     grep -q 'Speed-ups for this Dockerfile' "$page" && grep -q 'Add a cache mount for apk' "$page" &&
       grep -q 'class="spmk" href="#speedup-1"' "$page" && grep -q 'aside class="dfnotes"' "$page" || return 1
     step=$(grep -o 'href="/builds/[0-9]*/steps/[0-9]*#speed" data-step="[0-9]*" data-dtab-open="speed"' "$page" | head -1 | cut -d'"' -f2 | cut -d'#' -f1)
-    [ -n "$step" ] && kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080$step?part=panel" 2>/dev/null |
-      grep -q 'data-dpane="speed"'
+    [ -n "$step" ] || return 1
+    # The panel is kept for the logs: in CI it once came back without the
+    # speed-up while the page had it.
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "http://$BOX_REL-web.$BOX_NS.svc:8080$step?part=panel" 2>/dev/null >"$LOGS/box-speedup-panel.html"
+    grep -q 'data-dpane="speed"' "$LOGS/box-speedup-panel.html"
   }
-  check "the build page shows the speed-up in its card, on the Dockerfile tab and in the step's panel" quiet box_speedup_page
+  check "the build page shows the speed-up in its card, on the Dockerfile tab and in the step's panel" eventually 30 box_speedup_page
 }
 
 s_box() {
