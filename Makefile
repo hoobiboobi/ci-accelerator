@@ -46,8 +46,8 @@ SHELLCHECK_SHA256_linux_amd64  := b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e
 # The official gitlab-runner chart integrations/gitlab-runner/values.yaml is
 # written for; make validate renders it with the fragment.
 # renovate: datasource=helm depName=gitlab-runner registryUrl=https://charts.gitlab.io
-RUNNER_CHART_VERSION := 0.93.0
-RUNNER_CHART_SHA256  := a8932d04c94724aa93e3147811696e3512df9cbaa5901818d2b3872b0f02f0a9
+RUNNER_CHART_VERSION := 0.94.1
+RUNNER_CHART_SHA256  := 2403187ea4f50199814f22019b6a3a88b271dcfe67d26bd44c6d93b47065ffad
 
 # Helm, kind and kubectl for CI runners (Linux), where nothing is installed:
 # `make ci-tools CI_HELM_VERSION=v3.22.1` puts them into .tools/bin.
