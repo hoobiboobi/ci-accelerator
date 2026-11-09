@@ -9,11 +9,55 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-- The main runner's pod restarts once for gitlab-runner 19.5.1 (the
-  official chart 0.94.1); the daemons, the control plane's store and the
-  cache stay as they are.
+- From 0.5.1, `helm upgrade` in place. The controller, the web and the
+  routers restart once for the new image, and the main runner's pod once
+  for gitlab-runner 19.5.1 (the official chart 0.94.1); the daemons, the
+  control plane's store and the cache stay as they are.
+- The fixed step count (see Fixed) reaches builds stored before: the
+  controller reads the daemons' build histories again when it restarts
+  and stores those builds again. A build whose record a daemon no longer
+  keeps keeps the count it was stored with.
+
+### Fixed
+
+- Rebuild reasons, found on moby/moby's own Dockerfile:
+  - a build whose only executed steps were git or HTTP sources resolved
+    again (BuildKit does that in every build) counted them as steps run
+    and read "Unclear: 1 step ran; nothing to compare with". It built
+    nothing: the lists, the build page and the reasons now leave such
+    sources out, as they leave out base images;
+  - a COPY --link line that did not change read "Dockerfile changed: LINK
+    COPY ... -> COPY ...": BuildKit records it as two operations under one
+    step, and a build lists one of them, not always the same one. The
+    previous build's step is now the operation of the same kind.
+
+### Added
+
+- The console API has a contract: [docs/api/openapi.yaml](docs/api/openapi.yaml)
+  (OpenAPI 3.0.3) describes `GET /api/v1/builds`. Within v1 no field is
+  removed or renamed and no type changes; new fields and values may
+  appear. The project's checks hold the responses to it and compare it
+  with the last release's ([ADR-0059](docs/adr/0059-api-contract.md)).
+- The ci-accelerator image carries an SPDX SBOM for each platform, next
+  to its provenance; the release checks it before signing. Read it with
+  `docker buildx imagetools inspect ghcr.io/hoobiboobi/ci-accelerator:<tag> --format '{{json .SBOM}}'`
+  ([ADR-0060](docs/adr/0060-sbom.md)).
 
 ### Changed
+
+- The README is short: what it is, how to try and install it, the first
+  limitations and a map of the documentation. Its details moved, word for
+  word, to [docs/install.md](docs/install.md) (what gets installed,
+  requirements, options, where the cache lives),
+  [docs/console.md](docs/console.md) (the console, its levels, sign-in,
+  logs, OTLP), [docs/limitations.md](docs/limitations.md) and
+  [docs/testing.md](docs/testing.md); the repository map is in
+  CONTRIBUTING.md. Links to the README's old sections point there.
+- Checks: golangci-lint (govet, staticcheck, unused, ineffassign) over the
+  Go code, actionlint and zizmor over the workflows, the API contract, and
+  one e2e run per kind cluster at a time. zizmor found that the release
+  job restored a cache that pull requests write: the release no longer
+  uses one. Nothing changes for a user.
 
 - The ci-accelerator image is built on a newer digest of its distroless base
   (static-debian13:nonroot). Nothing changes for a user.
