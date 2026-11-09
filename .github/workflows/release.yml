@@ -127,6 +127,8 @@ jobs:
         run: |
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
           scripts/build-image.sh "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator:v$VERSION" push | tee -a dist/digests
+          # Each platform carries its SPDX SBOM, as a user reads it.
+          scripts/check-sbom.sh "$(tail -n 1 dist/digests)"
 
       - name: Push to ghcr.io
         env:

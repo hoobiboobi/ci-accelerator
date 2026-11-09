@@ -220,7 +220,7 @@
       // (an image reference may carry its digest).
       customType: "regex",
       description: "Annotated assignments: NAME := value, NAME ?= value, NAME=value",
-      managerFilePatterns: ["/^Makefile$/", "/^test/e2e/run\\.sh$/", "/^scripts/quickstart\\.sh$/", "/^test/quickstart/run\\.sh$/"],
+      managerFilePatterns: ["/^Makefile$/", "/^test/e2e/run\\.sh$/", "/^scripts/quickstart\\.sh$/", "/^test/quickstart/run\\.sh$/", "/^scripts/build-image\\.sh$/"],
       matchStrings: [
         "# renovate: datasource=(?<datasource>[a-z0-9.-]+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?(?: registryUrl=(?<registryUrl>\\S+))?(?: extractVersion=(?<extractVersion>\\S+))?\\n[A-Z0-9_]+ *[:?]?= *(?:[a-z0-9./-]+:)?(?<currentValue>[^\\s@\"]+)(?:@(?<currentDigest>sha256:[0-9a-f]{64}))?",
       ],

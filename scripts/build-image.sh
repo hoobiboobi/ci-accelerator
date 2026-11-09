@@ -8,7 +8,8 @@
 #   scripts/build-image.sh <image:tag> check   # build only (CI)
 #
 # Prints <image>@<digest> after a push. The provenance attestation is
-# mode=min: builder and materials, not the whole CI event payload. With SCAN_TAR=<file> set, check
+# mode=min: builder and materials, not the whole CI event payload; an SPDX
+# SBOM is attached to each platform too. With SCAN_TAR=<file> set, check
 # mode also writes the linux/amd64 image as a docker archive there (the
 # same build, from the builder's cache) for a vulnerability scan.
 set -euo pipefail
@@ -16,6 +17,10 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ref=${1:?usage: $0 <image:tag> push|check}
 mode=${2:?usage: $0 <image:tag> push|check}
 BUILDKIT_IMAGE=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
+# The SBOM generator BuildKit runs for the image's SPDX attestation (next
+# to the provenance), pinned like every other image.
+# renovate: datasource=docker depName=docker/buildkit-syft-scanner
+SBOM_GENERATOR=docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
 
 builder=ci-accelerator-image-$$
 docker buildx create --name "$builder" --driver docker-container --driver-opt "image=$BUILDKIT_IMAGE" >/dev/null
@@ -29,8 +34,8 @@ case "$mode" in
   check) output="type=image,name=$ref,push=false,rewrite-timestamp=true" ;;
   *) echo "mode must be push or check" >&2; exit 2 ;;
 esac
-docker buildx build --builder "$builder" --provenance=mode=min -f "$ROOT/cmd/ci-accelerator/Dockerfile" \
-  --platform linux/amd64,linux/arm64 \
+docker buildx build --builder "$builder" --provenance=mode=min --attest "type=sbom,generator=$SBOM_GENERATOR" \
+  -f "$ROOT/cmd/ci-accelerator/Dockerfile" --platform linux/amd64,linux/arm64 \
   --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY:-hoobiboobi/ci-accelerator}" \
   --label "org.opencontainers.image.version=${ref##*:}" \
   --label "org.opencontainers.image.licenses=Apache-2.0" \

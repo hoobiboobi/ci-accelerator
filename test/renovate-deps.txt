@@ -58,6 +58,7 @@ regex	charts/ci-accelerator/Chart.yaml	registry.gitlab.com/gitlab-org/gitlab-run
 regex	charts/ci-accelerator/values.yaml	registry.gitlab.com/gitlab-org/gitlab-runner	-
 regex	ci/gitlab/build.yml	moby/buildkit	digest
 regex	examples/kind/kind-config.yaml	kindest/node	digest
+regex	scripts/build-image.sh	docker/buildkit-syft-scanner	digest
 regex	scripts/quickstart.sh	helm/helm	-
 regex	scripts/quickstart.sh	k3s	-
 regex	scripts/quickstart.sh	quay.io/jetstack/cert-manager-cainjector	digest
