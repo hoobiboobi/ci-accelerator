@@ -14,6 +14,15 @@ import (
 //   - jxi8m9n… all, after that same change;
 //   - nlcgo1q… all, after the base stage's ENV CI_ACCELERATOR_CHECK
 //     changed from 0.3.3 to 0.5.0.
+//
+// and on another such box, 2026-11-09, three targets in parallel per
+// pipeline:
+//   - gpzka9v… binary, built again with no change;
+//   - 2l9nh7i… binary, after a one-line change in cmd/dockerd/main.go,
+//     its last step received from the job building "all";
+//   - 0upbxwq… dev, after that same one-line change;
+//   - o0196ec… dev, after a change in hack/dockerfile/etc/docker/
+//     daemon.json, which its stage copies with COPY --link.
 func loadMoby(t *testing.T, ref string) *Build {
 	t.Helper()
 	d := filepath.Join("testdata/moby", ref)
@@ -68,5 +77,108 @@ func TestEnvLineChangeNamesTheVariable(t *testing.T) {
 	}
 	if r.Kind != StepChanged || r.Old != "ENV CI_ACCELERATOR_CHECK=0.3.3" || r.New != "ENV CI_ACCELERATOR_CHECK=0.5.0" {
 		t.Fatalf("reason %s %q -> %q (step %s), want the ENV line's change", r.Kind, r.Old, r.New, r.Step.Key)
+	}
+}
+
+// A build whose only executed steps are git sources fetched again built
+// nothing: BuildKit resolves a tag again in every build, the steps that
+// use it came from the cache or another job. It is not "1 step ran,
+// nothing to compare with" (seen on the binary target, which received its
+// last step from the job building "all").
+func TestGitSourceFetchedAgainRanNothing(t *testing.T) {
+	prev, cur := loadMoby(t, "gpzka9vad2oye8piy0ule0m8l"), loadMoby(t, "2l9nh7i2965vnggagtocjx2vf")
+	for _, b := range []*Build{prev, cur} {
+		fetched := 0
+		for i, s := range b.Steps {
+			if s.State == Built && b.prov.fetchSource(s.StepID) {
+				fetched++
+			}
+			if b.Ran(i) {
+				t.Errorf("%s: %s %q counts as run", b.Ref, s.Key, s.Name)
+			}
+		}
+		if fetched == 0 {
+			t.Fatalf("%s: no git source fetched again: the record no longer shows the case", b.Ref)
+		}
+	}
+	if r, ok := FirstRebuild(prev, cur); ok {
+		t.Errorf("a reason for a build that built nothing: %s %s", r.Kind, r.Step.Key)
+	}
+}
+
+// COPY --link is two operations under one key and one line, a copy
+// ("LINK COPY ...") and a merge ("COPY ..."), and a build lists one of
+// them, not always the same: between two dev builds of one base stage
+// several keys changed sides. A step is compared with the previous build's operation
+// of its own kind, never a copy with a merge.
+func TestCopyLinkComparedWithItsOwnKind(t *testing.T) {
+	prev, cur := loadMoby(t, "0upbxwq1irnwiln0cvj1ojdm2"), loadMoby(t, "o0196ecatampo7br2dh677y5b")
+	idx := stepsByKey(prev, cur)
+	listed := map[string]Step{}
+	for _, s := range prev.Steps {
+		listed[s.Key] = s
+	}
+	swapped := 0
+	for _, s := range cur.Steps {
+		ps, ok := listed[s.Key]
+		if !ok || s.StepID == "" || !strings.Contains(s.Name, "--link") || prev.prov.opKind(ps.StepID) == cur.prov.opKind(s.StepID) {
+			continue
+		}
+		swapped++
+		p, _ := idx.of(s)
+		if prev.prov.opKind(p.StepID) != cur.prov.opKind(s.StepID) {
+			t.Errorf("%s: %s compared with a %s", s.Key, cur.prov.opKind(s.StepID), prev.prov.opKind(p.StepID))
+		}
+		if p.Identity != s.Identity {
+			t.Errorf("%s: an unchanged line, another identity (%s vs %s)", s.Key, p.Name, s.Name)
+		}
+	}
+	if swapped == 0 {
+		t.Fatal("no COPY --link step listed as the other operation: the records no longer show the case")
+	}
+}
+
+// The case seen on moby (2026-11-04): the steps above a COPY --link were
+// received from a parallel job, so the first step this build executed is
+// the COPY itself, and the previous build listed its key as the other
+// operation. The reason was "Dockerfile changed: LINK COPY ... -> COPY
+// ..." for a line that did not change.
+func TestCopyLinkFirstExecutedIsNotAChangedLine(t *testing.T) {
+	prev, cur := loadMoby(t, "0upbxwq1irnwiln0cvj1ojdm2"), loadMoby(t, "o0196ecatampo7br2dh677y5b")
+	listed := map[string]Step{}
+	for _, s := range prev.Steps {
+		listed[s.Key] = s
+	}
+	target := -1
+	for i, s := range cur.Steps {
+		ps, ok := listed[s.Key]
+		if ok && s.StepID != "" && strings.Contains(s.Name, "--link --from=") && prev.prov.opKind(ps.StepID) != cur.prov.opKind(s.StepID) {
+			target = i
+			break
+		}
+	}
+	if target < 0 {
+		t.Fatal("every COPY --link --from is listed as the same operation in both builds: the records no longer show the case")
+	}
+	// Everything else came from the cache or the other job; the COPY ran.
+	b := *cur
+	b.Steps = append([]Step(nil), cur.Steps...)
+	for i := range b.Steps {
+		switch {
+		case i == target:
+			b.Steps[i].State = Built
+		case b.Steps[i].State == Built:
+			b.Steps[i].State = Received
+		}
+	}
+	r, ok := FirstRebuild(prev, &b)
+	if !ok {
+		t.Fatal("no reason for a build that ran a step")
+	}
+	if r.Step.Key != cur.Steps[target].Key {
+		t.Fatalf("first rebuilt step %s, want %s", r.Step.Key, cur.Steps[target].Key)
+	}
+	if r.Kind == StepChanged || r.Kind == NewStep {
+		t.Fatalf("an unchanged COPY --link line reads as changed: %s %q -> %q", r.Kind, r.Old, r.New)
 	}
 }

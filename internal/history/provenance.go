@@ -499,7 +499,27 @@ type opView struct {
 				} `json:"Action"`
 			} `json:"actions"`
 		} `json:"file"`
+		Merge *struct{} `json:"merge"`
 	} `json:"Op"`
+}
+
+// opKind names the kind of a step's operation: "source", "exec", "file",
+// "merge", or "" when the provenance does not say. COPY --link records two
+// steps under one key, a file operation and the merge that lays it onto
+// the stage ("LINK COPY ..."): the kind tells them apart.
+func (p *Provenance) opKind(id string) string {
+	o := viewOf(p.Steps[id].Op).Op
+	switch {
+	case o.Source != nil:
+		return "source"
+	case o.Exec != nil:
+		return "exec"
+	case o.File != nil:
+		return "file"
+	case o.Merge != nil:
+		return "merge"
+	}
+	return ""
 }
 
 func viewOf(op json.RawMessage) opView {

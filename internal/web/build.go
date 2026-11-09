@@ -74,10 +74,14 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 	d := &built{Page: p, Views: steps(b, p.Reason, name, outputs), Name: name}
 	var rec []Received
 	recIdx := map[string]int{}
+	for i, v := range d.Views {
+		// A git or HTTP source resolved again shows as built but ran nothing.
+		if v.State == "built" && b.Ran(i) {
+			d.Built++
+		}
+	}
 	for _, v := range d.Views {
 		switch v.State {
-		case "built":
-			d.Built++
 		case "cached":
 			d.Cached++
 		case "received":
@@ -538,8 +542,8 @@ func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stor
 		out = append(out, Change{"Files", template.HTML(at + " reads " + orContext(r.Paths) + " — changed or not: " + why)})
 	}
 	prevBuilt := 0
-	for _, st := range pb.Steps {
-		if st.State == history.Built && !isFrom(st) {
+	for i := range pb.Steps {
+		if pb.Ran(i) {
 			prevBuilt++
 		}
 	}
