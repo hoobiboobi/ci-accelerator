@@ -9,6 +9,12 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 0.5.2 - 2026-11-10
+
+### Upgrade notes
+
 - From 0.5.1, `helm upgrade` in place. The controller, the web and the
   routers restart once for the new image, and the main runner's pod once
   for gitlab-runner 19.5.1 (the official chart 0.94.1); the daemons, the
