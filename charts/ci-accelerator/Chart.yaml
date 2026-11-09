@@ -31,7 +31,7 @@ annotations:
         - linux/amd64
         - linux/arm64
     - name: gitlab-runner
-      image: registry.gitlab.com/gitlab-org/gitlab-runner:alpine-v19.5.3
+      image: registry.gitlab.com/gitlab-org/gitlab-runner:alpine-v19.5.1
   artifacthub.io/links: |
     - name: Website and documentation
       url: https://ci-accelerator.io/docs/

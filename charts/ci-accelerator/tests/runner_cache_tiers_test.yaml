@@ -331,7 +331,7 @@ tests:
     template: runner-tiers.yaml
     documentSelector: {path: kind, value: Deployment}
     asserts:
-      - equal: {path: 'spec.template.spec.containers[0].image', value: "registry.gitlab.com/gitlab-org/gitlab-runner:alpine-v19.5.3"}
+      - equal: {path: 'spec.template.spec.containers[0].image', value: "registry.gitlab.com/gitlab-org/gitlab-runner:alpine-v19.5.1"}
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: RUNNER_TOKEN, valueFrom: {secretKeyRef: {name: runner-deploy, key: runner-token}}}
