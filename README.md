@@ -99,8 +99,9 @@ Its sections:
 - **Builds** and **Images:** every build, and cache rate and build time per
   image; any two builds of an image compare side by side.
 - **Nodes:** the daemons' disk, cache, load and the router's decisions.
-- **Speed-ups:** steps that run a package manager without a working cache
-  mount get a ready Dockerfile fragment, with measured times.
+
+On a build's page, **speed-ups**: steps that run a package manager without
+a working cache mount get a ready Dockerfile fragment, with measured times.
 
 Every figure is measured, not estimated. The console works by itself, with
 a GitLab token, or with sign-in through GitLab:

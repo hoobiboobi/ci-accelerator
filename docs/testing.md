@@ -3,8 +3,9 @@
 Every check is a `make` target. The same targets are meant for CI.
 
 ```sh
-make quick                    # before every push: lint, unittest and go-test
-make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kubeconform (k8s 1.34 and 1.37)
+make quick                    # before every push: lint, unittest, go-test and go-lint
+make lint unittest validate   # no cluster needed: helm lint, helm-unittest, kubeconform (k8s 1.34 and 1.37), the workflows (actionlint, zizmor: needs docker)
+make api-check                # the console API's contract against the last release's
 make go-test ui-test          # Go tests; the console's pages in headless Chrome
 make kind-up                  # local kind cluster (examples/kind)
 make e2e                      # end-to-end on kind
