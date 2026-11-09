@@ -1,7 +1,8 @@
 # The Go sources with their test data (the image's build leaves the test
-# data out).
+# data out), and the API contract the API test reads.
 *
 !go.mod
 !go.sum
 !cmd/
 !internal/
+!docs/api/
