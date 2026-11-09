@@ -418,12 +418,28 @@ cleanup() {
   if [ "$FAILED" = 0 ] && [ "$SETUP_FAILED" = 0 ] && [ "$OWN_LOGS" = 1 ]; then rm -rf "$LOGS"; fi
 }
 
+# One run at a time per cluster, the clean-up included: two runs share the
+# e2e releases' names and the nodes' directories, and each one's cleanup
+# removes the other's state. A lock whose process is gone (an interrupted
+# run) is taken over.
+LOCK=${TMPDIR:-/tmp}/ci-accelerator-e2e-$CLUSTER.lock
+if ! mkdir "$LOCK" 2>/dev/null; then
+  other=$(cat "$LOCK/pid" 2>/dev/null || true)
+  if [ -n "$other" ] && kill -0 "$other" 2>/dev/null; then
+    refuse "another e2e run (pid $other) uses kind cluster '$CLUSTER'; wait for it to end"
+  fi
+  rm -rf "$LOCK"
+  mkdir "$LOCK" || refuse "cannot take the lock $LOCK"
+fi
+echo $$ >"$LOCK/pid"
+finish() { cleanup; rm -rf "$LOCK"; }
+
 if [ "$MODE" = clean ]; then
   KEEP=0
-  trap cleanup EXIT
+  trap finish EXIT
   exit 0
 fi
-trap cleanup EXIT
+trap finish EXIT
 
 # --- setup -------------------------------------------------------------------
 
