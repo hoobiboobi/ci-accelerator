@@ -76,56 +76,56 @@ vulnerabilities:
     statement: "moby/buildkit v0.34.2 (buildkitd, its CNI plugins): no BuildKit release with the fix"
     expired_at: 2026-12-01
   - id: CVE-2026-116587
-    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1: no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-56851
-    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1: no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-56852
-    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1: no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-56854
-    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1: no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-84304
-    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1: no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-84445
-    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1: no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: GHSA-hrxh-6v49-42gf
-    statement: "gitlab-runner alpine-v19.4.2: a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1: no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-111497
-    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.4.2: no release of either with the fix yet"
+    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.5.1: no release of either with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-46600
-    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.4.2: no release of either with the fix yet"
+    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.5.1: no release of either with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-78669
-    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.4.2: no release of either with the fix yet"
+    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.5.1: no release of either with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-92392
-    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.4.2: no release of either with the fix yet"
+    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.5.1: no release of either with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-25679
     statement: "moby/buildkit v0.34.2: its CNI plugins (unused in host network mode) are built with Go 1.25.7; no BuildKit release with the fix"
     expired_at: 2026-12-01
   - id: CVE-2026-117610
-    statement: "gitlab-runner alpine-v19.4.2 (libexpat): a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1 (libexpat): no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-118370
-    statement: "gitlab-runner alpine-v19.4.2 (libexpat): a newer runner comes with Renovate's gitlab-runner group"
+    statement: "gitlab-runner alpine-v19.5.1 (libexpat): no runner release with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-113351
-    statement: "gitlab-runner alpine-v19.4.2 (libexpat): no runner release with the fix yet (alpine-v19.5.3 has it too)"
+    statement: "gitlab-runner alpine-v19.5.1 (libexpat): no runner release with the fix yet (alpine-v19.5.3 has it too)"
     expired_at: 2026-12-01
   - id: CVE-2026-115506
-    statement: "gitlab-runner alpine-v19.4.2 (libexpat): no runner release with the fix yet (alpine-v19.5.3 has it too)"
+    statement: "gitlab-runner alpine-v19.5.1 (libexpat): no runner release with the fix yet (alpine-v19.5.3 has it too)"
     expired_at: 2026-12-01
   - id: CVE-2026-123158
-    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.4.2 (openssh): no release of either with the fix yet"
+    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.5.1 (openssh): no release of either with the fix yet"
     expired_at: 2026-12-01
   - id: CVE-2026-78661
-    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.4.2 (golang.org/x/net/html): no release of either with the fix yet"
+    statement: "moby/buildkit v0.34.2 and gitlab-runner alpine-v19.5.1 (golang.org/x/net/html): no release of either with the fix yet"
     expired_at: 2026-12-01

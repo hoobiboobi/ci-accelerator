@@ -9,7 +9,9 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- The main runner's pod restarts once for gitlab-runner 19.5.1 (the
+  official chart 0.94.1); the daemons, the control plane's store and the
+  cache stay as they are.
 
 ### Changed
 
@@ -17,6 +19,9 @@ None.
   (static-debian13:nonroot). Nothing changes for a user.
 - CI: actions/upload-artifact v7.0.2 (retries when the artifact service
   rate-limits). Nothing changes for a user.
+- The box's runner is gitlab-runner 19.5.1 with the official chart 0.94.1
+  (was 19.4.2 with 0.93.0): 19.5.3 fixes nothing the box runs into and is
+  taken once it is two weeks old.
 
 ### Security
 
@@ -27,7 +32,7 @@ None.
 - CVE-2026-78661 in golang.org/x/net/html v0.61.0 (in the image; govulncheck
   finds no call path) is accepted until 2026-11-24: v0.62.0 with the fix
   is taken once it is two weeks old.
-- The default BuildKit v0.34.2 and gitlab-runner alpine-v19.4.2 images
+- The default BuildKit v0.34.2 and gitlab-runner alpine-v19.5.1 images
   carry CVE-2026-123158 (openssh), CVE-2026-113351 and CVE-2026-115506
   (libexpat) and CVE-2026-78661 (golang.org/x/net/html), with no release of
   either that fixes them yet (gitlab-runner alpine-v19.5.3 has the same):
