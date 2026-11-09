@@ -28,4 +28,7 @@ old=$(mktemp)
 trap 'rm -f "$old"' EXIT
 git show "$base:$spec" >"$old"
 echo "api-check: $spec against $base"
-"$oasdiff" breaking "$old" "$spec" --fail-on ERR
+# The contract's promise (its info.description): within v1 no field is
+# removed, and a new field or value may appear. oasdiff's defaults
+# differ on two points; docs/api/oasdiff-levels.txt sets them.
+"$oasdiff" breaking "$old" "$spec" --fail-on WARN --severity-levels docs/api/oasdiff-levels.txt
