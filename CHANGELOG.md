@@ -22,6 +22,10 @@ workflow copies them into the GitHub release.
 - The box's runner is gitlab-runner 19.5.1 with the official chart 0.94.1
   (was 19.4.2 with 0.93.0): 19.5.3 fixes nothing the box runs into and is
   taken once it is two weeks old.
+- Dependabot no longer scans `test/hints/cases`: those are test fixtures
+  with versions pinned on purpose, never shipped. It still raises security
+  updates for the rest; version updates stay with Renovate. Nothing changes
+  for a user.
 
 ### Security
 
