@@ -22,6 +22,11 @@ None.
   never counts a file the context did not hold, and names the job's
   `.git` with what to do about it. Builds stored before the upgrade keep
   their verdicts.
+- A build of another pipeline that ran at the same time (a merge
+  request's pipeline next to its branch's, same commit) counted as the
+  image's previous build: the rebuild was compared with a build that left
+  it no cache, and its reason became "same commit, unclear". The previous
+  build is now one that ended before this one started.
 - A project's runner cache on the Nodes page warned about every S3
   folder (no lifecycle rule, a failed listing), also those of other
   runner tiers that hold none of its caches; it now shows the state of

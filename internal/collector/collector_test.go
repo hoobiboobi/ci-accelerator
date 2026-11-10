@@ -678,7 +678,7 @@ func TestFailedBuildComparedWhenItsPreviousArrivesLate(t *testing.T) {
 	// step identities).
 	failed := *good
 	failed.Ref, failed.Error, failed.Images = "failed-"+good.Ref, "process \"/bin/sh -c npm test\" did not complete successfully: exit code: 1", nil
-	failed.Started = good.Started.Add(cur.Started.Sub(good.Started) / 2)
+	failed.Started = good.Completed.Add(cur.Started.Sub(good.Completed) / 2) // after the good one ended
 	failed.Completed = failed.Started.Add(time.Second)
 	failed.Attribution.Pipeline, failed.Attribution.Job = good.Attribution.Pipeline+900000, good.Attribution.Job+900000
 	failed.Steps = append([]history.Step(nil), good.Steps...)

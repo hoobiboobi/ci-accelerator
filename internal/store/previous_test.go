@@ -114,7 +114,9 @@ func TestPreviousSkipsFailedBuilds(t *testing.T) {
 	// identities), an error.
 	failed := *good.Build
 	failed.Ref, failed.Error, failed.Images = "failed-"+good.Build.Ref, "process \"/bin/sh -c npm test\" did not complete successfully: exit code: 1", nil
-	failed.Started = good.Build.Started.Add(cur.Started.Sub(good.Build.Started) / 2)
+	// Between the two, after the good one ended (a build still running is
+	// no previous build).
+	failed.Started = good.Build.Completed.Add(cur.Started.Sub(good.Build.Completed) / 2)
 	failed.Completed = failed.Started.Add(time.Second)
 	failed.Attribution.Pipeline, failed.Attribution.Job = good.Build.Attribution.Pipeline+900000, good.Build.Attribution.Job+900000
 	failed.Steps = append([]history.Step(nil), good.Build.Steps...)
@@ -152,5 +154,74 @@ func TestPreviousSkipsFailedBuilds(t *testing.T) {
 	}
 	if next, err := s.Next(ctx, &failed); err != nil || len(next) != 0 {
 		t.Errorf("next of the failed build: %d builds (%v)", len(next), err)
+	}
+}
+
+// A build of another pipeline that ran at the same time (a merge
+// request's pipeline next to its branch's, same commit) is no previous
+// build either: it left no cache for this one, and comparing with it
+// turns the commit's own change into "same commit, unclear". Only a build
+// that ended before this one started counts; and this one is no previous
+// build of a build that started while it ran.
+func TestPreviousSkipsOverlappingPipelines(t *testing.T) {
+	c := &clock{time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
+	s := open(t, t.TempDir(), c)
+	bs := fixtures(t, s.SecretKey())
+	saveJobs(t, s, bs)
+	var older, cur *history.Build
+	for _, b := range bs {
+		if b.Target != "api" || b.Attribution.State != history.Attributed || b.Error != "" {
+			continue
+		}
+		if older == nil {
+			older = b
+		} else if cur == nil || b.Started.After(cur.Started) {
+			cur = b
+		}
+	}
+	if older == nil || cur == nil || !older.Completed.Before(cur.Started) || cur.Completed.Sub(cur.Started) < 10*time.Millisecond {
+		t.Fatal("fixtures: no two api builds one after the other")
+	}
+	// The other pipeline's build started just before cur and ends after
+	// it started; a later one starts while cur still runs.
+	twin, late, running := *cur, *cur, *cur
+	twin.Ref, late.Ref, running.Ref = "twin-"+cur.Ref, "late-"+cur.Ref, "running-"+cur.Ref
+	// Still running (no end yet) when cur started.
+	running.Started, running.Completed = cur.Started.Add(-2*time.Second), time.Time{}
+	running.Attribution.Pipeline, running.Attribution.Job = cur.Attribution.Pipeline+700002, cur.Attribution.Job+700002
+	twin.Started, twin.Completed = cur.Started.Add(-time.Second), cur.Started.Add(time.Millisecond)
+	late.Started, late.Completed = cur.Completed.Add(-time.Millisecond), cur.Completed.Add(time.Minute)
+	twin.Attribution.Pipeline, twin.Attribution.Job = cur.Attribution.Pipeline+700000, cur.Attribution.Job+700000
+	late.Attribution.Pipeline, late.Attribution.Job = cur.Attribution.Pipeline+700001, cur.Attribution.Job+700001
+	for _, b := range []*history.Build{&twin, &late, &running} {
+		if err := s.SaveJob(ctx, Job{Instance: b.Attribution.Instance, JobID: b.Attribution.Job,
+			PipelineID: b.Attribution.Pipeline, ProjectID: 42, ProjectPath: "example/app", Name: "build-api", Stage: "build"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, b := range []*history.Build{older, cur, &twin, &late, &running} {
+		if _, err := s.SaveBuild(ctx, Build{Build: b, Generation: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prev, _, err := s.Previous(ctx, cur)
+	if err != nil || prev == nil || prev.Build.Ref != older.Ref {
+		got := "<none>"
+		if prev != nil {
+			got = prev.Build.Ref
+		}
+		t.Fatalf("previous of cur = %s (%v), want %s, not the overlapping %s", got, err, older.Ref, twin.Ref)
+	}
+	if prev, _, err := s.Previous(ctx, &late); err != nil || prev == nil || prev.Build.Ref != twin.Ref {
+		t.Errorf("previous of a build that started while cur ran: %v %v, want %s (ended before it started)", prev, err, twin.Ref)
+	}
+	next, err := s.Next(ctx, cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range next {
+		if n.Build.Ref == late.Ref || n.Build.Ref == twin.Ref {
+			t.Errorf("next of cur lists %s, which started before cur ended", n.Build.Ref)
+		}
 	}
 }
