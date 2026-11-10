@@ -191,8 +191,8 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		INSERT INTO builds (daemon_id, ref, generation, attribution, instance, pipeline_id, job_id, project_id,
 			target, dockerfile_id, build_args, started_at, completed_at, error, context_bytes, images,
 			reason_kind, reason_step, reason_old, reason_new, reason_arg, reason_paths, reason_by, saved_ms, output_day, built, built_ms,
-			warnings, no_cache, truncated, context, context_commit)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			warnings, no_cache, truncated, context, context_commit, context_files)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (ref) DO UPDATE SET generation = excluded.generation,
 			attribution = excluded.attribution, instance = excluded.instance, pipeline_id = excluded.pipeline_id,
 			job_id = excluded.job_id, project_id = COALESCE(excluded.project_id, builds.project_id),
@@ -205,13 +205,13 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			output_day = COALESCE(excluded.output_day, builds.output_day),
 			built = excluded.built, built_ms = excluded.built_ms, warnings = excluded.warnings,
 			no_cache = excluded.no_cache, truncated = excluded.truncated, context = excluded.context,
-			context_commit = excluded.context_commit
+			context_commit = excluded.context_commit, context_files = excluded.context_files
 		WHERE excluded.generation >= builds.generation
 		RETURNING id`,
 		daemon, b.Ref, b.Generation, attributions[a.State], instance, pipeline, job, project,
 		b.Target, dockerfile, string(argsJSON), b.Started.UnixMilli(), nullTime(b.Completed), b.Error, b.ContextBytes, string(images),
 		string(r.Kind), reasonStep, r.Old, r.New, r.Arg, string(paths), reasonBy, saved.Milliseconds(), outDay, built, builtMs,
-		string(warnings), b.NoCache, b.Truncated, b.Context, b.ContextCommit,
+		string(warnings), b.NoCache, b.Truncated, b.Context, b.ContextCommit, contextFiles(b.Build),
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		// A newer generation is stored already.
@@ -578,4 +578,18 @@ func parseLines(s string) []history.LineRange {
 		}
 	}
 	return out
+}
+
+// contextFiles is what a build's local context held, as stored in
+// builds.context_files: "" when not known.
+func contextFiles(b *history.Build) string {
+	lc := b.LocalContext()
+	if lc == nil {
+		return ""
+	}
+	out, err := json.Marshal(lc)
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }

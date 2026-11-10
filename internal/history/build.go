@@ -71,6 +71,15 @@ func (b *Build) Dockerfile() (name, text string) {
 	return name, maskText(text, b.BuildArgs, true)
 }
 
+// LocalContext is what the client sent of the build's local context; nil
+// for a git context, a build without provenance or one that read none.
+func (b *Build) LocalContext() *LocalContext {
+	if b.prov == nil || b.ContextCommit != "" {
+		return nil
+	}
+	return b.prov.Context
+}
+
 // Duration is how long the step took in this build; for a received step,
 // how long this build waited for it.
 func (s Step) Duration() time.Duration {

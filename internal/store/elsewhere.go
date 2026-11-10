@@ -37,6 +37,9 @@ type Elsewhere struct {
 	// be known): GitLab's comparison decides its verdict, so it needs the
 	// submodules marked (ComparedMarked).
 	Git bool
+	// Context is which files of the job's folder a local context held;
+	// nil when not known (a git context, a build an older release stored).
+	Context *history.LocalContext
 }
 
 // plainPaths are changed files as people read them: a submodule's path
@@ -122,7 +125,7 @@ func (s *Store) ElsewhereProjects(ctx context.Context, since time.Time) ([]Proje
 func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, limit int) ([]Elsewhere, error) {
 	// A git context names its commit itself; otherwise the pipeline's.
 	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.started_at, COALESCE(NULLIF(b.context_commit, ''), p.sha, ''), b.reason_paths, b.reason_old,
-			b.ref, b.target, b.images, b.pipeline_id, b.context_commit, b.context
+			b.ref, b.target, b.images, b.pipeline_id, b.context_commit, b.context, b.context_files
 		FROM builds b INDEXED BY builds_elsewhere
 		LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
 		WHERE b.instance = ? AND b.project_id = ? AND b.started_at >= ?
@@ -144,8 +147,9 @@ func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, li
 			paths, images string
 			pipeline      sql.NullInt64
 			commit, ctxt  string
+			files         string
 		)
-		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.Old, &b.Ref, &b.Target, &images, &pipeline, &commit, &ctxt); err != nil {
+		if err := rows.Scan(&e.ID, &started, &e.SHA, &paths, &e.Old, &b.Ref, &b.Target, &images, &pipeline, &commit, &ctxt, &files); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -158,6 +162,12 @@ func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, li
 			}
 		}
 		_ = json.Unmarshal([]byte(paths), &e.Paths)
+		if files != "" && commit == "" {
+			var lc history.LocalContext
+			if json.Unmarshal([]byte(files), &lc) == nil {
+				e.Context = &lc
+			}
+		}
 		b.Started, b.Attribution.Pipeline = e.Started, uint64(pipeline.Int64)
 		_ = json.Unmarshal([]byte(images), &b.Images)
 		out = append(out, e)
