@@ -131,14 +131,25 @@ func (s *Store) sameImage(ctx context.Context, instance sql.NullInt64, project a
 func (s *Store) walkImage(ctx context.Context, instance sql.NullInt64, project any, b *history.Build, after bool,
 	fn func(id int64, failed bool) bool) error {
 	cmp, order := "<", "DESC"
+	// A build that ran at the same time as b (another pipeline of the same
+	// commit: a merge request's and its branch's) left no cache for it and
+	// is no previous build; b is no previous build of one that started
+	// while it ran.
+	overlap := `AND b.completed_at IS NOT NULL AND b.completed_at <= ?`
+	edge := b.Started.UnixMilli()
 	if after {
 		cmp, order = ">", "ASC"
+		overlap = `AND b.started_at >= ?`
+		edge = b.Started.UnixMilli()
+		if !b.Completed.IsZero() {
+			edge = b.Completed.UnixMilli()
+		}
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT b.id, b.images, b.error <> '' FROM builds b INDEXED BY builds_target
 		WHERE b.instance = ? AND b.project_id = ? AND b.target = ? AND b.started_at `+cmp+` ? AND b.ref <> ?
-			AND b.pipeline_id IS NOT ?
+			AND b.pipeline_id IS NOT ? `+overlap+`
 		ORDER BY b.started_at `+order, instance, project, b.Target, b.Started.UnixMilli(), b.Ref,
-		nullUint(b.Attribution.Pipeline))
+		nullUint(b.Attribution.Pipeline), edge)
 	if err != nil {
 		return err
 	}
