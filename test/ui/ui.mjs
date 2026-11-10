@@ -190,6 +190,14 @@ async function page(port, { width = 1400, height = 900 } = {}) {
   s.visible = sel => s.eval(`(() => { const e = document.querySelector(${JSON.stringify(sel)});
     if (!e || e.closest("[hidden]")) return false; const cs = getComputedStyle(e);
     return e.getClientRects().length > 0 && cs.visibility !== "hidden" && cs.display !== "none"; })()`);
+  // Polls s.visible until the element shows or the time is up.
+  s.shows = async (sel, ms = 5000) => {
+    for (const end = Date.now() + ms; ;) {
+      if (await s.visible(sel)) return true;
+      if (Date.now() > end) return false;
+      await sleep(100);
+    }
+  };
   s.take = () => { const p = s.problems; s.problems = []; return p; };
   s.close = async () => { await s.send("Page.close").catch(() => {}); ws.close(); };
   return s;
@@ -348,8 +356,11 @@ async function buildPage(s, pages) {
   check(`${b} Esc closes the panel`, !(await s.visible("#drawer")));
   await s.click(sel, 900);
   if (await s.eval(`!!document.querySelector(".grpbtn")`)) {
+    // The panel loads its step first (failed once in CI when it took
+    // longer than the click's pause); then the fold must leave it open.
+    const opened = await s.shows("#drawer");
     await s.click(".grpbtn", 300);
-    check(`${b} folding a stage keeps the panel open`, await s.visible("#drawer"));
+    check(`${b} folding a stage keeps the panel open`, opened && await s.visible("#drawer"));
     await s.click(".grpbtn", 300);
   }
   await s.click("h1", 300);
