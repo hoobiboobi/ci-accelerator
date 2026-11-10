@@ -605,6 +605,9 @@ func reasonText(b store.BuildRow, st Status) string {
 	case history.FirstBuild:
 		return "First build of an image on record"
 	case history.FilesChanged:
+		if b.Via == viaCheckout {
+			return "The job's .git is in the build context: add .git to .dockerignore"
+		}
 		if viaVerified(b.Via) && len(b.Paths) > 0 {
 			return "Files changed: " + strings.Join(clipList(b.Paths, 3), ", ")
 		}

@@ -248,6 +248,16 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 // withVia tells how a reason settled after the build was stored: GitLab's
 // comparison of the commits of this build and of the image's previous one.
 func withVia(v Verdict, r history.Reason, via string) Verdict {
+	if via == viaCheckout && r.Kind == history.FilesChanged {
+		at := ""
+		if r.Step.Line > 0 {
+			at = fmt.Sprintf(" (Dockerfile line %d)", r.Step.Line)
+		}
+		v.Title = template.HTML(fmt.Sprintf("Rebuilt from %s%s: the job's <code>.git</code> changed.", code(r.Step.Name), at))
+		v.Detail = "The commit's files did not change what this step reads, but the step reads the whole build context, and <code>.dockerignore</code> does not keep <code>.git</code> out. Every job's checkout writes its own <code>.git</code>, so this step never comes from another job's cache. Steps after it were rebuilt because their input changed."
+		v.Hint = "<b>Tip:</b> add <code>.git</code> to <code>.dockerignore</code>, or build from the repository (<code>context-source: git</code>): then only the commit's files are in the context. A step that needs git metadata (a version string) can take it as a build argument instead."
+		return v
+	}
 	cmp, ok := strings.CutPrefix(via, "gitlab ")
 	switch {
 	case strings.HasPrefix(via, "same commit"):

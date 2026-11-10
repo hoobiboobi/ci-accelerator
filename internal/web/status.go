@@ -81,6 +81,9 @@ func whyShort(b store.BuildRow) string {
 	case history.FirstBuild:
 		return "first build of " + buildName(b.Target, b.Images) + " on record"
 	case history.FilesChanged:
+		if b.Via == viaCheckout {
+			return "the job's .git is in the build context"
+		}
 		if viaVerified(b.Via) && len(b.Paths) > 0 {
 			return "files changed: " + strings.Join(clipList(b.Paths, 2), ", ")
 		}

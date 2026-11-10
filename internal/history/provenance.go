@@ -44,6 +44,20 @@ type Provenance struct {
 	// contextID is the identifier of the git source that is the build
 	// context (git://<repository>#<ref>[:<folder>]).
 	contextID string
+	// Context is what the client sent of a local build context (the
+	// "context" local source); nil for a git context or a build that read
+	// none.
+	Context *LocalContext
+}
+
+// LocalContext is which files of the job's folder a local build context
+// holds, as the frontend asked the client for them.
+type LocalContext struct {
+	// Excludes are the .dockerignore patterns the client applied.
+	Excludes []string
+	// Follow are the only paths the client sent, when the frontend could
+	// tell them; empty: the whole folder.
+	Follow []string
 }
 
 // Usage is what a step's processes used, from the cgroup counters BuildKit
@@ -181,6 +195,13 @@ func ParseProvenance(data []byte, key []byte) (*Provenance, error) {
 	commit := gitContextCommit(raw.BuildDefinition.ExternalParameters.ConfigSource.URI,
 		raw.BuildDefinition.ExternalParameters.ConfigSource.Digest)
 	for _, s := range bc.LLBDefinition {
+		// Normalising drops a local source's attributes: what it sent is
+		// read here.
+		if src := viewOf(s.Op).Op.Source; src != nil && src.Identifier == "local://context" && p.Context == nil {
+			p.Context = &LocalContext{}
+			_ = json.Unmarshal([]byte(src.Attrs["local.excludepatterns"]), &p.Context.Excludes)
+			_ = json.Unmarshal([]byte(src.Attrs["local.followpaths"]), &p.Context.Follow)
+		}
 		if commit != "" && p.ContextCommit == "" {
 			// The context, not another git source at the same commit (a
 			// named context of another folder): the same repository,

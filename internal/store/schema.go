@@ -335,6 +335,11 @@ var toleratedColumns = []struct{ table, column, def string }{
 	// release of the schema leaves it empty and treats the build as one
 	// with a local context).
 	{"builds", "context_commit", "TEXT NOT NULL DEFAULT ''"},
+	// Which files of the job's folder a local build context held: the
+	// .dockerignore patterns and the paths the frontend asked for, JSON
+	// (history.LocalContext; 0.5.3). Empty when not known (a git context,
+	// an older release): its verdicts stay as they were.
+	{"builds", "context_files", "TEXT NOT NULL DEFAULT ''"},
 	// A comparison stored with submodules marked (a trailing slash; 0.4.0).
 	// Older ones list a submodule like a file: a git context's verdict,
 	// which the comparison decides, asks GitLab again instead.

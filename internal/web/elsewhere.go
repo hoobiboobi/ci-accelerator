@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moby/patternmatcher"
+
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
@@ -132,6 +134,9 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 		case e.SHA == "" || e.PrevSHA == "":
 			out = append(out, asked(store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: a commit is not known"}, e))
 			continue
+		case e.SHA == e.PrevSHA && checkoutGit(e):
+			out = append(out, asked(store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: []string{".git"}, Via: viaCheckout}, e))
+			continue
 		case e.SHA == e.PrevSHA:
 			out = append(out, asked(store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: "same commit " + short(e.SHA, 8)}, e))
 			continue
@@ -233,6 +238,9 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 			hit = append(hit, f)
 			continue
 		}
+		if !inContext(e, f) {
+			continue // .dockerignore kept it out, or the frontend never asked for it
+		}
 		rel := ""
 		if e.GitFolder != "" {
 			// A git context is the repository's folder at the commit:
@@ -253,6 +261,8 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 	switch {
 	case len(hit) > 0:
 		return store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: clipList(hit, 20), Via: via}
+	case complete && checkoutGit(e):
+		return store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: []string{".git"}, Via: viaCheckout}
 	case complete && len(e.Paths) > 0:
 		for _, src := range e.Paths {
 			if history.RemotePath(src) {
@@ -264,6 +274,79 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 		return store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: via}
 	}
 	return store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: GitLab's comparison was cut short"}
+}
+
+// viaCheckout is the Via of a rebuild settled as the job's .git: the
+// commit's files did not change what the step reads, the checkout did.
+const viaCheckout = "checkout: .git is in the build context"
+
+// checkoutGit says whether a rebuild whose commit's files did not change
+// what its first rebuilt step reads is still the job's doing: the step
+// reads the whole local context, the context is the repository's root and
+// .dockerignore does not keep .git out. Every job's checkout writes its
+// own .git (fetch state, index), so such a step never comes from the
+// cache of another job.
+func checkoutGit(e store.Elsewhere) bool {
+	if e.Context == nil || e.Git || e.GitFolder != "" || e.Folder != "." || !inContext(e, ".git") {
+		return false
+	}
+	for _, src := range e.Paths {
+		src = strings.TrimSuffix(strings.TrimPrefix(src, "./"), "/")
+		if src == "" || src == "." || src == ".git" || strings.HasPrefix(src, ".git/") {
+			return true
+		}
+	}
+	return false
+}
+
+// inContext says whether a file of the repository was in a build's local
+// context: inside the context folder, among the paths the frontend asked
+// for (when it named them) and not excluded by .dockerignore, matched the
+// way BuildKit's file walker does. True whenever that is not known.
+func inContext(e store.Elsewhere, file string) bool {
+	lc := e.Context
+	if lc == nil || e.Folder == "" || e.GitFolder != "" {
+		return true
+	}
+	rel := file
+	if e.Folder != "." {
+		r, ok := strings.CutPrefix(file, strings.TrimSuffix(e.Folder, "/")+"/")
+		if !ok {
+			return false
+		}
+		rel = r
+	}
+	if len(lc.Follow) > 0 {
+		follow := false
+		for _, fp := range lc.Follow {
+			fp = strings.TrimSuffix(strings.TrimPrefix(fp, "./"), "/")
+			if fp == "." || fp == "" || rel == fp || strings.HasPrefix(rel, fp+"/") {
+				follow = true
+				break
+			}
+		}
+		if !follow {
+			return false
+		}
+	}
+	if len(lc.Excludes) == 0 {
+		return true
+	}
+	pm, err := patternmatcher.New(lc.Excludes)
+	if err != nil {
+		return true
+	}
+	var info patternmatcher.MatchInfo
+	parts := strings.Split(rel, "/")
+	excluded := false
+	for i := range parts {
+		m, next, err := pm.MatchesUsingParentResults(strings.Join(parts[:i+1], "/"), info)
+		if err != nil {
+			return true
+		}
+		excluded, info = m, next
+	}
+	return !excluded
 }
 
 // noChangeKind is the verdict for a build whose files provably did not
