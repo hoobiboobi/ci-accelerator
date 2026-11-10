@@ -1564,6 +1564,31 @@ sys.exit(0 if one and two and one["steps"].get("built") and not two["steps"].get
   }
   check "the console's page for the failed build shows its Dockerfile with the failed line" eventually 60 comp_failed_page
 
+  # A context with the job's .git in it (no .dockerignore, COPY . ...): the
+  # same commit built again reruns the copy, since every checkout writes
+  # its own .git, and the console says so instead of "unclear".
+  local ck1 ck2 cs1 cs2 cj2
+  gl POST "/projects/$app_id/repository/commits" '{"branch":"checkout","start_branch":"main","commit_message":"e2e: .git in the context","actions":[{"action":"delete","file_path":".dockerignore"},{"action":"update","file_path":"Dockerfile","content":"FROM alpine:3.22\nCOPY . /src/\nRUN ls -a /src > /list\n"}]}' >/dev/null \
+    || fail "commit the checkout branch"
+  read -r ck1 cs1 <<<"$(gl_pipeline "$app_id" checkout 0)"
+  gl POST "/projects/$app_id/pipeline" '{"ref":"checkout"}' >/dev/null || fail "start a second checkout pipeline"
+  read -r ck2 cs2 <<<"$(gl_pipeline "$app_id" checkout "${ck1:-0}")"
+  check "two pipelines of one commit with .git in the context succeed (${cs1:-none}, ${cs2:-none})" test "$cs1 $cs2" = "success success"
+  cj2=$(gl_trace "$app_id" "$ck2" build-image "$LOGS/component-checkout-2.trace")
+  check "the second one reruns the copy of the context" grep -qE '^Dockerfile steps: [0-9]+ from cache, [1-9][0-9]* run; ' "$LOGS/component-checkout-2.trace"
+  comp_checkout() {
+    local api=http://$COMP_REL-web.$COMP_NS.svc:8080 id
+    id=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "$api/api/v1/builds?limit=50" 2>/dev/null \
+      | python3 -c 'import json,sys; print([b["id"] for b in json.load(sys.stdin)["builds"] if b.get("job") == int(sys.argv[1])][0])' "$cj2") || return 1
+    # The build's page has the console settle the reason with GitLab.
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "$api/builds/$id" 2>/dev/null >"$LOGS/component-checkout.html" || return 1
+    kc -n "$JOBS_NS" exec client-build -- wget -qO- "$api/api/v1/builds?limit=50" 2>/dev/null \
+      | python3 -c 'import json,sys; b = [b for b in json.load(sys.stdin)["builds"] if b["id"] == int(sys.argv[1])][0]["reason"]
+sys.exit(0 if b["kind"] == "files-changed" and b.get("paths") == [".git"] else 1)' "$id" &&
+      grep -q "the job&#39;s <code>.git</code> changed\|the job.s <code>.git</code> changed" "$LOGS/component-checkout.html"
+  }
+  check "the console names the job's .git as why the same commit rebuilt the copy" eventually 120 comp_checkout
+
   # context-source git in a private project: the build job checks nothing
   # out, the build node fetches the pipeline's commit itself with the job's
   # token (folder svc as the context), while a job without the component
