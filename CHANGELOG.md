@@ -11,6 +11,22 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Fixed
+
+- A rebuild of a step that copies the whole build context, when the
+  context holds the job's `.git` (no `.dockerignore` entry for it), was
+  "unclear" for the same commit and "Dockerfile changed" (or another
+  file) after a commit even when `.dockerignore` keeps that file out. The
+  console now keeps what the context held (its `.dockerignore` patterns
+  and the paths the frontend asked for, from the build's provenance),
+  never counts a file the context did not hold, and names the job's
+  `.git` with what to do about it. Builds stored before the upgrade keep
+  their verdicts.
+- A project's runner cache on the Nodes page warned about every S3
+  folder (no lifecycle rule, a failed listing), also those of other
+  runner tiers that hold none of its caches; it now shows the state of
+  the folders that hold them (all folders when none does).
+
 ### Changed
 
 - The upgrade test starts from 0.5.2, and the release notes point to
