@@ -11,6 +11,12 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Changed
+
+- The upgrade test starts from 0.5.2, and the release notes point to
+  docs/install.md for pinning the images by digest (the README's
+  install section moved there). Nothing changes for a user.
+
 ## 0.5.2 - 2026-11-10
 
 ### Upgrade notes
