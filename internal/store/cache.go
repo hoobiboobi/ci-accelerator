@@ -119,6 +119,10 @@ func (s *Store) ProjectCache(ctx context.Context, p ProjectKey) ([]CacheObject, 
 		return nil, nil, err
 	}
 	defer srows.Close()
+	holds := map[string]bool{}
+	for _, o := range objs {
+		holds[o.Store] = true
+	}
 	var stores []CacheStore
 	for srows.Next() {
 		var c CacheStore
@@ -131,7 +135,10 @@ func (s *Store) ProjectCache(ctx context.Context, p ProjectKey) ([]CacheObject, 
 			v := lc.Int64 == 1
 			c.Lifecycle = &v
 		}
-		stores = append(stores, c)
+		// Another tier's folder says nothing about this project's caches.
+		if len(holds) == 0 || holds[c.ID] {
+			stores = append(stores, c)
+		}
 	}
 	return objs, stores, srows.Err()
 }
