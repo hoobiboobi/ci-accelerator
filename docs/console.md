@@ -143,8 +143,12 @@ The controller reads with it each pipeline's jobs while pages show it,
 asks GitLab to compare the commits of a rebuild whose cache was on
 another node (in the background, at most 25 requests a minute per
 project; GitLab's answers are stored, so they settle the build again
-after a restart) and reads the end of a job's log on request. Put it
-into a Secret and name it in the values:
+after a restart) and reads the end of a job's log on request. When the
+commits show no change in what the rebuilt step copies, but the step
+reads the whole build context and `.dockerignore` does not keep `.git`
+out, the verdict names the job's `.git`: every job's checkout writes its
+own (see [dockerfile-guide.md](dockerfile-guide.md)). Put it into a
+Secret and name it in the values:
 
 ```sh
 kubectl -n ci-accelerator create secret generic gitlab-api-token --from-literal=token=glpat-...
