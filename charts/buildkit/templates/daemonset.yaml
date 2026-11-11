@@ -99,14 +99,22 @@ spec:
               protocol: TCP
           env:
             {{- include "buildkit.env" . | trim | nindent 12 }}
-          {{- with .Values.preStopSleepSeconds }}
           lifecycle:
-            # Keep accepting connections while the endpoint is withdrawn;
-            # buildkitd closes its listener at once on SIGTERM.
+            # Keep accepting connections while the endpoint is withdrawn,
+            # then let the running builds finish while buildkitd still
+            # serves everything, and give the console time to read their
+            # records: on SIGTERM buildkitd exits right after its last build,
+            # and with an emptyDir its history goes with the pod.
             preStop:
-              sleep:
-                seconds: {{ int64 . }}
-          {{- end }}
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - >-
+                    sleep {{ int64 (default 0 .Values.preStopSleepSeconds) }};
+                    while env -i OTEL_TRACES_EXPORTER=none /usr/bin/buildctl debug histories 2>/dev/null | grep -q '^STARTED';
+                    do sleep 5; done;
+                    sleep 15
           startupProbe:
             {{- include "buildkit.probeExec" . | nindent 12 }}
             {{- toYaml .Values.probes.startup | nindent 12 }}

@@ -69,6 +69,7 @@ func TestSupervisorFollowsTheDaemons(t *testing.T) {
 		Collector: c,
 		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Every:     20 * time.Millisecond,
+		Drain:     50 * time.Millisecond, // the stream of a gone daemon ends soon after
 		Resolve: func(context.Context) ([]string, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -271,4 +272,88 @@ func TestSupervisorForgetsADaemonGoneWhileReconnecting(t *testing.T) {
 	addrs = nil
 	mu.Unlock()
 	until("forgotten", func() bool { k, _ := state(); return !k })
+}
+
+// A stopping daemon leaves the Service at once but finishes its running
+// builds for up to its termination grace period: their records come after
+// its address is gone (the lab's kill check lost a build this way). Its
+// history is read on until the daemon closes the stream, and then it is
+// not dialled again but forgotten.
+func TestSupervisorReadsALeavingDaemonToTheEnd(t *testing.T) {
+	c, _ := newCollector(t)
+	var mu sync.Mutex
+	addrs := []string{"tcp://a:1234", "tcp://b:1234"}
+	dials := map[string]int{}
+	active := map[string]bool{}
+	breaks := map[string]chan struct{}{"tcp://a:1234": make(chan struct{}, 1), "tcp://b:1234": make(chan struct{}, 1)}
+	sup := &Supervisor{
+		Collector: c,
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Every:     20 * time.Millisecond,
+		Drain:     time.Hour,
+		Resolve: func(context.Context) ([]string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), addrs...), nil
+		},
+		Dial: func(ctx context.Context, addr string) (Source, error) {
+			mu.Lock()
+			dials[addr]++
+			active[addr] = true
+			mu.Unlock()
+			go func() { <-ctx.Done(); mu.Lock(); active[addr] = false; mu.Unlock() }()
+			return &blocking{addr: addr, break_: breaks[addr]}, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { sup.Run(ctx); close(done) }()
+	wait := func(what string, ok func() bool) {
+		t.Helper()
+		for i := 0; i < 300; i++ {
+			mu.Lock()
+			r := ok()
+			mu.Unlock()
+			if r {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting: %s (dials %v, active %v)", what, dials, active)
+	}
+	known := func(name string) bool {
+		for _, d := range c.Daemons() {
+			if d.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	wait("both read", func() bool { return active["tcp://a:1234"] && active["tcp://b:1234"] })
+	mu.Lock()
+	addrs = []string{"tcp://a:1234"}
+	mu.Unlock()
+	time.Sleep(200 * time.Millisecond) // ten resolutions without b
+	mu.Lock()
+	still := active["tcp://b:1234"]
+	mu.Unlock()
+	if !still || !known("tcp://b:1234") {
+		t.Fatal("the leaving daemon's stream was cut while it may still finish builds")
+	}
+	breaks["tcp://b:1234"] <- struct{}{} // the daemon stops after its last build
+	wait("b forgotten after its stream ended", func() bool { return !known("tcp://b:1234") })
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	if dials["tcp://b:1234"] != 1 {
+		t.Errorf("the leaving daemon was dialled again: %v", dials)
+	}
+	// A new pod may get the old one's address: it is a new daemon to read.
+	addrs = []string{"tcp://a:1234", "tcp://b:1234"}
+	mu.Unlock()
+	wait("the address back, read again", func() bool { return dials["tcp://b:1234"] == 2 && active["tcp://b:1234"] })
+	cancel()
+	<-done
+	if !known("tcp://a:1234") {
+		t.Error("a forgotten")
+	}
 }
