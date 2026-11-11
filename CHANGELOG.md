@@ -9,7 +9,8 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+- Pipelines that include the CI component with `integrity:` need the new
+  value from the release notes (the component's job script changed).
 
 ### Added
 
