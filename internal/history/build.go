@@ -145,7 +145,9 @@ const ContextOpt = "ci-accelerator.io/context"
 
 // stepKey matches a Dockerfile step's vertex name: "[api 2/3] COPY ...", or
 // "[2/3] COPY ..." in a Dockerfile whose only stage has no name.
-var stepKey = regexp.MustCompile(`^(\[(?:[^\]]+ )?\d+/\d+\]) (.*)$`)
+// BuildKit pads a step's number to the width of the count ("[ 3/10]",
+// "[build  3/12]"): the key keeps it, as every build prints it.
+var stepKey = regexp.MustCompile(`^(\[(?:[^\]]+ )? *\d+/\d+\]) (.*)$`)
 
 // ParseRecord reads a record as BuildKit's controlapi type, from the JSON
 // buildctl prints with `debug histories --format '{{json .Record}}'`.
@@ -446,7 +448,8 @@ func waits(start time.Time, steps []Step) {
 	}
 }
 
-var stageKeyRE = regexp.MustCompile(`^\[(?:(.+) )?\d+/\d+\]$`)
+// The stage is the key's name without the padding of its number.
+var stageKeyRE = regexp.MustCompile(`^\[(?:(.*\S) )? *\d+/\d+\]$`)
 
 // contextURLCommit is the commit a git context's address pins
 // (<repository>?ref=...&checksum=<commit>): "" for anything else. Only the

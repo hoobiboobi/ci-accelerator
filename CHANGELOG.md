@@ -23,6 +23,12 @@ workflow copies them into the GitHub release.
 
 ### Fixed
 
+- A Dockerfile with ten steps or more without stage names lost its steps
+  1 to 9 on every page: BuildKit names them "[ 1/10]" to "[ 9/10]" (the
+  number padded to the count's width), which the console did not read as
+  steps (rustdesk's build in the lab run showed none of its 9 steps).
+  Stage names no longer keep the padding either ("dev-base " in the
+  Resources table).
 - A rebuild of a step that copies the whole build context, when the
   context holds the job's `.git` (no `.dockerignore` entry for it), was
   "unclear" for the same commit and "Dockerfile changed" (or another
