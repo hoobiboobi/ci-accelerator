@@ -33,10 +33,10 @@ workflow copies them into the GitHub release.
   tool closes every possible descriptor. The daemons now cap it at
   `openFilesLimit` (default 1048576, `0` keeps the node's).
 - A build whose provenance maps other digests than its progress reports
-  (seen with the `docker/dockerfile:1.7-labs` frontend image) said
-  "Nothing was rebuilt: every step came from a build running at the same
-  time" although it built them all (grafana's first build in the lab
-  run). Its steps are now its own; their Dockerfile lines and usage are
+  (seen with older frontend images: `# syntax=docker/dockerfile:1.4`,
+  `1.7-labs`) said "Nothing was rebuilt: every step came from a build
+  running at the same time" although it built them all (grafana and pake
+  in the lab run, in every build). Its steps are now its own; their Dockerfile lines and usage are
   not shown for such a build.
 - A Dockerfile with ten steps or more without stage names lost its steps
   1 to 9 on every page: BuildKit names them "[ 1/10]" to "[ 9/10]" (the
