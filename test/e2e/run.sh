@@ -11,6 +11,10 @@
 # ones, E2E_RUNNER_FRAGMENT=<file> replaces integrations/gitlab-runner/values.yaml,
 # E2E_LOGS=<dir> writes the logs there (and keeps them) instead of a temporary directory,
 # E2E_BOX_EXTRA_VALUES="<file> ..." adds values files to the umbrella install.
+# Runs that share one Docker host at once (each against its own kind
+# cluster) need their own E2E_IMAGE_TAG (default e2e) and ports
+# (E2E_UI_PORT, E2E_SIGNIN_PORT); only one of them may run the component
+# scenario, whose GitLab container has a fixed name.
 # The box scenario also runs the browser checks of test/ui against its
 # console when Node >= 22 (make ui-tools, or E2E_NODE) and Chrome are there;
 # E2E_UI=1 makes their absence a failure instead of a skip. A deliberately broken chart or value must turn scenarios red.
@@ -66,6 +70,9 @@ COMP_JOBS_NS=$NS-component-jobs
 COMP_REL=e2e-comp
 COMP_GL=e2e-gitlab
 COMP_GL_DIR=""
+# The tree's image in kind, and the values that point the box at it.
+IMG_TAG=${E2E_IMAGE_TAG:-e2e}
+IMG_TAG_SET=(--set "control-plane.image.tag=$IMG_TAG" --set "buildkit.diskProbe.image.tag=$IMG_TAG")
 SVC_HOST=$REL-buildkit.$NS.svc
 ADDR=tcp://$SVC_HOST:1234
 CLIENT_SECRET=$REL-buildkit-client
@@ -402,7 +409,9 @@ cleanup() {
     echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS, $OTHER_NS, $OBS_NS, $PSA_NS, $BOX_NS, $BOX_JOBS_NS, $COMP_NS, $COMP_JOBS_NS, $UPG_NS, $UPG_JOBS_NS (those that exist), the container $COMP_GL and $STATE_DIR on the nodes (make e2e-clean removes them)"
     return
   fi
-  docker rm -f "$COMP_GL" >/dev/null 2>&1 || true
+  # Only the run that started GitLab (or make e2e-clean) removes it: another
+  # run on the same Docker host may be using it.
+  if [ -n "$COMP_GL_DIR" ] || [ "$MODE" = clean ]; then docker rm -f "$COMP_GL" >/dev/null 2>&1 || true; fi
   [ -z "$COMP_GL_DIR" ] || rm -rf "$COMP_GL_DIR"
   echo; echo "== [$(elapsed)] cleanup"
   remove_release
@@ -1144,12 +1153,12 @@ PY
   check "the Nodes page draws every daemon's last hour; a daemon's page splits the node into its pod and the rest" eventually 150 box_nodes_load
 }
 
-# e2e_image <scenario>: builds the tree's ci-accelerator:e2e image and
+# e2e_image <scenario>: builds the tree's ci-accelerator:$IMG_TAG image and
 # loads it into kind, once per run (box and upgrade both use it).
 E2E_IMAGE_BUILT=
 e2e_image() {
   [ -n "$E2E_IMAGE_BUILT" ] && return 0
-  make -C "$ROOT" image LOCAL_IMAGE=ci-accelerator:e2e >"$LOGS/$1-image.log" 2>&1 \
+  make -C "$ROOT" image LOCAL_IMAGE="ci-accelerator:$IMG_TAG" >"$LOGS/$1-image.log" 2>&1 \
     || { fail "build the ci-accelerator image (see $LOGS/$1-image.log)"; return 1; }
   E2E_IMAGE_BUILT=1
 }
@@ -1212,7 +1221,7 @@ s_box() {
   make -C "$ROOT" deps >"$LOGS/box-deps.log" 2>&1 || { fail "make deps (see $LOGS/box-deps.log)"; return; }
   e2e_image box || return
   arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
-  local extra=(-f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml")
+  local extra=(-f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${IMG_TAG_SET[@]}")
   for f in ${E2E_BOX_EXTRA_VALUES:-}; do extra+=(-f "$f"); done
   hc upgrade --install "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" -f "$ROOT/test/e2e/box-values.yaml" ${extra[@]+"${extra[@]}"} \
     --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token \
@@ -1442,7 +1451,7 @@ s_component() {
   # GitLab's registry speaks plain HTTP here: the daemons are told so.
   printf 'buildkit:\n  config:\n    extraConfig: |\n      [registry."%s:5050"]\n        http = true\n' "$COMP_GL" >"$LOGS/component-values.yaml"
   hc upgrade --install "$COMP_REL" "$ROOT/charts/ci-accelerator" -n "$COMP_NS" -f "$ROOT/test/e2e/box-values.yaml" \
-    -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" -f "$LOGS/component-values.yaml" \
+    -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" -f "$LOGS/component-values.yaml" "${IMG_TAG_SET[@]}" \
     --set "gitlab-runner.gitlabUrl=http://$COMP_GL/" --set gitlab-runner.runners.secret=gitlab-runner-token \
     --set "global.jobs.namespace=$COMP_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$COMP_JOBS_NS" \
     --set "global.jobs.architecture=$arch" --set global.console.url=https://console.e2e.example \
@@ -2036,7 +2045,9 @@ box_router() {
 box_ui() {
   local node=${E2E_NODE:-} port=${E2E_UI_PORT:-18431} pf ok=0
   if [ -z "$node" ]; then
-    node=$(find "$ROOT/.tools" -maxdepth 3 -path '*/node-v*/bin/node' 2>/dev/null | sort | tail -n 1)
+    # The trailing slash: under make e2e-copy .tools is a symlink, which
+    # find would not enter.
+    node=$(find "$ROOT/.tools/" -maxdepth 3 -path '*/node-v*/bin/node' 2>/dev/null | sort | tail -n 1)
     [ -n "$node" ] || node=$(command -v node || true)
   fi
   if [ -z "$node" ] || ! "$node" -e 'process.exit(typeof WebSocket === "undefined" ? 1 : 0)' 2>/dev/null; then
@@ -2632,7 +2643,7 @@ upgrade_refused() {
   check "the message names the daemons' certificate Secret to delete" grep -qF "delete secret $UPG_REL-buildkit-tls" "$LOGS/upgrade-reuse.log"
   kc -n "$UPG_NS" delete secret "$UPG_REL-buildkit-tls" --ignore-not-found >/dev/null
   if hc install "$UPG_REL" "$ROOT/charts/ci-accelerator" -n "$UPG_NS" -f "$ROOT/test/e2e/box-values.yaml" \
-      -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${UPG_ARGS[@]}" \
+      -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${IMG_TAG_SET[@]}" "${UPG_ARGS[@]}" \
       --wait --timeout 8m >"$LOGS/upgrade-reinstall.log" 2>&1; then
     pass "after helm uninstall this tree installs in the same namespace"
   else
@@ -2657,12 +2668,12 @@ upgrade_refused() {
 # probe too; otherwise the probe keeps the old release's image, since
 # changing it would itself roll the daemons.
 upgrade_in_place() {
-  local gen1 gen2 uids1 tree_app tree_probe old_probe daemon0 cp_img=(--set control-plane.image.repository=ci-accelerator --set control-plane.image.tag=e2e
+  local gen1 gen2 uids1 tree_app tree_probe old_probe daemon0 cp_img=(--set control-plane.image.repository=ci-accelerator --set "control-plane.image.tag=$IMG_TAG"
     --set control-plane.image.digest= --set control-plane.image.pullPolicy=Never)
   tree_probe=$(sed -n 's/.*default "\(v[0-9][^"]*\)" \$img\.tag.*/\1/p' "$ROOT/charts/buildkit/templates/_helpers.tpl")
   old_probe=$(hc get manifest "$UPG_REL" -n "$UPG_NS" 2>/dev/null | sed -n 's|.*image: "ghcr.io/hoobiboobi/ci-accelerator:\(v[^"@]*\).*|\1|p' | sort | uniq -c | sort -n | awk 'NR == 1 {print $2}')
   if [ -n "$tree_probe" ] && [ "$tree_probe" != "$old_probe" ]; then
-    cp_img+=(--set buildkit.diskProbe.image.repository=ci-accelerator --set buildkit.diskProbe.image.tag=e2e
+    cp_img+=(--set buildkit.diskProbe.image.repository=ci-accelerator --set "buildkit.diskProbe.image.tag=$IMG_TAG"
       --set buildkit.diskProbe.image.digest= --set buildkit.diskProbe.image.pullPolicy=Never)
   fi
   check "the $UPGRADE_FROM console stores the job's build" eventually 90 upg_builds_has_job "$UPG_REL-web" "$(job_id upgrade-before)"
