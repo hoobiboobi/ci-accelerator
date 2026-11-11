@@ -387,6 +387,7 @@
     },
     "resources": { "type": "object", "additionalProperties": false, "properties": { "limits": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "requests": { "type": "object", "additionalProperties": { "type": ["string", "number"] } }, "claims": { "type": "array" } } },
     "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
+    "openFilesLimit": { "type": "integer", "minimum": 0, "description": "Open-files limit of buildkitd and its RUN steps; 0 keeps the node's." },
     "preStopSleepSeconds": { "type": "integer", "minimum": 0 },
     "minReadySeconds": { "type": "integer", "minimum": 0 },
     "updateStrategy": {

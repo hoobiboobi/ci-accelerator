@@ -394,6 +394,13 @@ resources:
     cpu: 500m
     memory: 512Mi
 
+# -- The open-files limit (soft and hard) of buildkitd and so of every RUN
+# step. A node whose containerd runs with LimitNOFILE=infinity hands pods
+# 2^30 or more, and old tools loop over every possible descriptor: yum on
+# CentOS 7 ran for an hour instead of three minutes (a lab run, 2026-11-11).
+# Docker gives containers 1024 by default. 0 keeps what the node gives.
+openFilesLimit: 1048576
+
 # -- Seconds a stopping daemon gets to finish running builds (it stops
 # accepting new ones at once). Builds still running after this are killed.
 # With maxUnavailable 1 a rollout takes up to nodes x this, so pass a helm

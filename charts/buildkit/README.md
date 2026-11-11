@@ -75,6 +75,7 @@ Kubernetes: `>=1.34.0-0`
 | networkPolicy.ingress.extraFrom | list | `[]` | More NetworkPolicyPeer entries for port 1234 (e.g. an ipBlock for NodePort clients outside the cluster). |
 | networkPolicy.ingress.namespaces | list | `[]` | Namespaces whose pods may connect to port 1234, in addition to tls.client.namespaces. |
 | nodeSelector | object | `{}` | Merged over global.buildNodes.selector (and kubernetes.io/os: linux). |
+| openFilesLimit | int | `1048576` | The open-files limit (soft and hard) of buildkitd and so of every RUN step. A node whose containerd runs with LimitNOFILE=infinity hands pods 2^30 or more, and old tools loop over every possible descriptor: yum on CentOS 7 ran for an hour instead of three minutes (a lab run, 2026-11-11). Docker gives containers 1024 by default. 0 keeps what the node gives. |
 | otel.metricsEndpoint | string | `""` | Full OTLP URL for metrics (with the path, e.g. http://otel-collector:4318/v1/metrics). Empty: no metrics are pushed. Both endpoints are rendered with tpl, so a parent chart can build them from the release name. |
 | otel.metricsIntervalSeconds | int | `60` | Seconds between metric pushes. Counters are deltas per interval: sum them over time (or convert them to cumulative in a collector). |
 | otel.protocol | string | `"http/protobuf"` | http/protobuf (what most OTLP receivers accept over HTTP) or grpc. |
