@@ -326,7 +326,7 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 	// A build always has vertices of its own among its steps (an image
 	// resolved, a cached step, the wait for a received one). When none of
 	// them is in the provenance's mapping, the mapping speaks of other
-	// digests (seen with the docker/dockerfile:1.7-labs frontend image):
+	// digests (seen with older frontend images, dockerfile:1.4 and 1.7-labs):
 	// every step is the build's own then, without lines or usage, rather
 	// than work received from nobody.
 	foreign := b.prov != nil
