@@ -136,6 +136,30 @@ run_case "defaults: context, Dockerfile, push with the job token" 0 -- \
 # Lines of build-args and secrets may be indented (a YAML block).
 run_case "indented build-args and secrets lines" 0 "CIA_BUILD_ARGS=  VERSION=1.2 3" "CIA_SECRETS=  npmrc = NPM_TOKEN " NPM_TOKEN=s3cr3t -- \
   'argv:^build-arg:VERSION=1\.2 3$' 'argv:^id=npmrc,env=NPM_TOKEN$'
+# The checkout's .git in the context: a note says why steps that copy the
+# whole context run in every pipeline, unless a .dockerignore keeps it out
+# (<Dockerfile>.dockerignore first, as BuildKit reads it).
+gitnote='stdout:note: \.git is in the build context'
+ignores() { rm -f "$WORK/repo/.dockerignore" "$WORK/repo/Dockerfile.dockerignore"; [ -z "$1" ] || printf '%b' "$1" >"$WORK/repo/.dockerignore"; [ -z "${2:-}" ] || printf '%b' "$2" >"$WORK/repo/Dockerfile.dockerignore"; }
+run_case "no .git in the context: no note" 0 -- "stdout:!note: \\.git"
+mkdir -p "$WORK/repo/.git"
+ignores ""
+run_case ".git and no .dockerignore: the note" 0 -- "$gitnote"
+ignores "node_modules\n.gitignore\n"
+run_case ".git and a .dockerignore without it: the note" 0 -- "$gitnote"
+for kept in ".git" "/.git/" "**/.git" ".git*" "  .git  " "*\n!src"; do
+  ignores "node_modules\n$kept\n"
+  run_case ".dockerignore keeps .git out ($kept): no note" 0 -- "stdout:!note: \\.git"
+done
+ignores "*\n!src\n!.git\n"
+run_case "an allow-list that lets .git back in: the note" 0 -- "$gitnote"
+ignores "node_modules\n" ".git\n"
+run_case "Dockerfile.dockerignore keeps .git out: no note" 0 -- "stdout:!note: \\.git"
+ignores ".git\n" "node_modules\n"
+run_case "Dockerfile.dockerignore wins over .dockerignore: the note" 0 -- "$gitnote"
+run_case "a context folder without .git: no note" 0 CIA_CONTEXT=app CIA_DOCKERFILE=app/Containerfile -- "stdout:!note: \\.git"
+ignores ""
+rmdir "$WORK/repo/.git"
 # A context BuildKit fetched itself (a git URL) prints no transfer line:
 # the build passed, so does the job.
 run_case "no context transfer in the log" 0 FAKE=nocontext -- \

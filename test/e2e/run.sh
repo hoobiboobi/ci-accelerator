@@ -1576,6 +1576,8 @@ sys.exit(0 if one and two and one["steps"].get("built") and not two["steps"].get
   check "two pipelines of one commit with .git in the context succeed (${cs1:-none}, ${cs2:-none})" test "$cs1 $cs2" = "success success"
   cj2=$(gl_trace "$app_id" "$ck2" build-image "$LOGS/component-checkout-2.trace")
   check "the second one reruns the copy of the context" grep -qE '^Dockerfile steps: [0-9]+ from cache, [1-9][0-9]* run; ' "$LOGS/component-checkout-2.trace"
+  check "the job's log says .git is in the build context, and how to keep it out" grep -q '^  note: \.git is in the build context' "$LOGS/component-checkout-2.trace"
+  check "a job whose .dockerignore keeps .git out has no such note" eval '! grep -q "note: \.git is in the build context" "$LOGS/component-build-1.trace"'
   comp_checkout() {
     local api=http://$COMP_REL-web.$COMP_NS.svc:8080 id
     id=$(kc -n "$JOBS_NS" exec client-build -- wget -qO- "$api/api/v1/builds?limit=50" 2>/dev/null \
