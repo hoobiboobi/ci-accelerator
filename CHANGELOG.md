@@ -11,6 +11,15 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Added
+
+- The CI component notes in the job's log when the checkout's `.git` is
+  in the build context (no `.dockerignore` line keeps it out): every
+  job's checkout writes its own, so a step that copies the whole context
+  runs again in every pipeline. In a lab run of popular open-source
+  projects, a quarter lost their warm builds this way. The component's
+  integrity changes: take the new one from the release notes.
+
 ### Fixed
 
 - A rebuild of a step that copies the whole build context, when the

@@ -297,6 +297,18 @@ spec:
         echo "  only committed files are in it: .dockerignore is not applied, artifacts of earlier jobs are not there"
       else
         say "context $CIA_CONTEXT ($(du -sh "$CIA_CONTEXT" 2>/dev/null | cut -f1) on disk, before .dockerignore), Dockerfile $dockerfile"
+        # The checkout's .git in the context: every job writes its own, so a
+        # step that copies the whole context never comes from another job's
+        # cache. BuildKit reads <Dockerfile>.dockerignore, else the context's.
+        if [ -d "$CIA_CONTEXT/.git" ]; then
+          ignore="$dockerfile.dockerignore"
+          [ -f "$ignore" ] || ignore="$CIA_CONTEXT/.dockerignore"
+          if ! { [ -f "$ignore" ] && grep -qE '^[[:space:]]*(/?\.git/?|\*\*/\.git/?|\.git\*.*|\*)[[:space:]]*$' "$ignore" &&
+            ! grep -qE '^[[:space:]]*!/?\.git/?[[:space:]]*$' "$ignore"; }; then
+            echo "  note: .git is in the build context (no .dockerignore line keeps it out): every job's checkout writes its own,"
+            echo "  so a step that copies the whole context runs again in every pipeline. Add .git to .dockerignore, or use context-source: git."
+          fi
+        fi
       fi
       [ "$CIA_PUSH" != true ] || say "pushing $names"
       log=$(mktemp)
