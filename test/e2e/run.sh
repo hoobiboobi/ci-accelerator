@@ -2770,6 +2770,10 @@ s_cache() {
   fi
   check "deps step CACHED on the second build" deps_cached "$LOGS/cache-2.log"
   check "cache mount WARM on the second build" printed "$LOGS/cache-2.log" CACHE_MOUNT_WARM
+  # The node's limit is kind's containerd's (2^30 or more): RUN steps get
+  # the chart's cap instead (old tools loop over every descriptor).
+  next_id; build client-build ulimit --opt "build-arg:BUST=$ID" >"$LOGS/ulimit.log" 2>&1
+  check "a RUN step gets the open-files limit the chart sets (1048576)" printed "$LOGS/ulimit.log" "NOFILE 1048576 1048576"
 }
 
 s_dedup() {
