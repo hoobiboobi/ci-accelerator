@@ -285,6 +285,14 @@ Open BuildKit issues that still apply to v0.34.2:
 
 Other causes:
 
+- **A `RUN` with yum or rpm (CentOS 7, RHEL 7) runs for an hour and
+  times out, while it takes minutes with `docker build`.** Old tools
+  close every possible file descriptor, and a node whose containerd runs
+  with `LimitNOFILE=infinity` gives pods an open-files limit of 2^30 or
+  more. The daemons cap it at `buildkit.openFilesLimit` (1048576; the
+  same install took 183 s with it, 168 s with Docker's 1024 and did not
+  end in an hour without it). Check what a build gets:
+  `RUN ulimit -n`. `0` keeps the node's limit.
 - **A job waits for a long time after a build node died.** `buildctl` has
   no keepalive: when a node disappears without closing its connections
   (power loss, network partition), the job waits for TCP to give up, which

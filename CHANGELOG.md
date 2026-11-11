@@ -9,6 +9,9 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+- The daemons restart once, for the open-files limit in their pod
+  template (`buildkit.openFilesLimit`). A running build ends with them;
+  start the upgrade when no build runs, as for any daemon change.
 - Pipelines that include the CI component with `integrity:` need the new
   value from the release notes (the component's job script changed).
 
@@ -23,6 +26,12 @@ workflow copies them into the GitHub release.
 
 ### Fixed
 
+- A `RUN` with yum on CentOS 7 (ventoy in the lab run) hung for the job's
+  hour on the box while it took four minutes with `docker build`: the
+  daemons and every RUN step inherited the node's open-files limit, 2^31
+  on a node whose containerd runs with `LimitNOFILE=infinity`, and the
+  tool closes every possible descriptor. The daemons now cap it at
+  `openFilesLimit` (default 1048576, `0` keeps the node's).
 - A build whose provenance maps other digests than its progress reports
   (seen with the `docker/dockerfile:1.7-labs` frontend image) said
   "Nothing was rebuilt: every step came from a build running at the same

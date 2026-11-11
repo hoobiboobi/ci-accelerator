@@ -232,6 +232,47 @@ tests:
       - notExists:
           path: spec.template.spec.containers[0].lifecycle
 
+  - it: caps the open-files limit of the daemon and its RUN steps
+    template: daemonset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value:
+            - /bin/sh
+            - -c
+            - ulimit -n 1048576 && exec buildkitd "$@"
+            - buildkitd
+      # The arguments still reach buildkitd ("$@" after the name).
+      - equal:
+          path: spec.template.spec.containers[0].args[0]
+          value: --config
+
+  - it: takes another open-files limit
+    template: daemonset.yaml
+    set:
+      openFilesLimit: 65536
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command[2]
+          value: ulimit -n 65536 && exec buildkitd "$@"
+
+  - it: keeps the node's open-files limit with 0
+    template: daemonset.yaml
+    set:
+      openFilesLimit: 0
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].command
+
+  - it: caps the open-files limit for values from before the key (helm upgrade --reuse-values)
+    template: daemonset.yaml
+    set:
+      openFilesLimit: null
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command[2]
+          value: ulimit -n 1048576 && exec buildkitd "$@"
+
   - it: runs a privileged rootful daemon without an API token
     template: daemonset.yaml
     asserts:

@@ -63,6 +63,17 @@ spec:
         - name: buildkitd
           image: {{ include "buildkit.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- $nofile := 1048576 }}
+          {{- if hasKey .Values "openFilesLimit" }}{{ $nofile = int .Values.openFilesLimit }}{{ end }}
+          {{- if gt $nofile 0 }}
+          # Every RUN step inherits buildkitd's open-files limit: a node's
+          # unlimited one makes old tools (yum on CentOS 7) loop for hours.
+          command:
+            - /bin/sh
+            - -c
+            - ulimit -n {{ $nofile }} && exec buildkitd "$@"
+            - buildkitd
+          {{- end }}
           args:
             - --config
             - {{ include "buildkit.configDir" . }}/buildkitd.toml
