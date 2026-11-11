@@ -68,7 +68,7 @@ type Line struct {
 
 func isFrom(s history.Step) bool { return strings.HasPrefix(s.Name, "FROM ") }
 
-var stageKey = regexp.MustCompile(`^\[(?:(.+) )?\d+/\d+\]$`)
+var stageKey = regexp.MustCompile(`^\[(?:(.*\S) )? *\d+/\d+\]$`)
 
 func stageOf(key string) string {
 	if m := stageKey.FindStringSubmatch(key); m != nil && m[1] != "" {
