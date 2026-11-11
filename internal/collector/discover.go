@@ -24,7 +24,20 @@ type Supervisor struct {
 	Dial func(ctx context.Context, addr string) (Source, error)
 	// Every is how often addresses are resolved again (default 30 s).
 	Every time.Duration
+	// Drain is how long the history of a daemon whose address left the
+	// Service is still read (default 35 min): a stopping daemon finishes
+	// its running builds first (terminationGracePeriodSeconds), and their
+	// records come after its address is gone. The stream ends sooner when
+	// the daemon closes it; it is not opened again.
+	Drain time.Duration
 	Log   *slog.Logger
+}
+
+// following is one daemon's stream: cancel ends it, leaving is closed when
+// its address left the Service.
+type following struct {
+	cancel  context.CancelCauseFunc
+	leaving chan struct{}
 }
 
 // Run supervises until ctx ends.
@@ -33,8 +46,15 @@ func (s *Supervisor) Run(ctx context.Context) {
 	if every == 0 {
 		every = 30 * time.Second
 	}
-	var wg sync.WaitGroup
-	running := map[string]context.CancelCauseFunc{}
+	drain := s.Drain
+	if drain == 0 {
+		drain = 35 * time.Minute
+	}
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex // running: streams remove themselves when they end
+	)
+	running := map[string]*following{}
 	fails := 0
 	for {
 		wait := every
@@ -53,36 +73,52 @@ func (s *Supervisor) Run(ctx context.Context) {
 			fails = 0
 			seen := map[string]bool{}
 			var added, removed []string
+			mu.Lock()
 			for _, a := range addrs {
 				seen[a] = true
 				if running[a] == nil {
 					added = append(added, a)
 					actx, cancel := context.WithCancelCause(ctx)
-					running[a] = cancel
+					f := &following{cancel: cancel, leaving: make(chan struct{})}
+					running[a] = f
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						s.stream(actx, a)
+						s.stream(actx, a, f)
+						mu.Lock()
+						if running[a] == f {
+							delete(running, a)
+						}
+						mu.Unlock()
 					}()
 				}
 			}
-			for a, cancel := range running {
+			for a, f := range running {
+				select {
+				case <-f.leaving:
+					continue // already leaving
+				default:
+				}
 				if !seen[a] {
-					cancel(ErrGone)
-					delete(running, a)
+					close(f.leaving)
+					time.AfterFunc(drain, func() { f.cancel(ErrGone) })
 					removed = append(removed, a)
 				}
 			}
+			total := len(running) - len(removed) // the leaving ones are read on, not counted
+			mu.Unlock()
 			if len(added)+len(removed) > 0 {
 				sort.Strings(removed)
-				s.Log.Info("daemons changed", "added", added, "removed", removed, "total", len(running))
+				s.Log.Info("daemons changed", "added", added, "removed", removed, "total", total)
 			}
 		}
 		select {
 		case <-ctx.Done():
-			for _, cancel := range running {
-				cancel(nil)
+			mu.Lock()
+			for _, f := range running {
+				f.cancel(nil)
 			}
+			mu.Unlock()
 			wg.Wait()
 			return
 		case <-time.After(wait):
@@ -90,8 +126,10 @@ func (s *Supervisor) Run(ctx context.Context) {
 	}
 }
 
-// stream reads one daemon's history, reconnecting with a growing delay.
-func (s *Supervisor) stream(ctx context.Context, addr string) {
+// stream reads one daemon's history, reconnecting with a growing delay
+// until its address leaves the Service; then it reads on until the daemon
+// closes the stream (or Drain ends it) and does not reconnect.
+func (s *Supervisor) stream(ctx context.Context, addr string, f *following) {
 	// The address left the Service: forget the daemon read there, also when
 	// its stream had broken before (a rollout stops the pod first) and this
 	// one only waited to reconnect.
@@ -106,6 +144,15 @@ func (s *Supervisor) stream(ctx context.Context, addr string) {
 	}()
 	delay := time.Second
 	for ctx.Err() == nil {
+		select {
+		case <-f.leaving:
+			// The address left and the stream ended (the stopping daemon
+			// closed it after its last build) or was down: forget it.
+			s.Log.Info("daemon gone, its history read to the end", "addr", addr)
+			f.cancel(ErrGone)
+			return
+		default:
+		}
 		src, err := s.Dial(ctx, addr)
 		if err == nil {
 			name = src.Name()

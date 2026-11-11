@@ -214,23 +214,21 @@ tests:
           path: spec.template.spec.containers[0].readinessProbe.initialDelaySeconds
           value: 0
 
-  - it: delays SIGTERM until the endpoint is withdrawn
+  - it: delays SIGTERM until the endpoint is withdrawn and the running builds are done
     template: daemonset.yaml
     asserts:
-      - equal:
-          path: spec.template.spec.containers[0].lifecycle
-          value:
-            preStop:
-              sleep:
-                seconds: 5
+      - matchRegex:
+          path: spec.template.spec.containers[0].lifecycle.preStop.exec.command[2]
+          pattern: "^sleep 5; while env -i OTEL_TRACES_EXPORTER=none /usr/bin/buildctl debug histories 2>/dev/null \\| grep -q '\\^STARTED'; do sleep 5; done; sleep 15$"
 
-  - it: can drop the preStop delay
+  - it: can drop the preStop delay, never the wait for running builds
     template: daemonset.yaml
     set:
       preStopSleepSeconds: 0
     asserts:
-      - notExists:
-          path: spec.template.spec.containers[0].lifecycle
+      - matchRegex:
+          path: spec.template.spec.containers[0].lifecycle.preStop.exec.command[2]
+          pattern: "^sleep 0; while .*STARTED"
 
   - it: caps the open-files limit of the daemon and its RUN steps
     template: daemonset.yaml
