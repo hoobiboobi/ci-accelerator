@@ -262,7 +262,7 @@ jobs:
             fi
             test -n "$probe_digest" || { echo "no digest for the disk probe's image $probe_tag" >&2; exit 1; }
             echo
-            echo "To pin the box's images by digest (docs/install.md, \"Install options\"): \`--set control-plane.image.digest=$image_digest\` (ci-accelerator:v$VERSION) and, for the disk probe next to each daemon (ci-accelerator:$probe_tag), \`--set buildkit.diskProbe.image.digest=$probe_digest\`. The daemons' BuildKit image is pinned by digest already."
+            echo "To pin the box's images by digest (docs/production.md, \"Images pinned by digest\"): \`--set control-plane.image.digest=$image_digest\` (ci-accelerator:v$VERSION) and, for the disk probe next to each daemon (ci-accelerator:$probe_tag), \`--set buildkit.diskProbe.image.digest=$probe_digest\`. The daemons' BuildKit image is pinned by digest already."
           } > dist/notes.md
           prerelease=()
           case "$VERSION" in *-*) prerelease=(--prerelease) ;; esac

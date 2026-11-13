@@ -66,8 +66,17 @@ workflow copies them into the GitHub release.
 ### Changed
 
 - The upgrade test starts from 0.5.2, and the release notes point to
-  docs/install.md for pinning the images by digest (the README's
-  install section moved there). Nothing changes for a user.
+  docs/production.md for pinning the images by digest. Nothing changes
+  for a user.
+- Documentation: the install is one procedure per starting point, each
+  step with its check and what it prints: docs/install.md (a cluster),
+  docs/install-existing-cluster.md (a cluster that already runs
+  cert-manager, a runner or admission policies), docs/quickstart.md (one
+  machine), docs/first-build.md (the first CI job), docs/production.md
+  (the cache disk, daemon sizes, digests, zones, OTLP, mirrors);
+  docs/upgrading.md, docs/console.md and docs/runner-cache.md are
+  procedures too. The README keeps the short form. Every procedure was
+  run as written on fresh clusters and machines.
 
 ## 0.5.2 - 2026-11-10
 
