@@ -34,6 +34,11 @@ where ext4 fixes their number at `mkfs` time and can run out of them
 reserve that buildkitd's free-space check would count. The production
 numbers below come from XFS.
 
+`/dev/nvme1n1` below stands for the empty disk: `lsblk -o
+NAME,SIZE,FSTYPE,MOUNTPOINT` lists the disks; take the one with no
+filesystem and no mount point (`mkfs` on the wrong one destroys the
+node).
+
 ```sh
 mkfs.xfs -L buildkit /dev/nvme1n1            # ftype=1 (overlayfs needs it) is the default
 mkdir -p /var/mnt/nvme && mount -o noatime /dev/nvme1n1 /var/mnt/nvme
@@ -41,7 +46,8 @@ mkdir -p /var/mnt/nvme/buildkit              # the directory the daemon uses
 ```
 
 Add the mount to `/etc/fstab` (or your node image) so it comes back
-after a reboot. With ext4 instead, make more inodes (`mkfs.ext4 -i 8192`)
+after a reboot. Check: `findmnt /var/mnt/nvme` prints one line with
+`xfs`, and `df -h /var/mnt/nvme` shows the disk's size. With ext4 instead, make more inodes (`mkfs.ext4 -i 8192`)
 and drop the reserve (`tune2fs -m 0`).
 
 **2. The values.** The directory must exist on the mounted disk: with
@@ -170,7 +176,8 @@ global:
     architecture: arm64
 ```
 
-A mixed farm (amd64 and arm64 build nodes) needs two installs.
+A mixed farm (amd64 and arm64 build nodes in one install) is not
+supported; two installs, one per architecture, are untested.
 
 ## Metrics and traces to your backend
 
@@ -182,7 +189,7 @@ buildkit:
   otel:
     metricsEndpoint: http://otel-collector.observability.svc:4318/v1/metrics
     tracesEndpoint: http://otel-collector.observability.svc:4318/v1/traces
-    protocol: http/protobuf   # the default; or grpc
+    protocol: http/protobuf   # the default; with grpc the endpoints are host:4317 without a path
 ```
 
 Every metric and span names its daemon (`k8s.pod.name`,
@@ -192,10 +199,10 @@ the collector. Every job has its own trace: the runner sets
 `TRACEPARENT` before the job's script, with `ci.pipeline.id`,
 `ci.job.id` and `ci.project.path` on every span. Check: the collector's
 own log or metrics show received points within two minutes of the
-daemons' restart; the daemons' NetworkPolicy allows egress to the
-collector's namespace only if it is in-cluster or outside
-`buildkit.networkPolicy.egress.clusterCIDRs` (add an egress rule
-otherwise, `buildkit.networkPolicy.egress.extraRules`).
+daemons' restart; the daemons' NetworkPolicy allows egress to the collector unless its
+address falls inside `buildkit.networkPolicy.egress.clusterCIDRs` (empty
+by default); with the cluster's CIDRs listed there, add an egress rule
+for the collector in `buildkit.networkPolicy.egress.extraRules`.
 
 ## The console for a team
 
@@ -236,8 +243,9 @@ cert-manager is the default and the tested path. A cluster without it
 needs four certificates from one CA dedicated to the box, which
 `scripts/buildkit-certs.sh` makes; the procedure, the Secrets and the
 values are in [gitops.md](gitops.md#certificates-without-cert-manager).
-Renewal is yours then; the daemons read their certificate only at start,
-so restart them after replacing it.
+Renewal is yours then: the script issues certificates for 365 days,
+and the daemons read theirs only at start, so make new ones before
+the date and restart the daemons after replacing the Secret.
 
 ## NetworkPolicy and what the install needs from the cluster
 
@@ -252,6 +260,12 @@ objects, cert-manager's namespace and the installer's rights:
 
 ## A production values file
 
+The last two keys need what other pages set up first: the Secret
+`gitlab-api-token` ([console.md](console.md#level-2-with-a-gitlab-token),
+step 2; the controller does not start without it) and an Ingress that
+answers at `global.console.url` ([console.md](console.md#level-3-with-sign-in-through-gitlab-for-a-team)).
+Leave both out until then.
+
 ```yaml
 # values.yaml
 gitlab-runner:
@@ -261,7 +275,7 @@ gitlab-runner:
 
 global:
   console:
-    url: https://ci-console.example.com      # the console's address: every job's log links to its page
+    url: https://ci-console.example.com      # only once an Ingress answers here (console.md); every job's log links to it
 
 buildkit:
   storage:
@@ -286,7 +300,7 @@ control-plane:
     digest: "sha256:5071488b282537162b5e5025e8b6e4748e8273e91188afd88e0a67bf8a18239b"   # ci-accelerator:v0.5.2
   gitlab:
     token:
-      existingSecret: gitlab-api-token       # or signIn, see console.md
+      existingSecret: gitlab-api-token       # the Secret of console.md level 2, created first; or signIn
 ```
 
 Every other setting and its default: `helm show values

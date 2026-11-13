@@ -132,8 +132,9 @@ sign-in, upgrades and removal: [docs/quickstart.md](docs/quickstart.md).
 ### On your cluster
 
 Kubernetes 1.34 or newer, Helm 3.19 or 4, cert-manager, a default
-StorageClass, a CNI that enforces NetworkPolicy, and one node to give to
-builds. In short:
+StorageClass, a CNI that enforces NetworkPolicy, and at least two nodes:
+one to give to builds (nothing else runs on it) and one for the runner,
+the controller and the console. In short:
 
 ```sh
 kubectl label node <node> ci-accelerator.io/node-role=build
@@ -142,10 +143,21 @@ helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v
   --namespace cert-manager --create-namespace --set crds.enabled=true --wait
 kubectl create namespace ci-accelerator
 kubectl label namespace ci-accelerator pod-security.kubernetes.io/enforce=privileged
+# the token: in GitLab, Settings > CI/CD > Runners > Create project runner,
+# tag ci-accelerator, untagged jobs off (docs/install.md, step 4)
 kubectl -n ci-accelerator create secret generic gitlab-runner-token \
   --from-literal=runner-token=glrt-... --from-literal=runner-registration-token=
 helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
   -n ci-accelerator -f values.yaml --wait --timeout 10m
+```
+
+where `values.yaml` holds at least
+
+```yaml
+gitlab-runner:
+  gitlabUrl: https://gitlab.com/          # your GitLab, with the trailing slash
+  runners:
+    secret: gitlab-runner-token
 ```
 
 Each step with its checks, the runner in GitLab, `values.yaml` and the
@@ -159,13 +171,15 @@ With Flux or Argo CD: [docs/gitops.md](docs/gitops.md). For production
 ### A first build
 
 One job in `.gitlab-ci.yml` builds the project's `Dockerfile` on the
-daemons and pushes `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`; the install
-notes print it with the release's hash:
+daemons and pushes `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`. The notes
+`helm install` printed (`helm get notes ci-accelerator -n ci-accelerator`
+prints them again) and the release page carry it with the release's
+hash:
 
 ```yaml
 include:
   - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.5.2/ci/gitlab/build.yml
-    integrity: sha256-<from the install notes or the release notes>
+    integrity: sha256-Th5CoYA2g9uRP3gWvlve0s/5hmho1UK04sDgK23i8rc=   # 0.5.2's; the install notes and the release page print it
     inputs:
       runner-tags: [ci-accelerator]   # the tag you gave the runner
 ```

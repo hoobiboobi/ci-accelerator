@@ -1,8 +1,9 @@
 # Try it on one machine
 
 `quickstart.sh` installs everything on one clean Linux machine: a
-one-node Kubernetes (k3s), cert-manager, and the box with its runner and
-console. It is for a first look before a real deployment, not for
+one-node Kubernetes (k3s), cert-manager, and the box (the `ci-accelerator`
+chart: a BuildKit daemon, the build router, the console and a GitLab
+runner). It is for a first look before a real deployment, not for
 production: one node, no high availability, the console reachable only
 through an SSH tunnel. This page goes from an empty machine to the
 console, then to a first build, a GitLab token, sign-in, changes,
@@ -20,9 +21,10 @@ upgrades and removal. The install itself takes five minutes.
   `raw.githubusercontent.com`, `get.helm.sh`, `quay.io`, `ghcr.io`,
   `docker.io`, `registry.gitlab.com` and your GitLab. Nothing needs to
   reach the machine: the runner polls GitLab, and you reach the console
-  through SSH. Open only port 22 inbound. With `ufw` active, the script
-  prints two rules to add first (the pod and service networks,
-  `10.42.0.0/16` and `10.43.0.0/16`).
+  through SSH. Open only port 22 inbound. With `ufw` active, the script warns and goes on: before answering `Go
+  on?`, in another terminal, `sudo ufw allow from 10.42.0.0/16 to any &&
+  sudo ufw allow from 10.43.0.0/16 to any` (the pod and service
+  networks), or the pods cannot reach the API.
 - **A runner in GitLab** and its token. Create it as
   [install.md](install.md#4-create-the-runner-in-gitlab) describes: in
   the project you will build, Settings > CI/CD > Runners > Create project
@@ -32,7 +34,8 @@ upgrades and removal. The install itself takes five minutes.
 
 ## 1. Put the token in a file
 
-On the machine, as the user you log in with:
+On the machine, as the user you log in with, in your home directory
+(steps 2 and 3 run from the same directory):
 
 ```sh
 install -m 600 /dev/null runner-token
@@ -116,17 +119,24 @@ bare `kubectl`: add the prefix.
 sudo k3s kubectl -n ci-accelerator get pods
 ```
 
-Six pods `Running`: `ci-accelerator-buildkit-...` (`2/2`), one
-controller, one `gitlab-runner`, one router, two `web`. Then the runner:
+Six pods `Running`: `ci-accelerator-buildkit-...` (`2/2`),
+`ci-accelerator-controller-...`, `ci-accelerator-gitlab-runner-...`,
+`ci-accelerator-router-...` and two `ci-accelerator-web-...` (each
+`1/1`). A pod that is not `Running` or not ready: `sudo k3s kubectl -n
+ci-accelerator describe pod <name>`, and
+[troubleshooting.md](troubleshooting.md#the-install-fails). Then the
+runner:
 
 ```sh
-sudo k3s kubectl -n ci-accelerator logs deploy/ci-accelerator-gitlab-runner | grep -i -E 'registered|error'
+sudo k3s kubectl -n ci-accelerator logs deploy/ci-accelerator-gitlab-runner | grep -i -E 'registered|valid|error'
 ```
 
 `Runner registered successfully`; in GitLab, under Settings > CI/CD >
 Runners, the runner's row shows a green dot and **Online**. If it says
-`is not valid`, the token in the file is wrong: fix the file and run the
-script again with the same options.
+`is not valid`, the token in the file is wrong: fix the file, run the
+script again with the same options, then `sudo k3s kubectl -n
+ci-accelerator rollout restart deploy/ci-accelerator-gitlab-runner` (the
+runner reads the token at start) and check the log again.
 
 ## 5. Open the console
 
@@ -154,9 +164,10 @@ address you log in with.
 
 ## 6. A first build
 
-[first-build.md](first-build.md): a `.gitlab-ci.yml` with the component,
-the tag you gave the runner, and what the first and the second run look
-like. On this machine, prefix its `kubectl` commands with `sudo k3s`,
+[first-build.md](first-build.md): a `.gitlab-ci.yml` that includes the
+GitLab CI component (one `include:` block, printed by the install notes,
+that adds the `build-image` job), the tag you gave the runner, and what
+the first and the second run look like. On this machine, prefix its `kubectl` commands with `sudo k3s`,
 and the console's port-forward is the tunnel above. Every job's log links
 to its page in the console at `http://localhost:8080/...`; the links work
 while the tunnel is up.
@@ -182,10 +193,11 @@ comparing commits in GitLab.
    ```
 
    It keeps `values.yaml`, writes the token into the Secret
-   `gitlab-api-token` and applies it. It also warns that the token is
-   applied with `--set`: to keep it through your own Helm upgrades, add
-   these lines under the existing `control-plane:` key of
-   `/var/lib/ci-accelerator/values.yaml`, next to `enabled: true`:
+   `gitlab-api-token` and applies it. It also warns that the token is applied with `--set`: your own `helm
+   upgrade -f values.yaml` (step 9) would drop it. So make the
+   `control-plane:` block of `/var/lib/ci-accelerator/values.yaml` read
+   as follows (the first two lines are there already; add the three
+   under them):
 
    ```yaml
    control-plane:
@@ -196,7 +208,10 @@ comparing commits in GitLab.
    ```
 
 The console's job pages now show results and waits. The token expires on
-the date you chose: make a new one then and run the same command again.
+the date you chose: make a new one then, put it into the file, run the
+same command again and restart the controller, which reads the token
+only at start: `sudo k3s kubectl -n ci-accelerator rollout restart
+deploy/ci-accelerator-controller`.
 
 ## 8. Sign-in through GitLab
 
@@ -210,7 +225,8 @@ For a team, use a cluster install behind HTTPS
 1. In GitLab, select your avatar > **Edit profile** > **Access** >
    **Applications** > **Add new application**. Name: anything. Redirect
    URI: `http://localhost:8080/auth/callback/<id>`, where `<id>` is the
-   six characters the install notes printed after `redirect URI is`
+   six characters the install notes printed after `redirect URI is` (or,
+   once step 7 gave the console a token, after `redirect URI would be`)
    (print them again: `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml
    /usr/local/lib/ci-accelerator/helm-v4.3.1/helm get notes ci-accelerator
    -n ci-accelerator`; for `https://gitlab.com/` it is `993196`). Tick
@@ -242,7 +258,7 @@ For a team, use a cluster install behind HTTPS
            admins: ["id:1234567"]      # your user id: admins see every project
    ```
 
-5. Apply it (step 9), then open <http://localhost:8080/> through the
+5. Apply it with the `helm upgrade` command of step 9, then open <http://localhost:8080/> through the
    tunnel: GitLab asks you to authorize the application, and the console
    shows your projects. If GitLab says the redirect URI does not match,
    compare it with the notes' character by character.

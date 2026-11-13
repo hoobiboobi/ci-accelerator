@@ -194,7 +194,9 @@ the job's `.git`: every job's checkout writes its own (see
    kubectl -n ci-accelerator create secret generic gitlab-api-token --from-literal=token=glpat-...
    ```
 
-3. **Add to `values.yaml` and apply** (the command above):
+3. **Add to `values.yaml` and apply** (the command above). If the file
+   already has a `control-plane:` key, put `gitlab:` under it; a second
+   top-level `control-plane:` key silently replaces the first:
 
    ```yaml
    control-plane:
@@ -234,9 +236,11 @@ sign-in is on, so the Ingress comes last.
 of its host (no sub-path): `https://ci-console.example.com`. Plain
 `http://` is accepted only on `localhost`, through a port-forward or the
 one-machine install's tunnel. Set it in `values.yaml`; from then on
-every job's log prints a link to its page there, and the web answers
-only on that name, on `localhost` and on in-cluster names (another name
-gets "this console answers on ..."):
+every job's log prints a link to its page there. (Without sign-in, the
+web then answers only on that name, on `localhost` and on in-cluster
+names; with sign-in on, the sign-in completes only at that address.
+`control-plane.signIn.url` overrides it only when the sign-in address
+must differ from the one in the job logs, which is rare.)
 
 ```yaml
 global:
@@ -362,7 +366,8 @@ The box's NetworkPolicy admits connections to the web from every other
 namespace except the jobs namespace. An Ingress controller on the host
 network (ingress-nginx with `hostNetwork: true`, k3s's Traefik on some
 setups) connects from the node addresses, which the policy refuses: the
-browser hangs and the controller logs `upstream timed out`. Add the
+browser hangs and the Ingress controller's log (not ci-accelerator's)
+says `upstream timed out`. Add the
 addresses (`kubectl get nodes -o wide`, INTERNAL-IP):
 
 ```yaml
@@ -411,7 +416,9 @@ makes the lines readable; or set `control-plane.log.format: text`.
 `control-plane.<controller|web|router>.logLevel`) adds every request,
 GitLab call, controller API call and closed router connection; apply it
 like any value (the control plane's pods restart, the routers draining
-their builds first) and set it back the same way. BuildKit's own log is
+their builds first) and set it back to `info` the same way (a `--set`
+survives `--reset-then-reuse-values`: set it to `info`, not just drop
+it). BuildKit's own log is
 `buildkit.config.log.level`/`format` and the disk probe's
 `buildkit.diskProbe.logLevel`; both are empty by default, and setting
 them restarts every daemon once. No log carries a token, a cookie, a

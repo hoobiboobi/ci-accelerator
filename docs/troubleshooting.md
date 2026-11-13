@@ -554,7 +554,7 @@ limit on build nodes.
 - **Signing in does not ask for consent again after signing out.** GitLab
   skips its consent screen while the console holds any token of yours (a
   session in another browser). Signing out revokes only that session's
-  token; revoking the application in GitLab (Preferences > Applications)
+  token; revoking the application in GitLab (Edit profile > Access > Applications)
   withdraws all of them.
 - **Signed in, but every page sends you back to sign in.** The session
   cookie is Secure: the console's address must be https, or

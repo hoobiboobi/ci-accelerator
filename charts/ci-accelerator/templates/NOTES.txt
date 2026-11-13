@@ -8,7 +8,7 @@ BuildKit daemons on the build nodes: DaemonSet {{ $bk }}
 CI jobs run in namespace {{ .Values.global.jobs.namespace }}{{ if .Values.jobsNamespace.create }} (created by this release, Pod Security {{ .Values.jobsNamespace.podSecurity }}; deleted with it){{ end }}.
 {{- if $runner.enabled }}
 The runner takes jobs from {{ $runner.gitlabUrl }}; check that it registered:
-  kubectl -n {{ .Release.Namespace }} logs deploy/{{ .Release.Name }}-gitlab-runner | grep -i -E 'registered|error'
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ .Release.Name }}-gitlab-runner | grep -i -E 'registered|valid|error'
 {{- else }}
 No runner is installed: configure yours with integrations/gitlab-runner/values.yaml
 (BUILDKIT_REMOTE_ADDR={{ include "ci-accelerator.daemonsAddress" . }}).

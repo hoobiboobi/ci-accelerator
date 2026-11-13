@@ -85,6 +85,14 @@ kubectl -n ci-accelerator create secret generic runner-cache \
   --from-literal=accesskey=<access key> --from-literal=secretkey=<secret key>
 ```
 
+Check the key names without printing the values:
+
+```sh
+kubectl -n ci-accelerator get secret runner-cache -o go-template='{{range $k, $v := .data}}{{$k}} len={{len $v}}{{"\n"}}{{end}}'
+```
+
+`accesskey len=...` and `secretkey len=...`, nothing else.
+
 ### 2. The values
 
 ```yaml
@@ -93,9 +101,9 @@ gitlab-runner:
     cache:
       secretName: runner-cache
       s3:
-        server: fsn1.your-objectstorage.com   # host[:port], no https://
+        server: s3.example.com   # host[:port], no https://; e.g. <location>.your-objectstorage.com on Hetzner
         bucket: ci-cache
-        region: fsn1
+        region: <region>         # e.g. the Hetzner location, or the AWS region
 ```
 
 For the in-cluster trial store:
@@ -167,14 +175,17 @@ branches"). GitLab's own documentation of the keyword:
 
 ### 5. Check with two pipelines
 
-The first job prints
+Commit the job of step 4, then run the pipeline twice on the same branch
+(a merge-request pipeline and a pipeline on `main` have different
+caches): **Build > Pipelines > Run pipeline**, twice. The first job
+prints
 
 ```
 Checking cache for package-lock.json-...
 Failed to extract cache         (nothing there yet)
 ...
 Creating cache package-lock.json-...
-Uploading cache.zip to https://fsn1.your-objectstorage.com/ci-cache/ci-accelerator/993196/project/<id>/package-lock.json-...
+Uploading cache.zip to https://s3.example.com/ci-cache/ci-accelerator/993196/project/<id>/package-lock.json-...
 Created cache
 ```
 
@@ -211,11 +222,11 @@ example caches older than 14 days (checked with Hetzner), with the AWS
 CLI and the bucket's key in the environment:
 
 ```sh
-export AWS_ACCESS_KEY_ID=<access key> AWS_SECRET_ACCESS_KEY=<secret key> AWS_DEFAULT_REGION=fsn1
-aws --endpoint-url https://fsn1.your-objectstorage.com s3api put-bucket-lifecycle-configuration \
+export AWS_ACCESS_KEY_ID=<access key> AWS_SECRET_ACCESS_KEY=<secret key> AWS_DEFAULT_REGION=<region>
+aws --endpoint-url https://s3.example.com s3api put-bucket-lifecycle-configuration \
   --bucket ci-cache --lifecycle-configuration '{"Rules":[{"ID":"ci-cache-expiry","Status":"Enabled",
   "Filter":{"Prefix":""},"Expiration":{"Days":14},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}'
-aws --endpoint-url https://fsn1.your-objectstorage.com s3api get-bucket-lifecycle-configuration --bucket ci-cache
+aws --endpoint-url https://s3.example.com s3api get-bucket-lifecycle-configuration --bucket ci-cache
 ```
 
 A cache that is read every day but never changes is not uploaded again, so
@@ -334,8 +345,9 @@ needed (an extra key does no harm):
 kubectl -n ci-accelerator create secret generic runner-deploy --from-literal=runner-token=glrt-...
 ```
 
-Create it before the upgrade: the chart checks that the Secret and its
-key exist.
+Create it before the upgrade: when the Secret exists, the chart checks
+that it has the key; a Secret that is missing is not caught at render
+time and leaves the tier's pod in `CreateContainerConfigError`.
 
 ### 3. The values
 
@@ -353,9 +365,9 @@ runnerTiers:
     cache:                         # optional; a tier without it has NO S3 cache,
       secretName: runner-cache     # even when the main runner has one: repeat
       s3:                          # the main runner's block to share the caches
-        server: fsn1.your-objectstorage.com
+        server: s3.example.com
         bucket: ci-cache
-        region: fsn1
+        region: <region>
 ```
 
 - **`resources`** is the size of every job of the tier (jobs cannot raise
@@ -380,17 +392,23 @@ Apply with the command at the top, then:
 
 ```sh
 kubectl -n ci-accelerator get deploy ci-accelerator-runner-deploy
-kubectl -n ci-accelerator logs deploy/ci-accelerator-runner-deploy | grep -i -E 'registered|error'
+kubectl -n ci-accelerator logs deploy/ci-accelerator-runner-deploy | grep -i -E 'registered|valid|error'
 ```
 
-One replica ready and `Runner registered successfully`; in GitLab the
-runner shows **Online**. The install notes list every tier with its pod,
+One replica ready and `Verifying runner... is valid` (a tier starts
+from its configuration file and does not register, so there is no
+`Runner registered successfully` line); in GitLab the runner shows
+**Online**. The install notes list every tier with its pod,
 placement and cache.
 
 ### 5. A pipeline across tiers
 
-The build on the main runner, the deploy on the tier, the image
-reference handed over by the component:
+The build on the main runner ([first-build.md](first-build.md): a
+Dockerfile in the project, the `include:` block with its hash from the
+install notes), the deploy on the tier. The component's `build-image`
+job hands `IMAGE_REF` (`<repository>@sha256:...`), `IMAGE` and
+`IMAGE_DIGEST` to the jobs that `needs:` it, as a dotenv report, when
+the build pushed:
 
 ```yaml
 include:

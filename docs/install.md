@@ -25,17 +25,20 @@ You need these. Each line has the check and what it must show.
 | You need | Check | It must show |
 |---|---|---|
 | Kubernetes 1.34 or newer | `kubectl version` | `Server Version: v1.34.x` or newer |
-| Helm 3.19 or newer, or Helm 4 | `helm version` | `v3.19.x` or `v4.x` |
+| Helm 4 (Helm 3.19 still works; Helm 3's security support ended on 2026-11-11) | `helm version` | `v4.x`, or `v3.19.x` (works, no longer receives security fixes) |
 | Cluster-admin rights on the cluster | `kubectl auth can-i create clusterroles` | `yes` (a warning that the resource is not namespaced is fine); the install creates a PriorityClass, a ClusterRole and a ClusterIssuer |
 | A default StorageClass | `kubectl get storageclass` | one line with `(default)` after its name |
-| One node to dedicate to builds | `kubectl get nodes -o wide` | a node you can give away: nothing else will run on it |
-| A CNI that enforces NetworkPolicy | the cluster's documentation | Calico, Cilium, kindnet and most managed clusters do; plain flannel does not |
+| Two nodes that take ordinary pods | `kubectl get nodes -o wide`, `kubectl describe node <node> \| grep Taints` | one node to give to builds, which nothing else will use, and one more without a `NoSchedule` taint for the runner, the controller and the web (a control-plane node with its default taint does not count). One machine in total: [quickstart.md](quickstart.md) |
+| A CNI that enforces NetworkPolicy, ingress and egress | the cluster's documentation | Calico, Cilium, kindnet and most managed clusters do; plain flannel does not |
 | The Maintainer role on a GitLab project | the project's Settings menu | it has a CI/CD entry |
 | Outbound access from the nodes | | to `ghcr.io`, `quay.io`, `registry.gitlab.com`, `docker.io` and your GitLab |
 
 Without a default StorageClass, the console's controller cannot get its
 volume and the install waits until it times out: pick a class from
-`kubectl get storageclass` and keep its name for step 6. Without a CNI
+`kubectl get storageclass` whose provisioner gives block volumes (a
+cloud disk, local-path, Longhorn; not NFS or another shared file
+system, which the controller's SQLite store cannot use) and keep its
+name for step 6. Without a CNI
 that enforces NetworkPolicy everything works, but the daemons accept
 connections from every namespace and builds can reach cloud instance
 metadata; see [limitations.md](limitations.md).
@@ -83,26 +86,29 @@ node, and the daemons appear there by themselves.
 
 cert-manager issues the certificates for the mutual TLS between the CI
 jobs and the daemons. Skip this step if the cluster has it already
-(`kubectl get crd certificates.cert-manager.io` finds the CRD; it must be
-v1.16 or newer, see
-[install-existing-cluster.md](install-existing-cluster.md#cert-manager-is-already-installed)).
+(`kubectl get crd certificates.cert-manager.io` finds the CRD). It must
+be v1.16 or newer: `kubectl get deploy -A -l
+app.kubernetes.io/name=cert-manager -o
+jsonpath='{.items[*].spec.template.spec.containers[0].image}'` shows the
+image tag; older, or anything else about an existing cert-manager:
+[install-existing-cluster.md](install-existing-cluster.md#cert-manager-is-already-installed).
 
 ```sh
 helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.3 \
   --namespace cert-manager --create-namespace --set crds.enabled=true --wait
 ```
 
-`--wait` returns when its three pods are ready, after about half a
-minute. Check:
+The command returns after about half a minute, when cert-manager's own
+start-up check has seen its webhook answer (`--wait` also waits for the
+three pods). Check:
 
 ```sh
 kubectl -n cert-manager get pods
 ```
 
 Three pods `1/1 Running`: `cert-manager`, `cert-manager-cainjector` and
-`cert-manager-webhook`. If you go on before the webhook is ready, the
-next `helm install` fails with `failed calling webhook
-"webhook.cert-manager.io"`: wait and run it again.
+`cert-manager-webhook`. cert-manager v1.21.3 is the version the project
+tests with; v1.16 or newer works.
 
 ## 3. Create the namespace
 
@@ -139,10 +145,11 @@ project of the group, with the same steps under Group > Build > Runners).
 2. Select **Create project runner** (on older GitLab versions: **New
    project runner**).
 3. In **Tags**, enter `ci-accelerator`. Leave **Run untagged jobs**
-   unchecked: with it, every job of the project without tags would come
-   here, and on gitlab.com a job without tags would otherwise go to the
-   shared runners, which cannot build on the daemons. The tag is the one
-   your CI jobs name later.
+   unchecked: this runner should take only the build jobs that name the
+   tag ([first-build.md](first-build.md) puts it in `runner-tags:
+   [ci-accelerator]`), not every untagged job of the project; jobs
+   without the tag keep going where they go today (on gitlab.com, the
+   shared runners).
 4. Leave **Protected** and **Lock to current projects** as they are
    (unchecked). A description is optional.
 5. Select **Create runner**.
@@ -224,7 +231,7 @@ buildkit:
 ```
 
 The build cache goes to an `emptyDir` on the node's root disk by default,
-and is lost when the daemon restarts. That is fine for a start; a
+and is lost when the daemon's pod is replaced (a rollout, an eviction). That is fine for a start; a
 dedicated disk comes later without a reinstall
 ([production.md](production.md#a-dedicated-cache-disk)). Every other
 setting and its default: `helm show values
@@ -268,10 +275,11 @@ ci-accelerator` shows the state, `kubectl -n ci-accelerator get pods`
 which pod is not ready, and [troubleshooting.md](troubleshooting.md#the-install-fails)
 the fixes (a pod `Pending` with a controller volume `Pending` means no
 default StorageClass; `ImagePullBackOff` means a node cannot reach
-`ghcr.io` or `docker.io`). A failed install leaves the release behind
-and a second `helm install` refuses the name: remove it first with
-`helm uninstall ci-accelerator -n ci-accelerator`, fix the cause, and
-install again.
+`ghcr.io` or `docker.io`). When one of the chart's own checks stopped the install, nothing was
+created: fix what the message names and run `helm install` again. When
+`--wait` timed out, the release stays behind as `failed` and a second
+`helm install` refuses the name: `helm uninstall ci-accelerator -n
+ci-accelerator`, fix the cause, and install again.
 
 ## 8. Check the install
 
@@ -297,7 +305,7 @@ Then the certificates and the runner:
 
 ```sh
 kubectl -n ci-accelerator get certificate
-kubectl -n ci-accelerator logs deploy/ci-accelerator-gitlab-runner | grep -i -E 'registered|error'
+kubectl -n ci-accelerator logs deploy/ci-accelerator-gitlab-runner | grep -i -E 'registered|valid|error'
 ```
 
 Three certificates, every one `READY True`: `ci-accelerator-buildkit-tls`
@@ -305,19 +313,23 @@ Three certificates, every one `READY True`: `ci-accelerator-buildkit-tls`
 `ci-accelerator-controller-tls`. The runner's log has the line
 `Runner registered successfully`; in GitLab, under Settings > CI/CD >
 Runners, the runner's row now shows a green dot and **Online**. If the
-log says `is not valid`, the token in the Secret is wrong: see
-[troubleshooting.md](troubleshooting.md#the-runner).
+log says `is not valid`, the token in the Secret is wrong: re-create the
+Secret (step 5), then `kubectl -n ci-accelerator rollout restart
+deploy/ci-accelerator-gitlab-runner` (the token is read at start); more
+in [troubleshooting.md](troubleshooting.md#the-runner).
 
 ## 9. Open the console
 
-The console has no sign-in yet, so it is reachable only from inside the
-cluster. Forward its port to your computer:
+You have not set up a sign-in yet ([console.md](console.md#setting-up-the-console)),
+so the console is reachable only from inside the cluster. Forward its port to your computer:
 
 ```sh
 kubectl -n ci-accelerator port-forward svc/ci-accelerator-web 8080
 ```
 
-Then open <http://localhost:8080/>. The pages are empty until the first
+It prints `Forwarding from 127.0.0.1:8080 -> 8080` and keeps running:
+leave it in this terminal and work in another (Ctrl-C ends it). Then
+open <http://localhost:8080/>. The pages are empty until the first
 build. At this level the console sees the builds and the job pods, but
 not GitLab: a job's result shows as "unknown" and no runner waits are
 drawn. A GitLab token or sign-in adds them

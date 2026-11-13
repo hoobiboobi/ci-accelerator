@@ -22,9 +22,9 @@ both in the console.
   the job stops with `this GitLab has no container registry`; see
   [the component's README](../ci/gitlab/README.md) for `push: false` or
   another registry.
-- **GitLab 17.9 or newer** for the `integrity:` line below (**Help**, the
-  `?` in the top bar, shows the version). On 17.0 to 17.8, leave that
-  line out.
+- **GitLab 17.0 or newer** for the component, **17.9 or newer** for the
+  `integrity:` line below (**Help**, the `?` in the top bar, shows the
+  version). On 17.0 to 17.8, leave that line out.
 - **Your GitLab server can reach GitHub.** It fetches the job's
   definition from `raw.githubusercontent.com` when the pipeline starts.
   If it cannot, copy `build.yml` into a project of your GitLab and use
@@ -57,10 +57,15 @@ include:
       runner-tags: [ci-accelerator]
 ```
 
+- **A project that already has a `.gitlab-ci.yml`:** add the `- remote:`
+  item to its `include:` list (create the key at the top level if there
+  is none); the file's own jobs stay as they are.
 - **The version and the hash belong together** and must match the box
   (`helm list -n ci-accelerator` shows its version in the CHART column).
   The install notes print this block with the right hash:
-  `helm get notes ci-accelerator -n ci-accelerator`; the release page
+  `helm get notes ci-accelerator -n ci-accelerator` (on the one-machine
+  install with the script's Helm, [quickstart.md](quickstart.md#3-run-it));
+  the release page
   (<https://github.com/hoobiboobi/ci-accelerator/releases/tag/v0.5.2>)
   prints it too. The hash above is the one of 0.5.2.
 - **`runner-tags`** lists the tag you gave the runner in GitLab
@@ -94,14 +99,18 @@ digest sha256:...
 Job succeeded
 ```
 
-`0 from cache` is right for a first build: the daemon has never seen
+(`2 run` for a Dockerfile with two steps after `FROM`; your numbers
+follow your Dockerfile.) `0 from cache` is right for a first build: the daemon has never seen
 this project. The image is in the project under **Deploy > Container
 Registry**, tagged with the commit's short SHA.
 
 ## 4. Run it again
 
-Push a small change (a line in the README), or open the finished job and
-select **Retry**. This time the log says, for the Dockerfile above,
+Open the finished job and select **Retry** (the same commit: nothing in
+the context changed), or push a change to a file the Dockerfile never
+copies (one listed in `.dockerignore`). A change to a file that `COPY
+. .` takes reruns that step and everything after it, so the counts
+differ then. This time the log says, for a two-step Dockerfile,
 
 ```
 Dockerfile steps: 2 from cache, 0 run; context sent: 13.99kB
@@ -117,15 +126,19 @@ before it stay cached.
 kubectl -n ci-accelerator port-forward svc/ci-accelerator-web 8080
 ```
 
-Open <http://localhost:8080/>. The home page lists the pipelines, newest
+On the one-machine install the port-forward is the SSH tunnel of
+[quickstart.md](quickstart.md#5-open-the-console). Open
+<http://localhost:8080/>. The home page lists the pipelines, newest
 first; the pipeline opens into its jobs, the job into its build: every
 Dockerfile step with its time, which steps came from the cache, and one
 of five verdicts (from cache, your change, build farm, unclear, failed).
 The second pipeline's build says "from cache"; the first says why it was
 not. Until the console has a GitLab token, a job's result shows as
 "unknown" and no runner waits are drawn: [console.md](console.md#setting-up-the-console)
-adds them. With `global.console.url` set to the console's address, every
-job's log prints a link to its page.
+adds them. With `global.console.url` set to the console's address (in
+`values.yaml`, applied as [console.md](console.md#setting-up-the-console)
+shows; the one-machine install sets it to `http://localhost:8080`
+already), every job's log prints a link to its page.
 
 ## When it does not work
 
@@ -139,9 +152,13 @@ job's log prints a link to its page.
 3. The runner is not **Protected** while the branch is not, and not
    **Paused**.
 4. `kubectl -n ci-accelerator-jobs get pods`: a job pod `Pending` cannot
-   be scheduled on a build node; `ImagePullBackOff` means the build node
+   be scheduled on a build node; `kubectl -n ci-accelerator-jobs describe
+   pod <name>` says why under Events (the build node is full, or the
+   taint is not tolerated: [troubleshooting.md](troubleshooting.md#the-runner));
+   `ImagePullBackOff` means the build node
    cannot pull `moby/buildkit` from Docker Hub (mirror it and set the
-   `buildkit-image` input).
+   `buildkit-image` input to your copy,
+   [production.md](production.md#private-registries-and-mirrors)).
 
 **The job fails at once with `BUILDKIT_REMOTE_ADDR/BUILDKIT_TLS_DIR are
 not set: this job must run on a ci-accelerator runner (check
@@ -165,24 +182,31 @@ has the errors and their causes.
 **Docker Hub refuses the base image (`toomanyrequests`).** The build
 node pulls base images anonymously. Use GitLab's Dependency Proxy
 (`FROM ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:3.22`, which the
-job logs in to; it needs a group) or a registry mirror
-(`buildkit.config.extraConfig`).
+job logs in to; it needs a group) or a registry mirror in the daemons' configuration
+(`buildkit.config.extraConfig`, the TOML block in
+[production.md](production.md#private-registries-and-mirrors)).
 
 ## Without the component
 
 The component is one job script around `buildctl`. To call it yourself,
 in the `moby/buildkit` image:
 
-```sh
-buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build \
-  --frontend dockerfile.v0 --local context=. --local dockerfile=. \
-  --output type=image,name=$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA,push=true
+```yaml
+build:
+  image: { name: "moby/buildkit:v0.34.2", entrypoint: [""] }
+  tags: [ci-accelerator]
+  script:
+    - export DOCKER_CONFIG=$(mktemp -d); unset DOCKER_AUTH_CONFIG
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > $DOCKER_CONFIG/config.json
+    - buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build
+        --frontend dockerfile.v0 --local context=. --local dockerfile=.
+        --output type=image,name=$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA,push=true
 ```
 
 The runner gives every job `BUILDKIT_REMOTE_ADDR` and the client
-certificate in `BUILDKIT_TLS_DIR`. To push, write the registry
-credentials to `$DOCKER_CONFIG/config.json` and run `unset
-DOCKER_AUTH_CONFIG` first: buildctl reads that variable too, and a
-read-only entry in it overrides the job's credentials. Add
+certificate in `BUILDKIT_TLS_DIR`. The registry credentials go into
+`$DOCKER_CONFIG/config.json`, and `DOCKER_AUTH_CONFIG` must be unset:
+buildctl reads that variable too, and a read-only entry in it overrides
+the job's credentials. Add
 `--opt "ci-accelerator.io/traceparent=$TRACEPARENT"` and the console
 shows the build live on the job's page.
