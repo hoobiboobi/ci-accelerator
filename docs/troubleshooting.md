@@ -39,6 +39,9 @@ names the fix; the common ones:
 | `image.tag is ..., but image.digest is still the digest of ...` | Set `image.digest` to the new tag's digest, or `""` |
 | `image.digest (control-plane.image.digest in the box) is the digest of the v... image, but this chart runs v...` | The digest pinned for the release before, kept by the upgrade: set the new release's digest from its notes, or remove it |
 | `diskProbe.image.digest (buildkit.diskProbe.image.digest in the box) is the digest of the v... image, but the disk probe runs v...` | Set the digest the message names (the release notes list it too), or remove it |
+| `helm install --wait` times out; the controller pod is `Pending` and `kubectl -n ci-accelerator get pvc` shows `Pending` | No default StorageClass: name one in `control-plane.controller.persistence.storageClass` (ReadWriteOnce, not NFS) |
+| `failed calling webhook "webhook.cert-manager.io"` | cert-manager's webhook is not ready yet: `kubectl -n cert-manager get pods`, then install again |
+| A pod in `ImagePullBackOff` | The node cannot reach `ghcr.io` (the box's image), `docker.io` (BuildKit) or `registry.gitlab.com` (the runner): the nodes' egress, or mirror the images ([production.md](production.md#private-registries-and-mirrors)) |
 | `priorityclasses.scheduling.k8s.io is forbidden` | The installer may not create cluster-scoped objects: `buildkit.priorityClass.create=false`, or name an existing class in `buildkit.priorityClassName` (and the same class, or `""`, in `control-plane.router.priorityClassName`) |
 | `clusterroles.rbac.authorization.k8s.io is forbidden` | The controller checks its callers' ServiceAccount tokens with a TokenReview, which needs a ClusterRole and its binding: install with the right to create them |
 | `ci-accelerator 0.3.0 cannot upgrade a 0.2.x release in place`, or `release ... has the console of ci-accelerator 0.2.x` | 0.3.0 renamed every object and value of the console: uninstall, wait for the pods, install again ([upgrading](upgrading.md#from-02x-to-030-or-later-install-again)) |
@@ -99,6 +102,7 @@ kubectl -n ci-accelerator get secret gitlab-runner-token \
 |---|---|---|
 | Runner pod in `ContainerCreating`, event `FailedMount ... non-existent secret key: runner-registration-token` | The empty key is missing | `kubectl -n ci-accelerator patch secret gitlab-runner-token --type merge -p '{"data":{"runner-registration-token":""}}'` |
 | Log `Verifying runner... is not valid` | Wrong or placeholder token, or the runner was deleted in GitLab | Fix the Secret, then `kubectl -n ci-accelerator rollout restart deploy/ci-accelerator-gitlab-runner` (the token is read at start) |
+| The job fails at once with `BUILDKIT_REMOTE_ADDR/BUILDKIT_TLS_DIR are not set: this job must run on a ci-accelerator runner (check runner-tags)` | Another runner took the job: gitlab.com's shared runners, or one of your own, because the job has no tags or a tag the box's runner does not have | `runner-tags` with the runner's tag, or disable the other runners for the project ([first-build.md](first-build.md#when-it-does-not-work)) |
 | The runner is online, jobs stay pending or run elsewhere | Tags: a runner with tags that does not run untagged jobs only takes jobs with matching `tags:`. On gitlab.com untagged jobs go to the shared runners, which have no `BUILDKIT_*` variables | Add `tags:` to the job, or allow untagged jobs on the runner |
 | Runner pod `Pending` (`Unschedulable`), `helm install --wait` times out on the runner Deployment; the same for the control plane's pods | Every node is a tainted build node: the runner manager, the controller and the web do not tolerate the build-node taint (the router does: it runs on the build nodes) | Keep one node without the taint, or add tolerations: `gitlab-runner.tolerations`, `control-plane.controller.tolerations` and `control-plane.web.tolerations` |
 | Job pod `Pending` | It cannot go to a build node: missing toleration or node selector in a hand-made runner configuration | Use the configuration from the umbrella or `integrations/gitlab-runner` |
@@ -368,7 +372,7 @@ config:
 ```
 
 The filesystem matters too: XFS (dynamic inodes, no root reserve) is the
-tested choice; [Where the cache lives](install.md#where-the-cache-lives)
+tested choice; [A dedicated cache disk](production.md#a-dedicated-cache-disk)
 says why and how to prepare the disk.
 
 Keep headroom beyond `maxUsedSpace`. Two reasons:

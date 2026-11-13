@@ -161,6 +161,9 @@ kind: HelmRelease
 metadata: { name: ci-accelerator, namespace: ci-accelerator }
 spec:
   interval: 10m
+  timeout: 15m                                 # a daemon rollout: nodes x (longest build + startup); Flux's default is 5m
+  upgrade:
+    remediation: { retries: 1 }
   releaseName: ci-accelerator
   dependsOn:
     - { name: cert-manager, namespace: cert-manager }   # your cert-manager HelmRelease
@@ -248,6 +251,11 @@ spec:
           gitlabUrl: https://gitlab.example.com/
           runners:
             secret: gitlab-runner-token
+        control-plane:
+          image: { digest: "sha256:..." }   # ci-accelerator:v0.5.2, from the release notes
+        buildkit:
+          diskProbe:
+            image: { digest: "sha256:..." } # the probe image, from the release notes
         # ... the same values as in the Flux example
   destination:
     server: https://kubernetes.default.svc
@@ -336,8 +344,7 @@ daemons directly: leave out `--router` and admit the jobs namespace in
   annotate it `helm.sh/resource-policy=keep` first (the chart refuses the
   change until then).
 - An upgrade that changes the daemons' pod template rolls the DaemonSet one
-  node at a time; `emptyDir` caches are lost then ([where the
-  cache lives](install.md#where-the-cache-lives)). A chart release that changes nothing in that template
+  node at a time; `emptyDir` caches are lost then ([a dedicated cache disk](production.md#a-dedicated-cache-disk)). A chart release that changes nothing in that template
   restarts no daemon.
 - The daemons read their certificate only at start. The DaemonSet carries
   Stakater Reloader's annotation (`buildkit.tls.reloader`), so with

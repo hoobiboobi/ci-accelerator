@@ -111,13 +111,18 @@ three levels.
 ## Setting up the console
 
 The console is on by default. The control plane serves it: a controller
-(Deployment `<release>-controller`, one pod: the store, the sessions,
-every GitLab token) and a web (Deployment and Service `<release>-web`, two
-pods serving the pages), which reads the controller's API over HTTPS and
-proves who it is with a ServiceAccount token; see
-[the architecture](architecture.md#the-control-plane-and-the-console).
-It works in three levels; each adds to the previous one, and the install
-notes say which is on.
+(Deployment `ci-accelerator-controller`, one pod: the store, the
+sessions, every GitLab token) and a web (Deployment and Service
+`ci-accelerator-web`, two pods serving the pages), which reads the
+controller's API over HTTPS and proves who it is with a ServiceAccount
+token ([architecture.md](architecture.md#the-control-plane-and-the-console)).
+The names assume the install of [install.md](install.md): release and
+namespace `ci-accelerator` (`helm list -A` shows yours). The install
+notes come back any time with `helm get notes ci-accelerator -n
+ci-accelerator`; on the one-machine install, with the script's Helm
+([quickstart.md](quickstart.md#3-run-it)).
+
+The console works in three levels; each adds to the previous one.
 
 | | by itself (default) | with a GitLab token | with sign-in |
 |---|---|---|---|
@@ -128,106 +133,257 @@ notes say which is on.
 | who sees what | everyone who reaches it | everyone who reaches it | each person: the projects GitLab lets them read |
 | the console reads GitLab with | nothing | one shared token | each person's own token |
 
-**1. By itself.** The console reads the daemons' build history and the CI
-job pods, nothing else: every image build with its steps, the verdict
-(from cache, your change, build farm, unclear, failed) and the pipeline's
-timeline are there; a job's result is "unknown", runner waits are not
-shown, and a rebuild whose cache sat on another node stays "unclear". It
-has a ClusterIP Service and no sign-in, so whoever reaches it sees
-everything: keep it inside the cluster and reach it with
-`kubectl port-forward` (the install notes print the command; the
-one-machine install prints its SSH tunnel).
+Which level runs now: `helm get values ci-accelerator -n ci-accelerator
+-o yaml` shows `control-plane.gitlab.token` (level 2) or
+`control-plane.signIn` (level 3), or neither.
 
-**2. With a GitLab token.** One token with `read_api` for all viewers.
-The controller reads with it each pipeline's jobs while pages show it,
-asks GitLab to compare the commits of a rebuild whose cache was on
-another node (in the background, at most 25 requests a minute per
-project; GitLab's answers are stored, so they settle the build again
-after a restart) and reads the end of a job's log on request. When the
-commits show no change in what the rebuilt step copies, but the step
-reads the whole build context and `.dockerignore` does not keep `.git`
-out, the verdict names the job's `.git`: every job's checkout writes its
-own (see [dockerfile-guide.md](dockerfile-guide.md)). Put it into a
-Secret and name it in the values:
+Every change below is applied the same way, with the version you run
+(`helm list -n ci-accelerator`, the CHART column) and your values file:
 
 ```sh
-kubectl -n ci-accelerator create secret generic gitlab-api-token --from-literal=token=glpat-...
+helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
+  -n ci-accelerator -f values.yaml --wait --timeout 15m
 ```
+
+The control plane's pods restart; the daemons do not. On the one-machine
+install the values are `/var/lib/ci-accelerator/values.yaml` and the
+command is in [quickstart.md](quickstart.md#9-change-the-values).
+
+### Level 1: by itself
+
+The console reads the daemons' build history and the CI job pods,
+nothing else: every image build with its steps, the verdict (from cache,
+your change, build farm, unclear, failed) and the pipeline's timeline
+are there; a job's result is "unknown", runner waits are not shown, and
+a rebuild whose cache sat on another node stays "unclear". It has a
+ClusterIP Service and no sign-in, so whoever reaches it sees everything:
+keep it inside the cluster and reach it with
+
+```sh
+kubectl -n ci-accelerator port-forward svc/ci-accelerator-web 8080
+```
+
+at <http://localhost:8080/> (the one-machine install: the SSH tunnel of
+[quickstart.md](quickstart.md#5-open-the-console)).
+
+### Level 2: with a GitLab token
+
+One token with the scope `read_api` for all viewers. The controller reads
+with it each pipeline's jobs while pages show it, asks GitLab to compare
+the commits of a rebuild whose cache was on another node (in the
+background, at most 25 requests a minute per project; GitLab's answers
+are stored, so they settle the build again after a restart) and reads
+the end of a job's log on request. When the commits show no change
+in what the rebuilt step copies, but the step reads the whole build
+context and `.dockerignore` does not keep `.git` out, the verdict names
+the job's `.git`: every job's checkout writes its own (see
+[dockerfile-guide.md](dockerfile-guide.md)).
+
+1. **Create the token in GitLab.** For a team, a group access token:
+   the group > **Settings > Access tokens** > **Add new token**, role
+   **Reporter** (enough to read jobs), scope `read_api`, an expiry date.
+   For one project, a project access token the same way under the
+   project's Settings. For a trial, a personal access token: your avatar
+   > **Edit profile** > **Access** > **Personal access tokens**, scope
+   `read_api` (it is tied to your account and its memberships). GitLab
+   shows the token (`glpat-...`) once. Note the expiry date: when it
+   passes, the console silently drops back to level 1.
+2. **Put it into a Secret.** The key must be named `token`:
+
+   ```sh
+   kubectl -n ci-accelerator create secret generic gitlab-api-token --from-literal=token=glpat-...
+   ```
+
+3. **Add to `values.yaml` and apply** (the command above):
+
+   ```yaml
+   control-plane:
+     gitlab:
+       token:
+         existingSecret: gitlab-api-token
+   ```
+
+4. **Check.** Open a finished pipeline in the console: each job now has
+   its result and "waited for a runner" time. The controller reads the
+   Secret at start, so after changing the token later, re-create the
+   Secret and `kubectl -n ci-accelerator rollout restart
+   deploy/ci-accelerator-controller`. A refused token (wrong, expired,
+   without `read_api`) shows in the controller's log as `gitlab api`
+   warnings with GitLab's 401 or 403: `kubectl -n ci-accelerator logs
+   deploy/ci-accelerator-controller | grep 'gitlab api'`.
+
+On the one-machine install, run the script again with
+`--gitlab-token-file` instead ([quickstart.md](quickstart.md#7-add-a-gitlab-token)).
+
+### Level 3: with sign-in through GitLab, for a team
+
+Sign-in replaces the shared token: each person signs in with their
+GitLab account, the console reads GitLab with their own token and shows
+them the projects whose jobs GitLab lets them read; `admins` see
+everything. Visibility is per project, not per runner: a person sees the
+builds of every project where they may read jobs (Reporter or more,
+directly or through a group; a project with public pipelines is visible
+to everyone signed in). A group runner and a project runner make no
+difference. GitLab's answer about a person's projects is kept for 10
+minutes.
+
+The order matters: the console is open to whoever reaches it until
+sign-in is on, so the Ingress comes last.
+
+**1. Decide the address.** The console is served over https at the root
+of its host (no sub-path): `https://ci-console.example.com`. Plain
+`http://` is accepted only on `localhost`, through a port-forward or the
+one-machine install's tunnel. Set it in `values.yaml`; from then on
+every job's log prints a link to its page there, and the web answers
+only on that name, on `localhost` and on in-cluster names (another name
+gets "this console answers on ..."):
 
 ```yaml
 global:
   console:
-    url: https://ci-console.example.com   # optional: every job's log links to its page
-control-plane:
-  gitlab:
-    token:
-      existingSecret: gitlab-api-token
+    url: https://ci-console.example.com
 ```
 
-On the one-machine install, run the script again with
-`--gitlab-token-file ./token` and the same GitLab URL and runner token.
-Like every second run, it keeps `values.yaml`, and it also brings the
-script's cert-manager and Helm
-([what a second run changes](upgrading.md#upgrade-with-the-new-releases-script)).
+**2. Create the OAuth application in GitLab.** For a team, a group
+application: the group > **Settings > Applications** (needs the Owner
+role); on your own GitLab, **Admin > Applications**. A user application
+(your avatar > **Edit profile** > **Access** > **Applications** > **Add
+new application**) works for a trial, but stops with the account. Fill
+in:
 
-**3. With sign-in through GitLab.** Replaces the shared token: each person
-signs in with their GitLab account, the console reads GitLab with their
-own token and shows them the projects whose jobs GitLab lets them read;
-`admins` see everything. This is the mode for a console that a team
-reaches over https.
+- **Name:** anything, for example `ci-accelerator console`.
+- **Redirect URI:** `https://ci-console.example.com/auth/callback/<id>`,
+  where `<id>` is six characters derived from the GitLab URL exactly as
+  `gitlab-runner.gitlabUrl` has it, trailing slash included. The install
+  notes print the whole URI (`helm get notes ci-accelerator -n
+  ci-accelerator | grep auth/callback`, with `global.console.url` set);
+  or compute it:
 
-1. Decide the address. Serve the console over https at the root of its
-   host (no sub-path) and set `global.console.url` to it; plain `http://`
-   is accepted only on `localhost`, i.e. through a port-forward or the
-   one-machine install's SSH tunnel (`http://localhost:8080`).
-2. In GitLab, create an OAuth application (User or Group Settings >
-   Applications; Admin > Applications on your own GitLab): confidential,
-   scopes `openid` and `read_api`, redirect URI
-   `<global.console.url>/auth/callback/<id>`, where `<id>` identifies the
-   GitLab instance (the first six hex digits of the sha256 of its URL;
-   the install notes print the exact URI). Put the application's ID and
-   secret, as GitLab shows them, into a Secret:
+  ```sh
+  printf %s https://gitlab.com/ | sha256sum | cut -c1-6     # shasum -a 256 on macOS
+  ```
 
-   ```sh
-   kubectl -n ci-accelerator create secret generic console-gitlab-oauth \
-     --from-literal=client-id=... --from-literal=client-secret=gloas-...
-   ```
+  For `https://gitlab.com/` it is `993196`.
+- **Confidential:** ticked.
+- **Scopes:** `openid` and `read_api`, nothing else.
 
-3. Create a session key; it seals each person's GitLab token at rest, and
-   changing it signs everyone out (with Flux or Argo CD, see
-   [gitops.md](gitops.md#the-session-key)):
+Select **Save application**. GitLab shows the **Application ID** and
+the **Secret** (`gloas-...`): copy both now, the Secret is shown once
+(**Renew secret** makes a new one later).
 
-   ```sh
-   kubectl -n ci-accelerator create secret generic console-session \
-     --from-literal=key=$(openssl rand -base64 32)
-   ```
+**3. The two Secrets.** The keys must be named as shown; create them
+before the upgrade, because the controller mounts them and waits
+(`FailedMount`) until they exist:
 
-4. Set the values and upgrade (drop `control-plane.gitlab.token` if it
-   was set: a shared token and sign-in exclude each other):
+```sh
+kubectl -n ci-accelerator create secret generic console-gitlab-oauth \
+  --from-literal=client-id=<the Application ID> --from-literal=client-secret=gloas-...
+kubectl -n ci-accelerator create secret generic console-session \
+  --from-literal=key=$(openssl rand -base64 32)
+```
 
-   ```yaml
-   control-plane:
-     signIn:
-       enabled: true
-       sessionKey: { existingSecret: console-session }
-       gitlab:
-         - existingSecret: console-gitlab-oauth   # client-id, client-secret
-           admins: ["id:1234567"]                 # GitLab user ids who see everything
-   ```
+The session key seals each person's GitLab token at rest; changing it
+later signs everyone out (with Flux or Argo CD, see
+[gitops.md](gitops.md#the-session-key)). The controller reads both at
+start: after changing one, `kubectl -n ci-accelerator rollout restart
+deploy/ci-accelerator-controller`.
 
-   A `gitlab` entry without `url` is the runner's GitLab; several entries
-   serve several GitLabs. Admins are named by user id (`id:<n>`, shown on
-   the person's GitLab profile page); usernames are refused, since GitLab
-   gives a renamed or deleted account's username to the next account that
-   takes it. On the one-machine install
-   the values live in `/var/lib/ci-accelerator/values.yaml`; apply them
-   with the command in the [README's quickstart](../README.md#try-it-on-one-machine)
-   (it uses the Helm the script installed).
+**4. The values.** Your GitLab user id for `admins` is the number on
+your profile page (`https://gitlab.com/<username>`, "User ID" under the
+name), not the username: GitLab gives a renamed or deleted account's
+username to the next account that takes it. Admins see every project,
+builds the console could not attribute to a project, and may call the
+JSON API.
 
-   An install made by an older script may have another Helm under
-   `/usr/local/lib/ci-accelerator/` and another version: the script prints
-   the command for its own at the end
-   ([details](upgrading.md#apply-your-own-changes-or-upgrade-by-hand)).
+```yaml
+global:
+  console:
+    url: https://ci-console.example.com
+control-plane:
+  signIn:
+    enabled: true
+    sessionKey: { existingSecret: console-session }
+    gitlab:
+      - existingSecret: console-gitlab-oauth   # client-id, client-secret
+        admins: ["id:1234567"]                 # GitLab user ids who see everything
+```
+
+A `gitlab` entry without `url` is the runner's GitLab; several entries
+serve several GitLabs. A shared token and sign-in exclude each other:
+remove `control-plane.gitlab.token` from `values.yaml` (and, if the
+install set it with `--set`, add `--set
+control-plane.gitlab.token.existingSecret=` to the upgrade, or the chart
+stops with `gitlab.token and sign-in exclude each other`). Apply with
+the command above. The Secret `gitlab-api-token` is no longer read:
+delete it and revoke the token in GitLab. The stored builds stay.
+
+**5. Check before the Ingress.** The controller's log names the redirect
+URI it expects, and every sign-in:
+
+```sh
+kubectl -n ci-accelerator logs deploy/ci-accelerator-controller | grep -E 'redirect|signed in'
+```
+
+Compare the URI with the application's, character by character. Through
+a port-forward the sign-in page shows but the sign-in itself completes at
+`global.console.url`, so the full check comes after the Ingress.
+
+**6. Expose the web.** The chart creates no Ingress. The console is the
+ClusterIP Service `ci-accelerator-web`, port 8080, plain HTTP: put your
+Ingress or gateway with TLS in front of it, for example
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ci-accelerator-console
+  namespace: ci-accelerator
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt    # or a TLS Secret of your own
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [ci-console.example.com]
+      secretName: ci-console-tls
+  rules:
+    - host: ci-console.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ci-accelerator-web
+                port:
+                  number: 8080
+```
+
+The box's NetworkPolicy admits connections to the web from every other
+namespace except the jobs namespace. An Ingress controller on the host
+network (ingress-nginx with `hostNetwork: true`, k3s's Traefik on some
+setups) connects from the node addresses, which the policy refuses: the
+browser hangs and the controller logs `upstream timed out`. Add the
+addresses (`kubectl get nodes -o wide`, INTERNAL-IP):
+
+```yaml
+control-plane:
+  networkPolicy:
+    extraFrom:
+      - ipBlock: { cidr: 10.0.0.0/24 }
+```
+
+**7. Check.** In a private browser window, open
+`https://ci-console.example.com/`: a sign-in page with one button per
+GitLab; GitLab asks you to authorize the application (`openid` and
+`read_api`, read-only); then the Pipelines page of your projects. A
+person without a readable project sees an empty list. Sign out is in
+the sidebar; several people can be signed in at once. If GitLab answers
+"The redirect URI included is not valid", the application's URI and
+the one in the controller's log differ (the trailing slash of the
+GitLab URL is the usual cause); if sign-in ends with an error after
+Authorize, the `client-secret` does not match the application's:
+re-create the Secret with both values and restart the controller. More
+in [troubleshooting.md](troubleshooting.md#the-console).
 
 Every key is in [charts/control-plane/values.yaml](../charts/control-plane/values.yaml).
 
@@ -237,51 +393,33 @@ Every role of the control plane (controller, web, router, disk probe)
 writes one JSON object per line with its `role`: when it starts (with the
 settings it runs with), is ready, stops and has stopped, and a line per
 stored build, job start and end, change of the daemons, sign-in and
-sign-out and routed connection. To see where the routers sent jobs (one
-router pod per build node, each logs the jobs on its node):
+sign-out and routed connection.
 
 ```sh
-kubectl -n ci-accelerator logs -l app.kubernetes.io/component=router --prefix --tail=-1 | grep routed
+kubectl -n ci-accelerator logs deploy/ci-accelerator-controller                                   # the store, GitLab, sign-in
+kubectl -n ci-accelerator logs -l app.kubernetes.io/component=web --prefix --tail=-1                # the pages
+kubectl -n ci-accelerator logs -l app.kubernetes.io/component=router --prefix --tail=-1 | grep routed   # where jobs went
 ```
 
 With `-l`, kubectl prints only the last 10 lines of each pod unless
-`--tail=-1` is given.
+`--tail=-1` is given. Messages to grep for: `build stored`, `build
+attributed`, `routed`, `signed in`, `signed out`, `gitlab api` (a
+refused or failed GitLab call). `jq -r '[.time,.level,.msg]|@tsv'`
+makes the lines readable; or set `control-plane.log.format: text`.
 
-`control-plane.log.level=debug` (or one role's
+`control-plane.log.level: debug` (or one role's
 `control-plane.<controller|web|router>.logLevel`) adds every request,
-GitLab call, controller API call and closed router connection;
-`control-plane.log.format=text` is easier to read by eye. BuildKit's own
-log is `buildkit.config.log.level`/`format` and the disk probe's
+GitLab call, controller API call and closed router connection; apply it
+like any value (the control plane's pods restart, the routers draining
+their builds first) and set it back the same way. BuildKit's own log is
+`buildkit.config.log.level`/`format` and the disk probe's
 `buildkit.diskProbe.logLevel`; both are empty by default, and setting
-them restarts every daemon once. No log carries a token, a cookie, a query
-string, a build argument or step output, and anything shaped like a
-GitLab token is masked. Which command reads which pod:
-[troubleshooting](troubleshooting.md#reading-the-logs).
+them restarts every daemon once. No log carries a token, a cookie, a
+query string, a build argument or step output, and anything shaped like
+a GitLab token is masked. Which command reads which pod:
+[troubleshooting.md](troubleshooting.md#reading-the-logs).
 
-## Sending metrics and traces to your backend
+## Metrics and traces
 
-The box keeps no metrics or traces. To keep them, point the daemons at your
-own OTLP backend, such as an OpenTelemetry Collector. The endpoints are
-full URLs, one per signal:
-
-```yaml
-buildkit:
-  otel:
-    metricsEndpoint: http://otel-collector.observability.svc:4318/v1/metrics
-    tracesEndpoint: http://otel-collector.observability.svc:4318/v1/traces
-    protocol: http/protobuf   # the default; or grpc
-```
-
-- **Empty endpoints** (the default) send nothing.
-- **Every metric and span names its daemon** with `k8s.pod.name` and
-  `k8s.node.name`.
-- **BuildKit's counters are deltas** per push interval. Sum them over
-  time, or convert them in your collector if your backend expects
-  cumulative counters.
-
-Every job on the runner gets its own trace id without changes to
-`.gitlab-ci.yml`. The runner sets `TRACEPARENT` before the job's script.
-The trace id is derived from the pipeline and job ids, and every span
-carries `ci.pipeline.id`, `ci.job.id` and `ci.project.path`. The console
-uses the trace id to tie each build to its pipeline and job, so this needs
-no trace backend.
+The box keeps no metrics or traces; the daemons push them over OTLP to a
+backend you run: [production.md](production.md#metrics-and-traces-to-your-backend).

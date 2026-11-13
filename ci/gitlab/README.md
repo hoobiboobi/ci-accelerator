@@ -43,6 +43,9 @@ What the job does for you:
 
 ## Use it
 
+The first job step by step, with what to check before the push and what
+a cold and a cached run print: [docs/first-build.md](../../docs/first-build.md).
+
 From GitHub, pinned to a release and checked by its hash (GitLab 17.9 or
 newer; without `integrity`, 17.0). Every release's notes print this block
 with the hash filled in; use the release that matches your box, so the

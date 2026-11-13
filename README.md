@@ -110,137 +110,84 @@ a GitLab token, or with sign-in through GitLab:
 
 ## Quickstart
 
+Two ways to start; each is a step-by-step page with what every command
+should print.
+
 ### Try it on one machine
 
-To look at it before a real deployment, one clean Linux machine is enough:
-Ubuntu 24.04 or Debian 13, amd64 or arm64, 4 CPUs, 8 GB of memory and 40
-GB of free disk, without Docker or Kubernetes. First create a runner in
-GitLab and copy its token (`glrt-...`): the script asks for it, or reads
-it from a file (`--runner-token-file`), so it never sits on a command line
-where other users and the shell history see it. Then run:
+One clean Linux machine (Ubuntu 24.04 or Debian 13, 4 CPUs, 8 GB, 40 GB
+of disk) and a runner token from GitLab, in a file:
 
 ```sh
 curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.2/quickstart.sh
 curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.2/SHA256SUMS | grep quickstart.sh | sha256sum -c -
-sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/
+sudo bash quickstart.sh --gitlab-url https://gitlab.com/ --runner-token-file ./runner-token
 ```
 
-`quickstart.sh` installs the following; k3s, Helm, cert-manager and the
-chart are pinned and checked against their sha256 (the box's images come
-by tag, the daemons' by digest):
-- k3s v1.36.5+k3s1, with the machine as its only node and build node;
-- Helm v4.3.1 and cert-manager v1.21.3;
-- the box, with the build router and the console. The daemon keeps its
-  cache in `/var/lib/ci-accelerator/buildkit` (a hostPath, so it survives
-  restarts; `--build-dir` on the first install puts it elsewhere). Its
-  resources are sized from the machine on the first install (half its CPUs
-  and a quarter of its memory requested, three quarters of the memory at
-  most) and kept, with the cache's path, in
-  `/var/lib/ci-accelerator/values.yaml`, which later runs leave alone.
-
-It prints a job to add to `.gitlab-ci.yml` and the SSH tunnel to the
-console. The console starts in its first level (builds only, no GitLab
-access; see [the console's levels](docs/console.md#setting-up-the-console)):
-`--gitlab-token-file` adds job results and runner waits, and sign-in
-through GitLab works on this box too. To upgrade, run a later release's
-`quickstart.sh` the same way
-([docs/upgrading.md](docs/upgrading.md#one-machine-installs-quickstartsh)).
-`sudo bash quickstart.sh --uninstall` removes everything again. It is not meant for production: one node, no high
-availability.
-
-To change its values later (`/var/lib/ci-accelerator/values.yaml`), apply
-them with the Helm the script installed:
-
-```sh
-sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
-  oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
-  -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait --timeout 15m
-```
+`quickstart.sh` installs k3s, Helm, cert-manager and the box on that
+machine, pinned and checked, and prints the SSH tunnel to the console.
+Everything from the runner token to the first build, a GitLab token,
+sign-in, upgrades and removal: [docs/quickstart.md](docs/quickstart.md).
 
 ### On your cluster
 
-Kubernetes 1.34 or newer with at least one build node, cert-manager, a
-default StorageClass and a CNI that enforces NetworkPolicy; the full list
-and every option: [docs/install.md](docs/install.md).
+Kubernetes 1.34 or newer, Helm 3.19 or 4, cert-manager, a default
+StorageClass, a CNI that enforces NetworkPolicy, and one node to give to
+builds. In short:
 
 ```sh
-# Build nodes: the daemons, the routers and the job pods run only there.
 kubectl label node <node> ci-accelerator.io/node-role=build
 kubectl taint node <node> ci-accelerator.io/node-role=build:NoSchedule
-
 helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.3 \
-  --namespace cert-manager --create-namespace --set crds.enabled=true
-
-# The daemons are privileged pods, so their namespace must allow them.
+  --namespace cert-manager --create-namespace --set crds.enabled=true --wait
 kubectl create namespace ci-accelerator
 kubectl label namespace ci-accelerator pod-security.kubernetes.io/enforce=privileged
-
-# A runner token from GitLab (project or group > Settings > CI/CD > Runners >
-# New runner; choose tags, or allow untagged jobs). The chart reads both
-# keys, so the empty one must be there too.
 kubectl -n ci-accelerator create secret generic gitlab-runner-token \
   --from-literal=runner-token=glrt-... --from-literal=runner-registration-token=
-
 helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
-  -n ci-accelerator \
-  --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
-  --set gitlab-runner.runners.secret=gitlab-runner-token \
-  --wait --timeout 10m
+  -n ci-accelerator -f values.yaml --wait --timeout 10m
 ```
 
-The notes printed at the end show how to check that the runner registered.
-For production, give the daemons a dedicated disk
-([where the cache lives](docs/install.md#where-the-cache-lives)) and pin the
-ci-accelerator images by digest
-([install options](docs/install.md#install-options)); with Flux or Argo CD:
-[docs/gitops.md](docs/gitops.md).
+Each step with its checks, the runner in GitLab, `values.yaml` and the
+console: [docs/install.md](docs/install.md). A cluster that already has
+cert-manager, a GitLab runner or admission policies:
+[docs/install-existing-cluster.md](docs/install-existing-cluster.md).
+With Flux or Argo CD: [docs/gitops.md](docs/gitops.md). For production
+(a dedicated cache disk, images pinned by digest, OTLP):
+[docs/production.md](docs/production.md).
 
 ### A first build
 
-In a project with a `Dockerfile`, include the GitLab CI component: one job
-that builds on the build farm and pushes `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`
-with the job token. The release notes print this block with the file's
-hash:
+One job in `.gitlab-ci.yml` builds the project's `Dockerfile` on the
+daemons and pushes `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA`; the install
+notes print it with the release's hash:
 
 ```yaml
-# .gitlab-ci.yml
 include:
   - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.5.2/ci/gitlab/build.yml
-    integrity: sha256-<from the release notes>
+    integrity: sha256-<from the install notes or the release notes>
     inputs:
-      runner-tags: [my-runner-tag]   # if the runner only takes tagged jobs
+      runner-tags: [ci-accelerator]   # the tag you gave the runner
 ```
 
-Build arguments, secrets, several images, another Dockerfile, the digest
-for later jobs, GitLab without access to GitHub, and large repositories
-built without a checkout (`context-source: git`):
-[ci/gitlab/README.md](ci/gitlab/README.md).
-
-Add `.git` to `.dockerignore` (with the default context, the job's own
-files). Every job has a fresh clone, so with `.git` in the build context,
-every step after `COPY . .` runs again in every pipeline. More in [docs/dockerfile-guide.md](docs/dockerfile-guide.md).
-
-Without the component, call buildctl yourself: `buildctl --addr
-"$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build ...` in the
-`moby/buildkit` image. To push, write the registry credentials to
-`$DOCKER_CONFIG/config.json` and run `unset DOCKER_AUTH_CONFIG` first:
-buildctl reads that variable too, and a read-only entry in it overrides the
-job's credentials.
+What to check before the push, what a cold and a cached run look like,
+and where the build is in the console: [docs/first-build.md](docs/first-build.md).
+Every input of the component: [ci/gitlab/README.md](ci/gitlab/README.md).
 
 ## Upgrading
 
-Every release upgrades in place from the release before it (a 0.2.x
-install reaches 0.3.0 or later by installing again). Read the release's
-**Upgrade notes** in [CHANGELOG.md](CHANGELOG.md) first, then:
+Every release upgrades in place from the release before it. Read the
+release's **Upgrade notes** in [CHANGELOG.md](CHANGELOG.md), then
 
 ```sh
 helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version <new version> \
   -n ci-accelerator --reset-then-reuse-values --wait --timeout 15m
 ```
 
-A one-machine install upgrades by running the new release's
-`quickstart.sh` again. Both ways step by step, with pinned digests, GitOps,
-checks and rollbacks: [docs/upgrading.md](docs/upgrading.md).
+with the new digests when you pin the images. A one-machine install
+upgrades by running the new release's `quickstart.sh` again. Each kind
+of install step by step, with the checks and the rollback:
+[docs/upgrading.md](docs/upgrading.md).
 
 ## Limitations
 
@@ -263,8 +210,12 @@ Known, deliberate or not yet solved; the full list, with the reasons:
 
 | Page | What |
 |---|---|
-| [docs/install.md](docs/install.md) | What gets installed, requirements, install options, where the cache lives |
-| [docs/console.md](docs/console.md) | The console: its pages, its three levels, sign-in, logs, OTLP |
+| [docs/install.md](docs/install.md) | Install on your cluster, step by step, with what gets installed |
+| [docs/install-existing-cluster.md](docs/install-existing-cluster.md) | A cluster that already runs cert-manager, a runner or admission policies |
+| [docs/quickstart.md](docs/quickstart.md) | One machine with quickstart.sh: install, console, token, sign-in, upgrade, remove |
+| [docs/first-build.md](docs/first-build.md) | The first CI job, a cold and a cached run |
+| [docs/production.md](docs/production.md) | A dedicated cache disk, daemon sizes, digests, zones, OTLP, mirrors |
+| [docs/console.md](docs/console.md) | The console: its pages, its three levels, sign-in, logs |
 | [docs/upgrading.md](docs/upgrading.md) | Upgrading: Helm, one machine, GitOps, rollbacks |
 | [docs/limitations.md](docs/limitations.md) | What it does not do, and the security model |
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together |

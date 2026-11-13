@@ -114,7 +114,7 @@ person only the projects GitLab lets them read; its redirect URI would be
 
 The build cache is an emptyDir on each build node's root disk: every rollout
 starts with an empty cache. For production, point the daemons at a dedicated
-disk (buildkit.storage.type=hostPath; docs/install.md, "Where the cache lives").
+disk (buildkit.storage.type=hostPath; docs/production.md, "A dedicated cache disk").
 {{- end }}
 
 Builds share the daemons' cache: a build's RUN steps can read and write what

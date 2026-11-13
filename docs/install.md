@@ -1,8 +1,339 @@
-# Installing on Kubernetes
+# Install on your cluster
 
-The commands are in the [README's quickstart](../README.md#quickstart); this
-page has what they need, what the box installs, the install options and
-where the build cache should live.
+This page installs ci-accelerator on a Kubernetes cluster from the
+beginning to a registered runner and an open console, one step at a time,
+with what each step should print. It takes about twenty minutes. Other
+starting points:
+
+- a cluster that already runs cert-manager, a GitLab runner or admission
+  policies: [install-existing-cluster.md](install-existing-cluster.md),
+  which builds on this page;
+- one Linux machine to try it on, without a cluster:
+  [quickstart.md](quickstart.md);
+- Flux or Argo CD: [gitops.md](gitops.md);
+- the first CI job after the install: [first-build.md](first-build.md).
+
+What you get: BuildKit daemons on the nodes you choose as build nodes, a
+build router in front of them, a GitLab runner whose jobs build on those
+daemons, and the console that explains every build
+([what gets installed](#what-gets-installed), at the end of this page).
+
+## Before you start
+
+You need these. Each line has the check and what it must show.
+
+| You need | Check | It must show |
+|---|---|---|
+| Kubernetes 1.34 or newer | `kubectl version` | `Server Version: v1.34.x` or newer |
+| Helm 3.19 or newer, or Helm 4 | `helm version` | `v3.19.x` or `v4.x` |
+| Cluster-admin rights on the cluster | `kubectl auth can-i create clusterroles` | `yes` (a warning that the resource is not namespaced is fine); the install creates a PriorityClass, a ClusterRole and a ClusterIssuer |
+| A default StorageClass | `kubectl get storageclass` | one line with `(default)` after its name |
+| One node to dedicate to builds | `kubectl get nodes -o wide` | a node you can give away: nothing else will run on it |
+| A CNI that enforces NetworkPolicy | the cluster's documentation | Calico, Cilium, kindnet and most managed clusters do; plain flannel does not |
+| The Maintainer role on a GitLab project | the project's Settings menu | it has a CI/CD entry |
+| Outbound access from the nodes | | to `ghcr.io`, `quay.io`, `registry.gitlab.com`, `docker.io` and your GitLab |
+
+Without a default StorageClass, the console's controller cannot get its
+volume and the install waits until it times out: pick a class from
+`kubectl get storageclass` and keep its name for step 6. Without a CNI
+that enforces NetworkPolicy everything works, but the daemons accept
+connections from every namespace and builds can reach cloud instance
+metadata; see [limitations.md](limitations.md).
+
+All commands below assume the namespace `ci-accelerator` and the release
+name `ci-accelerator`. Keep them: every object name, every later command
+and the install notes use them.
+
+## 1. Choose the build node
+
+The daemons, the build router and the CI job pods run only on nodes
+labelled as build nodes. Everything else (the runner, the controller, the
+web) runs on the other nodes, so at least one node must stay without the
+label.
+
+List the nodes and pick one:
+
+```sh
+kubectl get nodes -o wide -L kubernetes.io/arch
+```
+
+Take the worker with the most CPU and memory. Its root disk holds the
+build cache until you give it a dedicated disk
+([production.md](production.md#a-dedicated-cache-disk)). The node must be
+amd64 unless you set `global.jobs.architecture: arm64` in step 6: the
+runner's job pods and the daemons follow the same architecture. Then
+label and taint it:
+
+```sh
+kubectl label node <node> ci-accelerator.io/node-role=build
+kubectl taint node <node> ci-accelerator.io/node-role=build:NoSchedule
+```
+
+The taint keeps new pods off the node; pods already running there stay
+until they restart. Check:
+
+```sh
+kubectl get nodes -l ci-accelerator.io/node-role=build
+```
+
+One line: your node. More build nodes later: the same two commands per
+node, and the daemons appear there by themselves.
+
+## 2. Install cert-manager
+
+cert-manager issues the certificates for the mutual TLS between the CI
+jobs and the daemons. Skip this step if the cluster has it already
+(`kubectl get crd certificates.cert-manager.io` finds the CRD; it must be
+v1.16 or newer, see
+[install-existing-cluster.md](install-existing-cluster.md#cert-manager-is-already-installed)).
+
+```sh
+helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version v1.21.3 \
+  --namespace cert-manager --create-namespace --set crds.enabled=true --wait
+```
+
+`--wait` returns when its three pods are ready, after about half a
+minute. Check:
+
+```sh
+kubectl -n cert-manager get pods
+```
+
+Three pods `1/1 Running`: `cert-manager`, `cert-manager-cainjector` and
+`cert-manager-webhook`. If you go on before the webhook is ready, the
+next `helm install` fails with `failed calling webhook
+"webhook.cert-manager.io"`: wait and run it again.
+
+## 3. Create the namespace
+
+The daemons are privileged pods, so their namespace must allow them.
+Create it and label it:
+
+```sh
+kubectl create namespace ci-accelerator
+kubectl label namespace ci-accelerator pod-security.kubernetes.io/enforce=privileged
+```
+
+Check:
+
+```sh
+kubectl get namespace ci-accelerator --show-labels
+```
+
+The labels contain `pod-security.kubernetes.io/enforce=privileged`. If an
+admission policy of your cluster removes the label or refuses it, see
+[install-existing-cluster.md](install-existing-cluster.md#pod-security-is-managed-by-a-policy).
+
+Do not create a second namespace for the jobs: the install creates
+`ci-accelerator-jobs` itself, and refuses to adopt one that exists.
+
+## 4. Create the runner in GitLab
+
+The runner registers itself from a token that GitLab shows once when you
+create the runner. Create it in the project you will build first (a
+project runner serves only that project; a group runner serves every
+project of the group, with the same steps under Group > Build > Runners).
+
+1. Open the project in GitLab. In the left sidebar select **Settings >
+   CI/CD**, then expand **Runners**.
+2. Select **Create project runner** (on older GitLab versions: **New
+   project runner**).
+3. In **Tags**, enter `ci-accelerator`. Leave **Run untagged jobs**
+   unchecked: with it, every job of the project without tags would come
+   here, and on gitlab.com a job without tags would otherwise go to the
+   shared runners, which cannot build on the daemons. The tag is the one
+   your CI jobs name later.
+4. Leave **Protected** and **Lock to current projects** as they are
+   (unchecked). A description is optional.
+5. Select **Create runner**.
+6. GitLab now shows a page with a token that starts with `glrt-`. Copy it
+   somewhere safe: GitLab shows it only this once. Ignore the
+   `gitlab-runner register` commands on that page: the install registers
+   the runner for you.
+
+Until the install runs, the runner's row under Runners says **Never
+contacted**. That is expected.
+
+## 5. Store the token in a Secret
+
+```sh
+kubectl -n ci-accelerator create secret generic gitlab-runner-token \
+  --from-literal=runner-token=glrt-... \
+  --from-literal=runner-registration-token=
+```
+
+Replace `glrt-...` with the token from step 4. The second key is
+deliberately empty: the runner chart mounts both keys, and a Secret
+without the empty one keeps the runner pod from starting. Check:
+
+```sh
+kubectl -n ci-accelerator get secret gitlab-runner-token \
+  -o go-template='{{range $k, $v := .data}}{{$k}} len={{len $v}}{{"\n"}}{{end}}'
+```
+
+```
+runner-registration-token len=0
+runner-token len=104
+```
+
+(The length is of the stored, base64-encoded value: around 100 for a
+`glrt-` token.)
+
+The token is now in your shell history. To avoid that, write it to a
+file and use `--from-file=runner-token=<file>` instead of the first
+`--from-literal`.
+
+## 6. Write the values file
+
+Put the settings in a file, `values.yaml`, and keep it: every later
+change and every upgrade starts from it.
+
+```yaml
+# values.yaml
+gitlab-runner:
+  # Your GitLab's address, with the trailing slash. Write it the same way
+  # everywhere: the runner, the router and the console compare it
+  # character by character.
+  gitlabUrl: https://gitlab.com/
+  runners:
+    # The Secret of step 5.
+    secret: gitlab-runner-token
+
+buildkit:
+  # The daemon's size. The chart's default (500m CPU, 512Mi) only keeps it
+  # out of the kubelet's first evictions; size it to the build node and
+  # leave the node headroom. Sizes that worked:
+  #   a small node (4-8 CPU, 8-16 GiB):  requests {cpu: "1", memory: 2Gi},  limits {memory: 6Gi}
+  #   16-32 CPU, 64 GiB:                 requests {cpu: "8", memory: 16Gi}, limits {memory: 48Gi}
+  #   production (48+ CPU, 192+ GiB):    requests {cpu: "48", memory: 128Gi}, limits {memory: 128Gi}
+  # The requests must fit the node, or the daemon stays Pending.
+  resources:
+    requests: {cpu: "1", memory: 2Gi}
+    limits: {memory: 6Gi}
+
+# Only without a default StorageClass (see "Before you start"):
+# control-plane:
+#   controller:
+#     persistence:
+#       storageClass: <a ReadWriteOnce class>
+
+# Only with arm64 build nodes:
+# global:
+#   jobs:
+#     architecture: arm64
+```
+
+The build cache goes to an `emptyDir` on the node's root disk by default,
+and is lost when the daemon restarts. That is fine for a start; a
+dedicated disk comes later without a reinstall
+([production.md](production.md#a-dedicated-cache-disk)). Every other
+setting and its default: `helm show values
+oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2`.
+
+## 7. Install
+
+```sh
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
+  -n ci-accelerator -f values.yaml --wait --timeout 10m
+```
+
+The chart checks the cluster before it creates anything (the namespace's
+Pod Security label, a build node, cert-manager, the Secret's keys) and
+stops with a message that names the fix when a check fails. Then the
+nodes pull the images (about 250 MB on the build node) and cert-manager
+issues the certificates. With `--wait` the command returns when every pod
+is ready, after one to three minutes, and prints:
+
+```
+NAME: ci-accelerator
+LAST DEPLOYED: ...
+NAMESPACE: ci-accelerator
+STATUS: deployed
+REVISION: 1
+NOTES:
+ci-accelerator 0.5.2 in namespace ci-accelerator.
+...
+```
+
+The notes that follow are the install notes: the commands of the next
+steps, and the `include:` block of the first build with its hash filled
+in. They scroll away; print them again any time with
+
+```sh
+helm get notes ci-accelerator -n ci-accelerator
+```
+
+If the command fails or times out: `helm status ci-accelerator -n
+ci-accelerator` shows the state, `kubectl -n ci-accelerator get pods`
+which pod is not ready, and [troubleshooting.md](troubleshooting.md#the-install-fails)
+the fixes (a pod `Pending` with a controller volume `Pending` means no
+default StorageClass; `ImagePullBackOff` means a node cannot reach
+`ghcr.io` or `docker.io`). A failed install leaves the release behind
+and a second `helm install` refuses the name: remove it first with
+`helm uninstall ci-accelerator -n ci-accelerator`, fix the cause, and
+install again.
+
+## 8. Check the install
+
+Every pod of the box, with one build node:
+
+```sh
+kubectl -n ci-accelerator get pods -o wide
+```
+
+```
+NAME                                            READY   STATUS    NODE
+ci-accelerator-buildkit-xxxxx                   2/2     Running   <the build node>
+ci-accelerator-controller-xxxxxxxxxx-xxxxx      1/1     Running   <another node>
+ci-accelerator-gitlab-runner-xxxxxxxxxx-xxxxx   1/1     Running   <another node>
+ci-accelerator-router-xxxxx                     1/1     Running   <the build node>
+ci-accelerator-web-xxxxxxxxxx-xxxxx             1/1     Running   <another node>
+ci-accelerator-web-xxxxxxxxxx-xxxxx             1/1     Running   <another node>
+```
+
+One `buildkit` pod (the daemon and its disk probe, `2/2`) and one
+`router` pod per build node; one controller; one runner; two web pods.
+Then the certificates and the runner:
+
+```sh
+kubectl -n ci-accelerator get certificate
+kubectl -n ci-accelerator logs deploy/ci-accelerator-gitlab-runner | grep -i -E 'registered|error'
+```
+
+Three certificates, every one `READY True`: `ci-accelerator-buildkit-tls`
+(the daemons'), `ci-accelerator-controller-client` and
+`ci-accelerator-controller-tls`. The runner's log has the line
+`Runner registered successfully`; in GitLab, under Settings > CI/CD >
+Runners, the runner's row now shows a green dot and **Online**. If the
+log says `is not valid`, the token in the Secret is wrong: see
+[troubleshooting.md](troubleshooting.md#the-runner).
+
+## 9. Open the console
+
+The console has no sign-in yet, so it is reachable only from inside the
+cluster. Forward its port to your computer:
+
+```sh
+kubectl -n ci-accelerator port-forward svc/ci-accelerator-web 8080
+```
+
+Then open <http://localhost:8080/>. The pages are empty until the first
+build. At this level the console sees the builds and the job pods, but
+not GitLab: a job's result shows as "unknown" and no runner waits are
+drawn. A GitLab token or sign-in adds them
+([console.md](console.md#setting-up-the-console)).
+
+## Next
+
+- [first-build.md](first-build.md): the CI job that builds your Dockerfile
+  on the daemons, and what its first and second run look like.
+- [production.md](production.md): a dedicated cache disk, images pinned
+  by digest, daemon sizes, metrics and traces, more build nodes.
+- [upgrading.md](upgrading.md): the next release, with `values.yaml`.
+- Uninstall: `helm uninstall ci-accelerator -n ci-accelerator` removes the
+  box and the jobs namespace; the controller's volume
+  (`ci-accelerator-controller-data`) and the CA Secret in cert-manager's
+  namespace stay, see [troubleshooting.md](troubleshooting.md#uninstall-completely).
 
 ## What gets installed
 
@@ -67,6 +398,15 @@ where the build cache should live.
   placement and cache, each its own pod
   ([runner-cache.md](runner-cache.md)).
 
+Outside its namespace the install creates: the jobs namespace
+`ci-accelerator-jobs` (Pod Security `baseline`), the daemons'
+PriorityClass `ci-accelerator-ci-accelerator-buildkit`, the controller's
+ClusterRole and ClusterRoleBinding
+`ci-accelerator-ci-accelerator-controller-tokenreview` (for TokenReviews,
+its only cluster-wide right), and the CA for this installation in
+cert-manager's namespace (an Issuer, a Certificate and its Secret) with a
+ClusterIssuer `ci-accelerator-ci-accelerator-buildkit-ca`.
+
 Each part is usable on its own:
 
 - **Only the daemons:** `charts/buildkit`
@@ -75,121 +415,3 @@ Each part is usable on its own:
   `charts/control-plane` (`oci://ghcr.io/hoobiboobi/charts/control-plane`).
 - **An existing gitlab-runner:** the values fragment in
   [integrations/gitlab-runner](../integrations/gitlab-runner/README.md).
-
-## Requirements
-
-- **Kubernetes 1.34 or newer.** Same-node routing (`PreferSameNode`) needs
-  kube-proxy 1.34+ or a proxy that implements it.
-- **Build nodes:** one or more, labelled and tainted. The daemons, the
-  build routers and the job pods run only there. The runner manager and
-  the console's controller and web run on the other nodes: keep at least
-  one node without the taint (or see
-  [troubleshooting](troubleshooting.md#the-runner) for tolerations).
-  Nodes in several zones (`topology.kubernetes.io/zone`) keep each job's
-  builds in its zone; see [Limitations](limitations.md).
-
-  ```sh
-  kubectl label node <node> ci-accelerator.io/node-role=build
-  kubectl taint node <node> ci-accelerator.io/node-role=build:NoSchedule
-  ```
-
-- **cert-manager,** installed as the [quickstart](../README.md#on-your-cluster)
-  shows (or without it: see "Without cert-manager" below).
-- **A default StorageClass,** for the controller's volume (or set
-  `control-plane.controller.persistence.storageClass` or
-  `control-plane.controller.persistence.existingClaim`, or leave the
-  control plane out with `control-plane.enabled=false` and
-  `global.router.enabled=false`).
-- **A CNI that enforces NetworkPolicy** (Calico, Cilium, kindnet, ...).
-  Without one, the daemons accept connections from any namespace and builds
-  and job scripts can reach cloud instance metadata; mutual TLS still
-  applies.
-- **Permission to create a PriorityClass** (cluster-scoped): the daemons get
-  their own, so under node pressure the kubelet evicts CI jobs before them.
-  Without that permission set `buildkit.priorityClass.create=false`, or name
-  an existing class in `buildkit.priorityClassName`.
-- **Permission to create a ClusterRole and its binding** for the control
-  plane: the controller checks the ServiceAccount tokens of the web and
-  the routers with a TokenReview, its only cluster-wide right.
-- **Daemon resources:** the defaults (500m CPU, 512Mi requested) only keep
-  the daemons out of BestEffort; size `buildkit.resources` to your build
-  nodes (the chart's values list sizes).
-- **Helm 3 (3.19+) or Helm 4.**
-
-## Install options
-
-The package contains its subcharts. From a clone instead: `make deps`, then
-`helm install ci-accelerator charts/ci-accelerator ...` with the same
-values.
-
-- **Defaults:** amd64 build nodes, jobs in namespace `ci-accelerator-jobs`
-  (created by the release), the build cache in an `emptyDir` (see below).
-- **arm64 build nodes:** add `--set global.jobs.architecture=arm64`.
-- **Production:** pin the ci-accelerator images by digest, both listed in
-  the release notes: the control plane's with
-  `--set control-plane.image.digest=sha256:...`, and the disk probe's next
-  to each daemon (it runs the image of the release that last changed it)
-  with `--set buildkit.diskProbe.image.digest=sha256:...`. The daemons'
-  BuildKit image is pinned by digest already. A digest belongs to one
-  release: upgrades set the new one (see
-  [upgrading.md](upgrading.md#helm-installs)).
-- **Without cert-manager:** `buildkit.tls.source=existingSecret` with four
-  certificates from one CA that `scripts/buildkit-certs.sh` makes (the
-  daemons' with the router's names, the jobs' client, the controller's
-  client and the controller API's server certificate); the jobs namespace
-  is then yours to create, with the jobs' client Secret in it
-  ([gitops.md](gitops.md#certificates-without-cert-manager)).
-- **GitOps:** [gitops.md](gitops.md) shows the same install as
-  a Flux `HelmRelease` and an Argo CD `Application`.
-
-The notes printed at the end show how to check that the runner registered.
-
-## Where the cache lives
-
-By default the daemons keep their cache in an `emptyDir` on the node's root
-disk: fine for a first look, but every rollout starts with an empty cache
-and the node's disk is shared with everything else. For production give
-each build node a dedicated disk and point the daemons at it:
-
-```yaml
-buildkit:
-  storage:
-    type: hostPath
-    hostPath:
-      path: /var/mnt/nvme/buildkit   # a directory on the mounted disk, created in advance
-  config:
-    gc:                              # absolute sizes on a dedicated disk (binary units: 1TB = 1 TiB)
-      maxUsedSpace: "2TB"
-      reservedSpace: "100GB"
-      minFreeSpace: "400GB"
-```
-
-- **The directory must exist** on the mounted disk (`type: Directory`, the
-  default): if the disk is not mounted, the daemon does not start instead
-  of filling the OS disk. One release per path per node; the cache stays
-  after `helm uninstall`.
-- **XFS.** The cache is millions of small files. ext4 fixes its number of
-  inodes at `mkfs` time and can run out of them (`df -i`) long before it
-  runs out of space; XFS allocates inodes as needed. ext4 also keeps 5% in
-  reserve for root, which buildkitd's free-space check counts and kubelet's
-  eviction does not; XFS has no such reserve, so `minFreeSpace` means what
-  `df` shows. XFS is what the production numbers above come from:
-
-  ```sh
-  mkfs.xfs -L buildkit /dev/nvme1n1            # ftype=1 (overlayfs needs it) is the default
-  mkdir -p /var/mnt/nvme && mount -o noatime /dev/nvme1n1 /var/mnt/nvme
-  mkdir -p /var/mnt/nvme/buildkit              # the hostPath
-  ```
-
-  With ext4, make more inodes (`mkfs.ext4 -i 8192`) and drop the reserve
-  (`tune2fs -m 0`).
-- **Sizing** and the reasons for headroom: [troubleshooting.md](troubleshooting.md#disk-inodes-and-processes).
-
-## Without the CI component
-
-Without the component, call buildctl yourself: `buildctl --addr
-"$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" build ...` in the
-`moby/buildkit` image. To push, write the registry credentials to
-`$DOCKER_CONFIG/config.json` and run `unset DOCKER_AUTH_CONFIG` first:
-buildctl reads that variable too, and a read-only entry in it overrides the
-job's credentials.
