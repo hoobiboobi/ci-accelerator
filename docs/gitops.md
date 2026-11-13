@@ -263,7 +263,7 @@ spec:
 Sync waves order Applications only inside a parent Application (app of
 apps); without one, sync cert-manager first. The box namespace comes from
 `CreateNamespace=true` with its label (or create it yourself); the jobs
-namespace is part of the chart, no option needed for it.
+namespace is part of the chart and needs no option.
 
 Argo CD renders the chart with `helm template` and the cluster's API
 versions, so the chart sees cert-manager's API. Helm's `lookup` returns
