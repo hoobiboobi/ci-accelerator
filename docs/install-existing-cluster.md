@@ -18,7 +18,7 @@ Outside its own namespace the install creates, by default:
 | Namespace for the job pods | `ci-accelerator-jobs` (Pod Security `baseline`) | pre-created by you: [below](#the-jobs-namespace-is-created-by-the-platform-team) |
 | PriorityClass for the daemons and the routers | `ci-accelerator-ci-accelerator-buildkit` | an existing class: [below](#priorityclasses-are-managed-by-the-platform-team) |
 | ClusterRole and ClusterRoleBinding for the controller's TokenReviews | `ci-accelerator-ci-accelerator-controller-tokenreview` | none: they cannot be pre-created or switched off |
-| The CA of this installation, in cert-manager's namespace: an Issuer, a Certificate and its Secret | `ci-accelerator-ci-accelerator-buildkit-ca` | a dedicated issuer of your own: [below](#cert-manager-is-already-installed) |
+| The CA of this installation, in cert-manager's namespace: an Issuer, a Certificate and its Secret | `ci-accelerator-ci-accelerator-buildkit-ca` (the Issuer: `...-buildkit-ca-selfsigned`) | a dedicated issuer of your own: [below](#cert-manager-is-already-installed) |
 | ClusterIssuer that signs the daemons' and the jobs' certificates | `ci-accelerator-ci-accelerator-buildkit-ca` | the same |
 
 (The names are `<namespace>-<release>-...`; the table shows them for the
@@ -28,11 +28,12 @@ So the account that runs `helm install` needs: `create` on ClusterRoles,
 ClusterRoleBindings, PriorityClasses, ClusterIssuers and Namespaces;
 `create` on Issuers, Certificates and Secrets in cert-manager's
 namespace; and, for the chart's checks before the install, `list` on
-Nodes and `get` on the box namespace and its Secrets. An account without
-the last ones can switch the checks off (`buildkit.preflight.buildNodes`,
-`buildkit.preflight.podSecurity`, `preflight.runnerSecret`); an account
-without the ClusterRole right cannot install at all: someone with it
-runs the install.
+Nodes and `get` on the box namespace, on the jobs namespace and on the
+box namespace's Secrets. An account without the Node and Secret rights
+can switch those checks off (`buildkit.preflight.buildNodes`,
+`buildkit.preflight.podSecurity`, `preflight.runnerSecret`); the read of
+the jobs namespace has no switch. An account without the ClusterRole
+right cannot install at all: someone with it runs the install.
 
 ## Pod Security is managed by a policy
 
@@ -156,8 +157,10 @@ control-plane:
     priorityClassName: platform-build   # the same (the box defaults to the daemons' class, which does not exist now)
 ```
 
-Without the third value the router pods are refused (`no PriorityClass
-with name ... was found`) and the install hangs in `--wait`. The class
+Without the third value the chart stops before it creates anything:
+`the router runs with the daemons' PriorityClass, which
+buildkit.priorityClass.create=false or buildkit.priorityClassName leaves
+out: set control-plane.router.priorityClassName ...`. The class
 should sit above the CI jobs' priority (0) and below the system classes,
 with `preemptionPolicy: Never`, so the daemons never evict running jobs
 to get scheduled, and not be `globalDefault`.
@@ -240,7 +243,9 @@ Either way:
    Skip step 5 (the token Secret) of install.md; in step 8 there is no
    `ci-accelerator-gitlab-runner` pod.
 2. **The runner's token Secret**, in the runner's own namespace (not the
-   box's), with both keys, as in [install.md step 5](install.md#5-store-the-token-in-a-secret).
+   box's; for a new runner create it first: `kubectl create namespace
+   gitlab-runner`), with both keys, as in
+   [install.md step 5](install.md#5-store-the-token-in-a-secret).
 3. **The configuration.** Download the values fragment of the box's
    release:
 
@@ -261,8 +266,11 @@ Either way:
    ```sh
    helm upgrade --install ci-accelerator-runner gitlab-runner \
      --repo https://charts.gitlab.io --version 0.93.0 \
-     -n gitlab-runner -f values.yaml
+     -n gitlab-runner --create-namespace -f values.yaml
    ```
+
+   Check: `kubectl -n gitlab-runner get pods` shows one pod
+   `ci-accelerator-runner-gitlab-runner-...` `1/1 Running`.
 
    For an **existing release**, merge it into the release's values:
    `helm get values <release> -n <namespace> -o yaml > mine.yaml`, then
@@ -275,7 +283,8 @@ Either way:
    and the console find the jobs by them); your own `concurrent`,
    `image`, polling and resource settings can stay. Then upgrade the
    release with `-f mine.yaml`, its own name, namespace and chart
-   version (0.93.0 or newer; the runner image 19.4.1 or newer).
+   version (0.93.0 or newer with the runner image 19.4.1 or newer; the
+   box ships chart 0.94.1 with 19.5.1, the fragment pins 19.4.2).
 4. **RBAC across namespaces.** The runner's ServiceAccount needs the
    fragment's Role in the jobs namespace. The fragment's `rbac.create:
    true` makes it there; with `rbac.create: false` in your release,
@@ -284,7 +293,7 @@ Either way:
 5. **Check.** The runner's log says `Runner registered successfully`:
    `kubectl -n <namespace> logs deploy/<release>-gitlab-runner` (the
    official chart names the Deployment after the release, without the
-   suffix when the release name already contains `gitlab-runner`;
+   suffix when the release name starts with `gitlab-runner`;
    `kubectl -n <namespace> get deploy` shows it). The upgrade starts the
    new runner pod before the old one stops.
    Then a test job in a project the runner serves:

@@ -10,7 +10,7 @@ it like any other chart. What is yours to provide:
   --version v1.21.3 --namespace cert-manager --create-namespace --set
   crds.enabled=true`.
 - **The build nodes**, labelled and tainted
-  `ci-accelerator.io/node-role=build` (README, quickstart).
+  `ci-accelerator.io/node-role=build` ([install.md, step 1](install.md#1-choose-the-build-node)).
 - **The box namespace** with its Pod Security label: the daemons are
   privileged pods.
 - **The Secrets** the values name: the chart never generates credentials,

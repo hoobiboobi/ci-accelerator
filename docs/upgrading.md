@@ -54,9 +54,10 @@ machine means [quickstart.sh](#one-machine-installs-quickstartsh); a
    cold; a `hostPath` cache stays. When only the control plane
    restarts, the console is away for a few seconds and running builds
    go on; a router restart lets its open builds finish for
-   `control-plane.router.drainSeconds` (300 s) and then cuts them. The
-   box's runner pod waits for its running jobs before it stops. For
-   0.5.1 to 0.5.2: the controller, the web, the routers and the runner
+   `control-plane.router.drainSeconds` (300 s) and then cuts them. A
+   job running on the box's runner pod when that pod is replaced may
+   fail and need a retry (the official runner chart's stop is not
+   tested here). For 0.5.1 to 0.5.2: the controller, the web, the routers and the runner
    pod restart once; the daemons, the store and the cache stay.
 
 ## Helm installs
@@ -103,8 +104,9 @@ machine means [quickstart.sh](#one-machine-installs-quickstartsh); a
 
 **`charts/buildkit` and `charts/control-plane` on their own** upgrade
 the same way, each release with its own name; the two charts of one
-release belong together, so bring both to the same version, the daemons
-first:
+release belong together: bring both to the same version (recommended:
+the daemons first; the end-to-end tests cover the box, not the
+standalone order):
 
 ```sh
 helm upgrade <buildkit release> oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.5.2 \
@@ -218,8 +220,10 @@ on the machine.
    answers it. Do not pass `--build-dir`: the cache stays where
    `values.yaml` says. A GitLab token the running install uses stays in
    use; to add one now, pass `--gitlab-token-file`. The run takes a few
-   minutes: cert-manager's pods restart (the box's certificates and the
-   daemon are untouched), then the box upgrades like a Helm install. It
+   minutes: cert-manager is brought to the version the script pins (its
+   pods restart only when that pin moved since your last run; the box's
+   certificates and the daemon are untouched), then the box upgrades
+   like a Helm install. It
    ends with `Done. ci-accelerator 0.5.2 runs on this machine.` and the
    notes.
 5. **If the script warns** `the GitLab token is applied with --set`, add
@@ -270,6 +274,9 @@ says so in its notes; upgrade k3s with its own
 
 ### Roll back a one-machine install
 
+With `$H`, the script's Helm, as defined in step 1 above (a new shell
+needs it again):
+
 ```sh
 sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml $H history ci-accelerator -n ci-accelerator
 sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml $H rollback ci-accelerator <revision> -n ci-accelerator --wait --timeout 15m
@@ -277,12 +284,13 @@ sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml $H rollback ci-accelerator <revision> 
 
 The revision is the last `superseded` one. cert-manager and Helm stay as
 the newer script left them, which is fine. Do not run an older
-`quickstart.sh` to go back: it would also move cert-manager back.
+`quickstart.sh` to go back: it would install its older chart as a new
+revision, not a rollback, and lacks the checks of later releases.
 
 ### Apply your own changes, or upgrade only the box
 
 To apply a change you made in `values.yaml`, or to upgrade the box alone
-(cert-manager and Helm then stay as they are):
+(cert-manager and Helm then stay as they are), with `$H` from step 1:
 
 ```sh
 sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml $H upgrade ci-accelerator \
@@ -299,7 +307,12 @@ unless `values.yaml` names it (step 5 above).
 Your values live in Git, so the upgrade is one commit:
 
 1. Read the release's notes (above).
-2. In the same commit: the chart version, `ref.tag` of the Flux
+2. Once, before the first upgrade that rolls the daemons: `spec.timeout:
+   15m` on the `HelmRelease` (Flux's default is 5 minutes) and `upgrade:
+   { remediation: { retries: 1 } }`, so a timed-out upgrade is retried
+   once instead of staying failed; for Argo CD a sync timeout to match
+   ([gitops.md](gitops.md) shows both objects).
+3. In one commit: the chart version, `ref.tag` of the Flux
    `OCIRepository` or `targetRevision` of the Argo CD `Application`, and,
    when you pin them, the image digests from the release page:
 
@@ -313,10 +326,6 @@ Your values live in Git, so the upgrade is one commit:
    ```
 
    Renovate can open this commit for you.
-3. Give the tool time for a daemon rollout: `spec.timeout: 15m` on the
-   `HelmRelease` (Flux's default is 5 minutes) with
-   `upgrade: { remediation: { retries: 1 } }`; for Argo CD a sync
-   timeout to match ([gitops.md](gitops.md) shows both objects).
 4. Watch it: `flux get helmrelease -n ci-accelerator` or `argocd app get
    ci-accelerator`, then [Check the upgrade](#check-the-upgrade). The
    chart's checks that read the live cluster do not run under Argo CD
@@ -397,7 +406,10 @@ it changes anything on the machine). Install the current release again:
    kubectl -n ci-accelerator delete secret ci-accelerator-buildkit-tls
    ```
    Without cert-manager (`buildkit.tls.source=existingSecret`), make the
-   daemons' certificate again from the same CA (the same `--out`
+   daemons' certificate again from the same CA (`scripts/buildkit-certs.sh`
+   is in the repository: `git clone --branch v0.5.2
+   https://github.com/hoobiboobi/ci-accelerator`; `--router` and
+   `--controller` take the release name) (the same `--out`
    directory, so the clients' certificates stay valid) and replace the
    Secret named in `buildkit.tls.existingSecret` with it:
    ```sh
@@ -417,9 +429,12 @@ it changes anything on the machine). Install the current release again:
    your own sets `BUILDKIT_REMOTE_ADDR` to the router,
    `tcp://ci-accelerator-router.ci-accelerator.svc:1234`.
 3. Install the current release with those values. Without cert-manager,
-   issue the controller's API certificate from the same CA and name its
-   Secret in `control-plane.controller.api.tls.existingSecret` (the script
-   prints the `kubectl create secret` command):
+   the controller needs two Secrets from the same CA: its client
+   certificate for the daemons (`scripts/buildkit-certs.sh --name
+   ci-accelerator-buildkit --no-server --client controller`, named in
+   `control-plane.tls.existingSecret`) and its API's server certificate
+   (below, named in `control-plane.controller.api.tls.existingSecret`);
+   the script prints the `kubectl create secret` command for each:
    ```sh
    scripts/buildkit-certs.sh --name ci-accelerator-buildkit --namespace ci-accelerator \
      --out <your certs directory> --controller ci-accelerator
