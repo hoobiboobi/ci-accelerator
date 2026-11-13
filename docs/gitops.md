@@ -139,7 +139,7 @@ metadata: { name: ci-accelerator, namespace: flux-system }
 spec:
   interval: 1h
   url: oci://ghcr.io/hoobiboobi/charts/ci-accelerator
-  ref: { tag: 0.5.2 }
+  ref: { tag: 0.6.0 }
   layerSelector:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
@@ -185,7 +185,7 @@ spec:
       diskProbe:
         image: { digest: "sha256:..." }      # ci-accelerator:v0.3.3 (the probe image, unchanged since), from the release notes
     control-plane:
-      image: { digest: "sha256:..." }        # ci-accelerator:v0.5.2, from the release notes
+      image: { digest: "sha256:..." }        # ci-accelerator:v0.6.0, from the release notes
       gitlab:
         token: { existingSecret: gitlab-api-token }
 ```
@@ -243,7 +243,7 @@ spec:
   source:
     repoURL: ghcr.io/hoobiboobi/charts       # no oci:// here
     chart: ci-accelerator
-    targetRevision: 0.5.2
+    targetRevision: 0.6.0
     helm:
       releaseName: ci-accelerator
       valuesObject:
@@ -252,7 +252,7 @@ spec:
           runners:
             secret: gitlab-runner-token
         control-plane:
-          image: { digest: "sha256:..." }   # ci-accelerator:v0.5.2, from the release notes
+          image: { digest: "sha256:..." }   # ci-accelerator:v0.6.0, from the release notes
         buildkit:
           diskProbe:
             image: { digest: "sha256:..." } # the probe image, from the release notes

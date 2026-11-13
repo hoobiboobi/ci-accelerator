@@ -31,7 +31,7 @@ machine means [quickstart.sh](#one-machine-installs-quickstartsh); a
 
    ```
    NAME            NAMESPACE       REVISION  STATUS    CHART                 APP VERSION
-   ci-accelerator  ci-accelerator  1         deployed  ci-accelerator-0.5.1  0.5.1
+   ci-accelerator  ci-accelerator  1         deployed  ci-accelerator-0.5.2  0.5.2
    ```
 
    The CHART column is your version (nothing listed: `helm list -A`
@@ -57,8 +57,10 @@ machine means [quickstart.sh](#one-machine-installs-quickstartsh); a
    `control-plane.router.drainSeconds` (300 s) and then cuts them. A
    job running on the box's runner pod when that pod is replaced may
    fail and need a retry (the official runner chart's stop is not
-   tested here). For 0.5.1 to 0.5.2: the controller, the web, the routers and the runner
-   pod restart once; the daemons, the store and the cache stay.
+   tested here). For 0.5.2 to 0.6.0: the daemons restart once (their pod template
+   changed: the open-files limit and the drain before SIGTERM), so
+   pick a quiet moment; the control plane and the runner pod restart
+   too; the store and a `hostPath` cache stay.
 
 ## Helm installs
 
@@ -66,7 +68,7 @@ machine means [quickstart.sh](#one-machine-installs-quickstartsh); a
    `v`):
 
    ```sh
-   helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
+   helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
      -n ci-accelerator --reset-then-reuse-values --wait --timeout 15m
    ```
 
@@ -83,7 +85,7 @@ machine means [quickstart.sh](#one-machine-installs-quickstartsh); a
    box's images by digest"):
 
    ```sh
-   helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
+   helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
      -n ci-accelerator --reset-then-reuse-values \
      --set control-plane.image.digest=sha256:<the ci-accelerator image's digest> \
      --wait --timeout 15m
@@ -92,8 +94,8 @@ machine means [quickstart.sh](#one-machine-installs-quickstartsh); a
    Add `--set buildkit.diskProbe.image.digest=sha256:...` only when the
    paragraph names another probe digest than the one you have (the probe
    is `v0.3.3` since 0.3.3). A kept digest of the release before is
-   refused with `image.digest ... is the digest of the v0.5.1 image, but
-   this chart runs v0.5.2`: the message names the right one. The daemons'
+   refused with `image.digest ... is the digest of the v0.5.2 image, but
+   this chart runs v0.6.0`: the message names the right one. The daemons'
    BuildKit image is pinned by the chart itself.
 3. **How long:** a few minutes when the daemons stay; when they roll,
    nodes × (longest build + half a minute), so set `--timeout` to that.
@@ -109,9 +111,9 @@ the daemons first; the end-to-end tests cover the box, not the
 standalone order):
 
 ```sh
-helm upgrade <buildkit release> oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.5.2 \
+helm upgrade <buildkit release> oci://ghcr.io/hoobiboobi/charts/buildkit --version 0.6.0 \
   -n <namespace> --reset-then-reuse-values --wait --timeout 15m
-helm upgrade <control-plane release> oci://ghcr.io/hoobiboobi/charts/control-plane --version 0.5.2 \
+helm upgrade <control-plane release> oci://ghcr.io/hoobiboobi/charts/control-plane --version 0.6.0 \
   -n <namespace> --reset-then-reuse-values --set image.digest=sha256:... --wait --timeout 15m
 ```
 
@@ -139,8 +141,8 @@ helm history ci-accelerator -n ci-accelerator
 
 ```
 REVISION  UPDATED                   STATUS      CHART                 APP VERSION  DESCRIPTION
-1         Fri Nov 13 22:36:15 2026  superseded  ci-accelerator-0.5.1  0.5.1        Install complete
-2         Fri Nov 13 23:10:02 2026  deployed    ci-accelerator-0.5.2  0.5.2        Upgrade complete
+1         Fri Nov 13 22:36:15 2026  superseded  ci-accelerator-0.5.2  0.5.2        Install complete
+2         Fri Nov 13 23:10:02 2026  deployed    ci-accelerator-0.6.0  0.6.0        Upgrade complete
 ```
 
 The revision to go back to is the last `superseded` one before the
@@ -155,7 +157,7 @@ included, and restarts what the upgrade restarted (a daemon rollout
 again, if there was one). The Upgrade notes say whether the console's
 store stays usable by the release before; a controller refuses a store
 written by a newer schema rather than damage it, and the notes of a
-release that changes the schema say what to do. 0.5.2 to 0.5.1: the
+release that changes the schema say what to do. 0.6.0 to 0.5.2: the
 store is unchanged, the rollback works.
 
 ## One-machine installs (quickstart.sh)
@@ -193,7 +195,7 @@ on the machine.
 3. **Download the new release's script and check it:**
 
    ```sh
-   v=0.5.2
+   v=0.6.0
    curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/quickstart.sh
    curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v$v/SHA256SUMS
    grep ' quickstart.sh$' SHA256SUMS | sha256sum -c -
@@ -224,7 +226,7 @@ on the machine.
    pods restart only when that pin moved since your last run; the box's
    certificates and the daemon are untouched), then the box upgrades
    like a Helm install. It
-   ends with `Done. ci-accelerator 0.5.2 runs on this machine.` and the
+   ends with `Done. ci-accelerator 0.6.0 runs on this machine.` and the
    notes.
 5. **If the script warns** `the GitLab token is applied with --set`, add
    to `/var/lib/ci-accelerator/values.yaml`, under the existing
@@ -244,7 +246,7 @@ on the machine.
 6. **Check:**
 
    ```sh
-   sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml $H list -n ci-accelerator     # CHART ci-accelerator-0.5.2
+   sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml $H list -n ci-accelerator     # CHART ci-accelerator-0.6.0
    sudo k3s kubectl -n ci-accelerator get pods                              # all Running
    ```
 
@@ -317,12 +319,12 @@ Your values live in Git, so the upgrade is one commit:
    when you pin them, the image digests from the release page:
 
    ```diff
-   -  ref: { tag: 0.5.1 }
-   +  ref: { tag: 0.5.2 }
+   -  ref: { tag: 0.5.2 }
+   +  ref: { tag: 0.6.0 }
    ...
         control-plane:
-   -      image: { digest: "sha256:<0.5.1's>" }
-   +      image: { digest: "sha256:<0.5.2's>" }
+   -      image: { digest: "sha256:<0.5.2's>" }
+   +      image: { digest: "sha256:<0.6.0's>" }
    ```
 
    Renovate can open this commit for you.
@@ -341,7 +343,7 @@ kubectl -n ci-accelerator get pods -o custom-columns=NAME:.metadata.name,READY:.
 ```
 
 Every pod ready; the controller, the web and the router pods run
-`ghcr.io/hoobiboobi/ci-accelerator:v0.5.2`, the daemons
+`ghcr.io/hoobiboobi/ci-accelerator:v0.6.0`, the daemons
 `moby/buildkit:v0.34.2@sha256:...` (the release's BuildKit). When the
 notes said the daemons roll, wait for the rollout:
 
@@ -407,7 +409,7 @@ it changes anything on the machine). Install the current release again:
    ```
    Without cert-manager (`buildkit.tls.source=existingSecret`), make the
    daemons' certificate again from the same CA (`scripts/buildkit-certs.sh`
-   is in the repository: `git clone --branch v0.5.2
+   is in the repository: `git clone --branch v0.6.0
    https://github.com/hoobiboobi/ci-accelerator`; `--router` and
    `--controller` take the release name) (the same `--out`
    directory, so the clients' certificates stay valid) and replace the

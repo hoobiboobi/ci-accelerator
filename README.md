@@ -19,7 +19,7 @@ hardware you already run.
 > its [GitLab mirror](https://gitlab.com/ci-accelerator/ci-accelerator/-/pipelines).
 > Open a running job to watch its build live.
 
-> **Status:** v0.5.2 is released: signed charts and the ci-accelerator image on
+> **Status:** v0.6.0 is released: signed charts and the ci-accelerator image on
 > ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
 > the released version: [ci-accelerator.io](https://ci-accelerator.io/docs/).
 
@@ -119,8 +119,8 @@ One clean Linux machine (Ubuntu 24.04 or Debian 13, 4 CPUs, 8 GB, 40 GB
 of disk) and a runner token from GitLab, in a file:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.2/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.2/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.6.0/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.6.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 sudo bash quickstart.sh --gitlab-url https://gitlab.com/ --runner-token-file ./runner-token
 ```
 
@@ -128,6 +128,15 @@ sudo bash quickstart.sh --gitlab-url https://gitlab.com/ --runner-token-file ./r
 machine, pinned and checked, and prints the SSH tunnel to the console.
 Everything from the runner token to the first build, a GitLab token,
 sign-in, upgrades and removal: [docs/quickstart.md](docs/quickstart.md).
+
+To change its values later (`/var/lib/ci-accelerator/values.yaml`), apply
+them with the Helm the script installed:
+
+```sh
+sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
+  oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
+  -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait --timeout 15m
+```
 
 ### On your cluster
 
@@ -147,7 +156,7 @@ kubectl label namespace ci-accelerator pod-security.kubernetes.io/enforce=privil
 # tag ci-accelerator, untagged jobs off (docs/install.md, step 4)
 kubectl -n ci-accelerator create secret generic gitlab-runner-token \
   --from-literal=runner-token=glrt-... --from-literal=runner-registration-token=
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
   -n ci-accelerator -f values.yaml --wait --timeout 10m
 ```
 
@@ -178,8 +187,8 @@ hash:
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.5.2/ci/gitlab/build.yml
-    integrity: sha256-Th5CoYA2g9uRP3gWvlve0s/5hmho1UK04sDgK23i8rc=   # 0.5.2's; the install notes and the release page print it
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.6.0/ci/gitlab/build.yml
+    integrity: sha256-Hp1o0lc/x3VdadiYVMbcFywe2DL8YkGSGr2K/KpQ8w8=   # 0.6.0's; the install notes and the release page print it
     inputs:
       runner-tags: [ci-accelerator]   # the tag you gave the runner
 ```

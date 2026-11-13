@@ -10,7 +10,7 @@ file at the end has them together.
 Apply a change with the same command every time:
 
 ```sh
-helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
+helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
   -n ci-accelerator -f values.yaml --wait --timeout 15m
 ```
 
@@ -124,13 +124,13 @@ own image, `ghcr.io/hoobiboobi/ci-accelerator`, runs the controller, the
 web and the router at the release's tag, and the disk probe next to each
 daemon at the tag of the release that last changed it. Pin both by their
 digests, which every release's notes list under **Digests**
-(<https://github.com/hoobiboobi/ci-accelerator/releases/tag/v0.5.2>, the
+(<https://github.com/hoobiboobi/ci-accelerator/releases/tag/v0.6.0>, the
 paragraph "To pin the box's images by digest"):
 
 ```yaml
 control-plane:
   image:
-    digest: "sha256:5071488b282537162b5e5025e8b6e4748e8273e91188afd88e0a67bf8a18239b"   # ci-accelerator:v0.5.2
+    digest: "sha256:<from the release notes>"   # ci-accelerator:v0.6.0
 buildkit:
   diskProbe:
     image:
@@ -143,7 +143,7 @@ Check: the pods run by digest.
 kubectl -n ci-accelerator get deploy ci-accelerator-controller -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 ```
 
-prints `ghcr.io/hoobiboobi/ci-accelerator:v0.5.2@sha256:5071488b...`. A
+prints `ghcr.io/hoobiboobi/ci-accelerator:v0.6.0@sha256:5071488b...`. A
 digest belongs to one release: an upgrade sets the new one from the new
 release's notes in the same `helm upgrade`, and the chart refuses a kept
 digest of the release before with a message that names the right one
@@ -297,11 +297,11 @@ buildkit:
 
 control-plane:
   image:
-    digest: "sha256:5071488b282537162b5e5025e8b6e4748e8273e91188afd88e0a67bf8a18239b"   # ci-accelerator:v0.5.2
+    digest: "sha256:<from the release notes>"   # ci-accelerator:v0.6.0
   gitlab:
     token:
       existingSecret: gitlab-api-token       # the Secret of console.md level 2, created first; or signIn
 ```
 
 Every other setting and its default: `helm show values
-oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2`.
+oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0`.
