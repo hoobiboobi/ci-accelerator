@@ -61,7 +61,7 @@ make renovate-check pins-check # Renovate sees every pin (docker); every pinned 
   build farm" with a link to that pipeline; the box's console is public at
   [demo.ci-accelerator.io](https://demo.ci-accelerator.io).
 - **Mutation testing:** the checks are broken on purpose (the code they
-  guard is changed or removed) to make sure each one can actually fail.
+  guard is changed or removed) to make sure each one can fail.
 - **Helm versions:** the checks pass on Helm 3 and Helm 4.
 - **Dependencies:** every version is pinned with a checksum or a digest,
   and taken only once it is two weeks old. Renovate opens one pull

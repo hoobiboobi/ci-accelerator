@@ -69,7 +69,7 @@ kubectl -n ci-accelerator describe pod <daemon pod> | tail -20
 | `disk-probe` in `ImagePullBackOff`, daemon pod not started | The probe runs the `ghcr.io/hoobiboobi/ci-accelerator` image at its own pinned tag (`buildkit.diskProbe.image`, default tag `v0.3.3`), and a pod starts only with all its images: mirror that tag too, or `buildkit.diskProbe.enabled=false` |
 | No pods at all after a successful `helm install` | The namespace enforces `baseline`/`restricted` without a label the chart could see (some distributions default to `baseline`); see the DaemonSet's events |
 
-The daemons run BuildKit v0.34.2. To check what they actually run, the
+The daemons run BuildKit v0.34.2. To check what they run, the
 console's Nodes page names the BuildKit version (a column appears when the
 daemons differ), or:
 

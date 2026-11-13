@@ -8,7 +8,7 @@ buildkitd's configuration is large; a few fields decide whether production works
 
 ## Decision
 
-- Key fields are typed values, validated by the schema and covered by unit tests.
+- Those fields are typed values, validated by the schema and covered by unit tests.
 - Everything else goes into `extraConfig`, raw TOML inserted before the chart's tables; `[worker.oci]` keys go through `workerOCI`.
 - The rendered TOML is parsed at render time; an invalid result fails the install.
 
