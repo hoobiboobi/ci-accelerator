@@ -73,6 +73,11 @@ None.
 
 ### Changed
 
+- The ci-accelerator image is built with Go 1.27.4, which fixes
+  GO-2026-6859 (an HTTP/1 server crash in `net/http`, reached by the
+  console's web server). The patch is two days old: a security fix of
+  the pinned minor line is taken at once
+  ([ADR-0041](docs/adr/0041-security-patch-exception.md)).
 - A stopping daemon now finishes its running builds before it receives
   SIGTERM (its `preStop` waits while `buildctl debug histories` lists a
   running build, then 15 s more), and the console's controller keeps
