@@ -51,8 +51,8 @@ For a project without a `.gitlab-ci.yml`, the whole file is:
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.5.2/ci/gitlab/build.yml
-    integrity: sha256-Th5CoYA2g9uRP3gWvlve0s/5hmho1UK04sDgK23i8rc=
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.6.0/ci/gitlab/build.yml
+    integrity: sha256-Hp1o0lc/x3VdadiYVMbcFywe2DL8YkGSGr2K/KpQ8w8=
     inputs:
       runner-tags: [ci-accelerator]
 ```
@@ -66,8 +66,8 @@ include:
   `helm get notes ci-accelerator -n ci-accelerator` (on the one-machine
   install with the script's Helm, [quickstart.md](quickstart.md#3-run-it));
   the release page
-  (<https://github.com/hoobiboobi/ci-accelerator/releases/tag/v0.5.2>)
-  prints it too. The hash above is the one of 0.5.2.
+  (<https://github.com/hoobiboobi/ci-accelerator/releases/tag/v0.6.0>)
+  prints it too. The hash above is the one of 0.6.0.
 - **`runner-tags`** lists the tag you gave the runner in GitLab
   (`ci-accelerator` in [install.md](install.md#4-create-the-runner-in-gitlab));
   the runner's row under Settings > CI/CD > Runners shows its tags. It is

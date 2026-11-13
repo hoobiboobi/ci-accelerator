@@ -9,9 +9,17 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-- The daemons restart once, for the open-files limit in their pod
-  template (`buildkit.openFilesLimit`). A running build ends with them;
-  start the upgrade when no build runs, as for any daemon change.
+None.
+
+## 0.6.0 - 2026-11-13
+
+### Upgrade notes
+
+- The daemons restart once, for their new pod template (the open-files
+  limit, `buildkit.openFilesLimit`, and the drain before SIGTERM). A
+  running build ends with them; start the upgrade when no build runs, as
+  for any daemon change. A rollback to 0.5.2 works; the console's store
+  is unchanged.
 - Pipelines that include the CI component with `integrity:` need the new
   value from the release notes (the component's job script changed).
 
@@ -65,6 +73,14 @@ workflow copies them into the GitHub release.
 
 ### Changed
 
+- A stopping daemon now finishes its running builds before it receives
+  SIGTERM (its `preStop` waits while `buildctl debug histories` lists a
+  running build, then 15 s more), and the console's controller keeps
+  reading a daemon whose address left the Service until it closes the
+  stream (up to 35 minutes). Before, a daemon deleted in the middle of a
+  build let the build finish, but with the default `emptyDir` storage
+  the console never stored it: every rollout lost the builds that were
+  still running ([ADR-0061](docs/adr/0061-drain-before-sigterm.md)).
 - The upgrade test starts from 0.5.2, and the release notes point to
   docs/production.md for pinning the images by digest. Nothing changes
   for a user.

@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.5.2
+version: 0.6.0
 # The box's own version (its control plane's image); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.5.2"
+appVersion: "0.6.0"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -26,7 +26,7 @@ annotations:
     - name: buildkit
       image: moby/buildkit:v0.34.2
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.5.2
+      image: ghcr.io/hoobiboobi/ci-accelerator:v0.6.0
       platforms:
         - linux/amd64
         - linux/arm64
@@ -46,17 +46,15 @@ annotations:
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
     - kind: fixed
-      description: "Rebuild reasons: a build whose only executed steps were git sources fetched again no longer reads as one with steps run"
+      description: "The daemons cap the open-files limit of every RUN step (buildkit.openFilesLimit): yum on CentOS 7 no longer hangs for an hour"
     - kind: fixed
-      description: "Rebuild reasons: an unchanged COPY --link line no longer reads as a changed Dockerfile line"
-    - kind: added
-      description: "The console API has an OpenAPI contract (docs/api/openapi.yaml), checked against the responses and the last release"
-    - kind: added
-      description: "The ci-accelerator image carries an SPDX SBOM for each platform"
+      description: "Console: builds with a provenance that maps other digests, Dockerfiles of ten steps or more, a rebuild with the job's .git in the context, and the previous build of an image are read right"
     - kind: changed
-      description: "gitlab-runner 19.5.1 with the official chart 0.94.1"
-    - kind: security
-      description: "github.com/klauspost/compress v1.20.2 (GO-2026-6865)"
+      description: "A stopping daemon finishes its builds before SIGTERM and the console reads a leaving daemon to the end: builds that finish during a rollout are stored"
+    - kind: added
+      description: "The CI component notes in the job's log when the checkout's .git is in the build context"
+    - kind: changed
+      description: "Documentation: the install, the upgrades and the settings as step-by-step procedures, each rehearsed on a fresh stand"
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -64,10 +62,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.5.2
+    version: 0.6.0
     repository: file://../buildkit
   - name: control-plane
-    version: 0.5.2
+    version: 0.6.0
     repository: file://../control-plane
     condition: control-plane.enabled
   - name: gitlab-runner

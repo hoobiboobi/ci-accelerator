@@ -55,8 +55,8 @@ hides what you type: paste, press Enter.
 ## 2. Download the script and check it
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.2/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.5.2/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.6.0/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.6.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 ```
 
 The second command prints `quickstart.sh: OK`. Anything else (`FAILED`):
@@ -272,7 +272,7 @@ the Helm to use):
 
 ```sh
 sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
-  oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.5.2 \
+  oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
   -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait --timeout 15m
 ```
 
