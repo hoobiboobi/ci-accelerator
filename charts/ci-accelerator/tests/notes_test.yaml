@@ -116,7 +116,7 @@ tests:
   - it: says where the cache lives while it is an emptyDir
     asserts:
       - matchRegexRaw:
-          pattern: 'The build cache is an emptyDir on each build node.s root disk: every rollout\nstarts with an empty cache\. For production, point the daemons at a dedicated\ndisk \(buildkit\.storage\.type=hostPath; docs/install\.md, "Where the cache lives"\)\.'
+          pattern: 'The build cache is an emptyDir on each build node.s root disk: every rollout\nstarts with an empty cache\. For production, point the daemons at a dedicated\ndisk \(buildkit\.storage\.type=hostPath; docs/production\.md, "A dedicated cache disk"\)\.'
 
   - it: is quiet about the cache on a dedicated disk
     set:
