@@ -96,6 +96,23 @@ steps, on the Dockerfile tab, on the step panel's Speed-up tab and as
 [the Dockerfile guide](dockerfile-guide.md#3-use-cache-mounts-for-package-managers) explains the
 mounts.
 
+**Installed again only because of the order**: when GitLab's comparison of
+the commits proves a rebuild your change, and it started from a `COPY` of
+the whole build context, a step after that copy in the same stage that
+installs dependencies (pip, uv, Poetry, npm, Yarn, pnpm, Bun, Go modules,
+Bundler, Composer, Mix, Cargo) without any of the files it installs from
+having changed is a speed-up of its own: the verdict says how much of the
+build it took, the steps list marks it, and the Speed-ups card gives a
+fragment that copies those files first, installs from them, and copies the
+code after (for Bundler and Cargo, and a step that does more than "a &&
+b", in words only). Its figure is that step's measured time in the
+image's builds of the last 30 days; once the order is fixed, the next
+such rebuild says so with the time a change cost before and after. Insights
+lists the part of your changes these installs took, and `GET
+/api/v1/builds` returns them as `order`. It needs the comparison (a GitLab
+token or sign-in) and a changed-files list of at most 20 entries; a step
+under 1 s is not listed.
+
 Every figure is measured, not estimated. Medians and p95 are nearest-rank
 percentiles, so always one of the measured times; "usual" needs five
 builds of its kind and a p95 twenty rebuilds (a dash until then). The

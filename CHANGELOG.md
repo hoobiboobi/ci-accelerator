@@ -9,7 +9,21 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None.
+None. The console's store gains a column (`builds.order_ms`) on its first
+start; a rollback to 0.6.0 keeps working on the same store.
+
+### Added
+
+- The console says when a rebuild installed dependencies again only
+  because a `COPY` of the whole build context comes before the install,
+  and none of the files the install reads changed (GitLab's comparison of
+  the commits proves which did): in the verdict with the share of the
+  build it took, in the steps list, and as an "order" speed-up with a
+  Dockerfile fragment that copies those files first (pip, uv, Poetry, npm,
+  Yarn, pnpm, Bun, Go modules, Composer, Mix; Bundler and Cargo in words).
+  A later rebuild whose dependencies came from the cache says the order
+  was fixed, with the time before and after. Insights lists their time;
+  `GET /api/v1/builds` returns them as `order`.
 
 ### Changed
 
