@@ -42,6 +42,9 @@ type BuildRow struct {
 	OldPersists   bool
 	// Images are the image names the build pushed or exported.
 	Images []string
+	// Order is what its installs took that ran again only because of the
+	// Dockerfile's order (OrderHint); 0 for none or not known.
+	Order time.Duration
 }
 
 // Duration is the build's time in BuildKit; 0 while it runs.
@@ -113,7 +116,7 @@ const feedCols = `b.id, b.instance, b.pipeline_id, b.job_id, b.target, d.name, b
 	b.reason_via, d.node,
 	CASE WHEN b.reason_old = '' THEN '' ELSE COALESCE((SELECT od.node FROM daemons od WHERE od.name = b.reason_old), '') END,
 	CASE WHEN b.reason_old = '' THEN 0 ELSE COALESCE((SELECT od.persists FROM daemons od WHERE od.name = b.reason_old), 0) END,
-	b.images`
+	b.images, b.order_ms`
 
 // Builds returns a project's builds, newest first.
 func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
@@ -169,11 +172,11 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 			started            int64
 			completed, created sql.NullInt64
 			kind, paths, imgs  string
-			builtMs            int64
+			builtMs, orderMs   int64
 		)
 		if err := rows.Scan(&r.ID, &instance, &pipeline, &job, &r.Target, &r.Daemon, &started, &completed, &r.Error,
 			&kind, &paths, &r.Old, &r.New, &r.Arg, &r.Built, &builtMs, &r.Ref, &r.SHA, &r.Title, &r.Author,
-			&r.JobName, &created, &r.ReasonStep, &r.Via, &r.Node, &r.OldNode, &r.OldPersists, &imgs); err != nil {
+			&r.JobName, &created, &r.ReasonStep, &r.Via, &r.Node, &r.OldNode, &r.OldPersists, &imgs, &orderMs); err != nil {
 			return nil, err
 		}
 		if instance.Valid {
@@ -182,6 +185,7 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 		r.Pipeline, r.Job = uint64(pipeline.Int64), uint64(job.Int64)
 		r.Started, r.Completed, r.PipelineCreatedAt = time.UnixMilli(started).UTC(), msTime(completed), msTime(created)
 		r.Reason, r.BuiltTime = history.ReasonKind(kind), time.Duration(builtMs)*time.Millisecond
+		r.Order = time.Duration(orderMs) * time.Millisecond
 		_ = json.Unmarshal([]byte(paths), &r.Paths)
 		r.Paths = plainPaths(r.Paths)
 		_ = json.Unmarshal([]byte(imgs), &r.Images)

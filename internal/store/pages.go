@@ -96,6 +96,11 @@ type BuildPage struct {
 	// Hints are the build's cache-mount hints (see Store.Hints); none when
 	// its graph is past retention.
 	Hints []StepHints
+	// Order are the steps that installed dependencies again only because
+	// of the Dockerfile's order (OrderHint); OrderFixed says the order was
+	// fixed since an earlier build of the image.
+	Order      []OrderHint
+	OrderFixed *OrderFixed
 }
 
 // StepRun is one build's run of a step identity, for its history.
@@ -312,6 +317,13 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 	// A build whose graph is past retention has no operations to read:
 	// no hints.
 	if p.Hints, err = s.Hints(ctx, st); err != nil {
+		return nil, err
+	}
+	p.Order = orderHints(st.Build, st.Reason, st.Via, p.Dockerfile)
+	if err := s.orderRuns(ctx, id, st.Build.Started, p.Order); err != nil {
+		return nil, err
+	}
+	if p.OrderFixed, err = s.orderFixed(ctx, st, p.Order); err != nil {
 		return nil, err
 	}
 	return p, nil

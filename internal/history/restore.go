@@ -115,6 +115,36 @@ func (b *Build) StepOps(i int) (json.RawMessage, []json.RawMessage) {
 	return s.Op, out
 }
 
+// DependsOn reports whether step j builds on step i: i's operation is
+// among the operations below j's in the build's graph.
+func (b *Build) DependsOn(j, i int) bool {
+	if b.prov == nil || i < 0 || j < 0 || i >= len(b.Steps) || j >= len(b.Steps) || i == j {
+		return false
+	}
+	want, from := b.Steps[i].StepID, b.Steps[j].StepID
+	s, ok := b.prov.Steps[from]
+	if want == "" || from == "" || !ok {
+		return false
+	}
+	seen := map[string]bool{from: true}
+	queue := append([]string(nil), s.Inputs...)
+	for len(queue) > 0 && len(seen) < maxAncestors {
+		id := queue[0]
+		queue = queue[1:]
+		if id == want {
+			return true
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if a, ok := b.prov.Steps[id]; ok {
+			queue = append(queue, a.Inputs...)
+		}
+	}
+	return false
+}
+
 // LastRun reads a provenance and returns the operation of the step made
 // by the Dockerfile's last line, the operations it builds on, and the
 // step's instruction as written ("RUN ..."), for tools that check hints
