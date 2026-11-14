@@ -168,7 +168,8 @@ dep_helm() {
   case $v in v4.*) ;; *) die "CI_HELM_VERSION $v: the Makefile keeps the v4 line here (Helm 3 is pinned by hand)" ;; esac
   read -r old _ <<<"$(moved scripts/quickstart.sh HELM_VERSION)"
   retext README.md "/usr/local/lib/ci-accelerator/helm-" "/helm upgrade" "$old" "$v"
-  retext README.md "- Helm " " and cert-manager" "$old" "$v"
+  retext docs/quickstart.md "- Helm " " and cert-manager" "$old" "$v"
+  retext docs/quickstart.md "==> Installing Helm " "" "$old" "$v"
   for arch in amd64 arm64; do
     fetch "https://get.helm.sh/helm-$v-linux-$arch.tar.gz.sha256sum" "$WORK/helm.sum"
     s=$(cut -d' ' -f1 "$WORK/helm.sum")
@@ -238,7 +239,8 @@ dep_k3s() {
   local v tag old; v=$(var scripts/quickstart.sh K3S_VERSION)
   tag=${v//+/%2B}
   read -r old _ <<<"$(moved scripts/quickstart.sh K3S_VERSION)"
-  retext README.md "- k3s " ", with the machine" "$old" "$v"
+  retext docs/quickstart.md "- k3s " ", with the machine" "$old" "$v"
+  retext docs/quickstart.md "==> Installing k3s " "          (about a minute)" "$old" "$v"
   fetch "https://github.com/k3s-io/k3s/releases/download/$tag/sha256sum-amd64.txt" "$WORK/sums"
   set_sum scripts/quickstart.sh K3S_SHA256_amd64 "$(sum_in "$WORK/sums" k3s)"
   fetch "https://github.com/k3s-io/k3s/releases/download/$tag/sha256sum-arm64.txt" "$WORK/sums"
@@ -259,7 +261,8 @@ dep_cert_manager() {
     retext "$f" "cert-manager --version " "" "$old" "$v"
   done
   retext docs/gitops.md "--version " " --namespace cert-manager" "$old" "$v"
-  retext README.md "- Helm $(var scripts/quickstart.sh HELM_VERSION) and cert-manager " ";" "$old" "$v"
+  retext docs/quickstart.md "- Helm $(var scripts/quickstart.sh HELM_VERSION) and cert-manager " ";" "$old" "$v"
+  retext docs/quickstart.md "==> Installing cert-manager " "      (half a minute)" "$old" "$v"
   retext test/e2e/cert-manager-values.yaml "pinned to the " " index digests" "$old" "$v"
   tok=$(curl -fsSL "https://quay.io/v2/auth?service=quay.io&scope=repository:jetstack/charts/cert-manager:pull" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
   [ -n "$tok" ] || die "no pull token from quay.io"

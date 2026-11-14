@@ -9,6 +9,14 @@ through an SSH tunnel. This page goes from an empty machine to the
 console, then to a first build, a GitLab token, sign-in, changes,
 upgrades and removal. The install itself takes five minutes.
 
+The script installs the following; k3s, Helm, cert-manager and the chart
+are pinned and checked against their sha256 (the box's images come by
+tag, the daemons' by digest):
+- k3s v1.36.5+k3s1, with the machine as its only node and build node;
+- Helm v4.3.1 and cert-manager v1.21.3;
+- the box, with the build router and the console; its cache and its
+  resources are set on the first install (step 3 says where they live).
+
 ## Before you start
 
 - **A clean machine:** Ubuntu 24.04 or Debian 13 (any Linux with systemd
@@ -79,9 +87,9 @@ What follows, with the time each step takes on a small cloud VM:
 ==> Waiting for Kubernetes
 ==> Installing Helm v4.3.1
 ==> Installing cert-manager v1.21.3      (half a minute)
-==> Installing ci-accelerator 0.5.2      (one to three minutes: the images)
+==> Installing ci-accelerator 0.6.0      (one to three minutes: the images)
 
-Done. ci-accelerator 0.5.2 runs on this machine.
+Done. ci-accelerator 0.6.0 runs on this machine.
 ```
 
 Then the install notes (the commands of the next steps and the `include:`
