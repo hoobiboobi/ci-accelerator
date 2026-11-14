@@ -790,6 +790,19 @@ type InsightsView struct {
 	MoreReasons             string
 	Running                 int
 	Empty                   bool
+	// Order is the part of "your change" that installed dependencies
+	// again only because of the Dockerfile's order (OrderHint).
+	Order OrderRow
+}
+
+// OrderRow sums the installs that ran again only because of a
+// Dockerfile's order: N builds, their time, the images, the latest.
+type OrderRow struct {
+	N      int
+	Lost   time.Duration
+	Images []string
+	URL    string
+	Last   string
 }
 
 func windowOf(r *http.Request) (string, time.Duration, string) {
@@ -851,6 +864,25 @@ func (s *Server) insights(w http.ResponseWriter, r *http.Request) {
 	v.Lost = duration(lost)
 	if lost > 0 {
 		v.Farm, v.Unclear = int(100*farm/lost), int(100*unclear/lost)
+	}
+	var last *store.BuildRow
+	for i, b := range in {
+		if b.Order <= 0 {
+			continue
+		}
+		v.Order.N++
+		v.Order.Lost += b.Order
+		name := buildName(b.Target, b.Images)
+		if !contains(v.Order.Images, name) {
+			v.Order.Images = append(v.Order.Images, name)
+		}
+		if last == nil || b.Started.After(last.Started) {
+			last = &in[i]
+		}
+	}
+	if last != nil {
+		v.Order.URL = fmt.Sprintf("/builds/%d#spT", last.ID)
+		v.Order.Last = clock(last.Started, inZone(s.now(), zone(r)))
 	}
 	all := s.reasons(in, 0, zone(r))
 	v.Reasons = all

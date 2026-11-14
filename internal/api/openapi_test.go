@@ -63,8 +63,13 @@ func TestResponsesMatchTheContract(t *testing.T) {
 			Insert: []hints.Insert{{After: "apk", Add: "--cache-dir /etc/apk/cache"}}, Caveats: []string{"shared by every project"}},
 			// A manager whose cache could not be placed has no folders.
 			{Manager: "npm", Problems: []hints.Problem{{Kind: hints.Missing}}}}}
+	order := store.OrderHint{Step: 1, Key: "[a 2/2]", Name: "RUN pip install .", Lines: []history.LineRange{{Start: 4, End: 4}},
+		CopyStep: 0, CopyKey: "[a 1/2]", CopyName: "COPY . .", CopyLines: []history.LineRange{{Start: 3, End: 3}},
+		Managers: []string{"pip"}, Files: []string{"pyproject.toml"}, Others: []string{"python -m compileall ."},
+		Took: 30 * time.Second, Fragment: "COPY pyproject.toml /app/\nRUN pip install -r /tmp/requirements.txt\nCOPY . .\nRUN pip install .",
+		Runs: 2, RunTime: 55 * time.Second, Since: t0.Add(-30 * 24 * time.Hour)}
 	f := &fakeStore{builds: []*store.Stored{{ID: 1, Build: full, Reason: reason}, {ID: 2, Build: running}},
-		hints: map[int64][]store.StepHints{1: {hint}}}
+		hints: map[int64][]store.StepHints{1: {hint}}, order: map[int64][]store.OrderHint{1: {order}}}
 	h := Handler(f)
 
 	check := func(name, query string, want int) []byte {

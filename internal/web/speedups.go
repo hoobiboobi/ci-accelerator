@@ -3,10 +3,12 @@ package web
 import (
 	"fmt"
 	"html/template"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/hints"
+	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
@@ -21,6 +23,7 @@ type Speedup struct {
 	LineText  string // "line 6", "lines 6–9"
 	Title     template.HTML
 	Broken    bool // a cache mount that is there but cannot work
+	Order     bool // installs again because of the Dockerfile's order
 	Chip      string
 	Why       []template.HTML
 	Figures   string
@@ -48,12 +51,122 @@ func managerName(m string) string {
 	return m
 }
 
-// speedups turns a build's stored hints into what the pages show.
-func speedups(hs []store.StepHints) []Speedup {
-	out := make([]Speedup, 0, len(hs))
-	for i, h := range hs {
-		out = append(out, speedupOf(i+1, h))
+// speedups turns a build's stored hints into what the pages show: the
+// cache-mount hints and the order hints together, the costliest first
+// (what the step cost the image's builds in the window).
+func speedups(hs []store.StepHints, order []store.OrderHint) []Speedup {
+	type item struct {
+		cost time.Duration
+		v    Speedup
 	}
+	var items []item
+	for _, h := range hs {
+		items = append(items, item{h.RunTime, speedupOf(0, h)})
+	}
+	for _, o := range order {
+		items = append(items, item{o.RunTime, orderSpeedup(o)})
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].cost > items[j].cost })
+	out := make([]Speedup, 0, len(items))
+	for i, it := range items {
+		it.v.N = i + 1
+		out = append(out, it.v)
+	}
+	return out
+}
+
+// orderSpeedup is an order hint as the pages show it.
+func orderSpeedup(o store.OrderHint) Speedup {
+	v := Speedup{Step: o.Step, Key: o.Key, Order: true, Chip: "order", Fragment: o.Fragment, Replace: "the copy and the step"}
+	first, last := 0, 0
+	if len(o.CopyLines) > 0 {
+		first = o.CopyLines[0].Start
+	}
+	if len(o.Lines) > 0 {
+		v.Line = o.Lines[0].Start
+		last = o.Lines[len(o.Lines)-1].End
+		if first == 0 {
+			first = v.Line
+		}
+	}
+	if first > 0 && last > first {
+		v.LineText = fmt.Sprintf("lines %d–%d", first, last)
+		v.Replace = v.LineText
+	} else if first > 0 {
+		v.LineText = fmt.Sprintf("line %d", first)
+	}
+	if v.Fragment != "" {
+		v.FragLines = strings.Count(v.Fragment, "\n") + 1
+	}
+	var names []string
+	for _, m := range o.Managers {
+		names = append(names, managerName(m))
+	}
+	who := strings.Join(names, " and ")
+	copyCmd := code(o.CopyName)
+	v.Title = template.HTML("Install the dependencies before copying the code")
+	v.Why = append(v.Why, template.HTML(fmt.Sprintf("%s comes before the step that runs %s, so a change to any file of the build context installs the dependencies again, though only %s decide what %s installs.",
+		copyCmd, e(who), filesText(o.Files), e(who))))
+	for _, x := range o.Others {
+		v.Why = append(v.Why, template.HTML(fmt.Sprintf("The step also runs %s, which needs the code: its time counts in the figure below too.", code(x))))
+	}
+	if v.Fragment == "" {
+		v.Why = append(v.Why, template.HTML(fmt.Sprintf("Copy %s first and install from %s before %s; then copy the rest and run what needs the code.",
+			filesText(o.Files), oneOrMany(len(o.Files), "it", "them"), copyCmd)))
+	}
+	v.Caveats = orderCaveats(o)
+	v.Figures = orderFigures(o)
+	return v
+}
+
+// filesText names files: "pyproject.toml", "go.mod and go.sum", "a, b and c".
+func filesText(fs []string) string {
+	var cs []string
+	for _, f := range fs {
+		cs = append(cs, string(code(f)))
+	}
+	switch len(cs) {
+	case 0:
+		return "its own files"
+	case 1:
+		return cs[0]
+	}
+	return strings.Join(cs[:len(cs)-1], ", ") + " and " + cs[len(cs)-1]
+}
+
+func oneOrMany(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// orderFigures is what installing again cost the image in the window:
+// measured step times, never what the order would save.
+func orderFigures(o store.OrderHint) string {
+	days := int(store.HintWindow / (24 * time.Hour))
+	if o.Runs <= 1 {
+		return fmt.Sprintf("Installed again without a change to those files once in the last %d days of this image's builds: %s.", days, duration(o.RunTime))
+	}
+	return fmt.Sprintf("Installed again without a change to those files %d times in the last %d days of this image's builds: %s in total.", o.Runs, days, duration(o.RunTime))
+}
+
+// orderCaveats are what to keep in mind with the fragment.
+func orderCaveats(o store.OrderHint) []string {
+	var out []string
+	for _, m := range o.Managers {
+		switch m {
+		case "npm", "yarn", "pnpm", "bun":
+			out = append(out, "COPY --parents copies every package.json below the project with its folders, as a workspace (monorepo) needs; it needs the Dockerfile syntax 1.20 or later, which BuildKit v0.34 has built in.")
+		case "pip", "uv":
+			out = append(out, "The first install takes the dependencies pyproject.toml lists (requirement files without the lines that name the project or other files); the command after the copy adds the project and anything the files do not list.")
+		case "composer":
+			out = append(out, "The first composer install skips the autoloader and the project's scripts: they need the code, and the command after the copy runs them.")
+		case "bundler":
+			out = append(out, "A Gemfile that reads the project's gemspec (gemspec) needs the gemspec and the files it reads copied too.")
+		}
+	}
+	out = append(out, "An install that reads other files of the repository (a local package, a patch, a config) needs them copied with the files above.")
 	return out
 }
 
@@ -192,4 +305,79 @@ func problemText(h hints.Hint, p hints.Problem) template.HTML {
 		return template.HTML(fmt.Sprintf("%s empties the cache mount in the same step.", code(p.Setting)))
 	}
 	return ""
+}
+
+// orderVerdict is the line under the verdict of a rebuild that installed
+// dependencies again only because of the Dockerfile's order: how much of
+// this build's time that took, drawn against the whole.
+func orderVerdict(os []store.OrderHint, b *history.Build) template.HTML {
+	var took time.Duration
+	var steps []string
+	var managers []string
+	for _, o := range os {
+		took += o.Took
+		at := ""
+		if len(o.Lines) > 0 {
+			at = fmt.Sprintf(" (line %d)", o.Lines[0].Start)
+		}
+		steps = append(steps, code(o.Name)+at)
+		for _, m := range o.Managers {
+			if !contains(managers, managerName(m)) {
+				managers = append(managers, managerName(m))
+			}
+		}
+	}
+	o := os[0]
+	copyAt := ""
+	if len(o.CopyLines) > 0 {
+		copyAt = fmt.Sprintf(" (line %d)", o.CopyLines[0].Start)
+	}
+	var files []string
+	for _, x := range os {
+		for _, f := range x.Files {
+			if !contains(files, f) {
+				files = append(files, f)
+			}
+		}
+	}
+	total := time.Duration(0)
+	if !b.Completed.IsZero() {
+		total = b.Completed.Sub(b.Started)
+	}
+	share := "<b>" + duration(took) + "</b>"
+	meter := ""
+	if total > took && total > 0 {
+		share = fmt.Sprintf("<b>%s of %s</b>", duration(took), duration(total))
+		pct := float64(took) / float64(total) * 100
+		meter = fmt.Sprintf(`<svg class="ometer" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="%s of %s installed the dependencies again"><rect class="r" width="100" height="8" rx="2"/><rect class="o" width="%.1f" height="8" rx="2"/></svg>`,
+			duration(took), duration(total), pct)
+	}
+	others := ""
+	if len(o.Others) > 0 {
+		others = " (the step also runs " + code(o.Others[0]) + ", which needs the code)"
+	}
+	return template.HTML(fmt.Sprintf(`%s went to installing the dependencies again%s, and none of the files they come from changed (%s). %s comes after %s%s, so a change to any file of the build context runs %s again.%s<a class="link" href="#spT">Install the dependencies before %s</a>`,
+		share, others, filesText(files), strings.Join(steps, ", "), code(o.CopyName), copyAt, e(strings.Join(managers, " and ")), meter, e(o.CopyName)))
+}
+
+// fixedVerdict is the line under the verdict of a rebuild whose
+// dependencies came from the cache, where an earlier build of the image
+// installed them again: what a change cost before and now.
+func fixedVerdict(f *store.OrderFixed) template.HTML {
+	now := ""
+	if f.ThisBuild > 0 {
+		now = fmt.Sprintf(" This build took <b>%s</b>;", duration(f.ThisBuild))
+	}
+	before := fmt.Sprintf(` <a class="link" href="/builds/%d">build %d</a>, the last that installed again, took <b>%s</b>, %s of it installing the dependencies.`,
+		f.Before, f.Before, duration(f.Took), duration(f.Wasted))
+	var names []string
+	for _, m := range f.Managers {
+		names = append(names, managerName(m))
+	}
+	at := ""
+	if f.Line > 0 {
+		at = fmt.Sprintf(" (line %d)", f.Line)
+	}
+	return template.HTML(fmt.Sprintf(`<span class="chip passed">order fixed</span> <b>The dependencies came from the cache:</b> %s installs them before the code is copied now%s.%s%s`,
+		e(strings.Join(names, " and ")), at, now, before))
 }

@@ -125,6 +125,14 @@ func (s *Server) explain(ctx context.Context, p *store.BuildPage) (*built, error
 				code(rd.Name), where, strings.TrimPrefix(string(d.Verdict.Detail), "Steps after it were rebuilt because their input changed. ")))
 		}
 	}
+	switch {
+	case len(p.Order) > 0:
+		// Replaces the general tip about COPY . .: this one says what it
+		// cost here.
+		d.Verdict.Hint = orderVerdict(p.Order, b)
+	case p.OrderFixed != nil:
+		d.Verdict.Hint = fixedVerdict(p.OrderFixed)
+	}
 	d.Cat = catOf(p.Reason.Kind, b.Error, d.Built)
 	d.Verdict.Icon = d.Cat.Icon
 	return d, nil
@@ -184,7 +192,10 @@ type BuildView struct {
 	// Speedups are the build's cache-mount hints, the costliest first;
 	// HintOf finds a step's.
 	Speedups []Speedup
-	HintOf   map[int]*Speedup
+	// OrderOf marks, by step, the steps that installed dependencies again
+	// only because of the Dockerfile's order.
+	OrderOf map[int]*Speedup
+	HintOf  map[int]*Speedup
 }
 
 // Change is one difference from the previous build of the target.
@@ -328,9 +339,16 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v.Blocks = blocksOf(b, d.Views)
-	v.Speedups, v.HintOf = speedups(p.Hints), map[int]*Speedup{}
+	v.Speedups, v.HintOf, v.OrderOf = speedups(p.Hints, p.Order), map[int]*Speedup{}, map[int]*Speedup{}
 	for i := range v.Speedups {
-		v.HintOf[v.Speedups[i].Step] = &v.Speedups[i]
+		sp := &v.Speedups[i]
+		if sp.Order {
+			v.OrderOf[sp.Step] = sp
+		}
+		// A step with both kinds is marked by its cache-mount hint.
+		if prev, ok := v.HintOf[sp.Step]; !ok || prev.Order {
+			v.HintOf[sp.Step] = sp
+		}
 	}
 	v.Gantt, v.GanttSkip = gantt(v.Blocks)
 	v.StepCount = len(b.Steps)
@@ -574,8 +592,10 @@ type StepData struct {
 	// HasDockerfile: the build page has a Dockerfile tab (a canceled build
 	// has none).
 	HasDockerfile bool
-	// Speedup is the step's cache-mount hint; nil without one.
+	// Speedup is the step's cache-mount hint, Order its order hint; nil
+	// without one.
 	Speedup   *Speedup
+	Order     *Speedup
 	Output    string
 	OutNote   string
 	Hist      []HistCol
@@ -623,9 +643,14 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 	p, b := d.Page, d.Page.Build
 	st, v := b.Steps[idx], d.Views[idx]
 	sd := StepData{BuildID: id, Step: v, Command: st.Name, Prev: -1, Next: -1, Err: st.Error, HasDockerfile: p.Dockerfile != ""}
-	for _, sp := range speedups(p.Hints) {
-		if sp.Step == idx {
-			sp := sp
+	for _, sp := range speedups(p.Hints, p.Order) {
+		if sp.Step != idx {
+			continue
+		}
+		sp := sp
+		if sp.Order {
+			sd.Order = &sp
+		} else {
 			sd.Speedup = &sp
 		}
 	}

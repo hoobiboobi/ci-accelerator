@@ -22,6 +22,7 @@ import (
 type Store interface {
 	Recent(ctx context.Context, limit int) ([]*store.Stored, error)
 	BuildHints(ctx context.Context, ids []int64) (map[int64][]store.StepHints, error)
+	BuildOrder(ctx context.Context, ids []int64) (map[int64][]store.OrderHint, error)
 	Ping(ctx context.Context) error
 }
 
@@ -45,6 +46,28 @@ type Build struct {
 	// manager without a cache mount (and ran in the image's builds of the
 	// last 30 days), or with one that cannot work.
 	Hints []Hint `json:"hints,omitempty"`
+	// Order are the steps that installed dependencies again only because
+	// a COPY of the whole build context comes before them, in a rebuild
+	// GitLab's comparison of the commits proved.
+	Order []Order `json:"order,omitempty"`
+}
+
+// Order is one step that installed dependencies again only because of
+// the Dockerfile's order.
+type Order struct {
+	Step     string    `json:"step"`
+	Name     string    `json:"name"`
+	Line     int       `json:"line,omitempty"`
+	Copy     string    `json:"copy"`
+	CopyLine int       `json:"copyLine,omitempty"`
+	Managers []string  `json:"managers"`
+	Files    []string  `json:"files"`
+	Others   []string  `json:"others,omitempty"`
+	Took     float64   `json:"tookSeconds"`
+	Fragment string    `json:"fragment,omitempty"`
+	Runs     int       `json:"runs"`
+	RunTime  float64   `json:"runSeconds"`
+	Since    time.Time `json:"since"`
 }
 
 // Hint is one step's cache-mount hint.
@@ -112,6 +135,11 @@ func Handler(s Store) http.Handler {
 		} else if len(ids) > store.MaxHintBuilds {
 			hintsNote = fmt.Sprintf("hints for the newest %d builds only", store.MaxHintBuilds)
 		}
+		order, err := s.BuildOrder(r.Context(), ids)
+		if err != nil {
+			log.Printf("api: order: %v", err)
+			order, hintsNote = nil, "unavailable"
+		}
 		out := make([]Build, 0, len(stored))
 		for _, st := range stored {
 			v := view(st)
@@ -122,6 +150,17 @@ func Handler(s Store) http.Handler {
 					x.Line = h.Lines[0].Start
 				}
 				v.Hints = append(v.Hints, x)
+			}
+			for _, o := range order[st.ID] {
+				x := Order{Step: o.Key, Name: o.Name, Copy: o.CopyName, Managers: o.Managers, Files: o.Files, Others: o.Others,
+					Took: o.Took.Seconds(), Fragment: o.Fragment, Runs: o.Runs, RunTime: o.RunTime.Seconds(), Since: o.Since}
+				if len(o.Lines) > 0 {
+					x.Line = o.Lines[0].Start
+				}
+				if len(o.CopyLines) > 0 {
+					x.CopyLine = o.CopyLines[0].Start
+				}
+				v.Order = append(v.Order, x)
 			}
 			out = append(out, v)
 		}
