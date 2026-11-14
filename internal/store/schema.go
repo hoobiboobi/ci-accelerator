@@ -344,6 +344,11 @@ var toleratedColumns = []struct{ table, column, def string }{
 	// Older ones list a submodule like a file: a git context's verdict,
 	// which the comparison decides, asks GitLab again instead.
 	{"compares", "marks", "INTEGER NOT NULL DEFAULT 0"},
+	// What the steps took that installed dependencies again only because
+	// a COPY of the whole context comes before them, in a rebuild that
+	// GitLab's comparison proved (OrderHint; 0.7.0). 0: none, or not
+	// known (an older release, a build settled before it).
+	{"builds", "order_ms", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // toleratedIndexes are created by the repairs when missing, on tolerated

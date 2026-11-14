@@ -1,0 +1,2405 @@
+{
+  "buildDefinition": {
+    "buildType": "https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md",
+    "resolvedDependencies": [
+      {
+        "uri": "pkg:docker/docker/dockerfile@1",
+        "digest": {
+          "sha256": "4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e"
+        }
+      },
+      {
+        "uri": "pkg:docker/python@3.12-slim?digest=sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b\u0026platform=linux%2Famd64",
+        "digest": {
+          "sha256": "5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+        }
+      },
+      {
+        "uri": "pkg:docker/ghcr.io/astral-sh/uv@0.12.9?digest=sha256:8b940d3a9d65bed080436972241af2e21c84b5e8c9193f7014ed71479ee795ff\u0026platform=linux%2Famd64",
+        "digest": {
+          "sha256": "8b940d3a9d65bed080436972241af2e21c84b5e8c9193f7014ed71479ee795ff"
+        }
+      }
+    ],
+    "externalParameters": {
+      "configSource": {
+        "path": "Dockerfile"
+      },
+      "request": {
+        "frontend": "gateway.v0",
+        "args": {
+          "ci-accelerator.io/context": ".",
+          "ci-accelerator.io/traceparent": "00-01902de9000000000097000000000027-0000000000000027-01",
+          "cmdline": "docker/dockerfile:1",
+          "label:org.opencontainers.image.revision": "a99dc9f0eb79114cd9b57f64286f7e3e78b02138",
+          "label:org.opencontainers.image.source": "http://github.com/browser-use/browser-use",
+          "source": "docker/dockerfile:1"
+        },
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ],
+        "root": {
+          "configSource": {
+            "path": "Dockerfile"
+          },
+          "request": {
+            "args": {
+              "ci-accelerator.io/context": ".",
+              "ci-accelerator.io/traceparent": "00-01902de9000000000097000000000027-0000000000000027-01",
+              "label:org.opencontainers.image.revision": "a99dc9f0eb79114cd9b57f64286f7e3e78b02138",
+              "label:org.opencontainers.image.source": "http://github.com/browser-use/browser-use"
+            }
+          }
+        },
+        "compatibilityVersion": 30
+      }
+    },
+    "internalParameters": {
+      "buildConfig": {
+        "digestMapping": {
+          "sha256:0f15c0ce5bda3a66c8fedfdb1136c21f77b22eabd7d8e43f62c3e6f71550a53e": "step3",
+          "sha256:136037ecd76b596700af4de07c3665f35a72dedc4bbe463ecbc562e0cb1fc037": "step4",
+          "sha256:2393e2a30f67387cc16d92bbc57a0c1ac58e6033422a5e615d714eacf568e244": "step1",
+          "sha256:2439567785bfa4ffe67e2365d751363e73a120498d10bac0eaa3f772607222e6": "step16",
+          "sha256:2cc989efd1dbf0ee7924b77ec24a1538e4483764185fa55faf2d13195b2d30a1": "step13",
+          "sha256:359a77a468de7a4f55d01b0bef96a494fcbcc70306d7f4ceeb80730c49e827d5": "step11",
+          "sha256:3834a80af35c850f50c6a29d76b7ae1d9cfb996b0480d4f9028b8894ca34c276": "step0",
+          "sha256:49df458607e6224cf80c6782953dfcc3f7e5017cf64f8ab58aaeb6290acbd2dc": "step15",
+          "sha256:53703dcfcb1e97918c7f93b152887845d04ed818c70e598c1275a4f0d81ca1f6": "step12",
+          "sha256:82077278a63903830961dd622c2c6314e8cd50187b7b55d0e451d8ab5985b1f7": "step2",
+          "sha256:999ba21a2e8b4c36339b591fe30fd15e9696e3e8b274935a50fdc4c8df903721": "step8",
+          "sha256:ab751c5d118f4ab05a444cf602d48337e2414bc13a1da16b67d76ad496679120": "step14",
+          "sha256:afb3bac9f81a1a35b2b369a1007ea887c8d6eb68bf8f5071285a118155163bfa": "step6",
+          "sha256:d186e20a84cd1308f96fa12309c64b88e24a27560e2b0b650a676979b0a4e931": "step9",
+          "sha256:d28809ff1176c499ff2cd77efa0ac4d7768d8a0f4dea6e8becc6743fc68fe682": "step7",
+          "sha256:d8e3a31e9023cdef1902cee441388540a0cc9e26e6f0e1f4c2b4471dfe5e7b47": "step5",
+          "sha256:ff9c07071257595559e2d663e9b9d4701bb0c8f5f78662610868c2553a1eb577": "step10"
+        },
+        "llbDefinition": [
+          {
+            "id": "step0",
+            "op": {
+              "Op": {
+                "source": {
+                  "identifier": "docker-image://docker.io/library/python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b"
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step1",
+            "inputs": [
+              "step0:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "echo 'Binary::apt::APT::Keep-Downloaded-Packages \"1\";' \u003e /etc/apt/apt.conf.d/99keep-cache     \u0026\u0026 echo 'APT::Install-Recommends \"0\";' \u003e /etc/apt/apt.conf.d/99no-intall-recommends     \u0026\u0026 echo 'APT::Install-Suggests \"0\";' \u003e /etc/apt/apt.conf.d/99no-intall-suggests     \u0026\u0026 rm -f /etc/apt/apt.conf.d/docker-clean"
+                    ],
+                    "cwd": "/",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step2",
+            "inputs": [
+              "step1:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "(echo \"[i] Docker build for Browser Use $(cat /VERSION.txt) starting...\"     \u0026\u0026 echo \"PLATFORM=${TARGETPLATFORM} ARCH=$(uname -m) ($(uname -s) ${TARGETARCH} ${TARGETVARIANT})\"     \u0026\u0026 echo \"BUILD_START_TIME=$(date +\"%Y-%m-%d %H:%M:%S %s\") TZ=${TZ} LANG=${LANG}\"     \u0026\u0026 echo     \u0026\u0026 echo \"CODE_DIR=${CODE_DIR} DATA_DIR=${DATA_DIR} PATH=${PATH}\"     \u0026\u0026 echo     \u0026\u0026 uname -a     \u0026\u0026 cat /etc/os-release | head -n7     \u0026\u0026 which bash \u0026\u0026 bash --version | head -n1     \u0026\u0026 which dpkg \u0026\u0026 dpkg --version | head -n1     \u0026\u0026 echo -e '\\n\\n' \u0026\u0026 env \u0026\u0026 echo -e '\\n\\n'     \u0026\u0026 which python \u0026\u0026 python --version     \u0026\u0026 which pip \u0026\u0026 pip --version     \u0026\u0026 echo -e '\\n\\n'     ) | tee -a /VERSION.txt"
+                    ],
+                    "cwd": "/",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step3",
+            "inputs": [
+              "step2:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "echo \"[*] Setting up $BROWSERUSE_USER user uid=${DEFAULT_PUID}...\"     \u0026\u0026 groupadd --system $BROWSERUSE_USER     \u0026\u0026 useradd --system --create-home --gid $BROWSERUSE_USER --groups audio,video $BROWSERUSE_USER     \u0026\u0026 usermod -u \"$DEFAULT_PUID\" \"$BROWSERUSE_USER\"     \u0026\u0026 groupmod -g \"$DEFAULT_PGID\" \"$BROWSERUSE_USER\"     \u0026\u0026 mkdir -p /data     \u0026\u0026 mkdir -p /home/$BROWSERUSE_USER/.config     \u0026\u0026 chown -R $BROWSERUSE_USER:$BROWSERUSE_USER /home/$BROWSERUSE_USER     \u0026\u0026 ln -s $DATA_DIR /home/$BROWSERUSE_USER/.config/browseruse     \u0026\u0026 echo -e \"\\nBROWSERUSE_USER=$BROWSERUSE_USER PUID=$(id -u $BROWSERUSE_USER) PGID=$(id -g $BROWSERUSE_USER)\\n\\n\"     | tee -a /VERSION.txt"
+                    ],
+                    "cwd": "/",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step4",
+            "inputs": [
+              "step3:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "echo \"[+] Installing APT base system dependencies for $TARGETPLATFORM...\"     \u0026\u0026 mkdir -p /etc/apt/keyrings     \u0026\u0026 apt-get update -qq     \u0026\u0026 apt-get install -qq -y --no-install-recommends         apt-transport-https ca-certificates apt-utils gnupg2 unzip curl wget grep         nano iputils-ping dnsutils jq      \u0026\u0026 rm -rf /var/lib/apt/lists/*"
+                    ],
+                    "cwd": "/",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/apt-amd64",
+                        "sharing": 2
+                      },
+                      "dest": "/var/cache/apt",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step5",
+            "op": {
+              "Op": {
+                "source": {
+                  "identifier": "docker-image://ghcr.io/astral-sh/uv:0.12.9@sha256:8b940d3a9d65bed080436972241af2e21c84b5e8c9193f7014ed71479ee795ff"
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step6",
+            "inputs": [
+              "step4:0",
+              "step5:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/bin/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/uv",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": -1,
+                      "secondaryInput": 1
+                    },
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/bin/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/uvx",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 2,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step7",
+            "inputs": [
+              "step6:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "mkdir": {
+                          "makeParents": true,
+                          "mode": 493,
+                          "path": "/app",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step8",
+            "op": {
+              "Op": {
+                "source": {
+                  "attrs": {
+                    "local.excludepatterns": "[\"docs\",\"static\",\".agentx\",\".github\",\".DS_Store\",\"__pycache__\",\"*.py[cod]\",\"*$py.class\",\".mypy_cache\",\".ruff_cache\",\".pytest_cache\",\".ipynb_checkpoints\",\".venv\",\"venv\",\".vscode\",\".idea\",\"dist\",\"*.gif\",\"*.txt\",\"*.pdf\",\"*.csv\",\"*.json\",\"*.jsonl\",\"*.bak\",\"secrets.env\",\".env\",\"browser_cookies.json\",\"cookies.json\",\"gcp-login.json\",\"saved_trajectories\",\"AgentHistory.json\",\"AgentHistoryList.json\",\"private_example.py\",\"private_example\"]",
+                    "local.sharedkeyhint": "context"
+                  },
+                  "identifier": "local://context"
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step9",
+            "inputs": [
+              "step7:0",
+              "step8:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/app/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/pyproject.toml",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": -1,
+                      "secondaryInput": 1
+                    },
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/app/",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/uv.lock*",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 2,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step10",
+            "inputs": [
+              "step9:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "echo \"[+] Setting up venv using uv in $VENV_DIR...\"     \u0026\u0026 (      which uv \u0026\u0026 uv --version      \u0026\u0026 uv venv      \u0026\u0026 which python | grep \"$VENV_DIR\"      \u0026\u0026 python --version     ) | tee -a /VERSION.txt"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/cache-amd64",
+                        "sharing": 2
+                      },
+                      "dest": "/root/.cache",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step11",
+            "inputs": [
+              "step10:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "echo \"[+] Installing chromium browser from system packages...\"     \u0026\u0026 apt-get update -qq     \u0026\u0026 apt-get install -y --no-install-recommends         chromium         fonts-unifont         fonts-liberation         fonts-dejavu-core         fonts-freefont-ttf         fonts-noto-core     \u0026\u0026 rm -rf /var/lib/apt/lists/*     \u0026\u0026 ln -s /usr/bin/chromium /usr/bin/chromium-browser     \u0026\u0026 ln -s /usr/bin/chromium /app/chromium-browser     \u0026\u0026 mkdir -p \"/home/${BROWSERUSE_USER}/.config/chromium/Crash Reports/pending/\"     \u0026\u0026 chown -R \"$BROWSERUSE_USER:$BROWSERUSE_USER\" \"/home/${BROWSERUSE_USER}/.config\"     \u0026\u0026 (         which chromium-browser \u0026\u0026 /usr/bin/chromium-browser --version         \u0026\u0026 echo -e '\\n\\n'     ) | tee -a /VERSION.txt"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/apt-amd64",
+                        "sharing": 2
+                      },
+                      "dest": "/var/cache/apt",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step12",
+            "inputs": [
+              "step11:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "echo \"[+] Installing browser-use pip sub-dependencies...\"      \u0026\u0026 (         uv sync --all-extras --no-dev --no-install-project         \u0026\u0026 echo -e '\\n\\n'      ) | tee -a /VERSION.txt"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/cache-amd64",
+                        "sharing": 2
+                      },
+                      "dest": "/root/.cache",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            }
+          },
+          {
+            "id": "step13",
+            "inputs": [
+              "step12:0",
+              "step8:0"
+            ],
+            "op": {
+              "Op": {
+                "file": {
+                  "actions": [
+                    {
+                      "Action": {
+                        "copy": {
+                          "allowEmptyWildcard": true,
+                          "allowWildcard": true,
+                          "createDestPath": true,
+                          "dest": "/app",
+                          "dirCopyContents": true,
+                          "followSymlink": true,
+                          "mode": -1,
+                          "src": "/",
+                          "timestamp": -1
+                        }
+                      },
+                      "input": 0,
+                      "output": 0,
+                      "secondaryInput": 1
+                    }
+                  ]
+                }
+              },
+              "constraints": {}
+            }
+          },
+          {
+            "id": "step14",
+            "inputs": [
+              "step13:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "echo \"[+] Installing browser-use pip library from source...\"      \u0026\u0026 (         uv sync --all-extras --locked --no-dev         \u0026\u0026 python -c \"import browser_use; print('browser-use installed successfully')\"         \u0026\u0026 echo -e '\\n\\n'      ) | tee -a /VERSION.txt"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    },
+                    {
+                      "cacheOpt": {
+                        "ID": "/cache-amd64",
+                        "sharing": 2
+                      },
+                      "dest": "/root/.cache",
+                      "input": -1,
+                      "mountType": 3,
+                      "output": -1
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            },
+            "resourceUsage": {
+              "samples": [
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 8238
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 10091
+                      }
+                    },
+                    "systemNanos": 1949798000,
+                    "throttledNanos": 0,
+                    "usageNanos": 3261400000,
+                    "userNanos": 1311602000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 1208
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 1217
+                      }
+                    },
+                    "readBytes": 3371008,
+                    "readIOs": 224,
+                    "writeBytes": 3129344,
+                    "writeIOs": 298
+                  },
+                  "memoryStat": {
+                    "anon": 0,
+                    "file": 3739648,
+                    "fileDirty": 126976,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 0,
+                    "pageTables": 233472,
+                    "peak": 212545536,
+                    "pgfault": 61476,
+                    "pgmajfault": 5,
+                    "pgscan": 4,
+                    "pgsteal": 4,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 39
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 39
+                      }
+                    },
+                    "shmem": 0,
+                    "slab": 16984600,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 0
+                  },
+                  "timestamp": "2026-11-10T23:42:03.916423876Z"
+                }
+              ],
+              "sysCPUStat": {
+                "guest": 0,
+                "guestNice": 0,
+                "idle": 19.18,
+                "iowait": 0.14,
+                "irq": 0,
+                "nice": 0,
+                "softirq": 0.61,
+                "steal": 0,
+                "system": 3.4,
+                "user": 4.84
+              }
+            }
+          },
+          {
+            "id": "step15",
+            "inputs": [
+              "step14:0"
+            ],
+            "op": {
+              "Op": {
+                "exec": {
+                  "meta": {
+                    "args": [
+                      "/bin/bash",
+                      "-o",
+                      "pipefail",
+                      "-o",
+                      "errexit",
+                      "-o",
+                      "errtrace",
+                      "-o",
+                      "nounset",
+                      "-c",
+                      "mkdir -p \"$DATA_DIR/profiles/default\"     \u0026\u0026 chown -R $BROWSERUSE_USER:$BROWSERUSE_USER \"$DATA_DIR\" \"$DATA_DIR\"/*     \u0026\u0026 (         echo -e \"\\n\\n[√] Finished Docker build successfully. Saving build summary in: /VERSION.txt\"         \u0026\u0026 echo -e \"PLATFORM=${TARGETPLATFORM} ARCH=$(uname -m) ($(uname -s) ${TARGETARCH} ${TARGETVARIANT})\\n\"         \u0026\u0026 echo -e \"BUILD_END_TIME=$(date +\"%Y-%m-%d %H:%M:%S %s\")\\n\\n\"     ) | tee -a /VERSION.txt"
+                    ],
+                    "cwd": "/app",
+                    "env": [
+                      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                      "PYTHON_VERSION=3.12.16",
+                      "PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c",
+                      "TARGETPLATFORM=linux/amd64",
+                      "TARGETOS=linux",
+                      "TARGETARCH=amd64",
+                      "TARGETVARIANT=",
+                      "TZ=UTC",
+                      "LANGUAGE=en_US:en",
+                      "LC_ALL=C.UTF-8",
+                      "LANG=C.UTF-8",
+                      "DEBIAN_FRONTEND=noninteractive",
+                      "APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=1",
+                      "PYTHONIOENCODING=UTF-8",
+                      "PYTHONUNBUFFERED=1",
+                      "PIP_DISABLE_PIP_VERSION_CHECK=1",
+                      "UV_CACHE_DIR=/root/.cache/uv",
+                      "UV_LINK_MODE=copy",
+                      "UV_COMPILE_BYTECODE=1",
+                      "UV_PYTHON_PREFERENCE=only-system",
+                      "npm_config_loglevel=error",
+                      "IN_DOCKER=True",
+                      "BROWSERUSE_USER=browseruse",
+                      "DEFAULT_PUID=911",
+                      "DEFAULT_PGID=911",
+                      "CODE_DIR=/app",
+                      "DATA_DIR=/data",
+                      "VENV_DIR=/app/.venv",
+                      "PATH=/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    ],
+                    "removeMountStubsRecursive": true
+                  },
+                  "mounts": [
+                    {
+                      "dest": "/"
+                    }
+                  ]
+                }
+              },
+              "constraints": {},
+              "platform": {
+                "Architecture": "amd64",
+                "OS": "linux"
+              }
+            },
+            "resourceUsage": {
+              "samples": [
+                {
+                  "cpuStat": {
+                    "nrPeriods": 0,
+                    "nrThrottled": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 126
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 126
+                      }
+                    },
+                    "systemNanos": 15608000,
+                    "throttledNanos": 0,
+                    "usageNanos": 35120000,
+                    "userNanos": 19511000
+                  },
+                  "ioStat": {
+                    "discardBytes": 0,
+                    "discardIOs": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      }
+                    },
+                    "readBytes": 442368,
+                    "readIOs": 12,
+                    "writeBytes": 4096,
+                    "writeIOs": 1
+                  },
+                  "memoryStat": {
+                    "anon": 3637248,
+                    "file": 450560,
+                    "fileDirty": 8192,
+                    "fileMapped": 0,
+                    "fileWriteback": 0,
+                    "kernelStack": 0,
+                    "pageTables": 958464,
+                    "peak": 8593408,
+                    "pgfault": 2501,
+                    "pgmajfault": 3,
+                    "pgscan": 0,
+                    "pgsteal": 0,
+                    "pressure": {
+                      "full": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      },
+                      "some": {
+                        "avg10": 0,
+                        "avg300": 0,
+                        "avg60": 0,
+                        "total": 0
+                      }
+                    },
+                    "shmem": 0,
+                    "slab": 367504,
+                    "sock": 0,
+                    "swapBytes": 0
+                  },
+                  "pidsStat": {
+                    "current": 0
+                  },
+                  "timestamp": "2026-11-10T23:42:04.036059432Z"
+                }
+              ],
+              "sysCPUStat": {
+                "guest": 0,
+                "guestNice": 0,
+                "idle": 1.63,
+                "iowait": 0,
+                "irq": 0,
+                "nice": 0,
+                "softirq": 0.05,
+                "steal": 0,
+                "system": 0.09,
+                "user": 0.21
+              }
+            }
+          },
+          {
+            "id": "step16",
+            "inputs": [
+              "step15:0"
+            ],
+            "op": {
+              "Op": {}
+            }
+          }
+        ]
+      },
+      "builderPlatform": "linux/amd64",
+      "targetPlatform": "linux/amd64"
+    }
+  },
+  "runDetails": {
+    "builder": {
+      "id": ""
+    },
+    "metadata": {
+      "invocationId": "9etegv2762jr477jorilj0w90",
+      "startedOn": "2026-11-10T23:42:02.222279192Z",
+      "finishedOn": "2026-11-10T23:42:04.044328101Z",
+      "buildkit_metadata": {
+        "source": {
+          "locations": {
+            "step0": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 22
+                      },
+                      "end": {
+                        "line": 22
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step1": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 81
+                      },
+                      "end": {
+                        "line": 81
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 82
+                      },
+                      "end": {
+                        "line": 82
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 83
+                      },
+                      "end": {
+                        "line": 83
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 84
+                      },
+                      "end": {
+                        "line": 84
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step10": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 149
+                      },
+                      "end": {
+                        "line": 149
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 150
+                      },
+                      "end": {
+                        "line": 150
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 151
+                      },
+                      "end": {
+                        "line": 151
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 152
+                      },
+                      "end": {
+                        "line": 152
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 153
+                      },
+                      "end": {
+                        "line": 153
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 154
+                      },
+                      "end": {
+                        "line": 154
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 155
+                      },
+                      "end": {
+                        "line": 155
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 156
+                      },
+                      "end": {
+                        "line": 156
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step11": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 159
+                      },
+                      "end": {
+                        "line": 159
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 160
+                      },
+                      "end": {
+                        "line": 160
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 161
+                      },
+                      "end": {
+                        "line": 161
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 162
+                      },
+                      "end": {
+                        "line": 162
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 163
+                      },
+                      "end": {
+                        "line": 163
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 164
+                      },
+                      "end": {
+                        "line": 164
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 165
+                      },
+                      "end": {
+                        "line": 165
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 166
+                      },
+                      "end": {
+                        "line": 166
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 167
+                      },
+                      "end": {
+                        "line": 167
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 168
+                      },
+                      "end": {
+                        "line": 168
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 169
+                      },
+                      "end": {
+                        "line": 169
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 170
+                      },
+                      "end": {
+                        "line": 170
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 171
+                      },
+                      "end": {
+                        "line": 171
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 172
+                      },
+                      "end": {
+                        "line": 172
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 173
+                      },
+                      "end": {
+                        "line": 173
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 174
+                      },
+                      "end": {
+                        "line": 174
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 175
+                      },
+                      "end": {
+                        "line": 175
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 176
+                      },
+                      "end": {
+                        "line": 176
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 177
+                      },
+                      "end": {
+                        "line": 177
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step12": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 179
+                      },
+                      "end": {
+                        "line": 179
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 180
+                      },
+                      "end": {
+                        "line": 180
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 181
+                      },
+                      "end": {
+                        "line": 181
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 182
+                      },
+                      "end": {
+                        "line": 182
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 183
+                      },
+                      "end": {
+                        "line": 183
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 184
+                      },
+                      "end": {
+                        "line": 184
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step13": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 187
+                      },
+                      "end": {
+                        "line": 187
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step14": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 190
+                      },
+                      "end": {
+                        "line": 190
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 191
+                      },
+                      "end": {
+                        "line": 191
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 192
+                      },
+                      "end": {
+                        "line": 192
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 193
+                      },
+                      "end": {
+                        "line": 193
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 194
+                      },
+                      "end": {
+                        "line": 194
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 195
+                      },
+                      "end": {
+                        "line": 195
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 196
+                      },
+                      "end": {
+                        "line": 196
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step15": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 198
+                      },
+                      "end": {
+                        "line": 198
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 199
+                      },
+                      "end": {
+                        "line": 199
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 200
+                      },
+                      "end": {
+                        "line": 200
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 201
+                      },
+                      "end": {
+                        "line": 201
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 202
+                      },
+                      "end": {
+                        "line": 202
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 203
+                      },
+                      "end": {
+                        "line": 203
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 204
+                      },
+                      "end": {
+                        "line": 204
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step2": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 87
+                      },
+                      "end": {
+                        "line": 87
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 88
+                      },
+                      "end": {
+                        "line": 88
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 89
+                      },
+                      "end": {
+                        "line": 89
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 90
+                      },
+                      "end": {
+                        "line": 90
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 91
+                      },
+                      "end": {
+                        "line": 91
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 92
+                      },
+                      "end": {
+                        "line": 92
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 93
+                      },
+                      "end": {
+                        "line": 93
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 94
+                      },
+                      "end": {
+                        "line": 94
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 95
+                      },
+                      "end": {
+                        "line": 95
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 96
+                      },
+                      "end": {
+                        "line": 96
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 97
+                      },
+                      "end": {
+                        "line": 97
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 98
+                      },
+                      "end": {
+                        "line": 98
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 99
+                      },
+                      "end": {
+                        "line": 99
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 100
+                      },
+                      "end": {
+                        "line": 100
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 101
+                      },
+                      "end": {
+                        "line": 101
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step3": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 104
+                      },
+                      "end": {
+                        "line": 104
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 105
+                      },
+                      "end": {
+                        "line": 105
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 106
+                      },
+                      "end": {
+                        "line": 106
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 107
+                      },
+                      "end": {
+                        "line": 107
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 108
+                      },
+                      "end": {
+                        "line": 108
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 109
+                      },
+                      "end": {
+                        "line": 109
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 110
+                      },
+                      "end": {
+                        "line": 110
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 111
+                      },
+                      "end": {
+                        "line": 111
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 112
+                      },
+                      "end": {
+                        "line": 112
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 113
+                      },
+                      "end": {
+                        "line": 113
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 114
+                      },
+                      "end": {
+                        "line": 114
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step4": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 119
+                      },
+                      "end": {
+                        "line": 119
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 120
+                      },
+                      "end": {
+                        "line": 120
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 121
+                      },
+                      "end": {
+                        "line": 121
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 122
+                      },
+                      "end": {
+                        "line": 122
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 123
+                      },
+                      "end": {
+                        "line": 123
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 124
+                      },
+                      "end": {
+                        "line": 124
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 125
+                      },
+                      "end": {
+                        "line": 125
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 126
+                      },
+                      "end": {
+                        "line": 126
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 127
+                      },
+                      "end": {
+                        "line": 127
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 128
+                      },
+                      "end": {
+                        "line": 128
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 129
+                      },
+                      "end": {
+                        "line": 129
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 130
+                      },
+                      "end": {
+                        "line": 130
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 131
+                      },
+                      "end": {
+                        "line": 131
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 132
+                      },
+                      "end": {
+                        "line": 132
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 133
+                      },
+                      "end": {
+                        "line": 133
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 134
+                      },
+                      "end": {
+                        "line": 134
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 135
+                      },
+                      "end": {
+                        "line": 135
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 136
+                      },
+                      "end": {
+                        "line": 136
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 137
+                      },
+                      "end": {
+                        "line": 137
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 138
+                      },
+                      "end": {
+                        "line": 138
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 139
+                      },
+                      "end": {
+                        "line": 139
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 140
+                      },
+                      "end": {
+                        "line": 140
+                      }
+                    },
+                    {
+                      "start": {
+                        "line": 141
+                      },
+                      "end": {
+                        "line": 141
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step5": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 143
+                      },
+                      "end": {
+                        "line": 143
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step6": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 143
+                      },
+                      "end": {
+                        "line": 143
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step7": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 146
+                      },
+                      "end": {
+                        "line": 146
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "step8": {},
+            "step9": {
+              "locations": [
+                {
+                  "ranges": [
+                    {
+                      "start": {
+                        "line": 147
+                      },
+                      "end": {
+                        "line": 147
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "infos": [
+            {
+              "filename": "Dockerfile",
+              "language": "Dockerfile",
+              "data": "IyBzeW50YXg9ZG9ja2VyL2RvY2tlcmZpbGU6MQojIGNoZWNrPXNraXA9U2VjcmV0c1VzZWRJbkFyZ09yRW52CgojIFRoaXMgaXMgdGhlIERvY2tlcmZpbGUgZm9yIGJyb3dzZXItdXNlLCBpdCBidW5kbGVzIHRoZSBmb2xsb3dpbmcgZGVwZW5kZW5jaWVzOgojICAgICBweXRob24zLCBjaHJvbWl1bSwgYnJvd3Nlci11c2UgYW5kIGl0cyBkZXBlbmRlbmNpZXMuCiMgYnJvd3Nlci11c2UgMS4wOiBBZ2VudCguLi4sIGJyb3dzZXI9QnJvd3NlcignY2hyb21pdW0nKSkgbGF1bmNoZXMgdGhlIGNvbnRhaW5lcidzIGNocm9taXVtIGhlYWRsZXNzLCBvciB1c2UgdGhlCiMgZGVmYXVsdCBjbG91ZCBicm93c2VyLgojIFVzYWdlOgojICAgICBnaXQgY2xvbmUgaHR0cHM6Ly9naXRodWIuY29tL2Jyb3dzZXItdXNlL2Jyb3dzZXItdXNlLmdpdCAmJiBjZCBicm93c2VyLXVzZQojICAgICBkb2NrZXIgYnVpbGQgLiAtdCBicm93c2VydXNlIC0tbm8tY2FjaGUKIyAgICAgZG9ja2VyIHJ1biAtdiAiJFBXRC9kYXRhIjovZGF0YSBicm93c2VydXNlCiMgICAgIGRvY2tlciBydW4gLXYgIiRQV0QvZGF0YSI6L2RhdGEgYnJvd3NlcnVzZSAtLXZlcnNpb24KIyBNdWx0aS1hcmNoIGJ1aWxkOgojICAgICBkb2NrZXIgYnVpbGR4IGNyZWF0ZSAtLXVzZQojICAgICBkb2NrZXIgYnVpbGR4IGJ1aWxkIC4gLS1wbGF0Zm9ybT1saW51eC9hbWQ2NCxsaW51eC9hcm02NC0tcHVzaCAtdCBicm93c2VydXNlL2Jyb3dzZXJ1c2U6c29tZS10YWcKIwojIFJlYWQgbW9yZTogaHR0cHM6Ly9kb2NzLmJyb3dzZXItdXNlLmNvbQoKIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMKCgpGUk9NIHB5dGhvbjozLjEyLXNsaW1Ac2hhMjU2OjVlMmJkYjFiMGQ1NDJkNTAzOWNmZmI4MTgxYzY1OTMwMDkzOTQ5MTk0YTY1YzM2NWRmYjFiMGZlMTNhNGZhNWIKCkxBQkVMIG5hbWU9ImJyb3dzZXJ1c2UiIFwKICAgIG1haW50YWluZXI9Ik5pY2sgU3dlZXRpbmcgPGRvY2tlcmZpbGVAYnJvd3Nlci11c2UuY29tPiIgXAogICAgZGVzY3JpcHRpb249Ik1ha2Ugd2Vic2l0ZXMgYWNjZXNzaWJsZSBmb3IgQUkgYWdlbnRzLiBBdXRvbWF0ZSB0YXNrcyBvbmxpbmUgd2l0aCBlYXNlLiIgXAogICAgaG9tZXBhZ2U9Imh0dHBzOi8vZ2l0aHViLmNvbS9icm93c2VyLXVzZS9icm93c2VyLXVzZSIgXAogICAgZG9jdW1lbnRhdGlvbj0iaHR0cHM6Ly9kb2NzLmJyb3dzZXItdXNlLmNvbSIgXAogICAgb3JnLm9wZW5jb250YWluZXJzLmltYWdlLnRpdGxlPSJicm93c2VydXNlIiBcCiAgICBvcmcub3BlbmNvbnRhaW5lcnMuaW1hZ2UudmVuZG9yPSJicm93c2VydXNlIiBcCiAgICBvcmcub3BlbmNvbnRhaW5lcnMuaW1hZ2UuZGVzY3JpcHRpb249Ik1ha2Ugd2Vic2l0ZXMgYWNjZXNzaWJsZSBmb3IgQUkgYWdlbnRzLiBBdXRvbWF0ZSB0YXNrcyBvbmxpbmUgd2l0aCBlYXNlLiIgXAogICAgb3JnLm9wZW5jb250YWluZXJzLmltYWdlLnNvdXJjZT0iaHR0cHM6Ly9naXRodWIuY29tL2Jyb3dzZXItdXNlL2Jyb3dzZXItdXNlIiBcCiAgICBjb20uZG9ja2VyLmltYWdlLnNvdXJjZS5lbnRyeXBvaW50PSJEb2NrZXJmaWxlIiBcCiAgICBjb20uZG9ja2VyLmRlc2t0b3AuZXh0ZW5zaW9uLmFwaS52ZXJzaW9uPSI+PSAxLjQuNyIgXAogICAgY29tLmRvY2tlci5kZXNrdG9wLmV4dGVuc2lvbi5pY29uPSJodHRwczovL2F2YXRhcnMuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3UvMTkyMDEyMzAxP3M9MjAwJnY9NCIgXAogICAgY29tLmRvY2tlci5leHRlbnNpb24ucHVibGlzaGVyLXVybD0iaHR0cHM6Ly9icm93c2VyLXVzZS5jb20iIFwKICAgIGNvbS5kb2NrZXIuZXh0ZW5zaW9uLnNjcmVlbnNob3RzPSdbeyJhbHQiOiAiU2NyZWVuc2hvdCBvZiBDTEkgc3BsYXNoc2NyZWVuIiwgInVybCI6ICJodHRwczovL2dpdGh1Yi5jb20vdXNlci1hdHRhY2htZW50cy9hc3NldHMvMzYwNmQ4NTEtZGViMS00MzllLWFkOTAtNzc0ZTc5NjBkZWQ4In0sIHsiYWx0IjogIlNjcmVlbnNob3Qgb2YgQ0xJIHJ1bm5pbmciLCAidXJsIjogImh0dHBzOi8vZ2l0aHViLmNvbS91c2VyLWF0dGFjaG1lbnRzL2Fzc2V0cy9kMDE4YjExNS05NWE0LTRhYzUtODI1OS1iNzUwYmM1ZjU2YWQifV0nIFwKICAgIGNvbS5kb2NrZXIuZXh0ZW5zaW9uLmRldGFpbGVkLWRlc2NyaXB0aW9uPSdTZWUgaGVyZSBmb3IgZGV0YWlsZWQgZG9jdW1lbnRhdGlvbjogaHR0cHM6Ly9kb2NzLmJyb3dzZXItdXNlLmNvbScgXAogICAgY29tLmRvY2tlci5leHRlbnNpb24uY2hhbmdlbG9nPSdTZWUgaGVyZSBmb3IgcmVsZWFzZSBub3RlczogaHR0cHM6Ly9naXRodWIuY29tL2Jyb3dzZXItdXNlL2Jyb3dzZXItdXNlL3JlbGVhc2VzJyBcCiAgICBjb20uZG9ja2VyLmV4dGVuc2lvbi5jYXRlZ29yaWVzPSd3ZWIsdXRpbGl0eS10b29scyxhaScKCkFSRyBUQVJHRVRQTEFURk9STQpBUkcgVEFSR0VUT1MKQVJHIFRBUkdFVEFSQ0gKQVJHIFRBUkdFVFZBUklBTlQKCiMjIyMjIyMjIyBFbnZpcm9ubWVudCBWYXJpYWJsZXMgIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjCgojIEdsb2JhbCBzeXN0ZW0tbGV2ZWwgY29uZmlnCkVOViBUWj1VVEMgXAogICAgTEFOR1VBR0U9ZW5fVVM6ZW4gXAogICAgTENfQUxMPUMuVVRGLTggXAogICAgTEFORz1DLlVURi04IFwKICAgIERFQklBTl9GUk9OVEVORD1ub25pbnRlcmFjdGl2ZSBcCiAgICBBUFRfS0VZX0RPTlRfV0FSTl9PTl9EQU5HRVJPVVNfVVNBR0U9MSBcCiAgICBQWVRIT05JT0VOQ09ESU5HPVVURi04IFwKICAgIFBZVEhPTlVOQlVGRkVSRUQ9MSBcCiAgICBQSVBfRElTQUJMRV9QSVBfVkVSU0lPTl9DSEVDSz0xIFwKICAgIFVWX0NBQ0hFX0RJUj0vcm9vdC8uY2FjaGUvdXYgXAogICAgVVZfTElOS19NT0RFPWNvcHkgXAogICAgVVZfQ09NUElMRV9CWVRFQ09ERT0xIFwKICAgIFVWX1BZVEhPTl9QUkVGRVJFTkNFPW9ubHktc3lzdGVtIFwKICAgIG5wbV9jb25maWdfbG9nbGV2ZWw9ZXJyb3IgXAogICAgSU5fRE9DS0VSPVRydWUKCiMgVXNlciBjb25maWcKRU5WIEJST1dTRVJVU0VfVVNFUj0iYnJvd3NlcnVzZSIgXAogICAgREVGQVVMVF9QVUlEPTkxMSBcCiAgICBERUZBVUxUX1BHSUQ9OTExCgojIFBhdGhzCkVOViBDT0RFX0RJUj0vYXBwIFwKICAgIERBVEFfRElSPS9kYXRhIFwKICAgIFZFTlZfRElSPS9hcHAvLnZlbnYgXAogICAgUEFUSD0iL2FwcC8udmVudi9iaW46JFBBVEgiCgojIEJ1aWxkIHNoZWxsIGNvbmZpZwpTSEVMTCBbIi9iaW4vYmFzaCIsICItbyIsICJwaXBlZmFpbCIsICItbyIsICJlcnJleGl0IiwgIi1vIiwgImVycnRyYWNlIiwgIi1vIiwgIm5vdW5zZXQiLCAiLWMiXSAKCiMgRm9yY2UgYXB0IHRvIGxlYXZlIGRvd25sb2FkZWQgYmluYXJpZXMgaW4gL3Zhci9jYWNoZS9hcHQgKG1hc3NpdmVseSBzcGVlZHMgdXAgRG9ja2VyIGJ1aWxkcykKUlVOIGVjaG8gJ0JpbmFyeTo6YXB0OjpBUFQ6OktlZXAtRG93bmxvYWRlZC1QYWNrYWdlcyAiMSI7JyA+IC9ldGMvYXB0L2FwdC5jb25mLmQvOTlrZWVwLWNhY2hlIFwKICAgICYmIGVjaG8gJ0FQVDo6SW5zdGFsbC1SZWNvbW1lbmRzICIwIjsnID4gL2V0Yy9hcHQvYXB0LmNvbmYuZC85OW5vLWludGFsbC1yZWNvbW1lbmRzIFwKICAgICYmIGVjaG8gJ0FQVDo6SW5zdGFsbC1TdWdnZXN0cyAiMCI7JyA+IC9ldGMvYXB0L2FwdC5jb25mLmQvOTluby1pbnRhbGwtc3VnZ2VzdHMgXAogICAgJiYgcm0gLWYgL2V0Yy9hcHQvYXB0LmNvbmYuZC9kb2NrZXItY2xlYW4KCiMgUHJpbnQgZGVidWcgaW5mbyBhYm91dCBidWlsZCBhbmQgc2F2ZSBpdCB0byBkaXNrLCBmb3IgaHVtYW4gZXllcyBvbmx5LCBub3QgdXNlZCBieSBhbnl0aGluZyBlbHNlClJVTiAoZWNobyAiW2ldIERvY2tlciBidWlsZCBmb3IgQnJvd3NlciBVc2UgJChjYXQgL1ZFUlNJT04udHh0KSBzdGFydGluZy4uLiIgXAogICAgJiYgZWNobyAiUExBVEZPUk09JHtUQVJHRVRQTEFURk9STX0gQVJDSD0kKHVuYW1lIC1tKSAoJCh1bmFtZSAtcykgJHtUQVJHRVRBUkNIfSAke1RBUkdFVFZBUklBTlR9KSIgXAogICAgJiYgZWNobyAiQlVJTERfU1RBUlRfVElNRT0kKGRhdGUgKyIlWS0lbS0lZCAlSDolTTolUyAlcyIpIFRaPSR7VFp9IExBTkc9JHtMQU5HfSIgXAogICAgJiYgZWNobyBcCiAgICAmJiBlY2hvICJDT0RFX0RJUj0ke0NPREVfRElSfSBEQVRBX0RJUj0ke0RBVEFfRElSfSBQQVRIPSR7UEFUSH0iIFwKICAgICYmIGVjaG8gXAogICAgJiYgdW5hbWUgLWEgXAogICAgJiYgY2F0IC9ldGMvb3MtcmVsZWFzZSB8IGhlYWQgLW43IFwKICAgICYmIHdoaWNoIGJhc2ggJiYgYmFzaCAtLXZlcnNpb24gfCBoZWFkIC1uMSBcCiAgICAmJiB3aGljaCBkcGtnICYmIGRwa2cgLS12ZXJzaW9uIHwgaGVhZCAtbjEgXAogICAgJiYgZWNobyAtZSAnXG5cbicgJiYgZW52ICYmIGVjaG8gLWUgJ1xuXG4nIFwKICAgICYmIHdoaWNoIHB5dGhvbiAmJiBweXRob24gLS12ZXJzaW9uIFwKICAgICYmIHdoaWNoIHBpcCAmJiBwaXAgLS12ZXJzaW9uIFwKICAgICYmIGVjaG8gLWUgJ1xuXG4nIFwKICAgICkgfCB0ZWUgLWEgL1ZFUlNJT04udHh0CgojIENyZWF0ZSBub24tcHJpdmlsZWdlZCB1c2VyIGZvciBicm93c2VydXNlIGFuZCBjaHJvbWUKUlVOIGVjaG8gIlsqXSBTZXR0aW5nIHVwICRCUk9XU0VSVVNFX1VTRVIgdXNlciB1aWQ9JHtERUZBVUxUX1BVSUR9Li4uIiBcCiAgICAmJiBncm91cGFkZCAtLXN5c3RlbSAkQlJPV1NFUlVTRV9VU0VSIFwKICAgICYmIHVzZXJhZGQgLS1zeXN0ZW0gLS1jcmVhdGUtaG9tZSAtLWdpZCAkQlJPV1NFUlVTRV9VU0VSIC0tZ3JvdXBzIGF1ZGlvLHZpZGVvICRCUk9XU0VSVVNFX1VTRVIgXAogICAgJiYgdXNlcm1vZCAtdSAiJERFRkFVTFRfUFVJRCIgIiRCUk9XU0VSVVNFX1VTRVIiIFwKICAgICYmIGdyb3VwbW9kIC1nICIkREVGQVVMVF9QR0lEIiAiJEJST1dTRVJVU0VfVVNFUiIgXAogICAgJiYgbWtkaXIgLXAgL2RhdGEgXAogICAgJiYgbWtkaXIgLXAgL2hvbWUvJEJST1dTRVJVU0VfVVNFUi8uY29uZmlnIFwKICAgICYmIGNob3duIC1SICRCUk9XU0VSVVNFX1VTRVI6JEJST1dTRVJVU0VfVVNFUiAvaG9tZS8kQlJPV1NFUlVTRV9VU0VSIFwKICAgICYmIGxuIC1zICREQVRBX0RJUiAvaG9tZS8kQlJPV1NFUlVTRV9VU0VSLy5jb25maWcvYnJvd3NlcnVzZSBcCiAgICAmJiBlY2hvIC1lICJcbkJST1dTRVJVU0VfVVNFUj0kQlJPV1NFUlVTRV9VU0VSIFBVSUQ9JChpZCAtdSAkQlJPV1NFUlVTRV9VU0VSKSBQR0lEPSQoaWQgLWcgJEJST1dTRVJVU0VfVVNFUilcblxuIiBcCiAgICB8IHRlZSAtYSAvVkVSU0lPTi50eHQKICAgICMgREVGQVVMVF9QVUlEIGFuZCBERUZBVUxUX1BJRCBhcmUgb3ZlcnJpZGRlbiBieSBQVUlEIGFuZCBQR0lEIGluIC9iaW4vZG9ja2VyX2VudHJ5cG9pbnQuc2ggYXQgcnVudGltZQogICAgIyBodHRwczovL2RvY3MubGludXhzZXJ2ZXIuaW8vZ2VuZXJhbC91bmRlcnN0YW5kaW5nLXB1aWQtYW5kLXBnaWQKCiMgSW5zdGFsbCBiYXNlIGFwdCBkZXBlbmRlbmNpZXMgKGFkZGluZyBiYWNrcG9ydHMgdG8gYWNjZXNzIG1vcmUgcmVjZW50IGFwdCB1cGRhdGVzKQpSVU4gLS1tb3VudD10eXBlPWNhY2hlLHRhcmdldD0vdmFyL2NhY2hlL2FwdCxzaGFyaW5nPWxvY2tlZCxpZD1hcHQtJFRBUkdFVEFSQ0gkVEFSR0VUVkFSSUFOVCBcCiAgICBlY2hvICJbK10gSW5zdGFsbGluZyBBUFQgYmFzZSBzeXN0ZW0gZGVwZW5kZW5jaWVzIGZvciAkVEFSR0VUUExBVEZPUk0uLi4iIFwKIyAgICAgJiYgZWNobyAnZGViIGh0dHBzOi8vZGViLmRlYmlhbi5vcmcvZGViaWFuIGJvb2t3b3JtLWJhY2twb3J0cyBtYWluIGNvbnRyaWIgbm9uLWZyZWUnID4gL2V0Yy9hcHQvc291cmNlcy5saXN0LmQvYmFja3BvcnRzLmxpc3QgXAogICAgJiYgbWtkaXIgLXAgL2V0Yy9hcHQva2V5cmluZ3MgXAogICAgJiYgYXB0LWdldCB1cGRhdGUgLXFxIFwKICAgICYmIGFwdC1nZXQgaW5zdGFsbCAtcXEgLXkgLS1uby1pbnN0YWxsLXJlY29tbWVuZHMgXAogICAgICAgICMgMS4gcGFja2FnaW5nIGRlcGVuZGVuY2llcwogICAgICAgIGFwdC10cmFuc3BvcnQtaHR0cHMgY2EtY2VydGlmaWNhdGVzIGFwdC11dGlscyBnbnVwZzIgdW56aXAgY3VybCB3Z2V0IGdyZXAgXAogICAgICAgICMgMi4gZG9ja2VyIGFuZCBpbml0IHN5c3RlbSBkZXBlbmRlbmNpZXM6CiAgICAgICAgIyBkdW1iLWluaXQgZ29zdSBjcm9uIHpsaWIxZy1kZXYgXAogICAgICAgICMgMy4gZnJpdm9sb3VzIENMSSBoZWxwZXJzIHRvIG1ha2UgZGVidWdnaW5nIGZhaWxlZCBhcmNoaXZpbmcgZWFzaWVyTAogICAgICAgIG5hbm8gaXB1dGlscy1waW5nIGRuc3V0aWxzIGpxIFwKICAgICAgICAjIHRyZWUgeXEgcHJvY3BzIFwKICAgICAgICAjIDQuIGJyb3dzZXIgZGVwZW5kZW5jaWVzOiAoaW5zdGFsbGVkIHdpdGggdGhlIGNocm9taXVtIHBhY2thZ2UgYmVsb3cpCiAgICAgIyAgICBsaWJuc3MzIGxpYnhzczEgbGliYXNvdW5kMiBsaWJ4MTEteGNiMSBcCiAgICAgIyAgICBmb250Y29uZmlnIGZvbnRzLWlwYWZvbnQtZ290aGljIGZvbnRzLXdxeS16ZW5oZWkgZm9udHMtdGhhaS10bHdnIGZvbnRzLWtobWVyb3MgZm9udHMta2Fjc3QgZm9udHMtc3ltYm9sYSBmb250cy1ub3RvIGZvbnRzLWZyZWVmb250LXR0ZiBcCiAgICAgIyAgICBhdC1zcGkyLWNvbW1vbiBmb250cy1saWJlcmF0aW9uIGZvbnRzLW5vdG8tY29sb3ItZW1vamkgZm9udHMtdGx3Zy1sb21hLW90ZiBmb250cy11bmlmb250IGxpYmF0ay1icmlkZ2UyLjAtMCBsaWJhdGsxLjAtMCBsaWJhdHNwaTIuMC0wIGxpYmF2YWhpLWNsaWVudDMgXAogICAgICMgICAgbGliYXZhaGktY29tbW9uLWRhdGEgbGliYXZhaGktY29tbW9uMyBsaWJjdXBzMiBsaWJmb250ZW5jMSBsaWJpY2U2IGxpYm5zcHI0IGxpYm5zczMgbGlic202IGxpYnVud2luZDggXAogICAgICMgICAgbGlieGF3NyBsaWJ4Y29tcG9zaXRlMSBsaWJ4ZGFtYWdlMSBsaWJ4Zm9udDIgXAogICAgICMgICAgIyA1LiB4MTEveHZmYiBkZXBlbmRlbmNpZXM6CiAgICAgIyAgICBsaWJ4a2JmaWxlMSBsaWJ4bXU2IGxpYnhwbTQgbGlieHQ2IHgxMS14a2ItdXRpbHMgeDExLXV0aWxzIHhmb250cy1lbmNvZGluZ3MgXAogICAgICMgICAgeGZvbnRzLXNjYWxhYmxlIHhmb250cy11dGlscyB4c2VydmVyLWNvbW1vbiB4dmZiIFwKICAgICAmJiBybSAtcmYgL3Zhci9saWIvYXB0L2xpc3RzLyoKCkNPUFkgLS1mcm9tPWdoY3IuaW8vYXN0cmFsLXNoL3V2OjAuMTIuOUBzaGEyNTY6OGI5NDBkM2E5ZDY1YmVkMDgwNDM2OTcyMjQxYWYyZTIxYzg0YjVlOGM5MTkzZjcwMTRlZDcxNDc5ZWU3OTVmZiAvdXYgL3V2eCAvYmluLwoKIyBDb3B5IG9ubHkgZGVwZW5kZW5jeSBtYW5pZmVzdApXT1JLRElSIC9hcHAKQ09QWSBweXByb2plY3QudG9tbCB1di5sb2NrKiAvYXBwLwoKUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L3Jvb3QvLmNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPWNhY2hlLSRUQVJHRVRBUkNIJFRBUkdFVFZBUklBTlQgXAogICAgZWNobyAiWytdIFNldHRpbmcgdXAgdmVudiB1c2luZyB1diBpbiAkVkVOVl9ESVIuLi4iIFwKICAgICYmICggXAogICAgIHdoaWNoIHV2ICYmIHV2IC0tdmVyc2lvbiBcCiAgICAgJiYgdXYgdmVudiBcCiAgICAgJiYgd2hpY2ggcHl0aG9uIHwgZ3JlcCAiJFZFTlZfRElSIiBcCiAgICAgJiYgcHl0aG9uIC0tdmVyc2lvbiBcCiAgICApIHwgdGVlIC1hIC9WRVJTSU9OLnR4dAoKIyBJbnN0YWxsIENocm9taXVtIGJyb3dzZXIgZGlyZWN0bHkgZnJvbSBzeXN0ZW0gcGFja2FnZXMKUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L3Zhci9jYWNoZS9hcHQsc2hhcmluZz1sb2NrZWQsaWQ9YXB0LSRUQVJHRVRBUkNIJFRBUkdFVFZBUklBTlQgXAogICAgZWNobyAiWytdIEluc3RhbGxpbmcgY2hyb21pdW0gYnJvd3NlciBmcm9tIHN5c3RlbSBwYWNrYWdlcy4uLiIgXAogICAgJiYgYXB0LWdldCB1cGRhdGUgLXFxIFwKICAgICYmIGFwdC1nZXQgaW5zdGFsbCAteSAtLW5vLWluc3RhbGwtcmVjb21tZW5kcyBcCiAgICAgICAgY2hyb21pdW0gXAogICAgICAgIGZvbnRzLXVuaWZvbnQgXAogICAgICAgIGZvbnRzLWxpYmVyYXRpb24gXAogICAgICAgIGZvbnRzLWRlamF2dS1jb3JlIFwKICAgICAgICBmb250cy1mcmVlZm9udC10dGYgXAogICAgICAgIGZvbnRzLW5vdG8tY29yZSBcCiAgICAmJiBybSAtcmYgL3Zhci9saWIvYXB0L2xpc3RzLyogXAogICAgJiYgbG4gLXMgL3Vzci9iaW4vY2hyb21pdW0gL3Vzci9iaW4vY2hyb21pdW0tYnJvd3NlciBcCiAgICAmJiBsbiAtcyAvdXNyL2Jpbi9jaHJvbWl1bSAvYXBwL2Nocm9taXVtLWJyb3dzZXIgXAogICAgJiYgbWtkaXIgLXAgIi9ob21lLyR7QlJPV1NFUlVTRV9VU0VSfS8uY29uZmlnL2Nocm9taXVtL0NyYXNoIFJlcG9ydHMvcGVuZGluZy8iIFwKICAgICYmIGNob3duIC1SICIkQlJPV1NFUlVTRV9VU0VSOiRCUk9XU0VSVVNFX1VTRVIiICIvaG9tZS8ke0JST1dTRVJVU0VfVVNFUn0vLmNvbmZpZyIgXAogICAgJiYgKCBcCiAgICAgICAgd2hpY2ggY2hyb21pdW0tYnJvd3NlciAmJiAvdXNyL2Jpbi9jaHJvbWl1bS1icm93c2VyIC0tdmVyc2lvbiBcCiAgICAgICAgJiYgZWNobyAtZSAnXG5cbicgXAogICAgKSB8IHRlZSAtYSAvVkVSU0lPTi50eHQKClJVTiAtLW1vdW50PXR5cGU9Y2FjaGUsdGFyZ2V0PS9yb290Ly5jYWNoZSxzaGFyaW5nPWxvY2tlZCxpZD1jYWNoZS0kVEFSR0VUQVJDSCRUQVJHRVRWQVJJQU5UIFwKICAgICBlY2hvICJbK10gSW5zdGFsbGluZyBicm93c2VyLXVzZSBwaXAgc3ViLWRlcGVuZGVuY2llcy4uLiIgXAogICAgICYmICggXAogICAgICAgIHV2IHN5bmMgLS1hbGwtZXh0cmFzIC0tbm8tZGV2IC0tbm8taW5zdGFsbC1wcm9qZWN0IFwKICAgICAgICAmJiBlY2hvIC1lICdcblxuJyBcCiAgICAgKSB8IHRlZSAtYSAvVkVSU0lPTi50eHQKCiMgQ29weSB0aGUgcmVzdCBvZiB0aGUgYnJvd3Nlci11c2UgY29kZWJhc2UKQ09QWSAuIC9hcHAKCiMgSW5zdGFsbCB0aGUgYnJvd3Nlci11c2UgcGFja2FnZSBhbmQgYWxsIG9mIGl0cyBvcHRpb25hbCBkZXBlbmRlbmNpZXMKUlVOIC0tbW91bnQ9dHlwZT1jYWNoZSx0YXJnZXQ9L3Jvb3QvLmNhY2hlLHNoYXJpbmc9bG9ja2VkLGlkPWNhY2hlLSRUQVJHRVRBUkNIJFRBUkdFVFZBUklBTlQgXAogICAgIGVjaG8gIlsrXSBJbnN0YWxsaW5nIGJyb3dzZXItdXNlIHBpcCBsaWJyYXJ5IGZyb20gc291cmNlLi4uIiBcCiAgICAgJiYgKCBcCiAgICAgICAgdXYgc3luYyAtLWFsbC1leHRyYXMgLS1sb2NrZWQgLS1uby1kZXYgXAogICAgICAgICYmIHB5dGhvbiAtYyAiaW1wb3J0IGJyb3dzZXJfdXNlOyBwcmludCgnYnJvd3Nlci11c2UgaW5zdGFsbGVkIHN1Y2Nlc3NmdWxseScpIiBcCiAgICAgICAgJiYgZWNobyAtZSAnXG5cbicgXAogICAgICkgfCB0ZWUgLWEgL1ZFUlNJT04udHh0CgpSVU4gbWtkaXIgLXAgIiREQVRBX0RJUi9wcm9maWxlcy9kZWZhdWx0IiBcCiAgICAmJiBjaG93biAtUiAkQlJPV1NFUlVTRV9VU0VSOiRCUk9XU0VSVVNFX1VTRVIgIiREQVRBX0RJUiIgIiREQVRBX0RJUiIvKiBcCiAgICAmJiAoIFwKICAgICAgICBlY2hvIC1lICJcblxuW+KIml0gRmluaXNoZWQgRG9ja2VyIGJ1aWxkIHN1Y2Nlc3NmdWxseS4gU2F2aW5nIGJ1aWxkIHN1bW1hcnkgaW46IC9WRVJTSU9OLnR4dCIgXAogICAgICAgICYmIGVjaG8gLWUgIlBMQVRGT1JNPSR7VEFSR0VUUExBVEZPUk19IEFSQ0g9JCh1bmFtZSAtbSkgKCQodW5hbWUgLXMpICR7VEFSR0VUQVJDSH0gJHtUQVJHRVRWQVJJQU5UfSlcbiIgXAogICAgICAgICYmIGVjaG8gLWUgIkJVSUxEX0VORF9USU1FPSQoZGF0ZSArIiVZLSVtLSVkICVIOiVNOiVTICVzIilcblxuIiBcCiAgICApIHwgdGVlIC1hIC9WRVJTSU9OLnR4dAoKClVTRVIgIiRCUk9XU0VSVVNFX1VTRVIiClZPTFVNRSAiJERBVEFfRElSIgpFWFBPU0UgOTI0MgpFWFBPU0UgOTIyMgoKIyBIRUFMVEhDSEVDSyAtLWludGVydmFsPTMwcyAtLXRpbWVvdXQ9MjBzIC0tcmV0cmllcz0xNSBcCiMgICAgIENNRCBjdXJsIC0tc2lsZW50ICdodHRwOi8vbG9jYWxob3N0OjgwMDAvaGVhbHRoLycgfCBncmVwIC1xICdPSycKCkVOVFJZUE9JTlQgWyJicm93c2VyLXVzZSJdCg==",
+              "llbDefinition": [
+                {
+                  "id": "step0",
+                  "op": {
+                    "Op": {
+                      "source": {
+                        "identifier": "local://dockerfile",
+                        "attrs": {
+                          "local.differ": "none",
+                          "local.followpaths": "[\"Dockerfile\",\"Dockerfile.dockerignore\",\"dockerfile\"]",
+                          "local.sharedkeyhint": "dockerfile"
+                        }
+                      }
+                    },
+                    "constraints": {}
+                  }
+                },
+                {
+                  "id": "step1",
+                  "op": {
+                    "Op": {}
+                  },
+                  "inputs": [
+                    "step0:0"
+                  ]
+                }
+              ],
+              "digestMapping": {
+                "sha256:1366eded4937b0a7cf60ddf702029be8e63963265a6a466b0a078a697dc85752": "step0",
+                "sha256:3f238c48a0b8882789679527d62962e84789225983efb897749aba8fafa4f873": "step1"
+              }
+            }
+          ]
+        },
+        "layers": {
+          "step0:0": [
+            [
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+                "size": 29856132
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:68bced9e0afa4479df17c3646e27c7c7e9ce9ba70c0e6c73b6826487b89037d9",
+                "size": 1289792
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:2dc99d2d0a39fce31e37615eb4c932e16dcc4c2b0ce9993714280081b5dbe085",
+                "size": 12122550
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:05e0eee5572e9c9f50408a2132590133b830a668a1cf2ff2b150f19c57707e2b",
+                "size": 248
+              }
+            ]
+          ],
+          "step5:0": [
+            [
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:e27de307e11aaf4fa2bf5878efdbd2315579aa4e6317d6c76fa39392703672d7",
+                "size": 22915741
+              },
+              {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:b78788eb72df97b4eb48100030897057071ffb692c402ce508f42bb9f334ede3",
+                "size": 96
+              }
+            ]
+          ]
+        },
+        "sysUsage": [
+          {
+            "timestamp": "2026-11-10T23:42:03.857155371Z",
+            "cpuStat": {
+              "user": 47404.12,
+              "nice": 0.3,
+              "system": 19754.83,
+              "idle": 304311.68,
+              "iowait": 2716.87,
+              "irq": 0,
+              "softirq": 5843.74,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 626819583,
+              "processCreated": 1604499,
+              "processesRunning": 4
+            },
+            "memoryStat": {
+              "total": 49328400,
+              "free": 313992,
+              "available": 39602584,
+              "buffers": 4623372,
+              "cached": 29718964,
+              "active": 27610628,
+              "inactive": 14399108,
+              "swap": 0,
+              "dirty": 1900,
+              "writeback": 0,
+              "slab": 6509392
+            },
+            "cpuPressure": {
+              "some": {
+                "avg10": 0.22,
+                "avg60": 0.37,
+                "avg300": 0.33,
+                "total": 381930900
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 0
+              }
+            },
+            "memoryPressure": {
+              "some": {
+                "avg10": 0,
+                "avg60": 0.02,
+                "avg300": 0.04,
+                "total": 26430640
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0.02,
+                "avg300": 0.04,
+                "total": 24556784
+              }
+            },
+            "ioPressure": {
+              "some": {
+                "avg10": 0.33,
+                "avg60": 0.14,
+                "avg300": 0.68,
+                "total": 258315316
+              },
+              "full": {
+                "avg10": 0.33,
+                "avg60": 0.14,
+                "avg300": 0.65,
+                "total": 235206484
+              }
+            }
+          },
+          {
+            "timestamp": "2026-11-10T23:42:04.049885151Z",
+            "cpuStat": {
+              "user": 47404.67,
+              "nice": 0.3,
+              "system": 19755.14,
+              "idle": 304315.79,
+              "iowait": 2716.92,
+              "irq": 0,
+              "softirq": 5843.92,
+              "steal": 0,
+              "guest": 0,
+              "guestNice": 0
+            },
+            "procStat": {
+              "contextSwitches": 626838317,
+              "processCreated": 1604545,
+              "processesRunning": 5
+            },
+            "memoryStat": {
+              "total": 49328400,
+              "free": 496800,
+              "available": 39780020,
+              "buffers": 4623444,
+              "cached": 29716600,
+              "active": 27620760,
+              "inactive": 14212572,
+              "swap": 0,
+              "dirty": 1324,
+              "writeback": 168,
+              "slab": 6504708
+            },
+            "cpuPressure": {
+              "some": {
+                "avg10": 0.22,
+                "avg60": 0.37,
+                "avg300": 0.33,
+                "total": 381933271
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0,
+                "avg300": 0,
+                "total": 0
+              }
+            },
+            "memoryPressure": {
+              "some": {
+                "avg10": 0,
+                "avg60": 0.02,
+                "avg300": 0.04,
+                "total": 26430659
+              },
+              "full": {
+                "avg10": 0,
+                "avg60": 0.02,
+                "avg300": 0.04,
+                "total": 24556803
+              }
+            },
+            "ioPressure": {
+              "some": {
+                "avg10": 0.33,
+                "avg60": 0.14,
+                "avg300": 0.68,
+                "total": 258317491
+              },
+              "full": {
+                "avg10": 0.33,
+                "avg60": 0.14,
+                "avg300": 0.65,
+                "total": 235208508
+              }
+            }
+          }
+        ]
+      },
+      "buildkit_completeness": {
+        "request": true,
+        "resolvedDependencies": false
+      }
+    }
+  }
+}

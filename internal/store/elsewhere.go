@@ -259,6 +259,16 @@ func (s *Store) SettleElsewhere(ctx context.Context, settled []Settled) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	for _, st := range settled {
+		if st.Kind != history.FilesChanged {
+			continue
+		}
+		// Which installs ran again only because of the Dockerfile's order:
+		// known now that the changed files are.
+		if err := s.storeOrder(ctx, st.ID); err != nil {
+			return err
+		}
+	}
 	for _, k := range keys {
 		s.changed(k)
 	}
