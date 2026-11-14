@@ -101,16 +101,15 @@ RUNNER_CHART_SHA256=2403187ea4f50199814f22019b6a3a88b271dcfe67d26bd44c6d93b47065
 # UPGRADE_FROM_DIR=<dir> takes ci-accelerator-<v>.tgz and buildkit-<v>.tgz
 # from a directory instead (a packaged tree, to rehearse the next upgrade;
 # no checksums), with UPGRADE_FROM_VALUES for what it needs on kind.
-UPGRADE_FROM=${UPGRADE_FROM:-0.5.2}
-UPGRADE_FROM_SHA256=b5d141daa934958a8d575757eb4a3510f7b54bac5ce49bdc0a446ce113f8af59
-UPGRADE_FROM_BUILDKIT_SHA256=721e77591167485955aeae6c8cadb2a4e871c6b31ede246e849e8682a166a7d2
+UPGRADE_FROM=${UPGRADE_FROM:-0.6.0}
+UPGRADE_FROM_SHA256=15bf09b4e88947ac8652c187de6d5b29dc2993e160829e30abff3e642515fbc9
+UPGRADE_FROM_BUILDKIT_SHA256=aca6cd5ffdb4a7caeddf46ae9884f1671302b7c073375eeef1edddcd6e729af9
 UPGRADE_FROM_REPO=oci://ghcr.io/hoobiboobi/charts
 UPGRADE_FROM_DIR=${UPGRADE_FROM_DIR:-}
 UPGRADE_FROM_VALUES=${UPGRADE_FROM_VALUES:-$ROOT/test/e2e/box-values-old.yaml}
 # 1 when this tree changes the daemons' pod template on purpose (an upgrade
-# then restarts every daemon; say so in the upgrade notes). This tree: the
-# daemons' open-files limit.
-UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-1}
+# then restarts every daemon; say so in the upgrade notes). This tree: no.
+UPGRADE_ROLLOUT_EXPECTED=${UPGRADE_ROLLOUT_EXPECTED:-0}
 # The stand-in GitLab API runs on this image (python stdlib only).
 # renovate: datasource=docker depName=python
 PYTHON_IMAGE=python:3.13-alpine3.22@sha256:e81548ac35b07a3bd4805f275107592ef458b1e893c0e04d45aedaa19416cca5

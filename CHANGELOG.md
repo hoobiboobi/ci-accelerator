@@ -11,6 +11,10 @@ workflow copies them into the GitHub release.
 
 None.
 
+### Changed
+
+- The upgrade test starts from 0.6.0. Nothing changes for a user.
+
 ## 0.6.0 - 2026-11-13
 
 ### Upgrade notes
