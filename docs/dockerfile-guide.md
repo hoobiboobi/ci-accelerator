@@ -106,6 +106,17 @@ The same shape works for every ecosystem:
 | Java (Maven) | `pom.xml` | `mvn dependency:go-offline` |
 | Rust | `Cargo.toml`, `Cargo.lock` | a dependency-only build |
 
+When a project installs itself and its dependencies in one command (`pip
+install .`, `uv sync`, `composer install`), split it: install the
+dependencies from the copied files first (`uv sync --no-install-project`,
+`poetry install --no-root`, `composer install --no-scripts
+--no-autoloader`; for pip, the list in `pyproject.toml`), then copy the code
+and run the command again, which finds the dependencies installed. A
+workspace (monorepo) needs every `package.json`: `COPY --parents
+**/package.json package-lock.json ./` (Dockerfile syntax 1.20 or later).
+The console points such steps out with the fragment for the Dockerfile
+(the "order" speed-up in [the console](console.md)).
+
 ## 3. Use cache mounts for package managers
 
 A layer is all or nothing: if the lock file changes, `npm ci` runs again

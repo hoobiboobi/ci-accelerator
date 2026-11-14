@@ -65,3 +65,4 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0059](0059-api-contract.md) | An OpenAPI contract for the console API: written by hand, the responses checked against it, breaking changes against the last release's caught by oasdiff |
 | [0060](0060-sbom.md) | An SBOM on the ci-accelerator image: SPDX per platform from BuildKit, checked before the release signs |
 | [0061](0061-drain-before-sigterm.md) | A daemon drains before SIGTERM and the collector reads a leaving daemon to the end: builds that finish during a rollout are stored |
+| [0062](0062-order-hint.md) | Dependencies installed again only because of the step order: a verified "your change" that reinstalled without a dependency file changing gets the measured time and a fragment built in the lab |
