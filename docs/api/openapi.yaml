@@ -140,6 +140,65 @@ components:
           items:
             $ref: "#/components/schemas/Hint"
           description: The build's cache-mount hints, the costliest first.
+        order:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+          description: >-
+            The steps that installed dependencies again only because a COPY
+            of the whole build context comes before them, in a rebuild that
+            GitLab's comparison of the commits proved.
+    Order:
+      type: object
+      additionalProperties: false
+      required: [step, name, copy, managers, files, tookSeconds, runs, runSeconds, since]
+      description: One step that installed dependencies again only because of the Dockerfile's order.
+      properties:
+        step:
+          type: string
+          description: The step's key.
+        name:
+          type: string
+          description: The step's instruction.
+        line:
+          type: integer
+          description: Its first Dockerfile line.
+        copy:
+          type: string
+          description: The COPY of the whole build context before it.
+        copyLine:
+          type: integer
+          description: The COPY's Dockerfile line.
+        managers:
+          type: array
+          items:
+            type: string
+          description: The package managers whose installs ran again, such as "pip" or "npm".
+        files:
+          type: array
+          items:
+            type: string
+          description: The files the installs read, none of which changed.
+        others:
+          type: array
+          items:
+            type: string
+          description: The step's other commands, which need the code.
+        tookSeconds:
+          type: number
+          description: The step's time in this build, in seconds.
+        fragment:
+          type: string
+          description: The instructions to put in place of the COPY and the step.
+        runs:
+          type: integer
+          description: How many of the image's builds since `since` installed again this way.
+        runSeconds:
+          type: number
+          description: Their time together, in seconds.
+        since:
+          type: string
+          format: date-time
     Reason:
       type: object
       additionalProperties: false

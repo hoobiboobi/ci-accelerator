@@ -1064,6 +1064,14 @@ a.boxh:hover { background: var(--hover); }
 .sph .spat { margin-left: auto; font-size: 12px; }
 .spk { color: var(--accent); background: color-mix(in oklab, var(--accent) 13%, var(--panel)); }
 .broken .spk, .spk.broken { color: var(--warn); background: color-mix(in oklab, var(--warn) 13%, var(--panel)); }
+/* An install that ran again only because of the Dockerfile's order. */
+.sp.order .spn, .spmk.order { color: var(--warn); background: color-mix(in oklab, var(--warn) 16%, var(--panel)); }
+.sp.order .spk, .spk.order { color: var(--warn); background: color-mix(in oklab, var(--warn) 13%, var(--panel)); }
+tr.st.order > td { background: color-mix(in oklab, var(--warn) 6%, var(--panel)); }
+.orderwhy { display: block; font-family: var(--font); font-size: 11.5px; color: var(--warn); white-space: normal; }
+.ometer { display: block; width: min(420px, 100%); height: 8px; margin: 7px 0 5px; }
+.ometer .r { fill: var(--sel); } .ometer .o { fill: var(--warn); }
+.verdict .hint .chip.passed { margin-right: 4px; }
 .spw, .spf { margin: 0; color: var(--ink-2); }
 .spf { color: var(--ink-3); }
 pre.frag { margin: 0; padding: 10px 12px; background: var(--log-bg); color: var(--log-ink); border-radius: 6px; font-family: var(--mono); font-size: 12px;

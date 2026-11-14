@@ -35,7 +35,7 @@
 </section>{{end}}
 
 {{with .Speedups}}<section class="box spd" aria-labelledby="spT"><div class="boxh"><h2 class="h" id="spT">Speed-ups for this Dockerfile</h2><span class="muted">{{len .}} step{{if ne (len .) 1}}s{{end}} · the costliest first</span></div>
-  <ol class="spl">{{range .}}<li class="sp{{if .Broken}} broken{{end}}" id="speedup-{{.N}}">
+  <ol class="spl">{{range .}}<li class="sp{{if .Broken}} broken{{end}}{{if .Order}} order{{end}}" id="speedup-{{.N}}">
     <span class="spn" aria-hidden="true">{{.N}}</span>
     <div class="spb">
       <div class="sph"><b>{{.Title}}</b><span class="chip spk">{{.Chip}}</span><a class="link spat" href="/builds/{{$.ID}}/steps/{{.Step}}#speed" data-step="{{.Step}}" data-dtab-open="speed">step {{.Key}}{{with .LineText}} · {{.}}{{end}}</a></div>
@@ -63,9 +63,9 @@
     {{else}}
     <tr class="grp"><td colspan="4"><button class="grpbtn" type="button" data-blk="{{$bi}}" data-fold="{{if eq .Kind "cached"}}true{{else}}false{{end}}" aria-expanded="{{if eq .Kind "cached"}}false{{else}}true{{end}}">{{icon "chev" 13 "chev"}}<span class="gname">{{.Name}}</span>{{if eq .Kind "cached"}}<span class="chip cached">{{icon "s_cached" 11}}from cache</span>{{else if eq .State "received"}}<span class="chip received">{{icon "s_received" 11}}from {{if .From}}{{.From}}{{else}}another job{{end}}</span>{{else}}{{template "stchip" .State}}{{end}}<span class="gmeta">{{.Meta}}{{if .First}} · <span class="firstmk">rebuild started here</span>{{end}}</span><span class="gd">{{dur .D}}</span></button></td></tr>
     {{range .Rows}}
-    <tr class="st{{if .FirstRebuilt}} mark{{end}}" data-of="{{$bi}}" data-step="{{.Index}}" tabindex="0"{{if eq $blk.Kind "cached"}} hidden{{end}}>
+    <tr class="st{{if .FirstRebuilt}} mark{{end}}{{if index $.OrderOf .Index}} order{{end}}" data-of="{{$bi}}" data-step="{{.Index}}" tabindex="0"{{if eq $blk.Kind "cached"}} hidden{{end}}>
       <td class="ln">{{if .Line}}{{.Line}}{{end}}</td>
-      <td class="cmd"><a class="steplink c" href="/builds/{{$.ID}}/steps/{{.Index}}" tabindex="-1" title="{{.Name}} — output and history">{{.Name}}</a>{{with index $.HintOf .Index}}<span class="spmk{{if .Broken}} broken{{end}}" title="Speed-up {{.N}}: {{.Chip}}" aria-label="speed-up {{.N}}, {{.Chip}}">{{.N}}</span>{{end}}{{if .FirstRebuilt}}<span class="firstmk blk">↳ first rebuilt step</span>{{end}}</td>
+      <td class="cmd"><a class="steplink c" href="/builds/{{$.ID}}/steps/{{.Index}}" tabindex="-1" title="{{.Name}} — output and history">{{.Name}}</a>{{with index $.HintOf .Index}}<span class="spmk{{if .Broken}} broken{{end}}{{if .Order}} order{{end}}" title="Speed-up {{.N}}: {{.Chip}}" aria-label="speed-up {{.N}}, {{.Chip}}">{{.N}}</span>{{end}}{{if .FirstRebuilt}}<span class="firstmk blk">↳ first rebuilt step</span>{{end}}{{with index $.OrderOf .Index}}<a class="orderwhy" href="#speedup-{{.N}}">installed the dependencies again only because the code is copied before it: speed-up {{.N}}</a>{{end}}</td>
       <td class="res">{{if eq .State "received"}}<span class="chip received">{{icon "s_received" 11}}from {{.From}}</span>{{else}}{{template "stchip" .State}}{{end}}</td>
       <td class="num">{{dur .D}}</td>
     </tr>

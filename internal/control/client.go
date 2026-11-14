@@ -472,6 +472,11 @@ func (c *Client) BuildHints(ctx context.Context, ids []int64) (out map[int64][]s
 	return
 }
 
+func (c *Client) BuildOrder(ctx context.Context, ids []int64) (out map[int64][]store.OrderHint, err error) {
+	err = c.call(ctx, "BuildOrder", []any{ids}, &out)
+	return
+}
+
 func (c *Client) Ping(ctx context.Context) error { return c.call(ctx, "Ping", nil) }
 
 // liveFor is how long the daemons' state is reused while no change is

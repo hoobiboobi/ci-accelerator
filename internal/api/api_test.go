@@ -20,6 +20,12 @@ type fakeStore struct {
 	limit    int
 	hints    map[int64][]store.StepHints
 	hintsErr error
+	order    map[int64][]store.OrderHint
+	orderErr error
+}
+
+func (f *fakeStore) BuildOrder(_ context.Context, ids []int64) (map[int64][]store.OrderHint, error) {
+	return f.order, f.orderErr
 }
 
 func (f *fakeStore) BuildHints(_ context.Context, ids []int64) (map[int64][]store.StepHints, error) {

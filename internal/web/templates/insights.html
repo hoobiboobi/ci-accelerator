@@ -14,6 +14,9 @@
     <div class="rlist">{{range .Reasons}}<a class="rrow" href="{{.URL}}"><span class="rs">{{template "status" .Status}}</span><span class="rt">{{.Text}}</span><span class="ri muted">{{join .Images ", "}}{{if .More}} +{{.More}}{{end}} · last at {{.Last}}</span><span class="rn">{{.N}} build{{if ne .N 1}}s{{end}}</span><span class="rl">{{dur .Lost}}</span></a>{{end}}</div>
     {{with .MoreReasons}}<a class="more" href="/builds?outcome=rebuilt">{{.}} — all rebuilt builds</a>{{end}}
   </section>
+  {{with .Order}}{{if .N}}<section class="box" aria-labelledby="orT"><div class="boxh"><h2 class="h" id="orT">Part of your changes: dependencies installed again</h2><span class="muted">no file they come from changed</span></div>
+    <div class="rlist"><a class="rrow" href="{{.URL}}"><span class="rs"><span class="chip spk order">order</span></span><span class="rt">A COPY of the whole build context comes before the install, so a change to any file installs the dependencies again</span><span class="ri muted">{{join .Images ", "}} · last at {{.Last}}</span><span class="rn">{{.N}} build{{if ne .N 1}}s{{end}}</span><span class="rl">{{dur .Lost}}</span></a></div>
+  </section>{{end}}{{end}}
   {{if .NoRepoChange}}<p class="muted">{{if .OtherNode}}{{.OtherNode}} of the {{.NoRepoChange}} rebuilds without a change in the repository ran on another node than the image's previous build. {{end}}Files outside the repository (CI artifacts, generated files) may have changed instead; if your build contexts hold only repository files, <code>reasons.trustGitComparison</code> in the control-plane chart counts these as build farm.</p>{{end}}
   {{end}}
   {{end}}
