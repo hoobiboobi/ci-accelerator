@@ -1486,7 +1486,7 @@ box_fleet() {
   check "people sign in at the hub through GitLab" test -n "$alice" -a -n "$bob"
   hub_job() {
     curl -fsS -m 20 -L -H "Cookie: $alice" -w '%{url_effective}' -o "$d/job-page.html" "$url/jobs/$inst/$job" >"$d/job-page.url" &&
-      grep -q 'First build of <code>' "$d/job-page.html" && grep -q 'data-base="/m/e2e"' "$d/job-page.html"
+      grep -q 'First build of <code>' "$d/job-page.html" && grep -Eq 'data-base="/m/e2e(\.[0-9a-f]{4})?"' "$d/job-page.html"
   }
   check "the job address a job log prints opens the member's page for it at the hub" eventually 60 quiet hub_job
   check "an owner signed in may manage the fleet through the API" \
