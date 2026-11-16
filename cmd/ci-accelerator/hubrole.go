@@ -78,6 +78,8 @@ type hub struct {
 	signIn  *auth.Auth
 	admin   *web.Hub
 	token   *bootstrapToken
+	// events: what the hub saw of each member's link, for its page.
+	events *fleet.LinkEvents
 	// sealer opens the secrets the hub keeps for its clusters; nil: it
 	// keeps none.
 	sealer  *fleet.Sealer
@@ -148,7 +150,7 @@ func (v view) Members() []web.FleetMember {
 	var out []web.FleetMember
 	for _, m := range ms {
 		fm := web.FleetMember{Name: m.Name, State: "offline", Version: m.Version, SeenAt: m.SeenAt, Fingerprint: m.Fingerprint,
-			Origin: m.Origin, AddedBy: m.AddedBy, AddedAt: m.AddedAt, StoreReplaced: m.StoreReplaced, RemovedAt: m.RemovedAt}
+			Origin: m.Origin, AddedBy: m.AddedBy, AddedAt: m.AddedAt, StoreReplaced: m.StoreReplaced, RemovedAt: m.RemovedAt, Store: m.Store}
 		switch {
 		case !m.RemovedAt.IsZero():
 			fm.State = "removed"
@@ -252,6 +254,7 @@ func (h *hub) up(l *fleet.Link) {
 		if host(old.link.Remote) != host(l.Remote) {
 			h.log.Warn("fleet: a member's new link replaces an open one from another address: is its key used twice?",
 				"name", l.Name, "remote", l.Remote, "replaced_remote", old.link.Remote, "replaced_since", old.link.Since)
+			h.events.Add(l.Name, "closed: a new link from "+l.Remote+" replaced the one from "+old.link.Remote)
 		} else {
 			h.log.Info("fleet: a member's new link replaces its old one", "name", l.Name, "remote", l.Remote)
 		}
@@ -272,7 +275,7 @@ func (h *hub) up(l *fleet.Link) {
 			old.gone.Store(true)
 		}
 		h.seen.Forget(l.Name + "\x00")
-		h.log.Warn("fleet: a member came with another store: its earlier builds' addresses lead nowhere now", "name", l.Name, "store", l.Store)
+		h.log.Warn("fleet: a member came with another store: its earlier builds' addresses now say they are gone", "name", l.Name, "store", l.Store)
 	}
 	go func() {
 		// Every way out takes the link out of the map (if it is still this
@@ -296,7 +299,7 @@ func (h *hub) up(l *fleet.Link) {
 			h.log.Warn("fleet: the member's controller speaks another version of the console's API; some of its pages may not show",
 				"name", l.Name, "member_api", cfg.API, "hub_api", control.APIVersion, "member_version", cfg.Version)
 		}
-		opt := h.memberOptions(l.Name, cfg.Release)
+		opt := h.memberOptions(l.Name, l.Store, cfg.Release)
 		if cfg.GitLab {
 			// GitLab is read by the member, with the member's token.
 			opt.GitLab, opt.InstallToken = client, cfg.InstallToken
@@ -363,8 +366,8 @@ func host(addr string) string {
 // memberOptions are a cluster's pages' options at the hub: under its base,
 // with the hub's sign-in and the hub's roles (the sidebar's Fleet links and
 // the role it names).
-func (h *hub) memberOptions(name, release string) web.Options {
-	opt := web.Options{Base: "/m/" + name, Release: release, Version: h.version, PublicURL: publicURL(h.log),
+func (h *hub) memberOptions(name, store, release string) web.Options {
+	opt := web.Options{Base: web.MemberBase(name, store), Release: release, Version: h.version, PublicURL: publicURL(h.log),
 		Fleet: view{h, name}, Hub: h.admin}
 	if h.assets != "" {
 		opt.Assets = os.DirFS(h.assets)
@@ -398,6 +401,8 @@ func (h *hub) drop(name string) {
 	}
 	h.mu.Unlock()
 	h.seen.Forget(name + "\x00")
+	// A new cluster of that name starts without the removed one's events.
+	h.events.Forget(name)
 	if ml != nil {
 		ml.end()
 	}
@@ -413,15 +418,17 @@ func (ml *memberLink) end() {
 	}
 }
 
-// member serves /m/<name>/... from that member's pages; while the member
-// is away, the copy of the page the same person last opened, dated.
+// member serves /m/<name>/... (or /m/<name>.<mark>/..., the mark of the
+// member's store) from that member's pages; while the member is away, the
+// copy of the page the same person last opened, dated.
 func (h *hub) member(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	seg := r.PathValue("name")
+	name, _ := web.SplitMember(seg)
 	if !fleet.NamePattern.MatchString(name) {
 		h.root.MemberAway(w, r, name)
 		return
 	}
-	prefix := "/m/" + name
+	prefix := "/m/" + seg
 	if esc := r.URL.EscapedPath(); !strings.HasPrefix(esc, prefix+"/") {
 		// The name written escaped (/m/%65u/): to its plain address.
 		rest := "/"
@@ -440,6 +447,9 @@ func (h *hub) member(w http.ResponseWriter, r *http.Request) {
 		// templates: their script and stylesheet are the hub's, and are
 		// there while the cluster is away too.
 		http.StripPrefix(prefix, h.rootMux).ServeHTTP(w, r)
+		return
+	}
+	if h.root.OldStore(w, r, seg) {
 		return
 	}
 	h.mu.Lock()
@@ -633,10 +643,11 @@ type hubConfig struct {
 // and joins, the health checks, the management API and the pages.
 func newHub(ctx context.Context, c hubConfig) (*hub, http.Handler, error) {
 	log, reg := c.log, c.reg
-	h := &hub{reg: reg, log: log, signIn: c.signIn, sealer: c.sealer, token: c.token, assets: c.assets, version: c.version,
+	events := &fleet.LinkEvents{}
+	h := &hub{reg: reg, log: log, signIn: c.signIn, sealer: c.sealer, token: c.token, assets: c.assets, version: c.version, events: events,
 		links: map[string]*memberLink{}, seen: fleet.NewLastKnown(keptPages, keptBytes),
 		delivering: map[string]*sync.Mutex{}, retry: map[string]*retryState{}, forced: map[string]bool{}}
-	h.admin = &web.Hub{Registry: reg, Who: h.who, Bootstrap: c.token.configured(), Sealer: h.sealer,
+	h.admin = &web.Hub{Registry: reg, Who: h.who, Bootstrap: c.token.configured(), Sealer: h.sealer, Events: events,
 		Deliver: func(name string) { go h.deliver(context.WithoutCancel(ctx), name, false) }, Removed: h.drop,
 		NoOwners: func() bool {
 			if h.token.get() != "" {
@@ -698,7 +709,7 @@ func newHub(ctx context.Context, c hubConfig) (*hub, http.Handler, error) {
 	withToken := web.AccessLog(log, web.Secure(web.Compress(logRefused(log, "fleet: an API token was refused", apiMux,
 		http.StatusUnauthorized, http.StatusForbidden))))
 
-	link := &fleet.Hub{Key: c.key, Member: reg.Holder, Up: h.up, Log: log}
+	link := &fleet.Hub{Key: c.key, Member: reg.Holder, Up: h.up, Log: log, Events: events}
 	top := http.NewServeMux()
 	top.Handle("GET "+fleet.ConnectPath, link)
 	top.Handle("POST "+fleet.JoinPath, web.AccessLog(log, logRefused(log, "fleet: a join was refused", reg.JoinHandler(), http.StatusForbidden)))

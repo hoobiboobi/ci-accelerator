@@ -189,6 +189,7 @@ var pageFiles = map[string][]string{
 	"clusterform": nil,
 	"install":     nil,
 	"cluster":     nil,
+	"confirm":     nil,
 }
 
 // New parses the templates; a template that does not parse is a build

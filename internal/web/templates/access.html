@@ -19,8 +19,8 @@
       <td><span class="chip plain">{{.Origin}}</span></td>
       <td>{{if .Locked}}<span class="muted">with the values</span>{{else}}<span title="{{.Added.UTC}}">{{.Added.Text}}</span> <span class="muted">· {{.By}}</span>{{end}}</td>
       <td class="acts">{{if .Locked}}<span class="muted" title="An owner from the hub's values: change it there">locked</span>{{else if .Self}}<span class="muted" title="Your own role is changed by another owner">you</span>{{else if $.Access.RolesWrite}}
-        <form method="post" action="/~/access/people" class="inline"><input type="hidden" name="subject" value="{{.Subject}}"><input type="hidden" name="role" value="{{if eq .Role "owner"}}operator{{else}}owner{{end}}"><button class="btn sm" type="submit" aria-label="Make {{if .Name}}{{.Name}}{{else}}{{.Who}}{{end}} {{if eq .Role "owner"}}operator{{else}}owner{{end}}">Make {{if eq .Role "owner"}}operator{{else}}owner{{end}}</button></form>
-        <form method="post" action="/~/access/people/remove" class="inline"><input type="hidden" name="subject" value="{{.Subject}}"><button class="btn sm" type="submit" aria-label="Remove the role of {{if .Name}}{{.Name}}{{else}}{{.Who}}{{end}}">Remove</button></form>{{end}}</td>
+        <a class="btn sm" href="/~/access?confirm=role&amp;subject={{.Subject}}&amp;role={{if eq .Role "owner"}}operator{{else}}owner{{end}}" aria-label="Make {{if .Name}}{{.Name}}{{else}}{{.Who}}{{end}} {{if eq .Role "owner"}}operator{{else}}owner{{end}}">Make {{if eq .Role "owner"}}operator{{else}}owner{{end}}…</a>
+        <a class="btn sm" href="/~/access?confirm=remove-role&amp;subject={{.Subject}}" aria-label="Remove the role of {{if .Name}}{{.Name}}{{else}}{{.Who}}{{end}}">Remove…</a>{{end}}</td>
     </tr>{{end}}
     </tbody></table></div>{{else}}<p class="pad muted">Nobody has a role yet.</p>{{end}}</section>
   {{if .Access.RolesWrite}}
@@ -45,7 +45,7 @@
       <td>{{if .State}}<span class="chip plain">{{.State}}</span>{{else if .Never}}<span class="chip warn">never</span>{{else}}<span title="{{.Expires.UTC}}">{{.Expires.Text}}</span>{{end}}</td>
       <td>{{if .Used.UTC}}<span title="{{.Used.UTC}}">{{.Used.Text}}</span>{{else}}<span class="muted">never</span>{{end}}</td>
       <td>{{.By}}</td>
-      <td class="acts">{{if not .State}}<form method="post" action="/~/access/tokens/revoke" class="inline"><input type="hidden" name="name" value="{{.Name}}"><button class="btn sm" type="submit" aria-label="Revoke {{.Name}}">Revoke</button></form>{{end}}</td>
+      <td class="acts">{{if not .State}}<a class="btn sm" href="/~/access/tokens?confirm=revoke&amp;name={{.Name}}" aria-label="Revoke {{.Name}}">Revoke…</a>{{end}}</td>
     </tr>{{end}}
     {{if not (or .Tokens .Bootstrap)}}<tr><td colspan="6" class="muted">No API token yet.</td></tr>{{end}}
     </tbody></table></div></section>

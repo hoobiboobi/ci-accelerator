@@ -1,0 +1,11 @@
+{{define "confirm"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}}<span class="sepr">/</span>{{end}}<a class="link" href="{{$c.Value}}">{{$c.Label}}</a>{{end}}</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">{{.Question}}</h1></div></header>
+  <section class="box" aria-labelledby="cnT"><div class="boxh"><h2 class="h" id="cnT">What happens</h2><span class="muted">at once, when you confirm</span></div>
+    <div class="pad"><ul class="plain">{{range .Lines}}<li>{{.}}</li>{{end}}</ul>
+    <form method="post" action="{{.Action}}" class="cactions left">{{range .Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="hidden" name="confirm" value="yes">
+      <button class="btn danger" type="submit">{{.Button}}</button><a class="btn" href="{{.Cancel}}">Cancel</a></form></div></section>
+</div>
+{{end}}

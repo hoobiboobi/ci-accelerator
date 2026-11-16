@@ -727,7 +727,7 @@ var (
 	fzMethods  = []string{"GET", "POST", "PUT", "DELETE", "HEAD", "PATCH", "OPTIONS", "POST"}
 	fzKeys     = []string{"subject", "gitlab", "user", "role", "days", "name", "gitlab_url", "storage",
 		"runner_token", "public_key", "forget", "expires_in_days", "expires_in_minutes", "token", "values",
-		"joins", "token_hours", "concurrent", "cache_limit", "s3_server", "gitlab_token"}
+		"joins", "token_hours", "concurrent", "cache_limit", "s3_server", "gitlab_token", "confirm"}
 	fzInts = []int{-1, 0, 1, 2, 30, 60, 1440, 3650, 3651, 10080, 10081, 1 << 40}
 )
 
@@ -736,7 +736,7 @@ func (fh *fzHub) pool() []string {
 		"gitlab:" + fh.host + "/3", "gitlab:" + fh.host + "/2", "gitlab:" + fh.host + "/99", "gitlab:" + fh.host + "/1",
 		"eu", "us", "new", "x1", "owner-tok", "op-tok", "viewer-tok", "t1", "https://gl.example.com/", "emptyDir",
 		fh.poolPEM, "", "../../etc", "<script>x</script>", "cia_join_0000", "glrt-fuzz-posted-runner-token", "token", "key",
-		"1", "24", "10", "75%", "https://s3.example.com", "hostPath", "ab"}
+		"1", "24", "10", "75%", "https://s3.example.com", "hostPath", "ab", "yes"}
 }
 
 // Path kinds.
@@ -1257,7 +1257,7 @@ func FuzzHubRoutes(f *testing.F) {
 		// The owner's successful writes, then the state is put back.
 		enc(rec{m: post, p: pClusters, c: cOwner, o: sameOrigin, form: [][2]string{{"name", "x1"}, {"gitlab_url", "https://gl.example.com/"},
 			{"runner_token", "glrt-fuzz-posted-runner-token"}, {"storage", "emptyDir"}}},
-			rec{m: post, p: pClusterJoin, n: nameIdx("x1"), c: cOp, o: sameOrigin},
+			rec{m: post, p: pClusterJoin, n: nameIdx("x1"), c: cOp, o: sameOrigin, form: [][2]string{{"confirm", "yes"}}},
 			rec{m: post, p: pAPIJoins, n: nameIdx("x1"), a: aOpTok, json: [][2]string{{"expires_in_minutes", "60"}}},
 			rec{m: get, p: pAPIValues, n: nameIdx("x1"), a: aViewerTok}),
 		enc(rec{m: put, p: pAPISettings, n: eu, a: aOwnerTok, json: [][2]string{{"values", "https://gl.example.com/"}}},
@@ -1269,7 +1269,7 @@ func FuzzHubRoutes(f *testing.F) {
 				{"runner_token", "glrt-fuzz-posted-runner-token"}}}),
 		enc(rec{m: post, p: pAPIMembers, a: aOpTok, json: [][2]string{{"name", "x1"}, {"public_key", fh.poolPEM}}},
 			rec{m: post, p: pAPITokens, a: aOwnerTok, json: [][2]string{{"name", "t1"}, {"role", "viewer"}, {"expires_in_days", "30"}}}),
-		enc(rec{m: post, p: pClusterRemove, n: eu, c: cOwner, o: sameOrigin}, rec{m: get, p: pMember, n: eu, c: cOwner}),
+		enc(rec{m: post, p: pClusterRemove, n: eu, c: cOwner, o: sameOrigin, form: [][2]string{{"name", "eu"}}}, rec{m: get, p: pMember, n: eu, c: cOwner}),
 		enc(rec{m: del, p: pAPIMember, n: eu, a: aOwnerTok}, rec{m: get, p: pCluster, n: eu, c: cViewer}),
 		enc(rec{m: post, p: pAPIJoins, n: eu, a: aBootstrap, json: [][2]string{{"expires_in_minutes", "30"}}}),
 		enc(rec{m: del, p: pAPIToken, n: 0, a: aOwnerTok}, rec{m: get, p: pAPIMembers, a: aOwnerTok}),
