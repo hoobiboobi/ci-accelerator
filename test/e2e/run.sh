@@ -137,6 +137,16 @@ ALL_SCENARIOS="preflight tls certmanager existing netpol otel runner box compone
 
 refuse() { echo "refusing to run e2e: $*" >&2; exit 2; }
 
+# A misspelt scenario would run nothing after the setup and end green.
+if [ "$SCENARIOS" != all ]; then
+  for s in $SCENARIOS; do
+    case " $ALL_SCENARIOS " in
+      *" $s "*) ;;
+      *) refuse "unknown scenario '$s' in SCENARIOS (known: $ALL_SCENARIOS)" ;;
+    esac
+  done
+fi
+
 # --- safety: only ever act on a local kind cluster ---------------------------
 
 case "$CTX" in
@@ -2256,7 +2266,7 @@ box_router() {
     test "$(routed_to p1c)" = "$(box_daemon_on "$b")"
   check "and finds its step in the cache" eval '! built p1c'
   check "the build page says the router chose the node that holds the project's cache" \
-    eventually 30 route_page 9511 "most recently used layers (the job ran on $c)"
+    eventually 30 route_page 9511 "whose cache holds layers of the project (the job ran on $c)"
   # A connection from a pod the router does not know (no job): its node's daemon.
   kc -n "$BOX_JOBS_NS" delete pod route-unknown --ignore-not-found --wait=true >/dev/null 2>&1
   kc -n "$BOX_JOBS_NS" run route-unknown --image="$IMAGE" --restart=Never \
@@ -3293,6 +3303,13 @@ s_debug() {
   ip=$(pod_ip "$(daemon_on "$BUILD_NODE")")
   next_id; build client-build debug --opt "build-arg:BUST=$ID" >"$LOGS/debug.log" 2>&1
   check "a RUN step finds :6060 closed" printed "$LOGS/debug.log" DEBUG_CLOSED
+  # Positive control: the same exec reaches the daemon's TLS port, so a
+  # refused :6060 below is the daemon's answer, not a failed exec or nc.
+  if ! kc -n "$JOBS_NS" exec client-build -- nc -z -w 2 "$ip" 1234 >/dev/null 2>&1; then
+    fail "control: the job pod does not reach the daemon pod on :1234 (exec or nc failed)"
+    return
+  fi
+  pass "control: the job pod reaches the daemon pod on :1234"
   if kc -n "$JOBS_NS" exec client-build -- nc -z -w 2 "$ip" 6060 >/dev/null 2>&1; then
     fail "the daemon pod answers on :6060"
   else
