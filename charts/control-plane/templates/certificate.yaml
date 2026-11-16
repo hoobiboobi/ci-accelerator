@@ -1,3 +1,5 @@
+{{- if ne (include "control-plane.fleetRole" .) "hub" }}
+{{- /* A fleet hub runs none of this: hub.yaml. */}}
 {{- if not .Values.tls.existingSecret }}
 {{- if not (.Capabilities.APIVersions.Has "cert-manager.io/v1") }}
 {{- fail "control-plane: the controller's client certificate is issued with cert-manager, whose API (cert-manager.io/v1) this cluster does not have. Install cert-manager, or set tls.existingSecret to a Secret with ca.crt, tls.crt and tls.key signed by the daemons' CA. For an offline render pass --api-versions cert-manager.io/v1." }}
@@ -67,4 +69,5 @@ spec:
     labels:
       {{- include "control-plane.selectorLabels" (dict "root" . "role" "controller") | nindent 6 }}
       {{- include "control-plane.componentLabels" (dict "root" . "role" "controller") | nindent 6 }}
+{{- end }}
 {{- end }}

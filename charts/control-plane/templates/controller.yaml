@@ -1,9 +1,14 @@
+{{- if ne (include "control-plane.fleetRole" .) "hub" }}
+{{- /* A fleet hub runs none of this: hub.yaml. */}}
 {{- include "control-plane.validate" . }}
 {{- $jobs := include "control-plane.jobsNamespace" . }}
 {{- $urlsFrom := include "control-plane.urlsConfigMap" . }}
 {{- $token := .Values.gitlab.token.existingSecret }}
 {{- $signIn := include "control-plane.signIn" . }}
 {{- $caches := include "control-plane.cachesConfigMap" . }}
+{{- $member := eq (include "control-plane.fleetRole" .) "member" }}
+{{- $fleet := dig "fleet" (dict) .Values.AsMap }}
+{{- $join := and $member (dig "join" "existingSecret" "" $fleet) }}
 {{- $c := dict "root" . "role" "controller" }}
 {{- $v := .Values.controller }}
 apiVersion: apps/v1
@@ -27,10 +32,14 @@ spec:
     metadata:
       labels:
         {{- include "control-plane.podLabels" $c | nindent 8 }}
-      {{- if or $v.podAnnotations $signIn }}
+      {{- if or $v.podAnnotations $signIn $member }}
       annotations:
         {{- with $v.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $member }}
+        # The controller reads the hub's address and keys at start.
+        ci-accelerator.io/fleet-checksum: {{ printf "%s|%s|%s|%s|%s" (dig "hub" "url" "" $fleet) (dig "name" "" $fleet) (dig "hub" "publicKeys" "" $fleet) (dig "hub" "caCert" "" $fleet) (dig "join" "existingSecret" "" $fleet) | sha256sum | trunc 16 }}
         {{- end }}
         {{- if $signIn }}
         # The controller reads its sign-in file at start.
@@ -63,7 +72,10 @@ spec:
             - -tls-dir=/certs
             - -api-listen=:{{ int $v.api.port }}
             - -api-tls-dir=/api-tls
+            {{- if not $member }}
+            # A member has no web: its hub calls the API over the link.
             - -api-allow={{ .Release.Namespace }}/{{ include "control-plane.webName" . }}
+            {{- end }}
             {{- if include "control-plane.router" . }}
             - -api-allow-router={{ .Release.Namespace }}/{{ include "control-plane.routerName" . }}
             - -warm-for={{ mul (int .Values.router.warmDays) 24 }}h
@@ -93,15 +105,34 @@ spec:
             {{- if $signIn }}
             - -sign-in=/sign-in/config/sign-in.json
             {{- end }}
+            {{- if $member }}
+            # A fleet member: the controller dials the hub and serves it its
+            # API over that connection.
+            - -fleet-hub={{ trimSuffix "/" (dig "hub" "url" "" $fleet) }}
+            - -fleet-name={{ dig "name" "" $fleet }}
+            - -fleet-key-file=/fleet/key/key
+            - -fleet-hub-keys-file=/fleet/hub/keys.pem
+            {{- if dig "hub" "caCert" "" $fleet }}
+            - -fleet-hub-ca-file=/fleet/hub/ca.pem
+            {{- end }}
+            {{- if $join }}
+            # Joining with a token: the controller makes the key, keeps it
+            # in this Secret first, then trades the token.
+            - -fleet-join-file=/fleet/join/token
+            - -fleet-key-secret={{ include "control-plane.fleetKeySecret" . }}
+            {{- end }}
+            {{- end }}
             {{- if $caches }}
             - -caches=/caches/{{ .Values.caches.key }}
             - -cache-every={{ default "10m" .Values.caches.every }}
             {{- end }}
           {{- $trustGit := dig "reasons" "trustGitComparison" false .Values.AsMap }}
-          {{- if or $caches $trustGit }}
+          {{- if or $caches $trustGit $member }}
           env:
-            {{- if $caches }}
-            # Where the Secrets with the caches' keys are.
+            {{- if or $caches $member }}
+            # Where the Secrets with the caches' keys are, and where a fleet
+            # member writes the Secrets its hub delivers (and keeps a key it
+            # makes).
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -168,6 +199,19 @@ spec:
               mountPath: /gitlab-urls
               readOnly: true
             {{- end }}
+            {{- if $member }}
+            - name: fleet-key
+              mountPath: /fleet/key
+              readOnly: true
+            - name: fleet-hub
+              mountPath: /fleet/hub
+              readOnly: true
+            {{- if $join }}
+            - name: fleet-join
+              mountPath: /fleet/join
+              readOnly: true
+            {{- end }}
+            {{- end }}
             {{- if $signIn }}
             - name: sign-in
               mountPath: /sign-in/config
@@ -205,6 +249,11 @@ spec:
           secret:
             secretName: {{ $token }}
             defaultMode: 0440
+            {{- if $member }}
+            # A fleet hub may deliver it after the controller started: read
+            # at every use, so it counts once it is there.
+            optional: true
+            {{- end }}
             items:
               - key: {{ default "token" .Values.gitlab.token.key }}
                 path: token
@@ -221,6 +270,32 @@ spec:
             items:
               - key: {{ .Values.gitlab.urlsFrom.key }}
                 path: urls
+        {{- end }}
+        {{- if $member }}
+        - name: fleet-key
+          secret:
+            secretName: {{ include "control-plane.fleetKeySecret" . }}
+            defaultMode: 0440
+            {{- if $join }}
+            # Filled by the controller at its first start: empty before.
+            optional: true
+            {{- end }}
+            items:
+              - key: {{ if dig "key" "existingSecret" "" $fleet }}{{ dig "key" "key" "key" $fleet }}{{ else }}key{{ end }}
+                path: key
+        {{- if $join }}
+        - name: fleet-join
+          secret:
+            secretName: {{ dig "join" "existingSecret" "" $fleet }}
+            defaultMode: 0440
+            optional: true
+            items:
+              - key: {{ dig "join" "key" "token" $fleet }}
+                path: token
+        {{- end }}
+        - name: fleet-hub
+          configMap:
+            name: {{ include "control-plane.controllerName" . }}-fleet
         {{- end }}
         {{- if $signIn }}
         - name: sign-in
@@ -257,3 +332,4 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end }}

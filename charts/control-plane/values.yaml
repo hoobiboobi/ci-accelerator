@@ -108,6 +108,8 @@ signIn:
   #        API): "id:<GitLab user id>" (on the person's GitLab profile
   #        page). Usernames are refused: GitLab gives one that was renamed
   #        or deleted to the next account that takes it
+  #   owners: on a fleet hub (fleet.role hub) instead of admins: who sees
+  #        every cluster and manages the fleet, "id:<GitLab user id>"
   gitlab: []
   # - url: https://gitlab.com/
   #   existingSecret: console-gitlab-oauth
@@ -322,6 +324,66 @@ networkPolicy:
   # ipBlock with the node addresses when the Ingress controller runs on the
   # host network.
   extraFrom: []
+
+# A fleet (experimental: its values and protocol may change between
+# releases): several boxes under one console. A hub is a release of this
+# chart with fleet.role hub (no daemons, controller, web or routers: one
+# process), always a new release in a namespace of its own: a box's
+# release cannot become a hub, or back. Its pod takes controller.*
+# (resources, placement, podLabels, podAnnotations, persistence,
+# logLevel) and web.port; its address is global.console.url (or
+# signIn.url), at the root of its host; networkPolicy.enabled guards its
+# pages as the web's. A box joins it as a member: its controller dials
+# the hub's console address, its own web is not installed and its signIn
+# values are ignored (people sign in at the hub). docs/fleet.md.
+fleet:
+  # -- "" (a box on its own), "hub" or "member".
+  role: ""
+  # -- member: this box's name in the fleet (lower-case letters, digits
+  # and dashes), as registered at the hub.
+  name: ""
+  # -- hub and member: a Secret with the private key (PEM: PKCS#8 or
+  # SEC1; Ed25519 or ECDSA P-256/P-384). `ci-accelerator fleet-keygen
+  # <file>` or `openssl genpkey -algorithm ed25519` make one.
+  key:
+    existingSecret: ""
+    key: key
+  # -- member: a Secret with a join token (under `token`) issued by the
+  # hub, instead of fleet.key: the controller makes the member's key,
+  # keeps it in the Secret `<release>-controller-fleet-key` and trades the
+  # token for its registration. The token works once; the Secret may go
+  # after the member joined.
+  join:
+    existingSecret: ""
+    key: token
+  hub:
+    # -- member: the hub's console address (https://..., the root of its
+    # host, no user or password; plain http only to an in-cluster *.svc
+    # address when joining with a token).
+    url: ""
+    # -- member: the hub's public key(s), PEM. Several while the hub's key
+    # is being replaced.
+    publicKeys: ""
+    # -- member: CA certificate(s) of the hub's address (PEM), when its
+    # certificate is not from a public CA. hub: the same, written into the
+    # values the hub generates for its clusters.
+    caCert: ""
+  # -- hub: a Secret with a bootstrap token (at least 24 characters) for
+  # the management API (/api/v1/fleet/, role owner). A hub needs this or
+  # sign-in. To retire it, unset this and upgrade, then delete the Secret.
+  apiToken:
+    existingSecret: ""
+    key: token
+  # -- hub: a Secret with a key (at least 32 characters, e.g. `openssl
+  # rand -base64 32`) the hub seals the secrets it keeps for its clusters
+  # with (runner tokens, S3 keys entered in "Add a cluster"). Without it
+  # the hub keeps no secrets. Keep it with the hub's backups: they do not
+  # open without it.
+  secretsKey:
+    existingSecret: ""
+    key: key
+  # -- hub: days a removed member's record is kept (its name can be registered again at once).
+  keepRemovedDays: 30
 
 global:
   # The build router, shared with the buildkit chart (the box sets it).

@@ -1,0 +1,265 @@
+{{- if eq (include "control-plane.fleetRole" .) "hub" }}
+{{- include "control-plane.refuseOld" . }}
+{{- include "control-plane.validateFleet" . }}
+{{- include "control-plane.validateSignIn" . }}
+{{- $f := dig "fleet" (dict) .Values.AsMap }}
+{{- $signIn := include "control-plane.signIn" . }}
+{{- $token := dig "apiToken" "existingSecret" "" $f }}
+{{- $secretsKey := dig "secretsKey" "existingSecret" "" $f }}
+{{- $h := dict "root" . "role" "hub" }}
+{{- $v := .Values.controller }}
+{{- $caCert := dig "hub" "caCert" "" $f }}
+# A fleet hub: one console for the boxes that join it. One process (pages,
+# sign-in, the members' connections, the management API) and one writer of
+# its store: SQLite on a ReadWriteOnce volume, so Recreate.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "control-plane.hubName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" $h | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "control-plane.selectorLabels" $h | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- /* The hub's pod settings are the controller's (controller.*), but
+        web.port. */}}
+        {{- include "control-plane.podLabels" (dict "root" . "role" "hub" "from" "controller") | nindent 8 }}
+      annotations:
+        {{- with $v.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $signIn }}
+        # The hub reads its sign-in file at start.
+        ci-accelerator.io/sign-in-checksum: {{ include "control-plane.signInConfig" . | sha256sum | trunc 16 }}
+        {{- end }}
+        {{- with $caCert }}
+        # The hub reads the CA it writes into generated values at start.
+        ci-accelerator.io/fleet-checksum: {{ . | sha256sum | trunc 16 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "control-plane.hubName" . }}
+      # No Kubernetes API access: the hub's members prove themselves with
+      # their keys, people through GitLab.
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hub
+          image: {{ include "control-plane.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - hub
+            - -listen=:{{ int .Values.web.port }}
+            - -data=/data
+            - -key-file=/fleet/key/key
+            {{- if $signIn }}
+            - -sign-in=/sign-in/config/sign-in.json
+            {{- range .Values.signIn.gitlab }}
+            {{- with .url }}
+            - -gitlab-url={{ . }}
+            {{- end }}
+            {{- end }}
+            {{- range .Values.gitlab.urls }}
+            - -gitlab-url={{ . }}
+            {{- end }}
+            {{- end }}
+            {{- if $token }}
+            - -api-token-file=/fleet/api-token/token
+            {{- end }}
+            {{- if $secretsKey }}
+            - -secrets-key-file=/fleet/secrets-key/key
+            {{- end }}
+            {{- if $caCert }}
+            - -ca-cert-file=/fleet/hub/ca.pem
+            {{- end }}
+            - -keep-removed={{ mul (int (dig "keepRemovedDays" 30 $f)) 24 }}h
+            {{- include "control-plane.logArgs" (dict "root" $ "role" $v) | nindent 12 }}
+          env:
+            # The chart version the install commands it generates name.
+            - name: CI_ACCELERATOR_CHART_VERSION
+              value: {{ .Chart.Version | quote }}
+            {{- with include "control-plane.signInURL" . }}
+            - name: CI_ACCELERATOR_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ int .Values.web.port }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with $v.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            - name: fleet-key
+              mountPath: /fleet/key
+              readOnly: true
+            {{- if $token }}
+            - name: api-token
+              mountPath: /fleet/api-token
+              readOnly: true
+            {{- end }}
+            {{- if $secretsKey }}
+            - name: secrets-key
+              mountPath: /fleet/secrets-key
+              readOnly: true
+            {{- end }}
+            {{- if $caCert }}
+            - name: fleet-hub
+              mountPath: /fleet/hub
+              readOnly: true
+            {{- end }}
+            {{- if $signIn }}
+            - name: sign-in
+              mountPath: /sign-in/config
+              readOnly: true
+            - name: sign-in-key
+              mountPath: /sign-in/key
+              readOnly: true
+            {{- range $i, $g := .Values.signIn.gitlab }}
+            - name: sign-in-gitlab-{{ $i }}
+              mountPath: /sign-in/gitlab-{{ $i }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "control-plane.pvcName" . }}
+        - name: tmp
+          emptyDir: {}
+        - name: fleet-key
+          secret:
+            secretName: {{ dig "key" "existingSecret" "" $f }}
+            defaultMode: 0440
+            items:
+              - key: {{ dig "key" "key" "key" $f }}
+                path: key
+        {{- if $token }}
+        - name: api-token
+          secret:
+            secretName: {{ $token }}
+            defaultMode: 0440
+            # Read at every use: deleting the Secret ends the token, and the
+            # hub still starts without it.
+            optional: true
+            items:
+              - key: {{ dig "apiToken" "key" "token" $f }}
+                path: token
+        {{- end }}
+        {{- if $secretsKey }}
+        - name: secrets-key
+          secret:
+            secretName: {{ $secretsKey }}
+            defaultMode: 0440
+            items:
+              - key: {{ dig "secretsKey" "key" "key" $f }}
+                path: key
+        {{- end }}
+        {{- if $caCert }}
+        - name: fleet-hub
+          configMap:
+            name: {{ include "control-plane.hubName" . }}-fleet
+        {{- end }}
+        {{- if $signIn }}
+        - name: sign-in
+          configMap:
+            name: {{ include "control-plane.controllerName" . }}-sign-in
+        - name: sign-in-key
+          secret:
+            secretName: {{ .Values.signIn.sessionKey.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ default "key" .Values.signIn.sessionKey.key }}
+                path: key
+        {{- range $i, $g := .Values.signIn.gitlab }}
+        - name: sign-in-gitlab-{{ $i }}
+          secret:
+            secretName: {{ $g.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: client-id
+                path: client-id
+              - key: client-secret
+                path: client-secret
+        {{- end }}
+        {{- end }}
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+# The hub's console: its pages, its API and the members' connections
+# (WebSocket at /fleet/v1/connect). Put your Ingress in front of it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "control-plane.hubName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" $h | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "control-plane.selectorLabels" $h | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ int .Values.web.port }}
+      targetPort: http
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "control-plane.hubName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" $h | nindent 4 }}
+automountServiceAccountToken: false
+{{- end }}

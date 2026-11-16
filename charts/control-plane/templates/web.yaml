@@ -1,3 +1,5 @@
+{{- if not (include "control-plane.fleetRole" .) }}
+{{- /* A fleet member has no web of its own (the hub shows its pages); a hub is hub.yaml. */}}
 {{- $w := dict "root" . "role" "web" }}
 {{- $v := .Values.web }}
 # The pages. They keep nothing (the controller holds the store and the
@@ -136,3 +138,4 @@ metadata:
   labels:
     {{- include "control-plane.labels" $w | nindent 4 }}
 automountServiceAccountToken: false
+{{- end }}

@@ -105,6 +105,10 @@
               "admins": {
                 "type": "array",
                 "items": { "type": "string", "pattern": "^id:[1-9][0-9]*$" }
+              },
+              "owners": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^id:[1-9][0-9]*$" }
               }
             }
           }
@@ -323,6 +327,41 @@
         "deniedNamespaces": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "deniedComponents": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "extraFrom": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "fleet": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A fleet (experimental): several boxes under one console. role hub: this release is the hub only; role member: this box joins a hub.",
+      "properties": {
+        "role": { "type": "string", "enum": ["", "hub", "member"] },
+        "name": { "type": "string" },
+        "key": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "existingSecret": { "type": "string" }, "key": { "type": "string" } }
+        },
+        "join": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "existingSecret": { "type": "string" }, "key": { "type": "string" } }
+        },
+        "hub": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "url": { "type": "string" }, "publicKeys": { "type": "string" }, "caCert": { "type": "string" } }
+        },
+        "apiToken": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "existingSecret": { "type": "string" }, "key": { "type": "string" } }
+        },
+        "secretsKey": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "existingSecret": { "type": "string" }, "key": { "type": "string" } }
+        },
+        "keepRemovedDays": { "type": "integer", "minimum": 1 }
       }
     },
     "global": { "type": "object" }

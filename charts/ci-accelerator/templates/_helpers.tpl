@@ -114,6 +114,9 @@ subcharts must agree on.
 */}}
 {{- define "ci-accelerator.validate" -}}
 {{- include "ci-accelerator.refuseOld" . }}
+{{- if eq (toString (dig "control-plane" "fleet" "role" "" .Values.AsMap)) "hub" }}
+{{- fail "control-plane.fleet.role=hub: a fleet hub is not a box (no daemons, no runner); install it as a release of its own of the control-plane chart (docs/fleet.md). A box joins a hub with control-plane.fleet.role=member." }}
+{{- end }}
 {{- $runner := index .Values "gitlab-runner" }}
 {{- $jobs := .Values.global.jobs.namespace }}
 {{- if eq $jobs .Release.Namespace }}
@@ -228,7 +231,10 @@ lookup is empty offline, so the check is skipped there.
 {{- $name := $runner.runners.secret }}
 {{- $ns := .Release.Namespace }}
 {{- $secret := lookup "v1" "Secret" $ns $name }}
-{{- if $secret }}
+{{- /* A fleet member's runner Secret is created empty and filled by the
+controller once the hub delivers the token: nothing to check before. */}}
+{{- $waiting := and (eq (toString (dig "control-plane" "fleet" "role" "" .Values.AsMap)) "member") (not (dig "data" nil (default (dict) $secret))) }}
+{{- if and $secret (not $waiting) }}
 {{- $data := default (dict) $secret.data }}
 {{- if not (hasKey $data "runner-registration-token") }}
 {{- fail (printf "Secret %s/%s (gitlab-runner.runners.secret) has no runner-registration-token key. The runner chart mounts it even when empty; add it: kubectl -n %s patch secret %s --type merge -p '{\"data\":{\"runner-registration-token\":\"\"}}' (or set preflight.runnerSecret=false to skip this check)" $ns $name $ns $name) }}

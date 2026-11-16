@@ -1,9 +1,56 @@
+{{- $role := include "control-plane.fleetRole" . }}
+{{- if eq $role "hub" }}
+{{- $hub := include "control-plane.hubName" . }}
+{{- $u := include "control-plane.signInURL" . }}
+A fleet hub (docs/fleet.md): one console for the boxes that join it. The
+Deployment {{ $hub }} serves the pages, the management API
+({{ $u }}/api/v1/fleet/) and the members' connections
+({{ $u }}/fleet/v1/connect, a WebSocket) on its ClusterIP Service
+{{ $hub }}, port {{ int .Values.web.port }}: put it behind your Ingress or gateway, with TLS and
+WebSockets, at {{ $u }}.
+{{- if include "control-plane.signIn" . }}
+
+People sign in through GitLab at {{ $u }}/; the owners
+(signIn.gitlab[].owners) see and manage the whole fleet. Each GitLab's
+OAuth application must list this redirect URI:
+{{- range .Values.signIn.gitlab }}
+{{- if .url }}
+  {{ .url }}: {{ $u }}/auth/callback/{{ sha256sum .url | trunc 6 }}
+{{- else }}
+  {{ first $.Values.gitlab.urls }}: {{ $u }}/auth/callback/<id> (the hub's log
+  prints it: kubectl -n {{ $.Release.Namespace }} logs deploy/{{ $hub }} | grep redirect_uri)
+{{- end }}
+{{- end }}
+{{- else }}
+
+Sign-in is off: the hub shows every cluster's pages to whoever reaches it,
+and changes come only through the API with the token in
+fleet.apiToken.existingSecret.
+{{- end }}
+
+Add a cluster at Members, "Add a cluster" (or POST {{ $u }}/api/v1/fleet/members):
+the hub hands out the box's values and its install commands. The hub's
+store is on the PersistentVolumeClaim {{ include "control-plane.pvcName" . }}
+{{- if not .Values.controller.persistence.existingClaim }}, which is kept when the release is removed{{ end }}.
+{{- else }}
 The controller reads the daemons behind {{ include "control-plane.discover" . }}
 {{- with include "control-plane.jobsNamespace" . }} and the CI job pods in {{ . }}{{ end }}.
 {{- $web := include "control-plane.webName" . }}
 {{- $ctrl := include "control-plane.controllerName" . }}
 
-{{- if include "control-plane.signIn" . }}
+{{- if eq $role "member" }}
+{{- $f := dig "fleet" (dict) .Values.AsMap }}
+{{- $hubURL := trimSuffix "/" (dig "hub" "url" "" $f) }}
+
+A fleet member: the controller dials the hub at {{ $hubURL }} as
+{{ dig "name" "" $f }} and serves it its API over that connection. This release
+installs no web: the cluster's pages are at the hub,
+{{ $hubURL }}/m/{{ dig "name" "" $f }}/, behind the hub's sign-in. The Secrets the
+hub delivers once the cluster is connected (fleet-runner-token,
+fleet-gitlab-token, fleet-s3-cache) are created here empty and filled
+then: a runner that takes its token from one waits until it is there.
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ $ctrl }} | grep fleet:
+{{- else if include "control-plane.signIn" . }}
 {{- $u := include "control-plane.signInURL" . }}
 
 People sign in to the console through GitLab at {{ $u }}/ and see the
@@ -36,18 +83,24 @@ signIn.enabled). To look at it:
 then open http://localhost:{{ int .Values.web.port }}/ (Pipelines, Insights, Builds,
 Images, Nodes) or http://localhost:{{ int .Values.web.port }}/api/v1/builds?limit=10.
 {{- end }}
-{{- if and (not .Values.gitlab.token.existingSecret) (not (include "control-plane.signIn" .)) }}
+{{- if and (not .Values.gitlab.token.existingSecret) (not (include "control-plane.signIn" .)) (ne $role "member") }}
 
 With a GitLab token that can read the projects' jobs
 (gitlab.token.existingSecret), the console also shows how long jobs waited
 for a runner, settles "files or node" by comparing commits, and shows the
 end of a job's log on request.
 {{- end }}
+{{- if eq $role "member" }}
+
+The controller (deploy/{{ $ctrl }}) keeps the cluster's builds; its store
+is on the PersistentVolumeClaim {{ include "control-plane.pvcName" . }}
+{{- else }}
 
 The controller (deploy/{{ $ctrl }}: the store, the sessions, GitLab)
 serves its API on the Service {{ $ctrl }} (HTTPS) to the web, {{ int .Values.web.replicas }} pods
 (deploy/{{ $web }}: the console's pages). The store is on the
 PersistentVolumeClaim {{ include "control-plane.pvcName" . }}
+{{- end }}
 {{- if not .Values.controller.persistence.existingClaim }}, which is kept when the release is removed{{ end }}.
 {{- if include "control-plane.router" . }}
 {{- $r := include "control-plane.routerName" . }}
@@ -57,4 +110,5 @@ daemons at tcp://{{ $r }}.{{ .Release.Namespace }}.svc:1234 (the runner's
 BUILDKIT_REMOTE_ADDR), and the daemons' certificate must name that Service
 (the buildkit chart adds it with global.router.enabled and
 global.router.service, or scripts/buildkit-certs.sh --router).
+{{- end }}
 {{- end }}

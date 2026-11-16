@@ -1,0 +1,700 @@
+suite: a fleet hub and a fleet member
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+    "apps/v1/Deployment":
+      gvr:
+        group: apps
+        version: v1
+        resource: deployments
+      namespaced: true
+tests:
+  # A hub is one process: no daemons to reach, no controller, web or router.
+  - it: renders a hub as its own Deployment, Service and ServiceAccount
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+    asserts:
+      - hasDocuments: { count: 3 }
+      - isKind: { of: Deployment }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: c-web }
+        documentIndex: 0
+      - equal: { path: spec.strategy.type, value: Recreate }
+        documentIndex: 0
+      - equal: { path: spec.template.spec.automountServiceAccountToken, value: false }
+        documentIndex: 0
+      - equal:
+          path: spec.template.spec.containers[0].args
+          value:
+            - hub
+            - -listen=:8080
+            - -data=/data
+            - -key-file=/fleet/key/key
+            - -api-token-file=/fleet/api-token/token
+            - -keep-removed=720h
+            - -log-level=info
+            - -log-format=json
+        documentIndex: 0
+      - contains: { path: spec.template.spec.volumes, content: { name: fleet-key, secret: { secretName: hub-key, defaultMode: 0440, items: [{ key: key, path: key }] } } }
+        documentIndex: 0
+      - isKind: { of: Service }
+        documentIndex: 1
+      - equal: { path: spec.selector, value: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: hub } }
+        documentIndex: 1
+  - it: renders nothing of a box on a hub
+    templates: [controller.yaml, web.yaml, router.yaml, tokenreview.yaml, certificate.yaml, serviceaccount.yaml, rbac.yaml, fleet-secrets.yaml]
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+    asserts:
+      - hasDocuments: { count: 0 }
+  - it: keeps the web Service off a hub (the hub's Service has its name)
+    template: service.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+    asserts:
+      - hasDocuments: { count: 0 }
+  - it: renders no hub for a box
+    template: hub.yaml
+    asserts:
+      - hasDocuments: { count: 0 }
+  - it: a hub needs its key
+    template: hub.yaml
+    set:
+      fleet.role: hub
+    asserts:
+      - failedTemplate: { errorPattern: "a fleet hub needs fleet.key.existingSecret" }
+  - it: a hub's people are owners, not admins
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      signIn.enabled: true
+      signIn.url: https://hub.example.com
+      signIn.sessionKey.existingSecret: session
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: oauth, admins: ["id:1"] }]
+    asserts:
+      - failedTemplate: { errorPattern: "admins is replaced by owners" }
+  - it: gives a hub's owners the rights of admins in the sign-in file
+    template: signin-configmap.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      signIn.enabled: true
+      signIn.url: https://hub.example.com
+      signIn.sessionKey.existingSecret: session
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: oauth, owners: ["id:7"] }]
+    asserts:
+      - matchRegex: { path: 'data["sign-in.json"]', pattern: '"admins":\["id:7"\]' }
+  - it: refuses an unknown role
+    template: controller.yaml
+    set:
+      fleet.role: leader
+    asserts:
+      - failedTemplate: { errorPattern: "value must be one of '', 'hub', 'member'" }
+
+  # A member: the controller dials the hub; no web of its own.
+  - it: makes the controller of a member dial the hub
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://hub.example.com/
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA\n-----END PUBLIC KEY-----\n"
+      fleet.hub.caCert: "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n"
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-hub=https://hub.example.com" }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-name=prod-eu" }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-key-file=/fleet/key/key" }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-hub-keys-file=/fleet/hub/keys.pem" }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-hub-ca-file=/fleet/hub/ca.pem" }
+      - contains: { path: spec.template.spec.volumes, content: { name: fleet-hub, configMap: { name: c-controller-fleet } } }
+      - exists: { path: 'spec.template.metadata.annotations["ci-accelerator.io/fleet-checksum"]' }
+  - it: installs no web on a member
+    templates: [web.yaml]
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - hasDocuments: { count: 0 }
+  - it: writes the hub's keys into a ConfigMap, no secret
+    template: fleet-configmap.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\nk\n-----END PUBLIC KEY-----\n"
+    asserts:
+      - equal: { path: 'data["keys.pem"]', value: "-----BEGIN PUBLIC KEY-----\nk\n-----END PUBLIC KEY-----\n" }
+      - notExists: { path: 'data["ca.pem"]' }
+  - it: a member needs the hub's address, keys and its own name
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.key.existingSecret: member-key
+      fleet.name: prod-eu
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "needs fleet.hub.url" }
+  - it: a member's name is lower case
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.key.existingSecret: member-key
+      fleet.name: Prod_EU
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "needs fleet.name" }
+  - it: a member needs the hub's public key in PEM
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.key.existingSecret: member-key
+      fleet.name: prod-eu
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "ssh-ed25519 AAAA"
+    asserts:
+      - failedTemplate: { errorPattern: "needs fleet.hub.publicKeys" }
+  # Joining with a token: the controller makes and keeps its key.
+  - it: makes a member that joins with a token keep the key it makes
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\nk\n-----END PUBLIC KEY-----\n"
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-join-file=/fleet/join/token" }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-key-secret=c-controller-fleet-key" }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-key-file=/fleet/key/key" }
+      - contains: { path: spec.template.spec.volumes, content: { name: fleet-key, secret: { secretName: c-controller-fleet-key, defaultMode: 0440, optional: true, items: [{ key: key, path: key }] } } }
+      - contains: { path: spec.template.spec.volumes, content: { name: fleet-join, secret: { secretName: prod-eu-join, defaultMode: 0440, optional: true, items: [{ key: token, path: token }] } } }
+      - contains: { path: 'spec.template.spec.containers[0].volumeMounts', content: { name: fleet-join, mountPath: /fleet/join, readOnly: true } }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: POD_NAMESPACE, valueFrom: { fieldRef: { fieldPath: metadata.namespace } } } }
+  # Creating Secrets would let a taken-over controller mint a token of any
+  # ServiceAccount of the namespace: the chart creates them, empty.
+  - it: lets a joining member read and change its key Secret and the delivered ones, and create none
+    template: rbac.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\nk\n-----END PUBLIC KEY-----\n"
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal: { path: metadata.name, value: c-controller-fleet }
+      - equal: { path: rules, value: [{ apiGroups: [""], resources: [secrets], resourceNames: [fleet-runner-token, fleet-gitlab-token, fleet-s3-cache, c-controller-fleet-key], verbs: [get, update] }] }
+  - it: lets a member with its own key write only the delivered Secrets
+    template: rbac.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\nk\n-----END PUBLIC KEY-----\n"
+    documentSelector: { path: kind, value: Role }
+    asserts:
+      - equal: { path: rules, value: [{ apiGroups: [""], resources: [secrets], resourceNames: [fleet-runner-token, fleet-gitlab-token, fleet-s3-cache], verbs: [get, update] }] }
+  - it: binds the member's Role to the controller's ServiceAccount
+    template: rbac.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\nk\n-----END PUBLIC KEY-----\n"
+    documentSelector: { path: kind, value: RoleBinding }
+    asserts:
+      - equal: { path: roleRef, value: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: c-controller-fleet } }
+      - equal: { path: subjects, value: [{ kind: ServiceAccount, name: c-controller, namespace: ci-accelerator }] }
+  - it: creates the Secrets a joining member fills, empty and kept
+    template: fleet-secrets.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\nk\n-----END PUBLIC KEY-----\n"
+    asserts:
+      - hasDocuments: { count: 4 }
+      - isKind: { of: Secret }
+      - equal: { path: type, value: Opaque }
+      - notExists: { path: data }
+      - notExists: { path: stringData }
+      - equal: { path: 'metadata.annotations["helm.sh/resource-policy"]', value: keep }
+      - equal: { path: metadata.name, value: fleet-runner-token }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: c-controller-fleet-key }
+        documentIndex: 3
+  - it: leaves a Secret of that name made outside the release as it is
+    template: fleet-secrets.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\nk\n-----END PUBLIC KEY-----\n"
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: { name: fleet-runner-token, namespace: ci-accelerator }
+          data: { runner-token: Z2xydC14 }
+        - apiVersion: v1
+          kind: Secret
+          metadata:
+            name: fleet-s3-cache
+            namespace: ci-accelerator
+            annotations: { meta.helm.sh/release-name: c, meta.helm.sh/release-namespace: ci-accelerator }
+    asserts:
+      - hasDocuments: { count: 2 }
+      - equal: { path: metadata.name, value: fleet-gitlab-token }
+        documentIndex: 0
+      - equal: { path: metadata.name, value: fleet-s3-cache }
+        documentIndex: 1
+  - it: creates no Secret for a box on its own
+    template: fleet-secrets.yaml
+    asserts:
+      - hasDocuments: { count: 0 }
+  - it: gives a box on its own no Secret rights
+    template: rbac.yaml
+    asserts:
+      - hasDocuments: { count: 0 }
+  - it: gives the hub its secrets key and the CA for generated values
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+      fleet.secretsKey.existingSecret: hub-secrets
+      fleet.hub.caCert: "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n"
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-secrets-key-file=/fleet/secrets-key/key" }
+      - equal: { path: 'spec.template.spec.containers[0].env[0].name', value: CI_ACCELERATOR_CHART_VERSION }
+      - matchRegex: { path: 'spec.template.spec.containers[0].env[0].value', pattern: '^[0-9]+\.[0-9]+\.[0-9]+' }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-ca-cert-file=/fleet/hub/ca.pem" }
+      - contains: { path: spec.template.spec.volumes, content: { name: secrets-key, secret: { secretName: hub-secrets, defaultMode: 0440, items: [{ key: key, path: key }] } } }
+      - contains: { path: spec.template.spec.volumes, content: { name: fleet-hub, configMap: { name: c-web-fleet } } }
+  - it: writes the hub's CA into a ConfigMap for generated values
+    template: fleet-configmap.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+      fleet.hub.caCert: "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n"
+    asserts:
+      - equal: { path: metadata.name, value: c-web-fleet }
+      - equal: { path: data, value: { ca.pem: "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n" } }
+  - it: refuses a member with neither a key nor a join token
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "needs fleet.join.existingSecret .a Secret with a join token" }
+  - it: a box on its own has no fleet arguments
+    template: controller.yaml
+    asserts:
+      - notContains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-key-file=/fleet/key/key" }
+
+  # The hub's pod is hardened as the controller's and the web's.
+  - it: runs the hub as non-root, read-only, without capabilities or a token
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+    asserts:
+      - equal: { path: spec.template.spec.securityContext.runAsNonRoot, value: true }
+        documentIndex: 0
+      - equal: { path: spec.template.spec.securityContext.seccompProfile.type, value: RuntimeDefault }
+        documentIndex: 0
+      - equal:
+          path: spec.template.spec.containers[0].securityContext
+          value: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+        documentIndex: 0
+      - contains: { path: spec.template.spec.volumes, content: { name: data, persistentVolumeClaim: { claimName: c-controller-data } } }
+        documentIndex: 0
+      - contains: { path: 'spec.template.spec.containers[0].volumeMounts', content: { name: fleet-key, mountPath: /fleet/key, readOnly: true } }
+        documentIndex: 0
+      - contains: { path: 'spec.template.spec.containers[0].volumeMounts', content: { name: api-token, mountPath: /fleet/api-token, readOnly: true } }
+        documentIndex: 0
+      - isKind: { of: ServiceAccount }
+        documentIndex: 2
+      - equal: { path: automountServiceAccountToken, value: false }
+        documentIndex: 2
+  # The hub reads the token at every use: a deleted Secret ends the token
+  # and does not keep the hub from starting.
+  - it: mounts the hub's API token as optional
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains: { path: spec.template.spec.volumes, content: { name: api-token, secret: { secretName: hub-token, defaultMode: 0440, optional: true, items: [{ key: token, path: token }] } } }
+  - it: gives the hub sign-in with its GitLab and the mounts
+    template: hub.yaml
+    values: [values/fleet-hub.yaml]
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-sign-in=/sign-in/config/sign-in.json" }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-gitlab-url=https://gitlab.example.com/" }
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-api-token-file=/fleet/api-token/token" }
+      - contains: { path: 'spec.template.spec.containers[0].env', content: { name: CI_ACCELERATOR_PUBLIC_URL, value: "https://hub.example.com" } }
+      - contains: { path: 'spec.template.spec.containers[0].volumeMounts', content: { name: sign-in, mountPath: /sign-in/config, readOnly: true } }
+      - contains: { path: 'spec.template.spec.containers[0].volumeMounts', content: { name: sign-in-key, mountPath: /sign-in/key, readOnly: true } }
+      - contains: { path: 'spec.template.spec.containers[0].volumeMounts', content: { name: sign-in-gitlab-0, mountPath: /sign-in/gitlab-0, readOnly: true } }
+      - contains: { path: spec.template.spec.volumes, content: { name: sign-in, configMap: { name: c-controller-sign-in } } }
+      - exists: { path: 'spec.template.metadata.annotations["ci-accelerator.io/sign-in-checksum"]' }
+  # A new CA must reach the values the hub generates: a rollout.
+  - it: restarts the hub when the CA it hands out changes
+    template: hub.yaml
+    values: [values/fleet-hub.yaml]
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - exists: { path: 'spec.template.metadata.annotations["ci-accelerator.io/fleet-checksum"]' }
+  - it: has no CA checksum on a hub without a CA
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - notExists: { path: 'spec.template.metadata.annotations["ci-accelerator.io/fleet-checksum"]' }
+  - it: gives the hub's pod the controller's podLabels
+    template: hub.yaml
+    values: [values/fleet-hub.yaml]
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - equal: { path: spec.template.metadata.labels.team, value: ci }
+      - equal: { path: 'spec.template.metadata.labels["app.kubernetes.io/component"]', value: hub }
+  - it: a hub with sign-in needs the GitLab people sign in with
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      gitlab.urls: []
+      signIn.enabled: true
+      signIn.url: https://hub.example.com
+      signIn.sessionKey.existingSecret: session
+      signIn.gitlab: [{ existingSecret: oauth, owners: ["id:7"] }]
+    asserts:
+      - failedTemplate: { errorPattern: "a fleet hub with sign-in needs the GitLab people sign in with" }
+  - it: takes the GitLab of a hub's sign-in from gitlab.urls
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      signIn.enabled: true
+      signIn.url: https://hub.example.com
+      signIn.sessionKey.existingSecret: session
+      signIn.gitlab: [{ existingSecret: oauth, owners: ["id:7"] }]
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-gitlab-url=https://gitlab.example.com/" }
+  - it: a hub needs its console address
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+    asserts:
+      - failedTemplate: { errorPattern: "a fleet hub needs its console address" }
+  - it: a hub is served at the root of its host
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://example.com/hub/
+    asserts:
+      - failedTemplate: { errorPattern: "at the root of its host" }
+  - it: a hub needs sign-in or an API token
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      global.console.url: https://hub.example.com
+    asserts:
+      - failedTemplate: { errorPattern: "a fleet hub needs a way in for its owners" }
+  - it: refuses a member's values on a hub
+    template: hub.yaml
+    set:
+      fleet.role: hub
+      fleet.key.existingSecret: hub-key
+      fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+      fleet.join.existingSecret: fleet-join
+    asserts:
+      - failedTemplate: { errorPattern: "are a member's values" }
+  - it: refuses a hub's values on a member
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+      fleet.secretsKey.existingSecret: hub-secrets
+    asserts:
+      - failedTemplate: { errorPattern: "are a hub's values" }
+  - it: refuses a member with a key and a join token
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "not both" }
+  - it: refuses owners on a box
+    template: controller.yaml
+    set:
+      signIn.enabled: true
+      signIn.url: https://ci.example.com
+      signIn.sessionKey.existingSecret: session
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: oauth, owners: ["id:7"] }]
+    asserts:
+      - failedTemplate: { errorPattern: "owners is for a fleet hub" }
+  # The join token goes out before the pinned link exists.
+  - it: refuses a plain http hub address outside the cluster for a join token
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: http://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "with a join token needs an https fleet.hub.url" }
+  - it: refuses a plain http hub address that only looks like a Service for a join token
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: http://hub.svcexample.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "with a join token needs an https fleet.hub.url" }
+  - it: takes a plain http hub address with a registered key
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: http://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-hub=http://hub.example.com" }
+  - it: takes a plain http hub address of a Service with a cluster domain for a join token
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: http://hub-web.fleet.svc.cluster.example:8080
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-hub=http://hub-web.fleet.svc.cluster.example:8080" }
+  - it: takes a plain http hub address on a loopback IP for a join token
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: http://127.0.0.2:8080
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-hub=http://127.0.0.2:8080" }
+  - it: takes a plain http hub address inside the cluster for a join token
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.join.existingSecret: prod-eu-join
+      fleet.hub.url: http://hub-web.fleet.svc:8080
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-fleet-hub=http://hub-web.fleet.svc:8080" }
+  - it: refuses a user and password in the hub address
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://bob:secret@hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "without user or password" }
+  - it: refuses a path in the hub address
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: https://example.com/hub
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "at the root of its host" }
+  - it: refuses a hub address that is not http(s)
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.name: prod-eu
+      fleet.key.existingSecret: member-key
+      fleet.hub.url: ftp://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "needs fleet.hub.url" }
+  - it: a member's name has at most 40 characters
+    template: controller.yaml
+    set:
+      fleet.role: member
+      fleet.key.existingSecret: member-key
+      fleet.name: a234567890123456789012345678901234567890b
+      fleet.hub.url: https://hub.example.com
+      fleet.hub.publicKeys: "-----BEGIN PUBLIC KEY-----\n"
+    asserts:
+      - failedTemplate: { errorPattern: "at most 40" }
+  - it: writes the CA of the hub's address for a member
+    template: fleet-configmap.yaml
+    values: [values/fleet-member.yaml]
+    asserts:
+      - equal: { path: 'data["ca.pem"]', value: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n" }
+  # A box with sign-in that joins keeps its values: the member ignores them
+  # (people sign in at the hub), and the hub's GitLab token is taken.
+  - it: ignores sign-in on a member
+    templates: [controller.yaml, signin-configmap.yaml]
+    values: [values/fleet-member.yaml]
+    set:
+      signIn.enabled: true
+      signIn.url: https://ci.example.com
+      signIn.sessionKey.existingSecret: session
+      signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: oauth, admins: ["id:1"] }]
+    asserts:
+      - notContains: { path: 'spec.template.spec.containers[0].args', content: "-sign-in=/sign-in/config/sign-in.json" }
+        template: controller.yaml
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-gitlab-token-file=/gitlab/token" }
+        template: controller.yaml
+      - hasDocuments: { count: 0 }
+        template: signin-configmap.yaml
+  - it: gives a member's controller no web caller
+    template: controller.yaml
+    values: [values/fleet-member.yaml]
+    asserts:
+      - notContains: { path: 'spec.template.spec.containers[0].args', content: "-api-allow=ci-accelerator/c-web" }
+  - it: gives a box's controller its web as caller
+    template: controller.yaml
+    asserts:
+      - contains: { path: 'spec.template.spec.containers[0].args', content: "-api-allow=ci-accelerator/c-web" }
+  # networkPolicy.enabled on a hub guards its pages as the web's.
+  - it: renders the console's NetworkPolicy for a hub's pods
+    template: networkpolicy.yaml
+    values: [values/fleet-hub.yaml]
+    asserts:
+      - hasDocuments: { count: 1 }
+      - equal: { path: metadata.name, value: c-web }
+      - equal: { path: spec.podSelector.matchLabels, value: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: hub } }
+      - equal:
+          path: spec.ingress[0].from[1].podSelector.matchExpressions
+          value: [{ key: ci-accelerator.io/component, operator: NotIn, values: [buildkit] }]
+  - it: renders no web policy on a member, and its controller admits no web
+    template: networkpolicy.yaml
+    values: [values/fleet-member.yaml]
+    asserts:
+      - hasDocuments: { count: 1 }
+      - equal: { path: metadata.name, value: c-controller }
+      - equal: { path: spec.ingress, value: [] }
+  - it: lets only the routers call a member's controller
+    template: networkpolicy.yaml
+    values: [values/fleet-member.yaml]
+    set:
+      router.enabled: true
+      jobs.namespace: ci-jobs
+    documentSelector: { path: metadata.name, value: c-controller }
+    asserts:
+      - equal: { path: 'spec.ingress[0].from', value: [{ podSelector: { matchLabels: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: router } } }] }
+  # A box's release cannot become a hub, or back: the Deployment of the
+  # web's name has another, immutable selector, and the hub would open
+  # the box's store.
+  - it: refuses to turn a box's release into a hub
+    template: hub.yaml
+    values: [values/fleet-hub.yaml]
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: c-controller
+            namespace: fleet
+            labels: { app.kubernetes.io/instance: c, app.kubernetes.io/component: controller }
+    release:
+      namespace: fleet
+    asserts:
+      - failedTemplate: { errorPattern: "release c is a box .* a fleet hub is a release of its own" }
+  - it: refuses to turn a hub's release into a box
+    template: controller.yaml
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: c-web
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: c, app.kubernetes.io/component: hub }
+    asserts:
+      - failedTemplate: { errorPattern: "release c is a fleet hub; it cannot become a box" }
+  - it: upgrades a hub in place
+    template: hub.yaml
+    values: [values/fleet-hub.yaml]
+    kubernetesProvider:
+      objects:
+        - apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: c-web
+            namespace: ci-accelerator
+            labels: { app.kubernetes.io/instance: c, app.kubernetes.io/component: hub }
+    documentSelector: { path: kind, value: Deployment }
+    asserts:
+      - equal: { path: metadata.name, value: c-web }

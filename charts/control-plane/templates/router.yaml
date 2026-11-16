@@ -1,3 +1,5 @@
+{{- if ne (include "control-plane.fleetRole" .) "hub" }}
+{{- /* A fleet hub runs none of this: hub.yaml. */}}
 {{- if include "control-plane.router" . }}
 {{- $r := dict "root" . "role" "router" }}
 {{- $v := .Values.router }}
@@ -261,5 +263,6 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "control-plane.routerName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}
 {{- end }}
