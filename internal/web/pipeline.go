@@ -431,6 +431,52 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, created ti
 	return waterfall(title, wjobs, start), wjobs[crit].Name, cp, drawn, nil
 }
 
+// LegendItem is one swatch of the timeline's legend: a bar class and
+// what it means.
+type LegendItem struct{ Class, Label string }
+
+// wfLegend is every class a timeline's bars may have, in the legend's
+// order (the pipeline's own bar needs none: its row names it).
+var wfLegend = []LegendItem{
+	{"queue", "Waiting for a runner"},
+	{"runner", "Runner & checkout"},
+	{"podwait", "The job's pod starting"},
+	{"xfer", "Send context"},
+	{"image", "Base image"},
+	{"built", "Built"},
+	{"cached", "From cache"},
+	{"received", "Waiting for another job"},
+	{"running", "Running now"},
+	{"failed", "Failed"},
+	{"canceled", "Canceled"},
+	{"push", "Export & push"},
+	{"after", "After the build"},
+	{"job", "Job without an image build"},
+	{"job-failed", "Job failed"},
+	{"job-running", "Job running, no finished build yet"},
+}
+
+// Legend is the timeline's legend: the classes its bars have, folded
+// rows included (they show when opened), and no other.
+func (w *Waterfall) Legend() []LegendItem {
+	if w == nil {
+		return nil
+	}
+	on := map[string]bool{}
+	for _, r := range w.Rows {
+		for _, b := range r.Bars {
+			on[b.Class] = true
+		}
+	}
+	var out []LegendItem
+	for _, it := range wfLegend {
+		if on[it.Class] {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 func jobsWithBuilds(rows []store.BuildRow) map[uint64]bool {
 	out := map[uint64]bool{}
 	for _, b := range rows {

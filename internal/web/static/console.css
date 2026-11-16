@@ -65,7 +65,9 @@ kbd { font-family: var(--mono); font-size: 11px; line-height: 1; padding: 3px 5p
 .search kbd { margin-left: auto; }
 .navgrp { margin-top: 10px; display: grid; gap: 1px; }
 
-.nav a[aria-current="page"] { background: var(--sel); color: var(--ink); }
+/* The current page and tab are marked by a shape in the accent colour, not
+   only by --sel, which is close to the sidebar and the panel. */
+.nav a[aria-current="page"] { background: var(--sel); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
 .nav a[aria-current="page"] .i { color: var(--ink); }
 .nav .count { font-size: 11px; color: var(--side-ink-3); font-variant-numeric: tabular-nums; }
 .wdot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
@@ -92,7 +94,7 @@ kbd { font-family: var(--mono); font-size: 11px; line-height: 1; padding: 3px 5p
 .mclu > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mclu > summary::-webkit-details-marker { display: none; }
 .mclu-menu { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; min-width: 200px; max-height: 70dvh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 4px; box-shadow: var(--shadow); }
-.mclu-menu .sbtn { height: 32px; } .mclu-menu a.sbtn { text-decoration: none; } .mclu-menu a.sbtn[aria-current="true"] { background: var(--sel); color: var(--ink); }
+.mclu-menu .sbtn { height: 32px; } .mclu-menu a.sbtn { text-decoration: none; } .mclu-menu a.sbtn[aria-current="true"] { background: var(--sel); color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
 .mclu-menu .hint { font-size: 11px; color: var(--ink-3); padding: 4px 8px 2px; }
 .mclu-menu .count { font-size: 11px; color: var(--ink-3); }
 .mclu-menu form { margin: 0; }
@@ -103,7 +105,7 @@ kbd { font-family: var(--mono); font-size: 11px; line-height: 1; padding: 3px 5p
 
 .seg { display: inline-flex; padding: 2px; border-radius: 7px; background: var(--panel); border: 1px solid var(--line); gap: 2px; }
 .seg button, .seg a { padding: 3px 9px; border-radius: 5px; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
-.seg button[aria-pressed="true"], .seg a[aria-pressed="true"] { background: var(--sel); color: var(--ink); }
+.seg button[aria-pressed="true"], .seg a[aria-pressed="true"] { background: var(--sel); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
 .seg button:hover, .seg a:hover { color: var(--ink); }
 
 .lb { padding: 6px 6px 24px; outline: none; }
@@ -203,7 +205,8 @@ h2.h .btn { margin-left: auto; height: 24px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
 .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex: none; }
-.c-runner { background: color-mix(in oklab, var(--runner) 38%, var(--panel)); }
+/* Runner time is faint on purpose; a dashed outline keeps it visible. */
+.c-runner { background: color-mix(in oklab, var(--runner) 38%, var(--panel)); border: 1px dashed var(--ink-3); }
 .c-xfer { background: var(--xfer); } .c-push { background: color-mix(in oklab, var(--xfer) 62%, var(--panel)); } .c-image { background: var(--image); }
 .c-built { background: var(--built); } .c-cached { background: var(--cached); } .c-received { background: var(--received); }
 .c-failed { background: var(--del); } .c-canceled { background: var(--image); }
@@ -474,7 +477,7 @@ pre.logb { margin: 0; font-family: var(--mono); font-size: 11px; line-height: 1.
   .bbar { display: flex; position: fixed; z-index: 30; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     gap: 2px; padding: 5px; border-radius: 14px; background: color-mix(in oklab, var(--panel) 88%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--line-2); box-shadow: var(--shadow); }
   .bbar button, .bbar a { display: grid; justify-items: center; gap: 2px; padding: 6px 6px; border-radius: 10px; font-size: 10.5px; color: var(--ink-3); min-width: 56px; }
-  .bbar button[aria-current="page"], .bbar a[aria-current="page"] { background: var(--sel); color: var(--ink); }
+  .bbar button[aria-current="page"], .bbar a[aria-current="page"] { background: var(--sel); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
   .bbar button .i, .bbar a .i { width: 18px; height: 18px; }
 
   .axis { grid-template-columns: 110px minmax(0, 1fr); }
@@ -632,7 +635,7 @@ body.signin-page { background: var(--bg); color: var(--ink); min-height: 100vh; 
 .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; margin-left: auto; }
 .seg a { padding: 4px 10px; font-size: 12.5px; color: var(--ink-3); }
 .seg a + a { border-left: 1px solid var(--line-2); }
-.seg a[aria-current="true"], .seg a[aria-selected="true"] { background: var(--sel); color: var(--ink); font-weight: 500; }
+.seg a[aria-current="true"], .seg a[aria-selected="true"] { background: var(--sel); color: var(--ink); font-weight: 500; box-shadow: inset 0 -2px 0 var(--accent); }
 .ml { margin-left: auto; }
 .box:has(> .boxh), .box:has(> .blist), .box.fold { padding: 0; }
 .inpipe .brow .bp { visibility: hidden; }
@@ -658,6 +661,10 @@ a.boxh:hover { background: var(--hover); }
 .strip .sq { width: 8px; height: 18px; border-radius: 2px; background: var(--sc); flex: none; }
 .strip .sq.st-cached { opacity: .35; }
 .strip .sq.st-unclear { background: repeating-linear-gradient(135deg, var(--sc) 0 2px, transparent 2px 4px); box-shadow: inset 0 0 0 1px var(--sc); }
+/* Failed is told apart by a shape, not only by its colour (close to
+   "change" and "farm"): a cross in the square, a ring round the dot,
+   cross-hatching in a week, a dashed bar on a pipeline lane. */
+.strip .sq.st-failed { background: linear-gradient(to top right, transparent calc(50% - .8px), var(--panel) calc(50% - .8px) calc(50% + .8px), transparent calc(50% + .8px)) center / 5px 8px no-repeat, linear-gradient(to bottom right, transparent calc(50% - .8px), var(--panel) calc(50% - .8px) calc(50% + .8px), transparent calc(50% + .8px)) center / 5px 8px no-repeat, var(--sc); }
 .strip .sq:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .legend5 { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; }
 
@@ -709,6 +716,7 @@ a.boxh:hover { background: var(--hover); }
 .chart .dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--sc); }
 .chart .dot.st-cached { opacity: .45; }
 .chart .dot.st-unclear { background: var(--panel); box-shadow: inset 0 0 0 2px var(--sc); border-radius: 2px; transform: rotate(45deg); }
+.chart .dot.st-failed { box-shadow: 0 0 0 1.5px var(--panel), 0 0 0 3px var(--sc); }
 .chart .dot:hover { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 1; }
 .chart .cy { position: absolute; left: 10px; font-size: 11px; color: var(--ink-3); transform: translateY(-50%); }
 .chart .cy.top { top: 14px; transform: none; }
@@ -721,6 +729,7 @@ a.boxh:hover { background: var(--hover); }
 .weeks .wcol i { display: block; background: var(--sc); flex: none; }
 .weeks .wcol i.st-cached { opacity: .35; }
 .weeks .wcol i.st-unclear { background: repeating-linear-gradient(135deg, var(--sc) 0 2px, transparent 2px 4px); }
+.weeks .wcol i.st-failed { background: repeating-linear-gradient(45deg, var(--sc) 0 1.5px, transparent 1.5px 4px), repeating-linear-gradient(135deg, var(--sc) 0 1.5px, transparent 1.5px 4px); box-shadow: inset 0 0 0 1px var(--sc); }
 .weeks .wcol:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .weeks .cx { position: absolute; bottom: 4px; font-size: 11px; color: var(--ink-3); }
 .weeks .cx.l { left: 14px; } .weeks .cx.r { right: 14px; }
@@ -865,6 +874,21 @@ a.boxh:hover { background: var(--hover); }
 .jw-job { --sc: color-mix(in oklab, var(--ink-3) 75%, var(--panel)); } .jw-failed { --sc: var(--del); } .jw-allowed { --sc: var(--warn); }
 .jw-canceled { --sc: var(--line-2); } .jw-running { --sc: var(--accent); }
 .pg-tr .j.st-cached { --sc: color-mix(in oklab, var(--cached) 70%, var(--panel)); }
+.pg-tr .j.jw-failed, .pg-tr .j.st-failed, .pg-key i.jw-failed { background: repeating-linear-gradient(90deg, var(--sc) 0 4px, transparent 4px 6px); border-radius: 1px; }
+.pg-tr .j.jw-canceled, .pg-key i.jw-canceled { background: transparent; box-shadow: inset 0 0 0 1px var(--ink-3); }
+/* a stage with more jobs side by side than rows: one bar, the whole 24px row a link */
+.pg-lane.agg .pg-tr { height: 24px; background: none; }
+.pg-agg { position: absolute; inset: 0; display: block; border-radius: 3px; background: color-mix(in oklab, var(--ink) 4%, var(--panel)); color: var(--ink-2); text-decoration: none; overflow: hidden; }
+.pg-agg:hover, .pg-agg:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.pg-agg .ab { position: absolute; top: 5px; height: 14px; min-width: 2px; border-radius: 3px; background: color-mix(in oklab, var(--ink-3) 75%, var(--panel)); }
+.pg-agg.has-failed .ab { background: color-mix(in oklab, var(--ink-3) 45%, var(--panel)); box-shadow: inset 0 0 0 1.5px var(--del); }
+.pg-agg .at { position: absolute; top: 0; height: 24px; display: flex; align-items: center; font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 0; }
+.pg-agg .at.r { justify-content: flex-end; }
+.pg-agg .at > span[aria-hidden] { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pg-agg .at.in > span[aria-hidden] { padding: 0 5px; border-radius: 3px; line-height: 16px; background: var(--panel); }
+.pg-agg .at .i { width: 10px; height: 10px; vertical-align: -1px; color: var(--del); }
+.pg-agg .af { color: var(--del); font-weight: 600; }
+.sub .pjobs b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 .pg-key { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; margin-left: auto; font-size: 11.5px; color: var(--ink-3); align-self: end; }
 .pg-key > span { display: inline-flex; align-items: center; gap: 5px; }
 .pg-key i { width: 14px; height: 6px; border-radius: 2px; background: var(--sc); display: inline-block; }
@@ -892,6 +916,8 @@ a.boxh:hover { background: var(--hover); }
 .cmp thead th { border-top: 0; color: var(--ink-3); font-weight: 500; }
 .cmp tbody th { color: var(--ink-3); font-weight: 400; white-space: nowrap; }
 .cmp tr.dif td { font-weight: 600; }
+.cmp td.dt .muted { font-weight: 400; } .cmp td.dt .pct { font-size: 11.5px; }
+.cmp td.num, .cmp th.num { text-align: right; }
 .cmp tr.dif th { color: var(--ink); }
 .cmp .diff { margin-top: 4px; }
 .cmpdiff .gap { color: var(--ink-3); }
@@ -1128,7 +1154,7 @@ pre.frag { margin: 0; padding: 10px 12px; background: var(--log-bg); color: var(
 .dl.sphl.broken { --rowbg: color-mix(in oklab, var(--warn) 10%, var(--panel)); }
 .dr .spmk { margin: 0 6px 0 0; text-decoration: none; }
 .drtabs { justify-self: start; }
-.drtabs button[aria-selected="true"] { background: var(--sel); color: var(--ink); font-weight: 500; }
+.drtabs button[aria-selected="true"] { background: var(--sel); color: var(--ink); font-weight: 500; box-shadow: inset 0 -2px 0 var(--accent); }
 .drtabs .spmk { width: auto; height: auto; background: none; margin-left: 2px; font-size: 10px; }
 .spdr { display: grid; gap: 8px; }
 .spdr h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
@@ -1173,5 +1199,8 @@ td.nowrap { white-space: nowrap; }
 .cactions form.inline { display: inline; }
 .btn.pri { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.pri:hover { background: color-mix(in oklab, var(--accent) 88%, var(--accent-ink)); color: var(--accent-ink); }
+.box.danger { border-color: color-mix(in oklab, var(--del) 45%, var(--line)); }
+.btn.danger { color: var(--del); border-color: color-mix(in oklab, var(--del) 45%, var(--line-2)); }
+.btn.danger:hover { background: color-mix(in oklab, var(--del) 10%, var(--panel)); }
 .tright { margin-left: auto; }
 pre.code { margin: 0; overflow-x: auto; font-size: 12px; line-height: 1.5; white-space: pre; }

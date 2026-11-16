@@ -59,6 +59,11 @@ workflow copies them into the GitHub release.
   oldest builds at the first hourly retention after the upgrade (the
   images' daily figures stay); set `retention.storeShare: 0` to keep the
   old behaviour.
+- Hub: scripts that post the hub's page forms (not the API) now send
+  `confirm=yes` to revoke an API token, change or take away a role, or
+  replace an unused join token, and `name=<cluster>` to remove a cluster;
+  without them the hub answers with its confirmation page and changes
+  nothing. The management API is unchanged.
 
 ### Security
 
@@ -197,6 +202,50 @@ workflow copies them into the GitHub release.
 ### Changed
 
 - The upgrade test starts from 0.6.0. Nothing changes for a user.
+- Hub: removing a cluster on its page takes its name typed, in a block of
+  its own that says what is lost; revoking an API token, changing or
+  taking away a role, and a new join token that voids an unused one are
+  asked once more on a confirmation page (no JavaScript needed; the API is
+  unchanged).
+- Hub: a cluster's page says when its store was replaced, with the exact
+  date and a link to the audit; the Members row no longer warns for seven
+  days. The hub's addresses of a cluster's pages carry its store's mark
+  (`/m/<name>.<mark>/`): a build address of a replaced store answers "This
+  build is gone" instead of opening another build; addresses without a
+  mark work as before.
+- Hub: a cluster's page lists the last five link events the hub saw
+  (connections refused and why, links closed), kept in the hub's memory
+  since it started.
+- Console: the compare page shows every step time difference from 0.1 s,
+  with its share of the earlier build's time; large ones (at least 1 s and
+  20 %, or 30 s) are bold and coloured, small ones muted. The builds feed
+  keeps hiding small differences.
+- Console: a running build's forecast adds up what its steps still to run
+  took in the reference build ("about N left, from K of M remaining
+  steps"), so cache hits that differ from last time no longer skew it. A
+  step whose text changes every pipeline (a build argument such as a
+  pipeline id) is matched by its place in the Dockerfile and its
+  instruction, marked "by place". No time is given while fewer than 3 of 4
+  remaining steps have an earlier run, and the page says which ones. The
+  reference skips other images' builds once the job's image is known.
+- Console: a failed build no longer differs from a rebuild by colour
+  alone: a cross in the strip square, a ring on the chart dot,
+  cross-hatching in the weekly bars and a dashed bar on pipeline lanes.
+- Console: the runner and checkout part of a bar has a dashed outline, a
+  canceled job on a pipeline card is a hollow outlined bar (with its own
+  legend entry), and the current page and tab carry an accent bar or
+  underline (WCAG 1.4.11 contrast in both themes).
+- Console: on a pipeline card, a stage with more than three jobs side by
+  side is one bar from its first start to its last end, with its jobs
+  counted in words ("12 jobs · 4 rebuilt, 8 from cache · ✕ 1 failed") and
+  the whole row a link to the pipeline; job bars no longer lie on top of
+  each other.
+- Console: the pipelines list has a "Failed only" filter
+  (`status=failed`, kept across pages); the cards no longer repeat the
+  runner-wait figures (the hatching stays; the figures are on the
+  pipeline's page). On a pipeline's page the jobs and their time move into
+  the subtitle, and the timeline's legend lists exactly what its bars
+  show, "After the build" and "Job failed" included.
 - Controller: new value `retention.storeShare` (default 70 % of
   `controller.persistence.size`, passed as `CI_ACCELERATOR_MAX_STORE_MIB`
   or `-max-store-mib`): above it the oldest builds are deleted before

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -28,7 +29,12 @@ type PipelinesView struct {
 	// BadDates: a custom period's dates could not be read; Backwards: its
 	// end is before its start.
 	BadDates, Backwards bool
-	// Filtered: a search or a period narrows the list.
+	// Failed: only pipelines GitLab says failed (status=failed).
+	Failed bool
+	// Scanned: Failed only read this many pipelines for the page and
+	// stopped before the oldest; Older reads on.
+	Scanned int
+	// Filtered: a search, a period or Failed narrows the list.
 	Filtered bool
 	Cards    []PipeCard
 	Older    string
@@ -71,11 +77,32 @@ var pipeStates = map[string]PipeState{
 	"manual":   {"manual", "Manual", "job"},
 }
 
-// Lane is one stage of a pipeline: its jobs in up to laneRows rows.
+// Lane is one stage of a pipeline: its jobs in up to laneRows rows, or,
+// when more of them ran side by side, one bar for the stage (Agg).
 type Lane struct {
 	Stage string
 	Rows  int
 	Jobs  []LaneJob
+	Agg   *LaneAgg
+}
+
+// LaneAgg is a stage whose jobs ran more than laneRows side by side: one
+// bar from its first job's start to its last job's end, with its jobs
+// counted in words. The whole row opens the pipeline, which lists them.
+type LaneAgg struct {
+	L, W string // the bar, percent of the axis
+	// Text counts the jobs ("12 jobs · 4 rebuilt, 8 from cache"); Failed
+	// is said after it, with a mark.
+	Text   string
+	Failed int
+	// Title says it all: the stage, the counts, when on the axis.
+	Title string
+	// The words sit after the bar (LabelL, percent from the left) or
+	// before it (LabelR, from the right), up to the row's edge; In: on
+	// the bar, there being no room either side.
+	LabelL, LabelR string
+	In             bool
+	URL            string
 }
 
 // LaneJob is one job on a lane: its wait for a runner (Q) and its run
@@ -90,7 +117,8 @@ type LaneJob struct {
 // longWait is a wait for a runner worth counting.
 const longWait = 10 * time.Second
 
-// laneRows bounds the rows of a lane: parallel jobs beyond it share rows.
+// laneRows bounds the rows of a lane: a stage with more jobs side by side
+// is one bar (LaneAgg), not bars drawn over each other.
 const laneRows = 3
 
 // pipePage is how many pipelines a page lists.
@@ -150,7 +178,59 @@ func pipeFilter(q url.Values, now time.Time, v *PipelinesView, pq *store.PipeQue
 		}
 	}
 	v.Backwards = !pq.Since.IsZero() && !pq.Until.IsZero() && !pq.Until.After(pq.Since)
-	v.Filtered = v.Q != "" || !pq.Since.IsZero() || !pq.Until.IsZero()
+	v.Failed = q.Get("status") == "failed"
+	v.Filtered = v.Q != "" || !pq.Since.IsZero() || !pq.Until.IsZero() || v.Failed
+}
+
+// failedChunk is how many pipelines Failed only reads at a time, and
+// failedScan how many at most for one page: the store keeps a status per
+// pipeline but no index on it, and a page is read in one request.
+const (
+	failedChunk = 200
+	failedScan  = 1000
+)
+
+// pipeList reads a page of pipelines, newest first, and where the next
+// page begins (nil: no older pipeline). With failed, only the pipelines
+// GitLab says failed: read failedChunk at a time, up to failedScan; then
+// the next page begins after the last one read (scanned says how many).
+func (s *Server) pipeList(ctx context.Context, pq store.PipeQuery, failed bool) (list []store.PipeRow, next *store.PipeRow, scanned int, err error) {
+	if !failed {
+		pq.Limit = pipePage + 1 // one more than a page: whether an older one exists
+		if list, err = s.data.PipelineList(ctx, pq); err != nil {
+			return nil, nil, 0, err
+		}
+		if len(list) > pipePage {
+			list = list[:pipePage]
+			next = &list[pipePage-1]
+		}
+		return list, next, 0, nil
+	}
+	pq.Limit = failedChunk
+	for {
+		rows, err := s.data.PipelineList(ctx, pq)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		for i := range rows {
+			if rows[i].Status != "failed" {
+				continue
+			}
+			if len(list) == pipePage {
+				return list, &list[pipePage-1], 0, nil
+			}
+			list = append(list, rows[i])
+		}
+		scanned += len(rows)
+		if len(rows) < failedChunk {
+			return list, nil, 0, nil
+		}
+		last := rows[len(rows)-1]
+		if scanned >= failedScan {
+			return list, &last, scanned, nil
+		}
+		pq.Before, pq.BeforeID = last.Created, last.ID
+	}
 }
 
 // pipeLink is the pipelines page with the view's filters and extra.
@@ -163,6 +243,9 @@ func pipeLink(v *PipelinesView, extra url.Values) string {
 	}
 	if v.Mine {
 		u.Set("mine", "1")
+	}
+	if v.Failed {
+		u.Set("status", "failed")
 	}
 	for k, vals := range extra {
 		u[k] = vals
@@ -183,8 +266,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	sh.Title = "Pipelines"
 	q := r.URL.Query()
 	v := &PipelinesView{Branch: q.Get("branch"), Mine: q.Get("mine") == "1", CanMine: sh.Viewer != nil}
-	// One more than a page: whether an older pipeline exists.
-	pq := store.PipeQuery{Project: sh.Project.ProjectKey, Ref: v.Branch, Limit: pipePage + 1}
+	pq := store.PipeQuery{Project: sh.Project.ProjectKey, Ref: v.Branch}
 	pipeFilter(q, inZone(s.now(), zone(r)), v, &pq)
 	if sh.Project.ID == 0 {
 		v.Shell = sh
@@ -210,7 +292,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	for _, b := range branches {
 		v.Branches = append(v.Branches, Option{Value: b, Label: b, On: b == v.Branch})
 	}
-	list, err := s.data.PipelineList(ctx, pq)
+	list, next, scanned, err := s.pipeList(ctx, pq, v.Failed)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -221,7 +303,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	v.NoAPI = api == nil
 	if api != nil {
 		var wg sync.WaitGroup
-		for _, p := range list[:min(len(list), pipePage)] {
+		for _, p := range list {
 			if store.Finished(p.Status) && !p.APIAt.IsZero() {
 				continue
 			}
@@ -238,15 +320,12 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 			}(p)
 		}
 		wg.Wait()
-		if list, err = s.data.PipelineList(ctx, pq); err != nil {
+		if list, next, scanned, err = s.pipeList(ctx, pq, v.Failed); err != nil {
 			s.fail(w, err)
 			return
 		}
 	}
-	more := len(list) > pipePage
-	if more {
-		list = list[:pipePage]
-	}
+	v.Scanned = scanned
 	ids := make([]uint64, len(list))
 	for i, p := range list {
 		ids[i] = p.ID
@@ -264,9 +343,8 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	for _, p := range list {
 		v.Cards = append(v.Cards, s.pipeCard(p, jobs[p.ID], builds[p.ID], zone(r)))
 	}
-	if more {
-		last := list[len(list)-1]
-		v.Older = pipeLink(v, url.Values{"before": {strconv.FormatInt(last.Created.UnixMilli(), 10)}, "bid": {strconv.FormatUint(last.ID, 10)}})
+	if next != nil {
+		v.Older = pipeLink(v, url.Values{"before": {strconv.FormatInt(next.Created.UnixMilli(), 10)}, "bid": {strconv.FormatUint(next.ID, 10)}})
 	}
 	v.Newest = pipeLink(v, nil)
 	v.Shell = sh
@@ -320,6 +398,7 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 		j          store.JobInfo
 		q, s, e    time.Time
 		class, why string
+		kind       string // what a stage's bar counts it as (laneKinds)
 	}
 	var all []placed
 	var origin, end time.Time
@@ -381,16 +460,32 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 			// ended, as its page shows.
 			st := rowStatus(bs[0])
 			pl.class, pl.why = "st-"+st.Key, st.Label
+			switch {
+			case isCanceled(st):
+				pl.kind = "canceled"
+			case st.Key == "failed", st.Key == "running", st.Key == "cached":
+				pl.kind = st.Key
+			default:
+				pl.kind = "rebuilt"
+			}
+			// Its image built, the job may still have failed after it, as
+			// GitLab says.
+			if j.Status == "failed" {
+				pl.kind = "failed"
+			}
+			if pl.kind == "failed" && j.AllowFailure {
+				pl.kind = "allowed"
+			}
 		} else {
 			switch {
 			case j.Status == "failed" && j.AllowFailure:
-				pl.class, pl.why = "jw-allowed", "allowed to fail"
+				pl.class, pl.why, pl.kind = "jw-allowed", "allowed to fail", "allowed"
 			case j.Status == "failed":
-				pl.class, pl.why = "jw-failed", "failed"
+				pl.class, pl.why, pl.kind = "jw-failed", "failed", "failed"
 			case j.Status == "canceled":
-				pl.class, pl.why = "jw-canceled", "canceled"
+				pl.class, pl.why, pl.kind = "jw-canceled", "canceled", "canceled"
 			case j.Finished.IsZero():
-				pl.class, pl.why = "jw-running", "running"
+				pl.class, pl.why, pl.kind = "jw-running", "running", "running"
 			case j.Status == "":
 				pl.class, pl.why = "jw-job", "ran"
 			default:
@@ -448,11 +543,17 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 		if lane.Stage == "" {
 			lane.Stage = "jobs"
 		}
-		var rowEnd []time.Time
+		var mine []placed
 		for _, pl := range all {
-			if pl.j.Stage != st {
-				continue
+			if pl.j.Stage == st {
+				mine = append(mine, pl)
 			}
+		}
+		// Each job in the first row free when it began to wait (in that
+		// order, as few rows as ever ran side by side).
+		var rowEnd []time.Time
+		rows := make([]int, len(mine))
+		for k, pl := range mine {
 			row := -1
 			for i, t := range rowEnd {
 				if !pl.q.Before(t) {
@@ -461,20 +562,24 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 				}
 			}
 			if row < 0 {
-				if len(rowEnd) < laneRows {
-					rowEnd = append(rowEnd, time.Time{})
-					row = len(rowEnd) - 1
-				} else {
-					// Every row is taken: the one that frees first.
-					row = 0
-					for i, t := range rowEnd {
-						if t.Before(rowEnd[row]) {
-							row = i
-						}
-					}
-				}
+				rowEnd = append(rowEnd, time.Time{})
+				row = len(rowEnd) - 1
 			}
-			rowEnd[row] = pl.e
+			rowEnd[row], rows[k] = pl.e, row
+		}
+		if len(rowEnd) > laneRows {
+			// More side by side than rows: bars would cover each other.
+			agg := make([]aggJob, len(mine))
+			for k, pl := range mine {
+				agg[k] = aggJob{s: pl.s, e: pl.e, kind: pl.kind}
+			}
+			lane.Rows = 1
+			lane.Agg = laneAgg(lane.Stage, agg, origin, span, c.URL)
+			c.Lanes = append(c.Lanes, lane)
+			continue
+		}
+		for k, pl := range mine {
+			row := rows[k]
 			title := pl.j.Name + " · " + pl.why
 			if pl.j.Waited > 0 {
 				title += " · waited " + duration(pl.j.Waited) + " for a runner"
@@ -497,6 +602,84 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 		c.Lanes = append(c.Lanes, lane)
 	}
 	return c
+}
+
+// aggJob is a job of a stage drawn as one bar: when it ran and what it
+// counts as (laneKinds).
+type aggJob struct {
+	s, e time.Time
+	kind string
+}
+
+// laneKinds are what a stage's bar counts its jobs as, in the order it
+// says them; "failed" comes last, with a mark. A job of no kind (it
+// passed, or GitLab has not said) is counted in the jobs only.
+var laneKinds = []struct{ kind, word string }{
+	{"rebuilt", "rebuilt"}, {"cached", "from cache"}, {"running", "running"},
+	{"canceled", "canceled"}, {"allowed", "allowed to fail"},
+}
+
+// laneAgg is one bar for a stage whose jobs ran more than laneRows side
+// by side: from the first start to the last end, its jobs counted.
+func laneAgg(stage string, jobs []aggJob, origin time.Time, span time.Duration, url string) *LaneAgg {
+	a := &LaneAgg{URL: url}
+	var from, to time.Time
+	n := map[string]int{}
+	for i, j := range jobs {
+		if i == 0 || j.s.Before(from) {
+			from = j.s
+		}
+		if i == 0 || j.e.After(to) {
+			to = j.e
+		}
+		n[j.kind]++
+	}
+	if to.Before(from) {
+		to = from
+	}
+	a.Failed = n["failed"]
+	l := pctOf(from.Sub(origin), span)
+	w := max(0.35, pctOf(to.Sub(from), span))
+	a.L = strconv.FormatFloat(l, 'f', 2, 64)
+	a.W = fitWidth(a.L, strconv.FormatFloat(w, 'f', 2, 64))
+	w, _ = strconv.ParseFloat(a.W, 64)
+	// Images first ("4 rebuilt, 8 from cache"), then how jobs stand.
+	var imgs, rest []string
+	for _, k := range laneKinds {
+		if n[k.kind] == 0 {
+			continue
+		}
+		part := fmt.Sprintf("%d %s", n[k.kind], k.word)
+		if k.kind == "rebuilt" || k.kind == "cached" {
+			imgs = append(imgs, part)
+		} else {
+			rest = append(rest, part)
+		}
+	}
+	parts := []string{fmt.Sprintf("%d job%s", len(jobs), plural(len(jobs)))}
+	if len(imgs) > 0 {
+		parts = append(parts, strings.Join(imgs, ", "))
+	}
+	parts = append(parts, rest...)
+	a.Text = strings.Join(parts, " · ")
+	said := strings.Join(append(append([]string{fmt.Sprintf("%d job%s", len(jobs), plural(len(jobs)))}, imgs...), rest...), ", ")
+	if a.Failed > 0 {
+		said += fmt.Sprintf(", %d failed", a.Failed)
+	}
+	a.Title = fmt.Sprintf("%s: %s, from %s to %s. Open the pipeline for every job.", stage, said,
+		clockLabel(max(from.Sub(origin), 0)), clockLabel(max(to.Sub(origin), 0)))
+	// The words after the bar, else before it, else on it.
+	const room = 30.0 // percent of the axis the words may take
+	switch end := l + w; {
+	case end <= 100-room:
+		a.LabelL = strconv.FormatFloat(end+0.8, 'f', 2, 64)
+	case l >= room:
+		a.LabelR = strconv.FormatFloat(100-l+0.8, 'f', 2, 64)
+	default:
+		a.In = true
+		a.LabelL = strconv.FormatFloat(l+0.8, 'f', 2, 64)
+	}
+	return a
 }
 
 // runningBuild: one of a job's stored builds has not completed.

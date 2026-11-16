@@ -7,9 +7,11 @@ out takes the router with it: set `control-plane.enabled=false` and
 Service (their own node's daemon). Five sections:
 
 - **Pipelines** (the home page): each pipeline's jobs by stage on a time
-  axis, with how long each waited for a runner and ran, searchable by
-  pipeline number, commit, title, branch, author or job name within a
-  period (24 hours, 7 or 30 days, or dates). A pipeline opens into a
+  axis, with how long each waited for a runner and ran (a stage with more
+  than three jobs side by side is one bar with its jobs counted),
+  searchable by pipeline number, commit, title, branch, author or job name
+  within a period (24 hours, 7 or 30 days, or dates), and "Failed only".
+  A pipeline opens into a
   waterfall of every job, and its image builds into stages and steps.
 - **Insights:** why images were rebuilt, the reasons ranked by the build
   time they cost, with the build farm's share of the rebuild time and,
@@ -70,7 +72,12 @@ farm, unclear or failed. A build's page starts with one sentence, then:
 
 **While a build runs**, its job's page follows it: what runs now and,
 against the last build of the image that ran the same step, how long the
-rest likely takes; the node's CPU and memory, the builds on its daemon and
+rest likely takes (what the steps still to run took then, steps that ran
+side by side counted once; a step whose text changes every pipeline, such
+as one with the pipeline id in a build argument, is matched by its place
+in the Dockerfile and its instruction, marked "by place"; no time while
+fewer than 3 of 4 of those steps ran before, and the page names them);
+the node's CPU and memory, the builds on its daemon and
 the CPU pressure; every step on a timeline that grows, each opening to its
 last 8 lines (the running one opens by itself, a finished one folds). The
 pipeline's timeline opens a running job into its stages so far. The job
@@ -80,7 +87,9 @@ done.
 
 **Compare** any two builds of an image side by side
 (`/builds/<id>/compare`): time, commit, node, build arguments, the
-Dockerfiles' differing lines and every step's state and time. The Compare
+Dockerfiles' differing lines and every step's state and time, with the
+difference of every step that ran in both from 0.1 s and its share of the
+earlier time (at least 1 s and 20 %, or 30 s, in bold). The Compare
 button on a build's page (key `x`), "Compare two builds" on the builds
 list, "compare two" on an image's page and Ctrl+K lead there.
 
