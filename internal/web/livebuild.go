@@ -1,11 +1,14 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,6 +79,10 @@ type liveRef struct {
 	wall  time.Duration
 	when  time.Time
 	steps map[string]refStep // by key and name
+	// byKey is each step by its key alone (its place in the Dockerfile),
+	// for a step whose text differs from the last time (a build argument
+	// expanded in it); a key two steps share is left out.
+	byKey map[string]refPlace
 }
 
 type refStep struct {
@@ -83,60 +90,155 @@ type refStep struct {
 	built    bool
 }
 
+type refPlace struct {
+	name string
+	step refStep
+}
+
 func liveKey(key, name string) string { return key + "\x00" + name }
 
+// instruction is a step's Dockerfile instruction: "RUN", "COPY", ...
+func instruction(name string) string {
+	f := strings.Fields(name)
+	if len(f) == 0 {
+		return ""
+	}
+	return strings.ToUpper(f[0])
+}
+
 func refOf(b *history.Build) *liveRef {
-	r := &liveRef{wall: b.Completed.Sub(b.Started), when: b.Started, steps: map[string]refStep{}}
+	r := &liveRef{wall: b.Completed.Sub(b.Started), when: b.Started, steps: map[string]refStep{}, byKey: map[string]refPlace{}}
+	twice := map[string]bool{}
 	for _, s := range b.Steps {
 		if s.Started.IsZero() || s.Completed.Before(s.Started) {
 			continue
 		}
-		r.steps[liveKey(s.Key, s.Name)] = refStep{off: s.Started.Sub(b.Started), dur: s.Duration(), built: s.State == history.Built}
+		rs := refStep{off: s.Started.Sub(b.Started), dur: s.Duration(), built: s.State == history.Built}
+		r.steps[liveKey(s.Key, s.Name)] = rs
+		if s.Key == "" {
+			continue
+		}
+		if _, ok := r.byKey[s.Key]; ok {
+			twice[s.Key] = true
+		}
+		r.byKey[s.Key] = refPlace{name: s.Name, step: rs}
+	}
+	for k := range twice {
+		delete(r.byKey, k)
 	}
 	return r
 }
+
+// match finds a step of the running build in the reference: by its key
+// and text, or else by its key and instruction (byPlace), when its text
+// changed since (a build argument expanded in it, as a pipeline's id).
+func (r *liveRef) match(key, name string) (rs refStep, byPlace, ok bool) {
+	if r == nil {
+		return refStep{}, false, false
+	}
+	if rs, ok := r.steps[liveKey(key, name)]; ok {
+		return rs, false, true
+	}
+	p, ok := r.byKey[key]
+	if key == "" || !ok || instruction(name) == "" || instruction(p.name) != instruction(name) {
+		return refStep{}, false, false
+	}
+	return p.step, true, true
+}
+
+// forecastShare is how many of the steps still to run must have a time
+// in the reference before the page says how long the rest takes: 3 of 4.
+const forecastNum, forecastDen = 3, 4
 
 // prediction is where a running build stands against its reference.
 type prediction struct {
 	// delta is how much later than the reference the build is (negative:
 	// earlier), at the end of its latest step that both executed; known
 	// says there is one.
-	delta     time.Duration
-	known     bool
-	by        history.LiveStep // that step
-	byRef     refStep
-	total     time.Duration // the build's likely length
-	remaining time.Duration
+	delta time.Duration
+	known bool
+	by    history.LiveStep // that step
+	byRef refStep
+	// todo is how many steps are still to run (waiting or running); sure
+	// how many of them the reference executed; unknown the keys (or
+	// names) of the others.
+	todo, sure int
+	unknown    []string
+	// says: enough of the steps still to run have a time to say how long
+	// the rest takes (forecastShare).
+	says bool
+	// left is how long the steps still to run took in the reference, less
+	// what a running one already ran; steps that ran side by side then
+	// count once. total is the build's likely length: elapsed + left.
+	elapsed, left, total time.Duration
+	spans                [][2]time.Duration // the reference's time those steps took, merged
 }
 
-// predict compares a running build with the reference: the build is as
-// far ahead as at the end of its latest step both executed, and the rest
-// takes as long as it did then; a running step that already took longer
-// than the last time pushes the end out by as much.
+// predict compares a running build with the reference. The rest takes
+// what its steps still to run took in the reference: each such step's
+// time then (a running one's less what it already ran), steps that ran
+// side by side counted once. A step from the cache now that ran then, or
+// the reverse, no longer moves the figure. Fewer than 3 of 4 steps to run
+// with a time then: the page says no figure (says false).
 func predict(steps []history.LiveStep, started, now time.Time, ref *liveRef) prediction {
-	var p prediction
+	p := prediction{elapsed: max(now.Sub(started), 0)}
+	var spans [][2]time.Duration
 	for _, s := range steps {
-		r, ok := ref.steps[liveKey(s.Key, s.Name)]
-		if !ok || !r.built || s.State != history.LiveBuilt || s.Completed.IsZero() {
-			continue
-		}
-		if !p.known || s.Completed.After(p.by.Completed) {
-			p.known, p.by, p.byRef = true, s, r
-			p.delta = s.Completed.Sub(started) - (r.off + r.dur)
+		r, _, ok := ref.match(s.Key, s.Name)
+		ok = ok && r.built
+		switch s.State {
+		case history.LiveBuilt:
+			if !ok || s.Completed.IsZero() {
+				continue
+			}
+			if !p.known || s.Completed.After(p.by.Completed) {
+				p.known, p.by, p.byRef = true, s, r
+				p.delta = s.Completed.Sub(started) - (r.off + r.dur)
+			}
+		case history.LiveWaiting, history.LiveRunning:
+			p.todo++
+			if !ok {
+				p.unknown = append(p.unknown, cmp.Or(s.Key, stepNameShort(s.Name)))
+				continue
+			}
+			p.sure++
+			from, to := r.off, r.off+r.dur
+			if s.State == history.LiveRunning && !s.Started.IsZero() {
+				from += min(max(now.Sub(s.Started), 0), r.dur)
+			}
+			if to > from {
+				spans = append(spans, [2]time.Duration{from, to})
+			}
 		}
 	}
-	p.total = ref.wall + p.delta
-	var over time.Duration
-	for _, s := range steps {
-		r, ok := ref.steps[liveKey(s.Key, s.Name)]
-		if s.State != history.LiveRunning || !ok || !r.built {
+	sort.Slice(spans, func(i, j int) bool { return spans[i][0] < spans[j][0] })
+	for _, sp := range spans {
+		if n := len(p.spans); n > 0 && sp[0] <= p.spans[n-1][1] {
+			p.spans[n-1][1] = max(p.spans[n-1][1], sp[1])
 			continue
 		}
-		over = max(over, now.Sub(s.Started)-r.dur)
+		p.spans = append(p.spans, sp)
 	}
-	p.total += max(over, 0)
-	p.remaining = p.total - now.Sub(started)
+	for _, sp := range p.spans {
+		p.left += sp[1] - sp[0]
+	}
+	p.says = p.todo > 0 && forecastDen*p.sure >= forecastNum*p.todo
+	p.total = p.elapsed + p.left
 	return p
+}
+
+// place is where a step that started at off in the reference likely
+// starts in the running build: now, plus the reference's time of the
+// steps still to run that lie before it.
+func (p prediction) place(off time.Duration) time.Duration {
+	at := p.elapsed
+	for _, sp := range p.spans {
+		if sp[0] >= off {
+			break
+		}
+		at += min(sp[1], off) - sp[0]
+	}
+	return at
 }
 
 // refCache keeps the reference of each running build's image for a while:
@@ -155,15 +257,19 @@ const refFor = time.Minute
 
 // liveReference finds the build a running one is compared with: of the
 // project's last builds of the same target, those that succeeded, the
-// job of the same name first; the first that executed the step running
-// now (or, with nothing running, shares half the steps).
+// job of the same name first; when the job's last stored build names its
+// image, only builds of that image (or naming none); the first that
+// executed the step running now (or, with nothing running, shares half
+// the steps). A build that executed it under the same text wins over one
+// that matches it only by its place in the Dockerfile.
 func (s *Server) liveReference(ctx context.Context, instance string, project uint64, lb *collector.LiveBuild, jobName string) *liveRef {
 	running := ""
+	var runStep history.LiveStep
 	keys := map[string]bool{}
 	for _, st := range lb.Steps {
 		keys[liveKey(st.Key, st.Name)] = true
 		if st.State == history.LiveRunning && running == "" {
-			running = liveKey(st.Key, st.Name)
+			running, runStep = liveKey(st.Key, st.Name), st
 		}
 	}
 	ck := fmt.Sprintf("%s/%d/%s/%s/%s", instance, project, lb.Target, jobName, running)
@@ -178,16 +284,28 @@ func (s *Server) liveReference(ctx context.Context, instance string, project uin
 	if err != nil {
 		return nil
 	}
+	// The running build names its image only once it is done: the image
+	// is the one the job's last stored build pushed, when it named one.
+	var image []string
+	for _, r := range rows {
+		if jobName != "" && r.JobName == jobName && !r.Completed.IsZero() && len(r.Images) > 0 {
+			image = history.Repositories(r.Images)
+			break
+		}
+	}
 	var cands []store.BuildRow
 	for pass := 0; pass < 2; pass++ {
 		for _, r := range rows {
 			if r.Completed.IsZero() || r.Error != "" || r.Ref == lb.Ref || (r.JobName == jobName) != (pass == 0) {
 				continue
 			}
+			if len(image) > 0 && len(r.Images) > 0 && !sharesAny(image, history.Repositories(r.Images)) {
+				continue // another image's build
+			}
 			cands = append(cands, r)
 		}
 	}
-	var found *liveRef
+	var found, byPlace *liveRef
 	for i, r := range cands {
 		if i == 4 { // each candidate is a build read whole
 			break
@@ -198,15 +316,29 @@ func (s *Server) liveReference(ctx context.Context, instance string, project uin
 		}
 		ref := refOf(page.Build)
 		shared := 0
-		for k := range keys {
-			if _, ok := ref.steps[k]; ok {
+		for _, st := range lb.Steps {
+			if _, _, ok := ref.match(st.Key, st.Name); ok {
 				shared++
 			}
 		}
-		if running != "" && ref.steps[running].built || running == "" && 2*shared >= len(keys) && shared > 0 {
+		if running != "" {
+			rs, place, ok := ref.match(runStep.Key, runStep.Name)
+			if ok && rs.built && !place {
+				found = ref
+				break
+			}
+			if ok && rs.built && byPlace == nil {
+				byPlace = ref
+			}
+			continue
+		}
+		if 2*shared >= len(keys) && shared > 0 {
 			found = ref
 			break
 		}
+	}
+	if found == nil {
+		found = byPlace
 	}
 	s.refs.mu.Lock()
 	if s.refs.m == nil || len(s.refs.m) > 500 {
@@ -215,6 +347,16 @@ func (s *Server) liveReference(ctx context.Context, instance string, project uin
 	s.refs.m[ck] = refEntry{found, s.now()}
 	s.refs.mu.Unlock()
 	return found
+}
+
+// sharesAny says two lists have an element in common.
+func sharesAny(a, b []string) bool {
+	for _, x := range a {
+		if slices.Contains(b, x) {
+			return true
+		}
+	}
+	return false
 }
 
 // liveBuildsOf are the running builds that say they are for a job.
@@ -310,25 +452,24 @@ func (s *Server) liveView(ctx context.Context, lb *collector.LiveBuild, instance
 	default:
 		sb.WriteString("Preparing: reading the build definition and sending the context")
 	}
-	if !lb.Done && ref != nil && v.Total > 0 {
+	if !lb.Done && ref != nil && p.todo > 0 {
 		switch {
-		case p.remaining > 5*time.Second:
-			fmt.Fprintf(&sb, "; if the rest goes as last time, done in about %s", e(duration(p.remaining.Round(10*time.Second))))
+		case !p.says:
+			n, verb := len(p.unknown), "have"
+			if n == 1 {
+				verb = "has"
+			}
+			fmt.Fprintf(&sb, "; no time left to say: %d of the %d steps still to run %s no earlier run", n, p.todo, verb)
+		case p.left > 5*time.Second:
+			fmt.Fprintf(&sb, "; if the rest goes as last time, about %s left, from %d of %d remaining step%s",
+				e(duration(p.left.Round(10*time.Second))), p.sure, p.todo, plural(p.todo))
 		default:
 			sb.WriteString("; if the rest goes as last time, done any moment now")
 		}
 	}
 	v.Sentence = template.HTML(sb.String())
-	if p.known && !lb.Done {
-		word, d := "faster", -p.delta
-		if p.delta > 0 {
-			word, d = "slower", p.delta
-		}
-		if d >= time.Second {
-			v.Detail = template.HTML(fmt.Sprintf("So far <b>%s %s</b> than the last build of this image that ran these steps (%s): <code>%s</code> took %s against %s.",
-				e(duration(d.Round(time.Second))), word, e(ref.when.In(loc).Format("2 Jan")), e(stepNameShort(p.by.Name)),
-				e(duration(p.by.Completed.Sub(p.by.Started))), e(duration(p.byRef.dur))))
-		}
+	if ref != nil && !lb.Done {
+		v.Detail = liveDetail(lb.Steps, ref, p, loc)
 	}
 	if lb.Load != nil {
 		v.Tiles = liveTiles(lb, now, loc)
@@ -344,12 +485,8 @@ func (s *Server) liveView(ctx context.Context, lb *collector.LiveBuild, instance
 		r := LiveRow{Key: st.Key, Name: st.Name, State: st.State, Open: st.State == history.LiveRunning}
 		sum := sha256.Sum256([]byte(lb.Ref + "\x00" + st.Key + "\x00" + st.Name))
 		r.ID = "ls-" + hex.EncodeToString(sum[:6])
-		var rs refStep
-		hasRef := false
-		if ref != nil {
-			rs, hasRef = ref.steps[liveKey(st.Key, st.Name)]
-			hasRef = hasRef && rs.built
-		}
+		rs, byPlace, matched := ref.match(st.Key, st.Name)
+		hasRef := matched && rs.built
 		end := elapsed
 		switch {
 		case st.State == history.LiveWaiting:
@@ -366,10 +503,7 @@ func (s *Server) liveView(ctx context.Context, lb *collector.LiveBuild, instance
 			end = off + d
 		}
 		if st.State == history.LiveWaiting && hasRef {
-			off := rs.off + p.delta
-			if off < elapsed {
-				off = elapsed
-			}
+			off := p.place(rs.off)
 			r.Ghost = &WFBar{Class: "ghost", L: at(off), W: width(rs.dur)}
 			end = off + rs.dur
 		}
@@ -380,15 +514,27 @@ func (s *Server) liveView(ctx context.Context, lb *collector.LiveBuild, instance
 				label = "last time " + duration(rs.dur)
 			}
 		case history.LiveWaiting:
-			if hasRef && st.Key == lastKey(lb.Steps) {
+			if hasRef && p.says && st.Key == lastKey(lb.Steps) {
 				label = "≈ " + clockLabel(p.total)
 			}
 		case history.LiveCached:
 			label = "from cache"
+			if hasRef && !lb.Done {
+				label += " (last time built, " + duration(rs.dur) + ": not counted)"
+			}
 		default:
 			label = duration(st.Completed.Sub(st.Started))
 		}
-		r.Label, r.LabelL = template.HTML(e(label)), strconv.FormatFloat(pctOf(end, span)+0.6, 'f', 2, 64)
+		html := e(label)
+		if ref != nil && !lb.Done && (st.State == history.LiveWaiting || st.State == history.LiveRunning) {
+			switch {
+			case !hasRef:
+				html = "no earlier run"
+			case byPlace:
+				html = joinSet(" · ", html, `<abbr title="matched by its place in the Dockerfile and its instruction: its text differs from the last time">by place</abbr>`)
+			}
+		}
+		r.Label, r.LabelL = template.HTML(html), strconv.FormatFloat(pctOf(end, span)+0.6, 'f', 2, 64)
 		if pctOf(end, span) > 80 && label != "" {
 			// Near the right edge the label ends where the bars begin.
 			lo := 100.0
@@ -430,6 +576,57 @@ func (s *Server) liveView(ctx context.Context, lb *collector.LiveBuild, instance
 		v.Rows = append(v.Rows, r)
 	}
 	return v
+}
+
+// liveDetail says what the forecast stands on: faster or slower than the
+// reference so far, the build it counts from, the steps matched only by
+// their place in the Dockerfile, and the steps it has no time for.
+func liveDetail(steps []history.LiveStep, ref *liveRef, p prediction, loc *time.Location) template.HTML {
+	when := e(ref.when.In(loc).Format("2 Jan"))
+	var parts []string
+	if p.known {
+		word, d := "faster", -p.delta
+		if p.delta > 0 {
+			word, d = "slower", p.delta
+		}
+		if d >= time.Second {
+			parts = append(parts, fmt.Sprintf("So far <b>%s %s</b> than the last build of this image that ran these steps (%s): <code>%s</code> took %s against %s.",
+				e(duration(d.Round(time.Second))), word, when, e(stepNameShort(p.by.Name)),
+				e(duration(p.by.Completed.Sub(p.by.Started))), e(duration(p.byRef.dur))))
+		}
+	}
+	if p.says && p.todo > 0 {
+		parts = append(parts, fmt.Sprintf("Each step still to run counts as long as it took on %s, steps that ran side by side then count once.", when))
+	}
+	var placed []string
+	for _, s := range steps {
+		if _, byPlace, ok := ref.match(s.Key, s.Name); ok && byPlace {
+			placed = append(placed, "<code>"+e(s.Key)+"</code> ("+e(instruction(s.Name))+")")
+		}
+	}
+	if len(placed) > 0 {
+		parts = append(parts, fmt.Sprintf("Text differs from %s, matched by place in the Dockerfile and instruction: %s.", when, codeList(placed)))
+	}
+	if len(p.unknown) > 0 {
+		var names []string
+		for _, k := range p.unknown {
+			names = append(names, "<code>"+e(k)+"</code>")
+		}
+		if p.says {
+			parts = append(parts, "Not counted, no earlier run: "+codeList(names)+".")
+		} else {
+			parts = append(parts, fmt.Sprintf("No earlier run: %s. The page says a time once at least %d of every %d steps still to run ran before.", codeList(names), forecastNum, forecastDen))
+		}
+	}
+	return template.HTML(strings.Join(parts, " "))
+}
+
+// codeList joins up to four items and says how many more there are.
+func codeList(items []string) string {
+	if len(items) > 4 {
+		return strings.Join(items[:4], ", ") + fmt.Sprintf(" and %d more", len(items)-4)
+	}
+	return strings.Join(items, ", ")
 }
 
 // lastKey is the key of the last step BuildKit named (the image's last

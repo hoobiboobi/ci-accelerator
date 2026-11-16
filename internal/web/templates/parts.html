@@ -57,7 +57,7 @@
 {{end}}</pre>{{end}}{{with .Note}}<div class="none">{{.}}</div>{{end}}</div></div></details>{{end}}
       {{end}}
     </div></div>
-    <div class="lt-foot"><span><i class="sw c-built"></i>built</span><span><i class="sw c-running"></i>running</span><span><i class="sw c-ghost"></i>as long as last time</span><span>Open a step for its last lines; the whole output is on the build's page once the build is done.</span></div>
+    <div class="lt-foot"><span><i class="sw c-built"></i>built</span><span><i class="sw c-running"></i>running</span><span><i class="sw c-ghost"></i>as long as last time</span><span><abbr title="matched by its place in the Dockerfile and its instruction: its text differs from the last time">by place</abbr>: matched by its place in the Dockerfile</span><span>Open a step for its last lines; the whole output is on the build's page once the build is done.</span></div>
   </section>{{end}}
 </div>{{end}}
 {{define "livelane"}}<span class="lane">{{with .Row.Ghost}}<i class="lbar c-ghost" style="left: {{.L}}%; width: {{.W}}%"></i>{{end}}{{with .Row.Bar}}<i class="lbar c-{{.Class}}" style="left: {{.L}}%; width: {{.W}}%"></i>{{end}}{{if not .View.Done}}<span class="lnow" style="left: {{.View.NowL}}%"></span>{{end}}{{if .Row.LabelEnd}}<span class="lab end" style="right: {{.Row.LabelEnd}}%">{{.Row.Label}}</span>{{else}}<span class="lab" style="left: {{.Row.LabelL}}%">{{.Row.Label}}</span>{{end}}</span>{{end}}

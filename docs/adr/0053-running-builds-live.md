@@ -45,12 +45,18 @@ build to its job) exists only once the build is done.
 - **The node's load** comes from the probe next to the daemon, read every
   10 s while the build is followed.
 - **The forecast** compares the build with the last successful build of
-  the same image (same project and target, the same job name first) that
-  executed the step running now: the build is as far ahead as at the end
-  of the latest step both executed, the rest takes as long as it did
-  then, and a running step that already took longer moves the end out.
-  Without such a build the page says what runs and for how long, nothing
-  more.
+  the same image (same project and target, the same job name first; when
+  the job's last stored build named its image, only builds of that image)
+  that executed the step running now, by its text or else by its place in
+  the Dockerfile and instruction. The rest takes what the steps still to
+  run took then (a running one less what it ran; steps that ran side by
+  side counted once). With fewer than 3 of 4 of those steps known, the
+  page gives no time and says which steps have no earlier run. Without
+  such a build the page says what runs and for how long, nothing more.
+  (Changed 2026-11-16: the forecast was the reference's end shifted by
+  how far ahead the build was, which a step taken from the cache now but
+  built then, or the other way round, skewed by its whole time; a step
+  whose text changes every pipeline found no reference at all.)
 - **The pages** ask for themselves: a running job's page every 2 s, a
   pipeline with running builds every 5 s. The running job opens on the
   pipeline's timeline into its stages so far, its running stage open.
