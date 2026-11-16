@@ -227,7 +227,7 @@ func dockerfile(text string, stepViews []StepView, b *history.Build) []Line {
 	// A build check names the line it is about (the Dockerfile's, not
 	// one of a frontend's own files).
 	warned := map[int][]history.Warning{}
-	for _, w := range b.Warnings {
+	for _, w := range safeWarnings(b.Warnings) {
 		if w.Line > 0 && w.Line <= len(lines) {
 			warned[w.Line] = append(warned[w.Line], w)
 		}

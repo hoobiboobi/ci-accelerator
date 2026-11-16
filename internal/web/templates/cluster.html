@@ -1,0 +1,30 @@
+{{define "cluster"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs"><a class="link" href="/~/">Members</a></div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">{{.Title}}</h1>
+      {{if .Waiting}}<span class="chip warn">waiting to join</span>{{else if eq .Member.State "connected"}}<span class="chip ok">connected</span>{{else}}<span class="chip warn">not connected</span>{{end}}</div>
+    <div class="sub"><span>{{if .Waiting}}Settings saved at the hub; the cluster has not joined yet.{{else}}{{with .Member}}Joined with {{template "joinedBy" .}} · key <span class="mono">{{.Fingerprint}}</span>{{if and .Remote (eq .State "connected")}} · from <span class="mono">{{.Remote}}</span>{{end}}{{end}}{{end}}</span></div></header>
+  {{with .Message}}<div class="callout{{if $.Bad}} warn{{end}}" role="status"><div>{{.}}</div></div>{{end}}
+  {{if .Manage}}<div class="cactions left">
+    {{if and .Member (eq .Member.State "connected")}}<a class="btn" href="/~/m/{{.Title}}/">Open its console</a>{{end}}
+    <a class="btn" href="/~/clusters/{{.Title}}/edit">Change settings</a>
+    {{if and .Waiting .Settings}}<form method="post" action="/~/clusters/{{.Title}}/join" class="inline"><button class="btn" type="submit">New join token</button></form>{{end}}
+    <form method="post" action="/~/clusters/{{.Title}}/remove" class="inline"><button class="btn" type="submit">Remove from the fleet</button></form>
+  </div>{{end}}
+  {{if .Settings}}
+  <section class="box" aria-labelledby="csT"><div class="boxh"><h2 class="h" id="csT">Settings</h2><span class="muted">changed <span title="{{.Changed.UTC}}">{{.Changed.Text}}</span></span></div>
+    <div class="tbox flat"><table class="ptable"><tbody>
+    {{range .Rows}}<tr><td class="muted">{{.Section}}</td><td>{{.Label}}</td><td class="mono">{{.Value}}</td></tr>{{end}}
+    </tbody></table></div></section>
+  <section class="box" aria-labelledby="ssT"><div class="boxh"><h2 class="h" id="ssT">Secrets kept for it</h2><span class="muted">never shown again; sent over its link</span></div>
+    {{if .Secrets}}<div class="tbox flat"><table class="ptable"><thead><tr><th scope="col">Secret</th><th scope="col">Saved</th><th scope="col">Delivered</th></tr></thead><tbody>
+    {{range .Secrets}}<tr><td>{{.Label}}</td><td><span title="{{.Updated.UTC}}">{{.Updated.Text}}</span> <span class="muted">· {{.By}}</span></td><td>{{if .Stale}}<span class="chip warn">does not open with the hub's secrets key: enter it again</span>{{else if .Delivered.UTC}}<span title="{{.Delivered.UTC}}">{{.Delivered.Text}}</span>{{else}}<span class="chip warn">not yet</span>{{end}}</td></tr>{{end}}
+    </tbody></table></div>{{else}}<p class="pad muted">None.</p>{{end}}</section>
+  {{else}}<section class="box"><p class="pad muted">{{if .Member}}Registered through the API: the hub keeps no settings for it.{{else}}A join token was issued for this name through the API; the hub keeps no settings for it.{{end}}{{if .Manage}} "Change settings" starts them, to generate its values here.{{end}}</p></section>{{end}}
+  {{with .Joins}}<section class="box" aria-labelledby="jtT"><div class="boxh"><h2 class="h" id="jtT">Join tokens</h2></div>
+    <div class="tbox flat"><table class="ptable"><thead><tr><th scope="col">#</th><th scope="col">Issued</th><th scope="col">State</th></tr></thead><tbody>
+    {{range .}}<tr><td class="mono">{{.ID}}</td><td><span title="{{.Created.UTC}}">{{.Created.Text}}</span> <span class="muted">· {{.By}}</span></td><td>{{.State}}</td></tr>{{end}}
+    </tbody></table></div></section>{{end}}
+</div>
+{{end}}

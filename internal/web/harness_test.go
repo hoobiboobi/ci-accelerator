@@ -24,6 +24,9 @@ type testOpts struct {
 	Assets  fs.FS
 	// PublicURL: where browsers reach the console (link previews).
 	PublicURL string
+	// Base and Fleet: the pages as a fleet hub serves one cluster's.
+	Base  string
+	Fleet Fleet
 }
 
 // split runs the pages against a controller in another "process" (its API
@@ -36,7 +39,8 @@ var split = os.Getenv("WEB_TEST_SPLIT") != ""
 func (o testOpts) wire(t *testing.T, st *store.Store) (Backend, Options) {
 	t.Helper()
 	local := &control.Local{Store: st, Live: o.Live}
-	opt := Options{Release: o.Release, Version: o.Version, Assets: o.Assets, InstallToken: o.Token != nil && o.Auth == nil, PublicURL: o.PublicURL}
+	opt := Options{Release: o.Release, Version: o.Version, Assets: o.Assets, InstallToken: o.Token != nil && o.Auth == nil, PublicURL: o.PublicURL,
+		Base: o.Base, Fleet: o.Fleet}
 	var gl *control.LocalGitLab
 	if o.API != nil {
 		gl = &control.LocalGitLab{Fetcher: o.API, Token: o.Token, Auth: o.Auth}

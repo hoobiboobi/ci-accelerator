@@ -85,7 +85,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	load := func(id int64) (*built, error) {
-		p, err := s.data.BuildPage(ctx, id)
+		p, err := s.buildPage(ctx, id)
 		if err == nil && !s.mayBuild(r, p) {
 			err = store.ErrNotFound
 		}
@@ -135,7 +135,7 @@ func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	with, prevID := int64(0), int64(0)
-	if prev, _, err := s.data.Previous(ctx, sb); err == nil && prev != nil {
+	if prev, _, err := s.previous(ctx, sb); err == nil && prev != nil {
 		with, prevID = prev.ID, prev.ID
 	}
 	if q := r.URL.Query().Get("with"); q != "" {

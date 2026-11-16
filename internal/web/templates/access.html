@@ -1,0 +1,61 @@
+{{define "access"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs">Fleet</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">Access</h1></div>
+    <div class="sub"><span>Who may manage this fleet. Everyone signed in sees, cluster by cluster, the projects GitLab lets them read; operators and owners see every project.</span></div></header>
+  {{if not .Access.SignIn}}<div class="callout neutral" role="note"><div><b class="k">Sign-in is off on this hub.</b> These pages read for everyone and change nothing: roles and tokens change through the API, with an API token (<a class="link" href="https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/fleet.md">the fleet guide</a>).</div></div>{{end}}
+  {{with .Message}}<div class="callout{{if $.Bad}} warn{{end}}" role="status"><div>{{.}}</div></div>{{end}}
+  <nav class="seg acctabs" aria-label="Access">
+    <a href="/~/access" aria-current="{{if eq .Tab "people"}}true{{else}}false{{end}}">People · {{len .People}}</a>
+    {{if .Access.Tokens}}<a href="/~/access/tokens" aria-current="{{if eq .Tab "tokens"}}true{{else}}false{{end}}">API tokens · {{.TokenCount}}</a>{{end}}
+  </nav>
+  {{if eq .Tab "people"}}
+  <section class="box" aria-labelledby="peT"><div class="boxh"><h2 class="h" id="peT">People with a role</h2><span class="muted">operator: clusters, join tokens, audit · owner: also roles and API tokens</span></div>
+    {{if .People}}<div class="tbox flat"><table class="ptable mtable"><thead><tr><th scope="col">Who</th><th scope="col">Role</th><th scope="col">From</th><th scope="col">Added</th><th scope="col" aria-label="Actions"></th></tr></thead><tbody>
+    {{range .People}}<tr>
+      <td>{{if .Name}}{{.Name}} <span class="muted">{{.Who}}</span>{{else}}<span class="mono">{{.Who}}</span>{{end}}</td>
+      <td>{{.Role}}</td>
+      <td><span class="chip plain">{{.Origin}}</span></td>
+      <td>{{if .Locked}}<span class="muted">with the values</span>{{else}}<span title="{{.Added.UTC}}">{{.Added.Text}}</span> <span class="muted">· {{.By}}</span>{{end}}</td>
+      <td class="acts">{{if .Locked}}<span class="muted" title="An owner from the hub's values: change it there">locked</span>{{else if .Self}}<span class="muted" title="Your own role is changed by another owner">you</span>{{else if $.Access.RolesWrite}}
+        <form method="post" action="/~/access/people" class="inline"><input type="hidden" name="subject" value="{{.Subject}}"><input type="hidden" name="role" value="{{if eq .Role "owner"}}operator{{else}}owner{{end}}"><button class="btn sm" type="submit" aria-label="Make {{if .Name}}{{.Name}}{{else}}{{.Who}}{{end}} {{if eq .Role "owner"}}operator{{else}}owner{{end}}">Make {{if eq .Role "owner"}}operator{{else}}owner{{end}}</button></form>
+        <form method="post" action="/~/access/people/remove" class="inline"><input type="hidden" name="subject" value="{{.Subject}}"><button class="btn sm" type="submit" aria-label="Remove the role of {{if .Name}}{{.Name}}{{else}}{{.Who}}{{end}}">Remove</button></form>{{end}}</td>
+    </tr>{{end}}
+    </tbody></table></div>{{else}}<p class="pad muted">Nobody has a role yet.</p>{{end}}</section>
+  {{if .Access.RolesWrite}}
+  <section class="box" aria-labelledby="grT"><div class="boxh"><h2 class="h" id="grT">Give a role</h2><span class="muted">by GitLab user id: the number on the person's GitLab profile page</span></div>
+    <form method="post" action="/~/access/people" class="filters pad">
+      <label><span>GitLab</span><select name="gitlab">{{range .GitLabs}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+      <label><span>User id</span><input type="text" name="user" inputmode="numeric" pattern="(id:)?[0-9]+" required placeholder="1234567" autocomplete="off"></label>
+      <label><span>Role</span><select name="role">{{range .Roles}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+      <button class="btn" type="submit">Give the role</button>
+    </form></section>
+  {{end}}
+  {{else}}
+  {{with .Secret}}<section class="box" aria-labelledby="nsT"><div class="boxh"><h2 class="h" id="nsT">The token {{$.SecretName}}</h2></div>
+    <div class="pad secretrow"><code class="mono" id="newSecret">{{.}}</code><button class="btn sm" type="button" aria-label="Copy the token" data-copy="{{.}}">Copy</button></div>
+    <p class="pad muted sm">Copy it now: the hub keeps only a hash of it and shows it never again. Give it as <code>Authorization: Bearer …</code>.</p></section>{{end}}
+  <section class="box" aria-labelledby="tkT"><div class="boxh"><h2 class="h" id="tkT">API tokens</h2><span class="muted">for Terraform and scripts: /api/v1/fleet/</span></div>
+    <div class="tbox flat"><table class="ptable mtable"><thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Expires</th><th scope="col">Last used</th><th scope="col">By</th><th scope="col" aria-label="Actions"></th></tr></thead><tbody>
+    {{if .Bootstrap}}<tr><td class="mono">bootstrap</td><td>owner</td><td class="muted">while its Secret holds it</td><td class="muted">—</td><td class="muted">values</td><td></td></tr>{{end}}
+    {{range .Tokens}}<tr{{if .State}} class="ended"{{end}}>
+      <td class="mono">{{.Name}} <span class="muted">…{{.Hint}}</span></td>
+      <td>{{.Role}}</td>
+      <td>{{if .State}}<span class="chip plain">{{.State}}</span>{{else if .Never}}<span class="chip warn">never</span>{{else}}<span title="{{.Expires.UTC}}">{{.Expires.Text}}</span>{{end}}</td>
+      <td>{{if .Used.UTC}}<span title="{{.Used.UTC}}">{{.Used.Text}}</span>{{else}}<span class="muted">never</span>{{end}}</td>
+      <td>{{.By}}</td>
+      <td class="acts">{{if not .State}}<form method="post" action="/~/access/tokens/revoke" class="inline"><input type="hidden" name="name" value="{{.Name}}"><button class="btn sm" type="submit" aria-label="Revoke {{.Name}}">Revoke</button></form>{{end}}</td>
+    </tr>{{end}}
+    {{if not (or .Tokens .Bootstrap)}}<tr><td colspan="6" class="muted">No API token yet.</td></tr>{{end}}
+    </tbody></table></div></section>
+  <section class="box" aria-labelledby="ntT"><div class="boxh"><h2 class="h" id="ntT">New token</h2></div>
+    <form method="post" action="/~/access/tokens" class="filters pad">
+      <label><span>Name</span><input type="text" name="name" required pattern="[a-z0-9]([a-z0-9._\-]{0,62}[a-z0-9])?" placeholder="terraform" autocomplete="off"></label>
+      <label><span>Role</span><select name="role"><option value="viewer">viewer</option><option value="operator">operator</option><option value="owner" selected>owner</option></select></label>
+      <label><span>Expires in</span><select name="days">{{range .Lifetimes}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+      <button class="btn" type="submit">Issue the token</button>
+    </form></section>
+  {{end}}
+</div>
+{{end}}

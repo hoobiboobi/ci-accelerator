@@ -59,14 +59,20 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		if title == "" {
 			title = fmt.Sprintf("Pipeline #%d", b.Pipeline)
 		}
-		items = append(items, indexItem{Kind: "Pipeline", Label: title, URL: "/pipelines/" + store.PipelineKey(b.Instance, b.Pipeline), Icon: "pipe",
+		items = append(items, indexItem{Kind: "Pipeline", Label: title, URL: "/pipelines/" + pipeKey(b.Instance, b.Pipeline), Icon: "pipe",
 			Sub: joinSet(" · ", fmt.Sprintf("#%d", b.Pipeline), short(b.SHA, 7), b.Ref)})
 	}
 	for _, d := range s.data.Daemons() {
+		if s.nodesHidden(sh) {
+			break
+		}
 		items = append(items, indexItem{Kind: "Node", Label: shortDaemon(d.Name), URL: nodeURL(d.Name), Icon: "nodes", Sub: d.Name + paren(d.Inspection.Node)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
+	for i := range items {
+		items[i].URL = s.based(items[i].URL)
+	}
 	json.NewEncoder(w).Encode(map[string]any{"items": items})
 }
 
@@ -142,10 +148,30 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 		return ok
 	}
+	// The person was let in once, when the stream opened: whether they are
+	// still signed in, with the same role, is asked again now and then. A
+	// stream whose answer changed ends; the browser opens it again through
+	// the sign-in gate.
+	var recheck <-chan time.Time
+	if v := viewer(r); s.opt.Auth != nil && v != nil && s.SessionCheck > 0 {
+		t := time.NewTicker(s.SessionCheck)
+		defer t.Stop()
+		recheck = t.C
+	}
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-recheck:
+			now, err := s.opt.Auth.Load(headerSink{}, r)
+			if err != nil {
+				// Asked again at the next check.
+				continue
+			}
+			if was := viewer(r); now == nil || now.Instance != was.Instance || now.UserID != was.UserID || now.Admin != was.Admin {
+				return
+			}
+			continue
 		case <-beat.C:
 			fmt.Fprint(w, ": ping\n\n")
 		case <-sub.C:
@@ -180,6 +206,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 						fmt.Fprintf(w, "event: changed\ndata: %s\n\n", k)
 					}
 				case onlyNodes:
+				case !validKey(k):
+					// Written into the stream as is: only a pipeline's key.
 				case (want == "" || k == want) && hear(k):
 					fmt.Fprintf(w, "event: changed\ndata: %s\n\n", k)
 				}
@@ -188,6 +216,20 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 }
+
+// validKey says whether a change names a pipeline ("<instance>/<id>").
+func validKey(k string) bool {
+	_, ok := store.ParseProjectKey(k)
+	return ok
+}
+
+// headerSink takes the cookie a session check would set again: a stream's
+// headers are long sent, and the browser's next request sets it.
+type headerSink struct{}
+
+func (headerSink) Header() http.Header         { return http.Header{} }
+func (headerSink) Write(b []byte) (int, error) { return len(b), nil }
+func (headerSink) WriteHeader(int)             {}
 
 // origin is the console's address as the browser reached it.
 func origin(r *http.Request) string {

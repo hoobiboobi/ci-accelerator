@@ -192,7 +192,7 @@ func (s *Server) liveReference(ctx context.Context, instance string, project uin
 		if i == 4 { // each candidate is a build read whole
 			break
 		}
-		page, err := s.data.BuildPage(ctx, r.ID)
+		page, err := s.buildPage(ctx, r.ID)
 		if err != nil || page == nil || page.Build == nil {
 			continue
 		}

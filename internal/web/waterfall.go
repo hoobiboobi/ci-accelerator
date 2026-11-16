@@ -164,10 +164,20 @@ func waitedFor(t jobTimes) string {
 	return "waited " + duration(t.Start.Sub(t.Queued)) + " · "
 }
 
+// ticksFor is an axis' ticks, at most maxTicks+1 whatever the span: the
+// times laid out may come from another cluster, any two instants apart.
 func ticksFor(span time.Duration) []Tick {
 	step := niceStep(span)
+	if span/step > maxTicks {
+		// Beyond niceStep's steps: whole hours, at most maxTicks of them.
+		step = (span/maxTicks + time.Hour - 1).Truncate(time.Hour)
+		if step <= 0 {
+			step = span / maxTicks
+		}
+	}
 	var out []Tick
-	for t := time.Duration(0); t <= span; t += step {
+	for n := time.Duration(0); n <= maxTicks && n <= span/step; n++ {
+		t := n * step // n <= span/step: no overflow
 		label := tickLabel(t)
 		if span >= time.Minute {
 			// One format along the axis: 0:00, 0:20, 1:40.
@@ -199,6 +209,12 @@ func tickLabel(t time.Duration) string {
 	return fmt.Sprintf("%.1fs", s)
 }
 
+// maxAxis bounds the time an axis spans.
+const maxAxis = 365 * 24 * time.Hour
+
+// maxTicks bounds the steps along an axis.
+const maxTicks = 12
+
 func niceStep(span time.Duration) time.Duration {
 	for _, s := range []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second,
 		30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour} {
@@ -222,8 +238,10 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 	if span <= 0 {
 		span = time.Second
 	}
-	// Room on the right for the labels after the last bars.
-	span = span * 118 / 100
+	// Room on the right for the labels after the last bars; an axis longer
+	// than a year (times from another cluster) is cut to one, so that the
+	// room cannot overflow.
+	span = min(span, maxAxis) * 118 / 100
 	at := func(t time.Time) string { return strconv.FormatFloat(pctOf(t.Sub(start), span), 'f', 2, 64) }
 	width := func(d time.Duration) string {
 		return strconv.FormatFloat(math.Max(0.25, pctOf(d, span)), 'f', 2, 64)

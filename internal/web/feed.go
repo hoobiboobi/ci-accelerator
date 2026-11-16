@@ -153,7 +153,7 @@ func (s *Server) item(b store.BuildRow, usual map[string]usualTime, loc *time.Lo
 	it := BuildItem{ID: b.ID, URL: fmt.Sprintf("/builds/%d", b.ID), Target: buildName(b.Target, b.Images), Status: st, Why: whyShort(b),
 		When: clockStamp(b.Started, inZone(s.now(), loc)), Ref: b.Ref, SHA: short(b.SHA, 8), Title: b.Title, Pipeline: b.Pipeline, Quiet: st.Key == "cached"}
 	if b.Pipeline != 0 {
-		it.PipeURL, it.PipeLabel = "/pipelines/"+store.PipelineKey(b.Instance, b.Pipeline), "#"+strconv.FormatUint(b.Pipeline, 10)
+		it.PipeURL, it.PipeLabel = "/pipelines/"+pipeKey(b.Instance, b.Pipeline), "#"+strconv.FormatUint(b.Pipeline, 10)
 	}
 	if d := b.Duration(); d > 0 {
 		it.Dur = duration(d)
@@ -455,7 +455,7 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 // anchor is the build picked first to compare, nil when it is not there
 // or the reader may not see it (picking then starts over).
 func (s *Server) anchor(r *http.Request, id int64) (*built, error) {
-	p, err := s.data.BuildPage(r.Context(), id)
+	p, err := s.buildPage(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !s.mayBuild(r, p)) {
 		return nil, nil
 	}
@@ -1060,11 +1060,11 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 				if label == "" {
 					label = fmt.Sprintf("project %d", p.ID)
 				}
-				elsewhere = append(elsewhere, Option{Value: "/projects/" + p.Instance + "/" + strconv.FormatUint(p.ID, 10) + "?to=" + url.QueryEscape(r.URL.Path), Label: label})
+				elsewhere = append(elsewhere, Option{Value: "/projects/" + instSeg(p.Instance) + "/" + strconv.FormatUint(p.ID, 10) + "?to=" + url.QueryEscape(r.URL.Path), Label: label})
 			}
 		}
 		if len(elsewhere) == 1 {
-			http.Redirect(w, r, elsewhere[0].Value, http.StatusFound)
+			s.redirect(w, r, elsewhere[0].Value, http.StatusFound)
 			return
 		}
 		sh.Title = "Not found"

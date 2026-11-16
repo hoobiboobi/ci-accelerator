@@ -61,3 +61,5 @@
   </section>{{end}}
 </div>{{end}}
 {{define "livelane"}}<span class="lane">{{with .Row.Ghost}}<i class="lbar c-ghost" style="left: {{.L}}%; width: {{.W}}%"></i>{{end}}{{with .Row.Bar}}<i class="lbar c-{{.Class}}" style="left: {{.L}}%; width: {{.W}}%"></i>{{end}}{{if not .View.Done}}<span class="lnow" style="left: {{.View.NowL}}%"></span>{{end}}{{if .Row.LabelEnd}}<span class="lab end" style="right: {{.Row.LabelEnd}}%">{{.Row.Label}}</span>{{else}}<span class="lab" style="left: {{.Row.LabelL}}%">{{.Row.Label}}</span>{{end}}</span>{{end}}
+{{/* How a cluster came into the fleet: a FleetMember. */}}
+{{define "joinedBy"}}{{if eq .Origin "join"}}a join token{{else if eq .Origin "ui"}}its key, in the console{{if .AddedBy}} <span class="muted">· {{.AddedBy}}</span>{{end}}{{else}}its key, through the API{{if .AddedBy}} <span class="muted">· {{.AddedBy}}</span>{{end}}{{end}}{{end}}

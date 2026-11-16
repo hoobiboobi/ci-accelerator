@@ -1,0 +1,30 @@
+{{define "clusterform"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs"><a class="link" href="/~/">Members</a>{{if .Change}} / <a class="link" href="/~/clusters/{{.Name}}">{{.Name}}</a>{{end}}</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">{{if .Change}}Change {{.Name}}{{else}}Add a cluster{{end}}</h1></div>
+    <div class="sub"><span>{{if .Change}}The hub makes the box's values anew; secrets left empty stay as they are.{{else}}The hub makes the box's values and the commands that install it. Tokens and keys entered here go to the cluster over its link, never into the values.{{end}}</span></div></header>
+  {{with .Message}}<div class="callout warn" role="alert"><div>{{.}}</div></div>{{else}}{{if .Refused}}<div class="callout warn" role="alert"><div>{{if eq .Refused 1}}One setting needs{{else}}{{.Refused}} settings need{{end}} a change: marked below. Secrets typed in are not kept from a refused form: enter them again.</div></div>{{end}}{{end}}
+  {{if .NoSecrets}}<div class="callout neutral" role="note"><div><b class="k">This hub keeps no secrets.</b> Give it a secrets key (fleet.secretsKey) to send the runner's token and S3 keys from here; meanwhile create those Secrets in the cluster yourself.</div></div>{{end}}
+  <form method="post" action="{{if .Change}}/~/clusters/{{.Name}}{{else}}/~/clusters{{end}}" class="cform" autocomplete="off">
+    {{range $i, $sec := .Sections}}
+    <section class="box" aria-labelledby="cf{{$i}}"><div class="boxh"><h2 class="h" id="cf{{$i}}">{{$sec.Title}}</h2></div>
+      <div class="cfields">
+      {{if and (eq $i 0) (not $.Change)}}
+        <label class="cf"><span>Name</span><input type="text" name="name" value="{{$.Name}}" required pattern="[a-z0-9]([a-z0-9\-]{0,38}[a-z0-9])?" placeholder="prod-eu" {{if $.NameError}}aria-invalid="true" aria-describedby="e-name" autofocus{{end}}>
+          <small id="e-name" class="{{if $.NameError}}err{{else}}muted{{end}}">{{if $.NameError}}{{$.NameError}}{{else}}Lower case; cannot be changed later.{{end}}</small></label>
+      {{end}}
+      {{range $sec.Fields}}
+        <label class="cf"{{with .When}} data-when="{{.}}"{{end}}><span>{{.Label}}{{if .Required}} <i class="muted">required</i>{{end}}</span>
+          {{if eq .Kind "choice"}}<select name="{{.Key}}" aria-describedby="e-{{.Key}}">{{range .Options}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select>
+          {{else if eq .Kind "secret"}}{{/* never a value: a secret is not written back into a page */}}<input type="password" name="{{.Key}}" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore {{if $.NoSecrets}}disabled{{end}} placeholder="{{if .Kept}}saved · leave empty to keep{{end}}" aria-describedby="e-{{.Key}}" {{if .Error}}aria-invalid="true"{{end}}{{if .Focus}} autofocus{{end}}>
+          {{else if eq .Key "public_key"}}<textarea name="{{.Key}}" rows="4" spellcheck="false" aria-describedby="e-{{.Key}}" {{if .Error}}aria-invalid="true"{{end}}{{if .Focus}} autofocus{{end}}>{{.Value}}</textarea>
+          {{else}}<input type="{{if eq .Kind "number"}}number{{else}}text{{end}}" name="{{.Key}}" value="{{.Value}}" aria-describedby="e-{{.Key}}" {{if .Error}}aria-invalid="true"{{end}}{{if .Focus}} autofocus{{end}}>{{end}}
+          <small id="e-{{.Key}}" class="{{if .Error}}err{{else}}muted{{end}}">{{if .Error}}{{.Error}}{{else}}{{.Help}}{{if .Kept}} Saved; sent to the cluster.{{end}}{{end}}</small></label>
+      {{end}}
+      </div></section>
+    {{end}}
+    <div class="cactions"><a class="btn" href="{{if .Change}}/~/clusters/{{.Name}}{{else}}/~/{{end}}">Cancel</a><button class="btn pri" type="submit">{{if .Change}}Save and show the values{{else}}Create and show the commands{{end}}</button></div>
+  </form>
+</div>
+{{end}}

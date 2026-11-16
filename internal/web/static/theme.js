@@ -24,6 +24,9 @@
   if (shown === undefined || !tz || tz === shown) return;
   document.cookie = "tz=" + encodeURIComponent(tz) + "; path=/; max-age=31536000; samesite=lax";
   if (document.cookie.split("; ").indexOf("tz=" + encodeURIComponent(tz)) < 0) return;
+  // A page that answers a form's post (a secret shown once) is not loaded
+  // again: that would post the form again. The next page has the zone.
+  if (document.documentElement.dataset.posted === "true") return;
   try {
     if (sessionStorage.getItem("ci-accelerator-tz-reload") === tz) return;
     sessionStorage.setItem("ci-accelerator-tz-reload", tz);

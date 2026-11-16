@@ -1,0 +1,31 @@
+{{define "members"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs">Fleet</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">Members</h1>{{if .Manage}}<a class="btn pri tright" href="/~/clusters/new">Add a cluster</a>{{end}}{{if eq .Connected .Total}}<span class="chip plain">{{.Total}} connected</span>{{else}}<span class="chip warn">{{icon "warn" 11}}{{.Connected}} connected of {{.Total}}</span>{{end}}</div>
+    <div class="sub"><span>The clusters whose consoles this hub shows. Each keeps its own builds; the hub asks it while you look.</span></div></header>
+  {{with .Message}}<div class="callout{{if $.Bad}} warn{{end}}" role="status"><div>{{.}}</div></div>{{end}}
+  {{with .Pending}}<section class="box" aria-labelledby="pnT"><div class="boxh"><h2 class="h" id="pnT">Waiting to join</h2><span class="muted">added here, not connected yet</span></div>
+    <div class="tbox flat"><table class="ptable"><tbody>{{range .}}<tr><td><a class="link" href="/~/clusters/{{.}}">{{.}}</a></td><td><span class="chip warn">waiting to join</span></td></tr>{{end}}</tbody></table></div></section>{{end}}
+  {{if .Rows}}
+  <section class="box" aria-labelledby="mbT"><div class="boxh"><h2 class="h" id="mbT">Clusters</h2><span class="muted">{{.Total}} registered</span></div>
+    <div class="tbox flat"><table class="ptable mtable"><thead><tr><th scope="col">Cluster</th><th scope="col">State</th><th scope="col">Version</th><th scope="col">Last contact</th><th scope="col">Joined with</th><th scope="col">Key</th><th scope="col" aria-label="Actions"></th></tr></thead><tbody>
+    {{range .Rows}}<tr>
+      <td><a class="link" href="{{.URL}}">{{.Name}}</a></td>
+      <td><span class="chip {{.StateChip}}">{{.StateText}}</span></td>
+      <td class="mono">{{if .Version}}{{.Version}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{if .Contact.UTC}}<span title="{{.Contact.UTC}}">{{.Contact.Text}}</span>{{else}}<span class="muted">{{.Contact.Text}}</span>{{end}}</td>
+      <td>{{template "joinedBy" .}}</td>
+      <td class="mono" title="{{.Fingerprint}}">{{.ShortPrint}}</td>
+      <td class="acts">{{if $.Manage}}<a class="btn sm" href="/~/clusters/{{.Name}}" aria-label="Settings of {{.Name}}">Settings</a>{{end}}</td>
+    </tr>{{end}}
+    </tbody></table></div></section>
+  {{else}}
+  <section class="box"><p class="pad">No cluster has joined yet.</p><p class="muted sm pad">{{if .Manage}}"Add a cluster" makes its values and install commands.{{else if .SignIn}}Operators add clusters here; machines register them through the hub's API (<code>/api/v1/fleet/</code>).{{else}}Sign-in is off on this hub: clusters are added through its API (<code>/api/v1/fleet/</code>) with an API token.{{end}} <a class="link" href="https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/fleet.md">The fleet guide</a> says more.</p></section>
+  {{end}}
+  {{with .Removed}}<section class="box" aria-labelledby="rmT"><div class="boxh"><h2 class="h" id="rmT">Removed</h2><span class="muted">records kept a while; a name can be used again, and its record then starts anew</span></div>
+    <div class="tbox flat"><table class="ptable"><thead><tr><th scope="col">Cluster</th><th scope="col">Joined with</th><th scope="col">Key</th></tr></thead><tbody>
+    {{range .}}<tr><td>{{.Name}}</td><td>{{template "joinedBy" .}}</td><td class="mono" title="{{.Fingerprint}}">{{.ShortPrint}}</td></tr>{{end}}
+    </tbody></table></div></section>{{end}}
+</div>
+{{end}}

@@ -30,9 +30,30 @@ type built struct {
 	Name    func(ref string) string
 }
 
+// buildPage reads a stored build's page. A page without its build (an
+// answer from a cluster at a fleet hub may lack it) is not found: the
+// pages read the build without asking.
+func (s *Server) buildPage(ctx context.Context, id int64) (*store.BuildPage, error) {
+	p, err := s.data.BuildPage(ctx, id)
+	if err == nil && (p == nil || p.Stored == nil || p.Build == nil) {
+		return nil, store.ErrNotFound
+	}
+	return p, err
+}
+
+// previous is the build before b; a stored build without its build counts
+// as none.
+func (s *Server) previous(ctx context.Context, b *history.Build) (*store.Stored, bool, error) {
+	prev, same, err := s.data.Previous(ctx, b)
+	if err == nil && prev != nil && prev.Build == nil {
+		return nil, false, nil
+	}
+	return prev, same, err
+}
+
 // readBuild loads a build with the names of the builds it waited for.
 func (s *Server) readBuild(ctx context.Context, id int64) (*built, error) {
-	p, err := s.data.BuildPage(ctx, id)
+	p, err := s.buildPage(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -220,9 +241,9 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	p, err := s.data.BuildPage(ctx, id)
+	p, err := s.buildPage(ctx, id)
 	if err == nil && s.askOwner(r, p) {
-		p, err = s.data.BuildPage(ctx, id)
+		p, err = s.buildPage(ctx, id)
 	}
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !s.mayBuild(r, p)) {
 		s.notFound(w, r, "build")
@@ -233,7 +254,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.ensureAPI(r, p.Pipeline) {
-		if p, err = s.data.BuildPage(ctx, id); err != nil {
+		if p, err = s.buildPage(ctx, id); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -247,7 +268,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			n, _ := s.settle(sctx, api, key, id, 1)
 			cancel()
 			if n > 0 {
-				if p, err = s.data.BuildPage(ctx, id); err != nil {
+				if p, err = s.buildPage(ctx, id); err != nil {
 					s.fail(w, err)
 					return
 				}
@@ -284,7 +305,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v := &BuildView{ID: id, Target: b.Target, Status: statusOf(p.Reason.Kind, b.Error, d.Built, running), Verdict: d.Verdict,
-		Ran: ran, Steps: len(b.Steps), Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b), DfName: p.DockerfileName, Warnings: b.Warnings,
+		Ran: ran, Steps: len(b.Steps), Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b), DfName: p.DockerfileName, Warnings: safeWarnings(b.Warnings),
 		StepViews: d.Views, Node: shortDaemon(b.Daemon), Failed: b.Error != "", Unparsed: history.ParseErrorLine(b.Error)}
 	if v.Failed && len(v.Lines) == 0 {
 		v.NoDockerfile = noDockerfile(b.Error)
@@ -294,7 +315,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("via") == "log" && a.State == history.Attributed {
 		v.ViaLog = true
-		v.LogLine = fmt.Sprintf("ci-accelerator: why this job's builds take their time: %s/jobs/%s/%d", origin(r), a.Instance, a.Job)
+		v.LogLine = fmt.Sprintf("ci-accelerator: why this job's builds take their time: %s/jobs/%s/%d", origin(r), instSeg(a.Instance), a.Job)
 	}
 	var job store.JobInfo
 	if p.Job != nil {
@@ -306,11 +327,11 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	}
 	sh.Title = v.Name
 	if pl := p.Pipeline; pl != nil {
-		v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(pl.Instance, pl.ID), "#"+strconv.FormatUint(pl.ID, 10)
+		v.PipeURL, v.PipeLabel = "/pipelines/"+pipeKey(pl.Instance, pl.ID), "#"+strconv.FormatUint(pl.ID, 10)
 		v.Commit, v.SHA, v.Ref = pl.CommitTitle, short(pl.SHA, 8), pl.Ref
 	}
 	if api := s.api(r); api != nil && job.ID != 0 && api.Knows(a.Instance) && job.ProjectID != 0 {
-		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", a.Instance, job.ID)
+		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", instSeg(a.Instance), job.ID)
 	}
 	// The usual time of builds like this one: from the cache, or rebuilt.
 	var usual time.Duration
@@ -352,7 +373,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	}
 	v.Gantt, v.GanttSkip = gantt(v.Blocks)
 	v.StepCount = len(b.Steps)
-	prev, _, err := s.data.Previous(ctx, b)
+	prev, _, err := s.previous(ctx, b)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -457,7 +478,11 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if v.Trace != "" {
 		v.Details = append(v.Details, KV{"Trace id", v.Trace})
 	}
-	v.Details = append(v.Details, KV{"Record", b.Ref}, KV{"API", fmt.Sprintf("GET /api/v1/builds?limit=50 (this build is id %d)", id)})
+	v.Details = append(v.Details, KV{"Record", b.Ref})
+	if s.opt.Fleet == nil {
+		// A hub does not serve the clusters' JSON API.
+		v.Details = append(v.Details, KV{"API", fmt.Sprintf("GET /api/v1/builds?limit=50 (this build is id %d)", id)})
+	}
 	if a.State == history.Attributed {
 		ids, err := s.data.JobBuilds(ctx, a.Instance, a.Job)
 		if err != nil {
@@ -826,6 +851,21 @@ func webURL(u string) string {
 		return u
 	}
 	return ""
+}
+
+// safeWarnings are build checks with only web addresses for their
+// documentation: a page links them as given, and at a fleet hub they come
+// from another cluster.
+func safeWarnings(ws []history.Warning) []history.Warning {
+	if len(ws) == 0 {
+		return ws
+	}
+	out := make([]history.Warning, len(ws))
+	for i, w := range ws {
+		w.URL = webURL(w.URL)
+		out[i] = w
+	}
+	return out
 }
 
 // ago is a past moment with its day, in the reader's zone.

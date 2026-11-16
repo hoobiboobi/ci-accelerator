@@ -270,7 +270,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 
 // pipeCard lays a pipeline's jobs out by stage on its time axis.
 func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.BuildRow, loc *time.Location) PipeCard {
-	c := PipeCard{URL: "/pipelines/" + store.PipelineKey(p.Instance, p.ID), GitLabURL: webURL(p.WebURL),
+	c := PipeCard{URL: "/pipelines/" + pipeKey(p.Instance, p.ID), GitLabURL: webURL(p.WebURL),
 		Title: p.Title, Ref: p.Ref, SHA: short(p.SHA, 8), When: clockStamp(p.Created, inZone(s.now(), loc))}
 	if c.Title == "" {
 		c.Title = fmt.Sprintf("Pipeline #%d", p.ID)
@@ -420,9 +420,9 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 		c.Waited, c.Longest = duration(median(waits)), duration(longest)
 	}
 	c.Ticks = ticksFor(span)
-	pct := func(d time.Duration) string { return strconv.FormatFloat(100*float64(d)/float64(span), 'f', 2, 64) }
+	pct := func(d time.Duration) string { return strconv.FormatFloat(pctOf(d, span), 'f', 2, 64) }
 	wid := func(d time.Duration) string {
-		return strconv.FormatFloat(max(0.35, 100*float64(d)/float64(span)), 'f', 2, 64)
+		return strconv.FormatFloat(max(0.35, pctOf(d, span)), 'f', 2, 64)
 	}
 	// Stages in the order they first started.
 	stageAt := map[string]time.Time{}
@@ -474,7 +474,7 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 			if pl.j.Waited > 0 {
 				title += " · waited " + duration(pl.j.Waited) + " for a runner"
 			}
-			title += " · ran " + duration(pl.e.Sub(pl.s))
+			title += " · ran " + duration(max(pl.e.Sub(pl.s), 0))
 			lj := LaneJob{L: pct(pl.s.Sub(origin)), W: wid(pl.e.Sub(pl.s)), Row: row, Class: pl.class, Title: title}
 			if pl.s.After(pl.q) {
 				lj.QL, lj.QW = pct(pl.q.Sub(origin)), wid(pl.s.Sub(pl.q))

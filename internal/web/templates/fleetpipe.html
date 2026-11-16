@@ -1,0 +1,20 @@
+{{define "fleetpipe"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs"><a class="link" href="/~/">Members</a> / Pipeline</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">{{with .Pipeline}}{{if .CommitTitle}}{{.CommitTitle}}{{else}}Pipeline #{{$.ID}}{{end}}{{else}}Pipeline #{{.ID}}{{end}}</h1>{{with .Pipeline}}{{with .Status}}<span class="chip plain">{{.}}</span>{{end}}{{end}}</div>
+    <div class="sub">{{with .Pipeline}}<span>{{.ProjectPath}}</span><span>{{.Ref}}</span><span class="mono">{{if gt (len .SHA) 8}}{{slice .SHA 0 8}}{{else}}{{.SHA}}{{end}}</span>{{end}}<span>#{{.ID}} · jobs in {{len .Groups}} cluster{{if ne (len .Groups) 1}}s{{end}}</span></div></header>
+  {{with .Silent}}<div class="callout warn" role="note">{{icon "warn" 16}}<div>Not answering now: {{range $i, $n := .}}{{if $i}}, {{end}}{{$n}}{{end}}. Jobs of this pipeline there are not shown.</div></div>{{end}}
+  {{range .Groups}}
+  <section class="box" aria-label="{{.Member}}"><div class="boxh"><h2 class="h"><a class="link" href="{{.URL}}">{{.Member}}</a></h2><span class="chip ok">connected</span><span class="muted">{{len .Jobs}} job{{if ne (len .Jobs) 1}}s{{end}} · the cluster's own page of this pipeline shows its builds</span></div>
+    {{if .Jobs}}<div class="tbox flat"><table class="ptable"><thead><tr><th scope="col">Job</th><th scope="col">Stage</th><th scope="col">Status</th><th scope="col" class="num">Time</th></tr></thead><tbody>
+    {{range .Jobs}}<tr><td><a class="link" href="{{.URL}}">{{.Name}}</a></td><td>{{.Stage}}</td><td>{{if .Status}}{{.Status}}{{else}}<span class="muted">—</span>{{end}}</td><td class="num">{{if .Duration}}{{.Duration}}{{else}}<span class="muted">—</span>{{end}}</td></tr>{{end}}
+    </tbody></table></div>{{else}}<p class="muted pad">The cluster knows the pipeline but none of its jobs yet.</p>{{end}}
+  </section>
+  {{end}}
+  {{with .Other}}<section class="box" aria-label="Other runners"><div class="boxh"><h2 class="h">Other runners</h2><span class="muted">jobs no cluster of this fleet ran</span></div>
+    <div class="tbox flat"><table class="ptable"><thead><tr><th scope="col">Job</th><th scope="col">Stage</th><th scope="col">Status</th></tr></thead><tbody>
+    {{range .}}<tr><td>{{.Name}}</td><td>{{.Stage}}</td><td>{{if .Status}}{{.Status}}{{else}}<span class="muted">—</span>{{end}}</td></tr>{{end}}
+    </tbody></table></div></section>{{end}}
+</div>
+{{end}}
