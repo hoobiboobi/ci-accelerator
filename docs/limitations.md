@@ -17,6 +17,12 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   builds, and a git context's address (repository and commit) is part of
   each. Treat every project that builds on one installation as able to
   read the code the others built there.
+- **A job reads its daemon's build records.** Its client certificate opens
+  BuildKit's whole control API, as the console's collector uses it: any
+  job can read every recent build record of the daemon it reaches (build
+  options with their build-arg values, the Dockerfile, step output, the
+  trace) and prune its cache or delete its history. Sign-in in the
+  console separates only what the console shows.
 - **Builds share the daemon's network.** RUN steps run in the daemon pod's
   network namespace, so they see its localhost and the connections of
   concurrent builds. Their egress is whatever the daemon's NetworkPolicy
@@ -26,6 +32,10 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   kube-proxy sends Service traffic for `kubernetes.default` to the control
   plane's node addresses, and a node's own address is always reachable from
   its pods, so list the control-plane node addresses too.
+  `clusterCIDRs` keeps RUN steps out of in-cluster services, not CI job
+  scripts: the jobs namespace's policy keeps every in-cluster destination
+  open (it must reach kube-dns and the router). To limit job pods, set
+  `jobsNamespace.networkPolicy.enabled=false` and write your own policy.
 - **The disk probe's numbers are readable by builds.** The box runs a small
   container next to each daemon that reports, on port 9180 for the
   controller, the cache disk's size and free space and the last hour of the
@@ -33,7 +43,10 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   (every 10 s). Builds share the pod's network and can read those numbers
   too, so a build can see when the node was busy, including with other
   projects' builds. The probe reads the host's cgroup filesystem through a
-  read-only mount; the daemon's own share needs cgroup v2 nodes.
+  read-only mount; the daemon's own share needs cgroup v2 nodes. A RUN
+  step can open many connections to the probe on `localhost:9180` (it
+  serves 32 at a time; more wait); if the probe's container is
+  OOM-killed, the daemon pod is not Ready until it restarts.
 - **Trace data is untrusted.** Any build (a RUN step) can write spans
   through BuildKit, so traces in your backend are input from builds. The
   buildctl command line, build-arg values included, is recorded in traces:
@@ -44,19 +57,40 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   With sign-in on, a build whose trace names a job and a pipeline of
   different projects is shown to admins only, and a pipeline keeps the
   project it was first seen in until GitLab says whose it is, so a job
-  cannot open another project's builds this way. It can still add builds
-  to another project's lists, and a job that names a pipeline before that
-  pipeline's own jobs are seen hides that pipeline's builds from everyone
-  but admins until one of its project's members opens one of them (the
-  console then asks GitLab, with that person's token, whose pipeline it
-  is). A build whose job's pod the console never saw (it ran while the
-  controller was away, or in a namespace it does not watch) is shown to
-  admins only until GitLab has said whose its pipeline is (asked when
-  the build's page opens); in a pipeline claimed this way that stays so.
+  cannot open another project's builds this way. A build that reuses the
+  id of a stored build does not replace it, and once a pipeline's project
+  is known only that project's builds settle each other's reasons. With
+  another project's pipeline and job ids (both are sequential and shown in
+  job logs), a job can still add builds to that project's lists and job
+  page (the link in that job's log may open the added build), make one of
+  them the previous build the project's next real build is compared with
+  (so that build's reason can be wrong), make its own node count as warm
+  for the project (the router may then send the project's jobs there), and
+  enter the project's hints, usual times and Insights. A job that names a
+  pipeline before that pipeline's own jobs are seen hides that pipeline's
+  builds from everyone but admins until one of its project's members opens
+  one of them (the console then asks GitLab, with that person's token,
+  whose pipeline it is); without sign-in and without a GitLab token nothing
+  asks, and such a claim stays. A build whose job's pod the console never
+  saw (it ran while the controller was away, or in a namespace it does not
+  watch) is shown to admins only until GitLab has said whose its pipeline
+  is (asked when the build's page opens); in a pipeline claimed this way
+  that stays so.
+- **The runner must not let jobs overwrite pod annotations.** The router
+  and the console take a job's id, project and URL from the annotations
+  the runner puts on its pod. With the runner's
+  `pod_annotations_overwrite_allowed` matching `job.runner.gitlab.com/`,
+  `project.runner.gitlab.com/` or `ci-accelerator.io/` keys, a job can
+  pass for another project: leave it unset, or not matching them
+  ([integrations/gitlab-runner](../integrations/gitlab-runner/README.md)).
 - **Client certificates:** any certificate from the installation's CA is
   accepted. By default cert-manager lets namespace editors request
   certificates from any ClusterIssuer; on a shared cluster restrict that,
-  e.g. with cert-manager approver-policy.
+  e.g. with cert-manager approver-policy. A job can copy the client
+  certificate it mounts; the daemons accept any certificate of their CA
+  until it expires, and there is no revocation. The box issues the jobs'
+  client certificate for 72 hours (`buildkit.tls.client.duration`). To cut
+  off copies sooner, rotate the CA.
 - **The router places builds; it does not authorize them.** It passes the
   bytes through and never reads a build, so the daemons' mutual TLS is
   still what lets a job in, and any job may build anything on the daemon
@@ -64,13 +98,26 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   would need the router to read the build requests
   ([ADR-0046](adr/0046-cache-reuse.md)).
 - **Job pods need Pod Security `baseline`.** The runner's job pods do not
-  meet `restricted`.
+  meet `restricted`. Job containers keep the container runtime's default
+  capabilities (`NET_RAW` included) and may escalate privileges, as
+  `baseline` allows; add `cap_drop` and `allow_privilege_escalation =
+  false` to the runner configuration when jobs need neither (`sudo` or
+  `ping` then stop working).
+- **Jobs share the images pulled to a node.** Job pods use the pull policy
+  `if-not-present`: a job can start a private image that another project
+  already pulled to the same node, without that image's registry
+  credentials. Where projects must not share images, enable the
+  `AlwaysPullImages` admission plugin or set `pull_policy = ["always",
+  "if-not-present"]` in the runner configuration.
 
 **Cache and routing.**
 - **The cache is per daemon.** The router sends a project's jobs to the
   node where it built in the last `control-plane.router.warmDays` (7) days,
   so each project warms one node. When that daemon is not ready, the job
-  goes to another one: it succeeds, with a cold cache there. A project
+  goes to another one: it succeeds, with a cold cache there. The project
+  then stays on that node: the router sends a project's jobs to the node
+  it used most recently, so after a rollout or a failed connection the
+  project warms its new node once and keeps to it. A project
   that has not built in the zone yet goes to a node by hash. The job's
   build context travels to the chosen node, which may not be its own.
 - **Zones:** with `control-plane.router.zones` (the default) a job stays
@@ -84,7 +131,7 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   without the router, after the router waited up to 3 s for a pod with
   that address to appear (a job's pod can connect before the router has
   seen it). While the controller is away, the routers keep routing on what
-  it last told them.
+  it last told them, and age that warmth themselves.
 - **emptyDir mode:** the cache lives only as long as the pod, so every
   rollout empties it, and the router no longer counts builds of a replaced
   daemon as warmth. Use `hostPath` on a dedicated disk in production.
@@ -112,11 +159,17 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
 - **Known vulnerabilities in the default third-party images.** The
   daemons' `moby/buildkit:v0.34.2` (its CNI plugins are built with Go
   1.25.7; brotli, curl and go-archive) and the runner's
-  `gitlab-runner:alpine-v19.4.2` have HIGH and CRITICAL findings fixed
+  `gitlab-runner:alpine-v19.5.1` have HIGH and CRITICAL findings fixed
   upstream but in no release of theirs yet. They are listed, with the date
   each is looked at again, in `.trivyignore-third-party.yaml`; a weekly
   scan (`make third-party-scan`) fails on a new one. Their exposure is not
   analysed.
+- **Cluster-scoped names join the namespace and the release.** The CA
+  and its ClusterIssuer, the PriorityClass and the controller's
+  ClusterRole are named `<namespace>-<release>-...`: two boxes whose
+  namespace and release names join to the same string (namespace `a-b`
+  with release `c`, namespace `a` with release `b-c`) collide. Choose
+  names that do not.
 - **Kernel risk on Talos 6.18:** a very large cache with high parallelism
   has led to node hangs (dying cgroups). This is under investigation, not
   solved.
@@ -140,16 +193,28 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   the console can read the logs of the jobs it shows (masked, a part at a
   time) through the installation's GitLab token.
 - **It stores build data.** Step output is kept 7 days, masked on a best
-  effort basis: known token formats, passwords in URLs, bearer tokens and
-  the values of build arguments with secret-like names. Dockerfiles are
-  kept too, masked the same way. The API returns stored build arguments,
-  with secret-named ones masked.
+  effort basis: GitLab, GitHub, Slack, npm, PyPI, Stripe, Google API and
+  Vault tokens, JWTs, private keys, AWS key ids, passwords in URLs and
+  token-only user information in URLs, Authorization headers of any
+  scheme, the values of assignments, options, headers and query
+  parameters named like a secret, registry JSON credentials, and the
+  values of build arguments with secret-like names (also URL-encoded,
+  base64 and JSON-escaped). A password in a URL that contains `/` is not
+  recognised. Dockerfiles are kept too, masked the same way. At rest, the
+  store keeps build operations with secret build-argument values and the
+  formats above replaced by keyed hashes; the key is in the same
+  database. The API returns stored build arguments: secret-named ones
+  masked, and known token formats and passwords in URLs masked in the
+  others.
 - **Step output is clipped.** A step keeps the first 8 KiB and the last
   56 KiB of what it printed. The controller reads a build holding at most
   64 MiB of its output: in a build where hundreds of steps print that
   much, the later ones show only how many bytes were cut. A build whose
-  provenance or trace is larger than 64 MiB is not stored (the controller
-  logs `record not stored`).
+  provenance is larger than 64 MiB is not stored (the controller logs
+  `record not stored`); one whose trace is larger is stored without its
+  job. A build record beyond the controller's bounds (2000 steps, a 1 MiB
+  Dockerfile, long step names and errors) is stored cut and reads as
+  truncated.
 - **Job pods carry the commit author's name and email** as annotations,
   and the console stores them.
 - **One controller.** SQLite on a ReadWriteOnce volume (never NFS), with
@@ -181,6 +246,20 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   fetches from the network without a checksum (`ADD https://...`, a git
   branch) is unclear too, and a build with `--no-cache` counts as the
   job's own choice.
+- **What GitLab's comparison cannot see.**
+  - A COPY source that is a symbolic link (or lies under a linked folder)
+    is compared by the link's own path: when only the link's target
+    changed, GitLab's comparison shows no change in what the step copies,
+    and a build from a git context (`context-source: git`) is counted as
+    the build farm's.
+  - With `reasons.trustGitComparison=true`, the comparison looks at the
+    context folder only: a step that copies from a named local build
+    context in another folder of the repository
+    (`--build-context name=../shared`) can be counted as the build farm's
+    when only that folder changed.
+  - A comparison GitLab answers with 404 (a commit force-pushed away or a
+    deleted branch, or a project the installation's token can no longer
+    see) leaves the rebuild unclear for good: it is not asked again.
 - **Images are told apart by Dockerfile target.** Builds without a target
   (the CI component's default) are named by the repository they push to,
   and each is compared with the previous build that pushed the same

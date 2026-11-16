@@ -37,3 +37,6 @@ builds that were still running.
 - Unit tests cover the leaving stream and a reused address; the e2e
   graceful scenario covers the drain. Measured on the lab stand: the
   build that was lost before is stored after the change.
+- The controller also finds stopping daemons through a Service of all
+  daemon pods (`<release>-buildkit-all`, ready or not), so a controller
+  that restarts during a drain still reads them.

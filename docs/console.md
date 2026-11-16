@@ -34,7 +34,11 @@ Service (their own node's daemon). Five sections:
   cache by kind and largest cache mounts, its disk (cache, other files,
   free space) with a warning near the GC's keep-free floor or the
   kubelet's eviction thresholds, why the router sent builds there, its
-  garbage collection and the projects it built for. The node's and the
+  garbage collection and the projects it built for. With sign-in, the
+  names that builds choose (running targets, cache mounts, base images)
+  are shown to admins only; others see their counts, sizes and ages. The
+  page is dated by its oldest daemon reading; while the controller does
+  not answer, it says so. The node's and the
   pod's figures come from the disk probe next to each daemon, which reads
   `/proc` and the pod's cgroup every 10 s and keeps an hour; longer
   series belong to your monitoring (OTLP, below).
@@ -53,7 +57,8 @@ farm, unclear or failed. A build's page starts with one sentence, then:
   how much step time ran in parallel; a Resources tab lists the executed
   steps by CPU time with the cores each used on average, and draws the
   cores the running steps used together over the build against the
-  node's cores, saying for how long they wanted more than the node has;
+  node's cores (each step at its average over its whole run), saying for
+  how long those averages added up to more than the node has;
 - BuildKit's Dockerfile build checks that failed (rule, line, link);
 - for a failed build, whether the step that failed is new or changed;
   exit codes 137 and 143 are read as the signals they are;
@@ -78,6 +83,13 @@ done.
 Dockerfiles' differing lines and every step's state and time. The Compare
 button on a build's page (key `x`), "Compare two builds" on the builds
 list, "compare two" on an image's page and Ctrl+K lead there.
+
+**Keyboard.** Ctrl+K opens search (pages, projects, Sign out), `?` lists
+the shortcuts. Single-key shortcuts (`t`, `[`, `e`, `c`, `x`, `/`, `?`,
+`g` then a letter) can be turned off, and on again, from search ("Turn
+single-key shortcuts off"); the choice is kept in this browser. Ctrl+K
+and Esc always work. On a phone the project switch (and signing out) is
+in the header's menu.
 
 **Speed-ups**: a step that runs a package manager (apt, apk, dnf, pip,
 uv, npm, Yarn, pnpm, Go, Cargo, Maven, Gradle and about twenty more)
@@ -224,9 +236,11 @@ the job's `.git`: every job's checkout writes its own (see
 
 4. **Check.** Open a finished pipeline in the console: each job now has
    its result and "waited for a runner" time. The controller reads the
-   Secret at start, so after changing the token later, re-create the
-   Secret and `kubectl -n ci-accelerator rollout restart
-   deploy/ci-accelerator-controller`. A refused token (wrong, expired,
+   token from the mounted Secret at every use: after changing the token
+   later, re-create the Secret, and the controller uses the new one once
+   the kubelet has updated the file (about a minute), without a restart.
+   A Secret emptied while the box runs stops its GitLab reads until it
+   holds a token again. A refused token (wrong, expired,
    without `read_api`) shows in the controller's log as `gitlab api`
    warnings with GitLab's 401 or 403: `kubectl -n ci-accelerator logs
    deploy/ci-accelerator-controller | grep 'gitlab api'`.
@@ -239,7 +253,10 @@ On the one-machine install, run the script again with
 Sign-in replaces the shared token: each person signs in with their
 GitLab account, the console reads GitLab with their own token and shows
 them the projects whose jobs GitLab lets them read; `admins` see
-everything. Visibility is per project, not per runner: a person sees the
+everything. With several GitLabs, a person's token is sent only to the
+GitLab they signed in with: an admin sees another GitLab's projects from
+what the console stored (builds, pipelines read before), but no job log
+or job times are read from that GitLab for them. Visibility is per project, not per runner: a person sees the
 builds of every project where they may read jobs (Reporter or more,
 directly or through a group; a project with public pipelines is visible
 to everyone signed in). A group runner and a project runner make no
@@ -309,12 +326,27 @@ later signs everyone out (with Flux or Argo CD, see
 start: after changing one, `kubectl -n ci-accelerator rollout restart
 deploy/ci-accelerator-controller`.
 
+Turning sign-in off later ends every stored session when the controller
+starts, sealed tokens included. Changing the session key, or removing or
+re-spelling a GitLab's URL, ends the sessions it concerns at their next
+use. In all three cases the box cannot revoke the grants: each person's
+authorization of the application stays valid at GitLab until it expires
+or is revoked there (User settings > Applications > Authorized
+applications), or an administrator renews the application's secret.
+
+With sign-in at an https address that is not a loopback one, the console
+sends `Strict-Transport-Security` (one year). A signed-in person can hold
+up to 16 live pages at a time (a hidden tab holds none), the console 256
+in all.
+
 **4. The values.** Your GitLab user id for `admins` is the number on
 your profile page (`https://gitlab.com/<username>`, "User ID" under the
 name), not the username: GitLab gives a renamed or deleted account's
 username to the next account that takes it. Admins see every project,
 builds the console could not attribute to a project, and may call the
-JSON API.
+JSON API. With sign-in, the JSON API takes an admin's session cookie only:
+the box's console has no API token, so a script calls it with sign-in on
+only through such a cookie ([api/openapi.yaml](api/openapi.yaml)).
 
 ```yaml
 global:
@@ -380,7 +412,8 @@ spec:
 ```
 
 The box's NetworkPolicy admits connections to the web from every other
-namespace except the jobs namespace. An Ingress controller on the host
+namespace except the jobs namespace (and the daemons' and the router's
+client namespaces). An Ingress controller on the host
 network (ingress-nginx with `hostNetwork: true`, k3s's Traefik on some
 setups) connects from the node addresses, which the policy refuses: the
 browser hangs and the Ingress controller's log (not ci-accelerator's)
@@ -393,6 +426,10 @@ control-plane:
     extraFrom:
       - ipBlock: { cidr: 10.0.0.0/24 }
 ```
+
+On Cilium, NetworkPolicy `ipBlock` rules do not match pod or node
+addresses unless its `policyCIDRMatchMode` includes them: such an
+`ipBlock` needs `policyCIDRMatchMode=nodes`.
 
 **7. Check.** In a private browser window, open
 `https://ci-console.example.com/`: a sign-in page with one button per

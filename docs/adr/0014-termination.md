@@ -15,3 +15,5 @@ It was unclear whether buildkitd aborts running builds on SIGTERM. Measured on k
 ## Consequences
 
 A rollout takes up to nodes x (longest build + startup); pass `--timeout` to Helm accordingly.
+
+Later: [ADR-0061](0061-drain-before-sigterm.md) changed the stop: after the `preStop` sleep the daemon waits while it runs builds, then 15 s more, and only then gets SIGTERM.

@@ -45,3 +45,5 @@ Two facts shape the design:
 - **Output cannot be searched with SQL**, because it is compressed. Searching output is not in v0.2.
 - **A weak secret passed as a build argument** could be guessed from its keyed hash by whoever holds the database file and its key. BuildKit secrets are the way to pass secrets.
 - **Records missed for more than two hours.** If the collector is down longer than that, a received step may lose the link to the build that executed it. It still shows as received.
+
+Later: builds are kept 30 days by default ([ADR-0037](0037-console-builds-only.md)), and the store moved into the controller, separate from the web ([ADR-0044](0044-control-plane.md)).

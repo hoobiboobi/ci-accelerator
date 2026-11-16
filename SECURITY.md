@@ -14,13 +14,13 @@ GitHub's advisory workflow.
 
 | Version | Fixes |
 |---|---|
-| 0.3.x | yes |
-| 0.2.x and older | no |
+| 0.6.x | yes |
+| 0.5.x and older | no |
 
 The latest 0.x minor receives fixes; older minors do not. A release
 upgrades in place from the previous one, with one exception: 0.2.x does
 not upgrade to 0.3.0 (the console became the control plane and its objects
-have new names), so move to 0.3 by installing again as the
+have new names), so move from 0.2.x by installing again as the
 [changelog's upgrade notes](CHANGELOG.md) describe. See also
 [docs/releasing.md](docs/releasing.md).
 
@@ -63,8 +63,12 @@ sign-in shows everything to whoever reaches it.
 
 ## What the project does itself
 
-- Every dependency, image, tool and GitHub Action is pinned by version and
-  checksum or digest; pins are at least two weeks old when adopted, except
+- Every build input, tool and GitHub Action is pinned by version and
+  checksum or digest, and so is the daemons' BuildKit image. The box's own
+  image (the control plane and the disk probe) and the gitlab-runner image
+  come by tag unless a digest is set
+  ([docs/production.md](docs/production.md) shows how). Pins are at least
+  two weeks old when adopted, except
   a security patch of the same minor line, which is adopted at once.
 - Every pull request that touches the Go code or the image's build runs
   `govulncheck` on the Go code for both release targets and `trivy` on the

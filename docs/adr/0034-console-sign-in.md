@@ -24,3 +24,5 @@ Options: oauth2-proxy in front of the console, Dex, or sign-in in the console it
 - While the console holds any token of a person (another browser), GitLab skips its consent screen; signing out ends only that session's token. Revoking the application in GitLab withdraws all of them.
 - The console reads GitLab only while a person's page asks: with sign-in, a pipeline nobody looks at is not read.
 - Changing the session key signs everyone out.
+
+Later: admins are listed by GitLab user id (`id:<user id>`), not by username: a username can be renamed and taken by someone else.

@@ -118,8 +118,9 @@ quarters of the memory at most), the cache path, the GitLab URL and
 
 **On this machine, `kubectl` is `sudo k3s kubectl`**, and Helm is the
 script's: `sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-/usr/local/lib/ci-accelerator/helm-v4.3.1/helm`. The install notes print
-bare `kubectl`: add the prefix.
+/usr/local/lib/ci-accelerator/helm-v4.3.1/helm`. The install notes the
+script prints already use `sudo k3s kubectl`; notes you print yourself
+with `helm get notes` use bare `kubectl`: add the prefix.
 
 ## 4. Check it
 
@@ -217,9 +218,9 @@ comparing commits in GitLab.
 
 The console's job pages now show results and waits. The token expires on
 the date you chose: make a new one then, put it into the file, run the
-same command again and restart the controller, which reads the token
-only at start: `sudo k3s kubectl -n ci-accelerator rollout restart
-deploy/ci-accelerator-controller`.
+same command again. The controller reads the token at every use and
+takes the new one once the kubelet has updated its file (about a
+minute), without a restart; an emptied Secret stops its GitLab reads.
 
 ## 8. Sign-in through GitLab
 

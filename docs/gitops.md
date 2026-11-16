@@ -295,7 +295,7 @@ names are needed while `global.router.enabled` is on, the default):
 # the daemons' certificate (with the build router's names) and the CI jobs' client
 scripts/buildkit-certs.sh --name ci-accelerator-buildkit --namespace ci-accelerator --router ci-accelerator
 # the controller's client certificate for the daemons
-scripts/buildkit-certs.sh --name ci-accelerator-buildkit --no-server --client controller
+scripts/buildkit-certs.sh --name ci-accelerator-buildkit --namespace ci-accelerator --no-server --client controller
 # the controller API's server certificate
 scripts/buildkit-certs.sh --name ci-accelerator-buildkit --namespace ci-accelerator --controller ci-accelerator
 ```
@@ -303,9 +303,8 @@ scripts/buildkit-certs.sh --name ci-accelerator-buildkit --namespace ci-accelera
 Each run prints the `kubectl create secret` command for what it made:
 `ci-accelerator-buildkit-tls` (box namespace), `ci-accelerator-buildkit-client`
 (jobs namespace: the runners mount it into every job),
-`ci-accelerator-buildkit-controller` (the controller's client certificate:
-the second run prints it for `<jobs-namespace>`, create it in the box
-namespace instead) and `ci-accelerator-controller-tls` (box namespace).
+`ci-accelerator-buildkit-controller` (the controller's client certificate,
+box namespace; `control-plane.tls.existingSecret`) and `ci-accelerator-controller-tls` (box namespace).
 Values:
 
 ```yaml

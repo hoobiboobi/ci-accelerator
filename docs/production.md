@@ -117,6 +117,17 @@ for; check `kubectl -n ci-accelerator get limitrange`. After the change,
 the Nodes page of the console draws the daemon's CPU and memory against
 the node's.
 
+## The controller's memory
+
+The controller keeps each daemon's builds of the last two hours in
+memory, with up to 64 KiB of printed output for each step a build
+executed, to link builds that share work. Its memory therefore grows with
+builds per two hours times their output. In a test, 1000 builds in two
+hours with about four steps each printing over 64 KiB held about 320 MiB
+of Go heap; mostly cached or quiet builds hold far less. Raise
+`control-plane.controller.resources.limits.memory` above the default 1Gi
+for farms with thousands of chatty builds an hour.
+
 ## Images pinned by digest
 
 The daemons' BuildKit image is pinned by digest by the chart. The box's
@@ -137,13 +148,17 @@ buildkit:
       digest: "sha256:8103f17d6512ed305f445fc436dfe19cf9669d57745ae95f2cc98756f39b1204"   # ci-accelerator:v0.3.3, the probe
 ```
 
+The runner (and every runner tier, which uses the same image) is pinned
+by digest by appending it to the tag:
+`gitlab-runner.image.tag: alpine-v19.5.1@sha256:<digest>`.
+
 Check: the pods run by digest.
 
 ```sh
 kubectl -n ci-accelerator get deploy ci-accelerator-controller -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 ```
 
-prints `ghcr.io/hoobiboobi/ci-accelerator:v0.6.0@sha256:5071488b...`. A
+prints `ghcr.io/hoobiboobi/ci-accelerator:v0.6.0@sha256:<the digest you set>`. A
 digest belongs to one release: an upgrade sets the new one from the new
 release's notes in the same `helm upgrade`, and the chart refuses a kept
 digest of the release before with a message that names the right one
@@ -166,6 +181,25 @@ zone without a ready daemon goes to another zone
 (`control-plane.router.crossZone: true`). Set `zones: false` when the
 zones are cheap to cross or every zone has one build node (then every
 job stays on its node anyway).
+
+## Taking a build node out for maintenance
+
+The router keeps sending jobs to a cordoned node's daemon (it is still
+ready), and `kubectl drain --ignore-daemonsets` leaves the daemon and the
+router running: a reboot then kills the builds routed there. Take the box
+off the node first:
+
+1. `kubectl cordon <node>`: no new job pods start there.
+2. `kubectl label node <node> ci-accelerator.io/node-role-`: the daemon
+   and the router on the node stop; each lets its running builds finish
+   first (up to `buildkit.terminationGracePeriodSeconds` and
+   `control-plane.router.drainSeconds`), and no new job is routed there.
+   Wait until `kubectl -n ci-accelerator get pods -o wide
+   --field-selector spec.nodeName=<node>` lists none of the box's pods.
+3. Drain the node and do the work.
+4. `kubectl label node <node> ci-accelerator.io/node-role=build` and
+   `kubectl uncordon <node>`. With `emptyDir` storage the node's cache
+   starts empty: the projects warm there build cold once.
 
 **arm64 build nodes:** the daemons, the runner's job pods and the
 runner's helper image follow one architecture, set once:
@@ -252,9 +286,14 @@ the date and restart the daemons after replacing the Secret.
 The box installs NetworkPolicies around every part ([install.md](install.md#what-gets-installed)
 lists them). They need a CNI that enforces policies, egress included;
 without one everything runs, but the daemons accept connections from
-every namespace and job scripts reach cloud instance metadata. An Ingress
+every namespace and job scripts reach cloud instance metadata. With one,
+builds and job pods do not reach the cloud metadata addresses in
+`buildkit.networkPolicy.egress.blockedCIDRs`: by default
+`169.254.169.254`, `168.63.129.16`, `100.100.100.200`, `fd00:ec2::254`
+and `fd20:ce::254`; a list set there replaces the defaults. An Ingress
 controller on the host network needs its node addresses in
-`control-plane.networkPolicy.extraFrom` to reach the web. Cluster-scoped
+`control-plane.networkPolicy.extraFrom` to reach the web; on Cilium such
+an `ipBlock` matches node addresses only with `policyCIDRMatchMode=nodes`. Cluster-scoped
 objects, cert-manager's namespace and the installer's rights:
 [install-existing-cluster.md](install-existing-cluster.md).
 

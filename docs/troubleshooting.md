@@ -70,6 +70,7 @@ kubectl -n ci-accelerator describe pod <daemon pod> | tail -20
 | `CrashLoopBackOff`, log `failed to load config` | A configuration buildkitd rejects (often `config.extraConfig`). The rollout stops on the first node; `helm rollback` |
 | `CrashLoopBackOff` with hostPath, lock error | Another daemon holds the state directory: a second release on the same path, or a surge pod (the chart refuses `maxSurge` with hostPath) |
 | `disk-probe` in `ImagePullBackOff`, daemon pod not started | The probe runs the `ghcr.io/hoobiboobi/ci-accelerator` image at its own pinned tag (`buildkit.diskProbe.image`, default tag `v0.3.3`), and a pod starts only with all its images: mirror that tag too, or `buildkit.diskProbe.enabled=false` |
+| `CrashLoopBackOff`, log `ulimit: error setting limit (Operation not permitted)` | `buildkit.openFilesLimit` (default 1048576) is above the node's `fs.nr_open` (`sysctl fs.nr_open`). Lower it to at most that value, or `0` to keep the node's limit |
 | No pods at all after a successful `helm install` | The namespace enforces `baseline`/`restricted` without a label the chart could see (some distributions default to `baseline`); see the DaemonSet's events |
 
 The daemons run BuildKit v0.34.2. To check what they run, the
@@ -152,7 +153,7 @@ the build router" and why:
 - *the job's own node, whose cache holds the project's layers*;
 - *the node whose cache holds the project's most recently used layers*
   (another node of the job's zone);
-- *the project's node by hash: no cache held its layers*;
+- *the project's node by hash: no ready node was known to hold its layers*;
 - *in another zone: no daemon of the job's zone was ready*.
 
 No such line: the router did not know the job and sent it to its own
@@ -184,13 +185,16 @@ facts the controller stored, per node:
   daemon that runs that many builds when another one is free.
 - While the controller does not answer, the routers keep routing on the
   last view they had (log `controller not reached: routing on the last
-  view`); decisions made then are not shown on the pages (`decisions
-  dropped while the controller was away`).
+  view`) and age its warmth themselves. Their decisions are kept (up to
+  10 000 per router) and sent when the controller answers again; only
+  older ones are dropped (`decisions dropped while the controller was
+  away`), and a router that restarts meanwhile loses what it kept.
 
 **The router does not know the job.** Its log then says `routed a
 connection of no known CI job to its node's daemon`, and the job goes to
-the daemon on its own node, as without the router (by hash when its node
-has no ready daemon). The router knows a job
+the daemon on its own node, as without the router (when its node has no
+ready daemon, to one of its zone by a hash of the node; refused when its
+zone has none and `crossZone` is off). The router knows a job
 by the source address of its connection, which must be the address of a
 running job pod in the jobs namespace (`control-plane.jobs.namespace`)
 whose annotation `job.runner.gitlab.com/url` starts with one of the
@@ -207,7 +211,17 @@ runner's `gitlabUrl`, exactly as written). It is not known when:
 - the job pod is not in the router's view within 3 seconds of connecting
   (the router waits that long for a new pod's address);
 - your own runner's `gitlabUrl` differs from the control plane's URL
-  (a trailing slash, another host name for the same GitLab).
+  (a trailing slash, another host name for the same GitLab);
+- the runner reaches GitLab at another address than the one GitLab writes
+  into its job URLs (for example an in-cluster Service name such as
+  `http://gitlab-webservice.gitlab.svc:8181` next to GitLab's own chart).
+  The runner's `gitlabUrl` must be GitLab's external URL, the one its job
+  pages have. The case of the host name and a default port (`:443`, `:80`)
+  do not matter. The controller logs `a job pod's URL starts with none of
+  the GitLab URLs` once when this happens.
+
+List the URL exactly as the runner has it: the trailing slash is part of
+the identifier the trace id is derived from.
 
 **Zones.** With `control-plane.router.zones=true` (the default) a job stays
 in its node's zone (`topology.kubernetes.io/zone` of the daemons' nodes),
@@ -399,8 +413,8 @@ limit on build nodes.
   build nodes with `cluster-autoscaler.kubernetes.io/scale-down-disabled=true`,
   or keep build pools out of autoscaling.
 - **Resources.** The chart's default requests (500m CPU, 512Mi) only keep
-  the daemons out of BestEffort, and the install notes say so while they
-  are in place. Size `buildkit.resources` to the build nodes; the chart's
+  the daemons out of BestEffort (the buildkit chart's own install notes say
+  so when it is installed alone; the box's notes do not). Size `buildkit.resources` to the build nodes; the chart's
   values list sizes (production started from requests of 48 CPU / 128 GiB
   and a memory limit of 128 GiB). A LimitRange can add a default memory
   limit, and an OOM kill takes the daemon down with every running build.
@@ -417,6 +431,14 @@ limit on build nodes.
   nodes silently. With the router on, the router still picks the daemon by
   the job's own node and project, so this costs a hop to another node, not
   the cache; without it, caches stay cold and builds still work.
+- **Builds time out reaching an in-cluster registry or GitLab** with
+  `buildkit.networkPolicy.egress.clusterCIDRs` set: the daemons and every
+  RUN step then lose in-cluster services. Allow them in
+  `buildkit.networkPolicy.egress.extraRules`; on Cilium see the
+  `policyCIDRMatchMode` note in [install.md](install.md).
+- **Taking a build node out for maintenance.** Cordoning and draining it
+  leaves the daemon and the router running there; follow
+  [production.md](production.md#taking-a-build-node-out-for-maintenance).
 
 ## The console
 
@@ -441,8 +463,12 @@ limit on build nodes.
   tokens are projected for the audience `ci-accelerator-controller`, and
   their ServiceAccounts must be `<release>-web` and `<release>-router` in
   the release's namespace; the controller checks both with Kubernetes
-  (TokenReview). The answers are kept for 5 minutes, refusals for 10
-  seconds.
+  (TokenReview), which must confirm that audience: an authenticator that
+  reports no audiences is refused. The answers are kept for 5 minutes,
+  refusals for 10 seconds. Reviews of tokens not kept yet are bounded per
+  caller address and overall; past the bound the caller gets 503 and tries
+  again. The controller logs a refused call once a minute per route, with
+  a count of the ones it left out.
 - **A running job's page shows no build in progress.** The console knows a
   running build's job only from the build option
   `ci-accelerator.io/traceparent`, which the CI component passes since
@@ -450,7 +476,8 @@ limit on build nodes.
   component of an earlier release, or a `buildctl build` of your own,
   needs `--opt "ci-accelerator.io/traceparent=$TRACEPARENT"`; without it
   the build shows once it completes. "follows too many running builds"
-  means 32 running builds have open pages: it shows when it is done. Its
+  means 32 running builds have open pages, or 8 running builds name the
+  same job: it shows when it is done. Its
   progress is read through the daemons' TLS port, like the build history:
   "could not be read" with a TLS or connection error points to the same
   places as missing builds (below).
@@ -465,7 +492,8 @@ limit on build nodes.
   (`hostNetwork: true`) comes from a node. Add the node addresses to
   `control-plane.networkPolicy.extraFrom` (`ipBlock`), or set
   `control-plane.networkPolicy.enabled=false` if the CNI enforces no
-  policies anyway. `kubectl port-forward` is not affected; it goes to
+  policies anyway. On Cilium an `ipBlock` matches node addresses only with
+  its `policyCIDRMatchMode` set to `nodes`. `kubectl port-forward` is not affected; it goes to
   `svc/ci-accelerator-web`.
 - **The Nodes page.** One table of the daemons, the ones that need
   attention first; "Needs attention" (`/nodes?show=attention`) shows only
@@ -481,8 +509,9 @@ limit on build nodes.
   controller`). Daemons that are gone after a rollout disappear from the
   page by themselves.
 - **"A daemon's cache could not be read".** The controller lists each
-  daemon's cache once a minute; the row keeps the builds it stored, and the
-  figures come back with the next reading.
+  daemon's cache once a minute; the row keeps the builds it stored, the
+  daemon's page says when its cache figures are from, its disk and load
+  stay current, and the figures come back with the next reading.
 - **The disk column says "no answer" ("The disk probe did not answer" on
   the daemon's page).** The controller asks the disk probe next to each
   daemon on the port the daemon names (9180 by default): check the daemon
@@ -555,13 +584,38 @@ limit on build nodes.
   skips its consent screen while the console holds any token of yours (a
   session in another browser). Signing out revokes only that session's
   token; revoking the application in GitLab (Edit profile > Access > Applications)
-  withdraws all of them.
+  withdraws all of them. A session that ends because it was idle or too
+  old is revoked at GitLab when it is next used; one that is never used
+  again is deleted by the hourly prune without a revoke, and its token
+  stays valid at GitLab until it expires (2 hours by default). Changing
+  the console's session key ends every session without a revoke: the old
+  key is needed to open their tokens.
 - **Signed in, but every page sends you back to sign in.** The session
   cookie is Secure: the console's address must be https, or
   `http://localhost` with a port-forward in a browser that keeps Secure
   cookies on localhost (Chrome and Firefox do).
 - **Someone removed from a project still sees it.** GitLab's answer on a
   project is kept for 10 minutes (a refusal for 90 seconds).
+- **The controller logs `retention` with "the volume of /data is nearly
+  full".** The console keeps its history on the controller's volume
+  (`<release>-controller-data`, `control-plane.controller.persistence.size`,
+  10Gi by default): builds for `retention.days`, step output for
+  `retention.outputDays` (7), the database within `retention.storeShare`
+  (70 %) of the volume. Below 5 % or 256 MiB free the hourly
+  retention says so; once the volume is full no new build is stored
+  (`record not stored` warnings) and each hourly pass frees only what it
+  can. Enlarge the volume (if its StorageClass allows expansion) or lower
+  the retention, then wait for the next pass or restart the controller.
+- **The controller restarts while reading one build.** Symptoms: the
+  controller is `OOMKilled`, or its log shows a panic, right after
+  `reading record` with the record's `ref`. Ways out: raise
+  `control-plane.controller.resources.limits.memory`; or delete that
+  record from the daemon (`docker buildx history rm <ref>` on a builder of
+  the `remote` driver that points at that daemon, with a client
+  certificate of the installation's CA; `buildctl debug histories` lists
+  the records); or wait until the daemon's
+  history drops it (`buildkit.config.history.maxAge`, 48 hours by
+  default).
 
 ## Reading the logs
 

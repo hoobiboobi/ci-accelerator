@@ -33,10 +33,12 @@ make renovate-check pins-check # Renovate sees every pin (docker); every pinned 
     ones;
   - an in-place upgrade from the last published release, and a rollback.
 
-  On GitHub it runs in four parallel groups, each on its own kind cluster.
+  On GitHub it runs in five parallel groups, each on its own kind cluster.
   A pull request runs only what its change touches: documentation alone
   runs nothing, Go code the Go checks and the two groups that run the
-  control plane, a chart every group
+  control plane (the code that reads GitLab, `internal/gitlab`,
+  `internal/history` and `internal/collector`, also the component's
+  group), a chart every group, a file with pins also the Renovate checks
   ([ADR-0049](adr/0049-ci-runs-what-a-change-touches.md)).
 - **The console's pages** are checked in headless Chrome: on test data by
   `make ui-test`, and against the real console in the e2e's box scenario.
@@ -47,6 +49,11 @@ make renovate-check pins-check # Renovate sees every pin (docker); every pinned 
   container with stand-ins for k3s and Helm: where the build cache is on
   later runs, the free-disk check, what `--uninstall` removes, what a
   second run keeps and when it stops before changing anything.
+- **The scripts' own tests** run in `make lint`: `scripts/test/*.sh`
+  (`quickstart.sh` in a fake root, `buildkit-certs.sh`, `update-pins.sh`),
+  `test/verify/joblogs_test.py`, and `scripts/pins-agree.sh`.
+  `ci/gitlab/test/run.sh --local` runs the component's job script with
+  this machine's `sh` instead of the image's BusyBox (no docker).
 - **CI jobs in the e2e** come from a real gitlab-runner. Most scenarios
   talk to a stand-in for the GitLab API; the component scenario runs real
   pipelines in GitLab CE (checkout, pushes with the job token to GitLab's

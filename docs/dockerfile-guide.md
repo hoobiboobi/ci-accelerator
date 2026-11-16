@@ -117,6 +117,14 @@ workspace (monorepo) needs every `package.json`: `COPY --parents
 The console points such steps out with the fragment for the Dockerfile
 (the "order" speed-up in [the console](console.md)).
 
+For pip, the early install in the order fragment reads only the lines of
+the requirement files the command names: files those include (`-r
+base.txt`, `-c constraints.txt`) are not known from the build record, so
+they are installed in the second step, after the code is copied. With
+layered requirement files, name each file on the command line (`pip
+install -r requirements/base.txt -r requirements/prod.txt`) to have all
+of them installed before the code.
+
 ## 3. Use cache mounts for package managers
 
 A layer is all or nothing: if the lock file changes, `npm ci` runs again
@@ -217,8 +225,10 @@ Pass build arguments with `--opt build-arg:VERSION=$CI_COMMIT_SHORT_SHA`.
 ## 5. Never pass secrets as build arguments
 
 Build arguments are visible in the image history and in BuildKit's build
-history on the daemon. The console shows their values (it masks only
-those whose names look secret, such as `*_TOKEN` or `*_PASSWORD`), and
+history on the daemon. The console shows their values (it hides the
+values of those whose names look secret, such as `*_TOKEN` or
+`*_PASSWORD`, and masks known token formats and passwords in URLs in the
+others: best effort), and
 when the daemons send traces to your backend, the `buildctl` command line
 with every `--opt build-arg:...` value is recorded there, where any build
 can write spans too. Use secret mounts instead. They are available to one
