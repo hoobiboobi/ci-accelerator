@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/net/netutil"
+
 	"github.com/hoobiboobi/ci-accelerator/internal/logging"
 )
 
@@ -61,6 +63,11 @@ func Handler(dir string, stat func(string) (Disk, error), load func() (Load, err
 	return mux
 }
 
+// maxConns bounds the connections the probe serves at once: the build
+// steps share the daemon pod's network, and the probe has little memory.
+// More wait to be accepted.
+var maxConns = 32
+
 // Serve answers on addr until ctx ends, logging to log: a statfs that
 // fails at most once a minute, each answer at the debug level. With a
 // sampler, it runs it and serves its readings as /load.
@@ -87,6 +94,7 @@ func Serve(ctx context.Context, addr, dir string, sampler *Sampler, log *slog.Lo
 	if err != nil {
 		return err
 	}
+	ln = netutil.LimitListener(ln, maxConns)
 	srv := &http.Server{Handler: Handler(dir, stat, load), ReadHeaderTimeout: 5 * time.Second, ErrorLog: logging.ErrorLog(log),
 		ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, MaxHeaderBytes: 8 << 10}
 	go func() {

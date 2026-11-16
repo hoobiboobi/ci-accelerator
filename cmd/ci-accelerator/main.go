@@ -20,8 +20,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -53,9 +56,13 @@ func (l *list) Set(v string) error { *l = append(*l, v); return nil }
 
 type config struct {
 	data, discover, tlsDir, serverName, listen string
-	jobsNamespace, kubeconfig, kubeContext     string
-	gitlabTokenFile, release, signIn           string
-	logLevel                                   string
+	// discoverAll is a headless Service that lists every daemon pod,
+	// ready or not: a controller that starts while a daemon drains finds
+	// it there.
+	discoverAll                            string
+	jobsNamespace, kubeconfig, kubeContext string
+	gitlabTokenFile, release, signIn       string
+	logLevel                               string
 	// A member of a fleet: the hub's console address, this box's name
 	// there, its key and the hub's public keys (files), and the CA of the
 	// hub's address ("" for the system's).
@@ -66,9 +73,14 @@ type config struct {
 	caches, namespace             string
 	devAssets                     string
 	gitlabURLsFile, gitlabURLsWas string
-	cacheEvery                    time.Duration
-	daemons, gitlabURLs           []string
-	keepDays, keepOutputDays      int
+	// gitlabURLsFixed are the URLs of the flags and $GITLAB_URLS, which a
+	// changed -gitlab-urls-file does not change.
+	gitlabURLsFixed          []string
+	cacheEvery               time.Duration
+	daemons, gitlabURLs      []string
+	keepDays, keepOutputDays int
+	// maxStoreMiB bounds the store's database (0: no bound).
+	maxStoreMiB int64
 
 	// The controller role (split): its API for the web.
 	split                     bool
@@ -228,6 +240,9 @@ func controllerMain(args []string, splitRole bool) error {
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	fs.StringVar(&c.data, "data", "/data", "directory of the store")
 	fs.StringVar(&c.discover, "discover", "", "headless Service host:port; every address it resolves to is a daemon")
+	// Also from an environment variable: a controller image older than
+	// the chart would stop on an unknown flag.
+	fs.StringVar(&c.discoverAll, "discover-all", os.Getenv(discoverAllEnv), "headless Service host:port listing every daemon pod, ready or not (stopping daemons too); its addresses are read as well (default $"+discoverAllEnv+")")
 	fs.Var(&daemons, "daemon", "a daemon's address, tcp://host:port (repeatable; instead of -discover)")
 	fs.StringVar(&c.tlsDir, "tls-dir", "/certs", "directory with ca.crt, tls.crt and tls.key (the client certificate)")
 	fs.StringVar(&c.serverName, "server-name", "", "name in the daemons' certificate (default: the host of -discover)")
@@ -244,6 +259,8 @@ func controllerMain(args []string, splitRole bool) error {
 	fs.StringVar(&c.signIn, "sign-in", "", "JSON file configuring sign-in through GitLab; empty: no sign-in (keep the console inside the cluster)")
 	fs.IntVar(&c.keepDays, "keep-days", 30, "days builds are kept")
 	fs.IntVar(&c.keepOutputDays, "keep-output-days", 7, "days step output is kept")
+	maxStore, _ := strconv.ParseInt(os.Getenv(maxStoreEnv), 10, 64)
+	fs.Int64Var(&c.maxStoreMiB, "max-store-mib", maxStore, "MiB the store's database may hold before the oldest builds go early; 0: no bound (default $"+maxStoreEnv+")")
 	if splitRole {
 		fs.StringVar(&c.apiListen, "api-listen", ":8443", "address of the API the web reads (HTTPS)")
 		fs.StringVar(&c.apiTLSDir, "api-tls-dir", "/api-tls", "directory with tls.crt and tls.key of the API (read again when they change)")
@@ -270,6 +287,7 @@ func controllerMain(args []string, splitRole bool) error {
 	}
 	c.daemons = daemons
 	c.gitlabURLs = append(gitlabURLs, split(os.Getenv("GITLAB_URLS"))...)
+	c.gitlabURLsFixed = append([]string(nil), c.gitlabURLs...)
 	if c.gitlabURLsFile != "" {
 		was, urls, err := readURLsFile(c.gitlabURLsFile)
 		if err != nil {
@@ -304,6 +322,9 @@ func run(c config, log *slog.Logger) error {
 	}
 	if c.keepDays < 1 || c.keepOutputDays < 1 || c.keepOutputDays > c.keepDays {
 		return errors.New("-keep-days and -keep-output-days must be at least 1, output no longer than builds")
+	}
+	if c.maxStoreMiB < 0 {
+		return errors.New("-max-store-mib must not be negative")
 	}
 	if c.caches != "" && c.cacheEvery < 10*time.Second {
 		// Listing a bucket is not free: 0s would list it without pause.
@@ -342,9 +363,9 @@ func run(c config, log *slog.Logger) error {
 	case c.gitlabTokenFile != "":
 		gitlabRead = "the installation's"
 	}
-	cfg := []any{"data", c.data, "discover", c.discover, "daemons", len(c.daemons), "jobs_namespace", c.jobsNamespace,
+	cfg := []any{"data", c.data, "discover", c.discover, "discover_all", c.discoverAll, "daemons", len(c.daemons), "jobs_namespace", c.jobsNamespace,
 		"gitlab", hosts(c.gitlabURLs), "gitlab_read", gitlabRead, "runner_caches", c.caches != "", "keep_days", c.keepDays,
-		"keep_output_days", c.keepOutputDays, "release", c.release, "log_level", c.logLevel}
+		"keep_output_days", c.keepOutputDays, "max_store_mib", c.maxStoreMiB, "release", c.release, "log_level", c.logLevel}
 	if c.fleetHub != "" {
 		cfg = append(cfg, "fleet_hub", c.fleetHub, "fleet_name", c.fleetName)
 	}
@@ -358,7 +379,20 @@ func run(c config, log *slog.Logger) error {
 	if c.gitlabURLsFile != "" {
 		// The instances are fixed at start (the collector, the job watch,
 		// GitLab's client): a new URL starts the controller again.
-		go followURLsFile(ctx, c.gitlabURLsFile, c.gitlabURLsWas, urlsEvery, func(urls []string) {
+		running := c.gitlabURLs
+		go followURLsFile(ctx, c.gitlabURLsFile, c.gitlabURLsWas, urlsEvery, func(fromFile []string) {
+			urls := append(append([]string(nil), c.gitlabURLsFixed...), fromFile...)
+			if slices.Equal(urls, running) {
+				log.Info("the GitLab URLs are the running ones again: no new start", "gitlab", hosts(urls))
+				return
+			}
+			// Ending now would leave no controller at all: the next start
+			// refuses these URLs.
+			if err := urlsRefused(c, urls); err != nil {
+				log.Warn("the GitLab URLs changed, but a start with them would be refused: running on with the old ones",
+					"gitlab", hosts(urls), "running", hosts(running), "reason", err.Error())
+				return
+			}
 			log.Info("the GitLab URLs changed: starting again", "gitlab", hosts(urls))
 			stop()
 		})
@@ -371,7 +405,7 @@ func run(c config, log *slog.Logger) error {
 		log.Info("rebuilds with no change in the repository count as the build farm's", "env", store.TrustGitComparisonEnv)
 	}
 	st, err := store.Open(ctx, c.data, store.Options{Keep: time.Duration(c.keepDays) * 24 * time.Hour, KeepOutput: c.keepOutputDays,
-		TrustGitComparison: trustGit})
+		MaxBytes: c.maxStoreMiB << 20, TrustGitComparison: trustGit})
 	if err != nil {
 		return err
 	}
@@ -390,7 +424,7 @@ func run(c config, log *slog.Logger) error {
 			defer cancel()
 			return collector.Dial(dctx, addr, tls)
 		},
-		Resolve: func(ctx context.Context) ([]string, error) { return resolve(ctx, c) },
+		Resolve: func(ctx context.Context) ([]string, error) { return resolve(ctx, c, log) },
 	}
 	col.OnLiveChange(func() { st.Announce("") })
 	var kube kubernetes.Interface
@@ -434,12 +468,16 @@ func run(c config, log *slog.Logger) error {
 		for _, ch := range signIn.Instances() {
 			log.Info("sign-in through GitLab", "gitlab", ch.Host, "redirect_uri", signIn.RedirectURL(ch.Instance))
 		}
+	} else if c.fleetHub == "" {
+		// Nothing reads or ends the sessions of an earlier sign-in now:
+		// their sealed GitLab tokens would stay in the store for good.
+		if err := endSignInSessions(ctx, st, log); err != nil {
+			return err
+		}
 	}
 	if c.gitlabTokenFile != "" {
 		if len(c.gitlabURLs) > 1 {
-			// The token is one GitLab's: every read of another GitLab's
-			// jobs would send it there.
-			return errors.New("-gitlab-token-file is a token of one GitLab, but several -gitlab-url are given: it would be sent to each of them; use -sign-in (each person's own token), or one URL")
+			return errOneTokenSeveralGitLabs
 		}
 		token, err := gitlabToken(ctx, c, log)
 		if err != nil {
@@ -466,7 +504,7 @@ func run(c config, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		certs, err := control.ReloadingCert(filepath.Join(c.apiTLSDir, "tls.crt"), filepath.Join(c.apiTLSDir, "tls.key"))
+		certs, err := control.ReloadingCertLog(filepath.Join(c.apiTLSDir, "tls.crt"), filepath.Join(c.apiTLSDir, "tls.key"), log)
 		if err != nil {
 			return err
 		}
@@ -486,7 +524,7 @@ func run(c config, log *slog.Logger) error {
 			}
 			go runMember(ctx, d, c, kube, outer, log)
 		}
-		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, ErrorLog: logging.ErrorLog(log),
+		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: idleTimeout, ErrorLog: logging.ErrorLog(log),
 			TLSConfig: &cryptotls.Config{MinVersion: cryptotls.VersionTLS12, GetCertificate: certs}}
 		srv.RegisterOnShutdown(api.Stop)
 		ln, err := net.Listen("tcp", c.apiListen)
@@ -516,12 +554,12 @@ func run(c config, log *slog.Logger) error {
 			return err
 		}
 		mux := http.NewServeMux()
-		apiRoutes := api.Handler(st)
+		apiRoutes := api.Handler(st, log)
 		mux.Handle("GET /healthz", apiRoutes)
-		mux.Handle("GET /api/", apiRoutes)
+		mux.Handle("GET /api/", web.Heavy(apiRoutes))
 		pages.Register(mux)
-		srv = &http.Server{Addr: c.listen, Handler: web.AccessLog(log, web.Secure(web.Compress(pages.Gate(mux)))), ReadHeaderTimeout: 10 * time.Second,
-			ErrorLog: logging.ErrorLog(log)}
+		srv = &http.Server{Addr: c.listen, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: idleTimeout, ErrorLog: logging.ErrorLog(log)}
+		srv.Handler = endStreamsOnShutdown(srv, web.AccessLog(log, web.Secure(web.Compress(pages.Gate(mux)))))
 		ln, err := net.Listen("tcp", c.listen)
 		if err != nil {
 			return err
@@ -540,9 +578,34 @@ func run(c config, log *slog.Logger) error {
 	begin := time.Now()
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err = srv.Shutdown(sctx)
+	// Requests still open after the wait are cut: a stop, not a failure.
+	if err := srv.Shutdown(sctx); err != nil {
+		log.Warn("requests still open when stopping were cut", "err", err)
+	}
 	log.Info("stopped", "dur_ms", time.Since(begin).Milliseconds())
-	return err
+	return nil
+}
+
+// idleTimeout closes a kept-alive connection no request used for this
+// long: idle connections are not held without bound.
+var idleTimeout = 2 * time.Minute
+
+// endStreamsOnShutdown ends the pages' event streams (/events) when srv
+// shuts down: Shutdown waits for every open request, and a stream ends
+// only with its request's context.
+func endStreamsOnShutdown(srv *http.Server, h http.Handler) http.Handler {
+	stopping, stop := context.WithCancel(context.Background())
+	srv.RegisterOnShutdown(stop)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/events" && !strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+			h.ServeHTTP(w, r)
+			return
+		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		defer context.AfterFunc(stopping, cancel)()
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // gitlabToken is the installation's GitLab token, read from its file at
@@ -607,17 +670,50 @@ func apiAuthorizer(c config, kube kubernetes.Interface) (func(*http.Request) (co
 	return r.Authorize, nil
 }
 
+// discoverAllEnv carries -discover-all from the chart.
+const discoverAllEnv = "CI_ACCELERATOR_DISCOVER_ALL"
+
+// maxStoreEnv carries -max-store-mib from the chart: in the environment,
+// so an older image that knows no such flag still starts.
+const maxStoreEnv = "CI_ACCELERATOR_MAX_STORE_MIB"
+
+// lookupHost resolves a Service's name; a variable for the tests.
+var lookupHost = net.DefaultResolver.LookupHost
+
 // resolve returns the daemons' addresses: given, or every address the
-// headless Service resolves to.
-func resolve(ctx context.Context, c config) ([]string, error) {
+// headless Service resolves to, and with -discover-all also the daemons
+// that are not ready (a stopping daemon is read to the end). A failed
+// lookup of -discover-all alone is no error: an older BuildKit chart has
+// no such Service.
+func resolve(ctx context.Context, c config, log *slog.Logger) ([]string, error) {
 	if c.discover == "" {
 		return c.daemons, nil
 	}
-	host, port, err := net.SplitHostPort(c.discover)
+	out, err := lookupAddrs(ctx, c.discover)
 	if err != nil {
 		return nil, err
 	}
-	ips, err := net.DefaultResolver.LookupHost(ctx, host)
+	if c.discoverAll == "" {
+		return out, nil
+	}
+	all, err := lookupAddrs(ctx, c.discoverAll)
+	if err != nil {
+		log.Debug("the daemons that are not ready not listed", "discover_all", c.discoverAll, "err", err)
+		return out, nil
+	}
+	out = append(out, all...)
+	sort.Strings(out)
+	return slices.Compact(out), nil
+}
+
+// lookupAddrs is every address of a Service's host:port, as tcp://ip:port,
+// sorted.
+func lookupAddrs(ctx context.Context, hostPort string) ([]string, error) {
+	host, port, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := lookupHost(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -642,9 +738,12 @@ func kubeClient(c config) (kubernetes.Interface, error) {
 	return kubernetes.NewForConfig(cfg)
 }
 
-// watchJobs reads the CI jobs from their pods into the store.
-func watchJobs(ctx context.Context, c config, client kubernetes.Interface, st *store.Store, col *collector.Collector, log *slog.Logger) {
+// watchJobs reads the CI jobs from their pods into the store until ctx
+// ends; the channel closes once the watch and its informers have stopped.
+func watchJobs(ctx context.Context, c config, client kubernetes.Interface, st *store.Store, col *collector.Collector, log *slog.Logger) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		err := podwatch.Watch(ctx, client, c.jobsNamespace, c.gitlabURLs, podwatch.Handlers{
 			Job: func(ctx context.Context, j store.Job) {
 				if err := st.SaveJob(ctx, j); err != nil {
@@ -664,6 +763,7 @@ func watchJobs(ctx context.Context, c config, client kubernetes.Interface, st *s
 					log.Warn("job's builds not compared", "job", j.JobID, "err", err)
 				}
 			},
+			Unknown: unknownJobLog(log, c.gitlabURLs),
 			Gone: func(ctx context.Context, j store.Job, at time.Time) {
 				if err := st.JobEnded(ctx, j.Instance, j.JobID, at); err != nil {
 					log.Warn("job end not stored", "job", j.JobID, "err", err)
@@ -676,10 +776,26 @@ func watchJobs(ctx context.Context, c config, client kubernetes.Interface, st *s
 			log.Error("watching job pods", "err", err)
 		}
 	}()
+	return done
+}
+
+// unknownJobLog tells of a job pod whose URL starts with none of the
+// GitLab URLs: a warning for the first, then at the debug level.
+func unknownJobLog(log *slog.Logger, gitlabURLs []string) func(ctx context.Context, pod, url string) {
+	var told atomic.Bool
+	return func(ctx context.Context, pod, url string) {
+		level := slog.LevelDebug
+		if told.CompareAndSwap(false, true) {
+			level = slog.LevelWarn
+		}
+		log.Log(ctx, level, "a job pod's URL starts with none of the GitLab URLs: its builds get no job", "pod", pod, "url", url, "gitlab_urls", gitlabURLs)
+	}
 }
 
 // loadCaches reads the list of cache stores (the chart writes it); the
-// same folder listed twice is listed once.
+// same folder listed twice for one GitLab is listed once. The same folder
+// for two GitLabs is refused: the runners keep their archives under
+// project/<id>/, so two GitLabs' projects of one id would be one.
 func loadCaches(path string) ([]runnercache.Store, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -691,15 +807,20 @@ func loadCaches(path string) ([]runnercache.Store, error) {
 	if err := dec.Decode(&list); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	seen := map[string]bool{}
+	seen := map[string]runnercache.Store{}
 	var out []runnercache.Store
 	for _, s := range list {
 		if s.Server == "" || s.Bucket == "" || s.Secret == "" {
 			return nil, fmt.Errorf("%s: a cache store needs server, bucket and secret", path)
 		}
-		if !seen[s.ID()] {
-			seen[s.ID()] = true
+		first, ok := seen[s.ID()]
+		switch {
+		case !ok:
+			seen[s.ID()] = s
 			out = append(out, s)
+		case first.Instance != s.Instance:
+			return nil, fmt.Errorf("%s: the cache folder %s is listed for two GitLabs (instances %s and %s): their projects' archives would mix; give each GitLab its own path",
+				path, s.ID(), first.Instance, s.Instance)
 		}
 	}
 	return out, nil
@@ -824,6 +945,20 @@ func settleRebuilds(ctx context.Context, st *store.Store, gl web.Changer, log *s
 	}
 }
 
+// endSignInSessions removes the sessions kept from a sign-in that is off
+// now. Their GitLab grants stay valid at GitLab until they expire or each
+// person revokes the application there.
+func endSignInSessions(ctx context.Context, st *store.Store, log *slog.Logger) error {
+	n, err := st.DeleteSessions(ctx)
+	if err != nil {
+		return fmt.Errorf("ending the sessions of an earlier sign-in: %w", err)
+	}
+	if n > 0 {
+		log.Info("sign-in is off: the sessions of an earlier sign-in ended; their GitLab grants stay valid until revoked in GitLab", "sessions", n)
+	}
+	return nil
+}
+
 // prune applies retention once an hour, and ends idle sessions.
 func prune(ctx context.Context, st *store.Store, signIn *auth.Auth, log *slog.Logger) {
 	for {
@@ -845,6 +980,44 @@ func prune(ctx context.Context, st *store.Store, signIn *auth.Auth, log *slog.Lo
 		case <-time.After(time.Hour):
 		}
 	}
+}
+
+// errOneTokenSeveralGitLabs refuses the installation's token next to
+// several GitLab URLs: every read of another GitLab's jobs would send it
+// there.
+var errOneTokenSeveralGitLabs = errors.New("-gitlab-token-file is a token of one GitLab, but several -gitlab-url are given: it would be sent to each of them; use -sign-in (each person's own token), or one URL")
+
+// urlsRefused says why a start with these GitLab URLs would be refused,
+// or nil: the installation's token next to several of them, or a sign-in
+// entry the URLs do not fit (as loadSignIn and auth.New check them).
+func urlsRefused(c config, urls []string) error {
+	if c.gitlabTokenFile != "" && len(urls) > 1 {
+		return errOneTokenSeveralGitLabs
+	}
+	if c.signIn == "" {
+		return nil
+	}
+	b, err := os.ReadFile(c.signIn)
+	if err != nil {
+		return nil // not the URLs' doing
+	}
+	var f signInFile
+	if json.Unmarshal(b, &f) != nil {
+		return nil
+	}
+	known := map[string]bool{}
+	for _, u := range urls {
+		known[history.InstancePrefix(u)] = true
+	}
+	for _, g := range f.GitLab {
+		switch {
+		case g.URL == "" && (len(urls) != 1 || len(f.GitLab) != 1):
+			return errors.New("sign-in: name each GitLab's url: the console serves several")
+		case g.URL != "" && !known[history.InstancePrefix(g.URL)]:
+			return fmt.Errorf("sign-in: %s is not one of the console's GitLab URLs (they must match exactly)", g.URL)
+		}
+	}
+	return nil
 }
 
 // signInFile is the sign-in configuration the chart writes. Secrets are

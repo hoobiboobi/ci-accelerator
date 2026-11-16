@@ -30,6 +30,7 @@ type Cluster struct {
 	owner   map[string]string         // pod IP -> UID of the job pod holding it
 	warm    map[route.Project][]route.Activity
 	active  map[string]int
+	heard   time.Time                          // when the controller last answered
 	own     map[route.Project][]route.Activity // decisions of this router not yet in warm
 	synced  bool
 	gitlabs []string
@@ -57,15 +58,23 @@ func (c *Cluster) SetGitLabs(gitlabURLs []string) {
 	}
 }
 
+// activeFor is how long the controller's count of running builds is
+// used: an older count is no longer a reason to pass a daemon over.
+const activeFor = time.Minute
+
 // Daemons is every daemon of the slices, ready or not, with the builds
-// each node runs as the controller last said.
+// each node runs as the controller said within activeFor.
 func (c *Cluster) Daemons() []route.Daemon {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	active := c.active
+	if time.Since(c.heard) > activeFor {
+		active = nil
+	}
 	var out []route.Daemon
 	for _, ds := range c.slices {
 		for _, d := range ds {
-			d.Active = c.active[d.Node]
+			d.Active = active[d.Node]
 			out = append(out, d)
 		}
 	}
@@ -133,7 +142,7 @@ func (c *Cluster) SetWarm(w control.Warm, at time.Time) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.warm, c.active = m, w.Active
+	c.warm, c.active, c.heard = m, w.Active, at
 	for p, acts := range c.own {
 		var keep []route.Activity
 		for _, a := range acts {
@@ -145,6 +154,48 @@ func (c *Cluster) SetWarm(w control.Warm, at time.Time) {
 			delete(c.own, p)
 		} else {
 			c.own[p] = keep
+		}
+	}
+}
+
+// Heard notes that the controller answered at at with the view the
+// router has ("not modified").
+func (c *Cluster) Heard(at time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.heard = at
+}
+
+// Expire forgets the router's own decisions older than warmFor: they warm
+// nothing any more, and without a controller nothing else removes them.
+func (c *Cluster) Expire(now time.Time, warmFor time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for p, acts := range c.own {
+		keep := acts[:0]
+		for _, a := range acts {
+			if now.Sub(a.At) <= warmFor {
+				keep = append(keep, a)
+			}
+		}
+		if len(keep) == 0 {
+			delete(c.own, p)
+		} else {
+			c.own[p] = keep
+		}
+	}
+}
+
+// ExpireEvery calls Expire every interval until ctx ends.
+func (c *Cluster) ExpireEvery(ctx context.Context, warmFor, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			c.Expire(now, warmFor)
 		}
 	}
 }
