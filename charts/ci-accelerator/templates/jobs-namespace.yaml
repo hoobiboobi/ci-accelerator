@@ -12,7 +12,7 @@ metadata:
     pod-security.kubernetes.io/audit: {{ .Values.jobsNamespace.podSecurity }}
 {{- end }}
 {{- if dig "jobsNamespace" "networkPolicy" "enabled" true .Values.AsMap }}
-{{- $blocked := dig "buildkit" "networkPolicy" "egress" "blockedCIDRs" (list "169.254.169.254/32" "fd00:ec2::254/128") .Values.AsMap }}
+{{- $blocked := dig "buildkit" "networkPolicy" "egress" "blockedCIDRs" (list "169.254.169.254/32" "168.63.129.16/32" "100.100.100.200/32" "fd00:ec2::254/128" "fd20:ce::254/128") .Values.AsMap }}
 ---
 # CI job pods run untrusted code on the build nodes: they reach what they
 # need (GitLab, registries, package mirrors, the router, in-cluster

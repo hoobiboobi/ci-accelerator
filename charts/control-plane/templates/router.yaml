@@ -90,6 +90,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # The controller's -warm-for, for the router's own ageing. An
+            # environment variable: an older router image ignores it.
+            - name: CI_ACCELERATOR_WARM_FOR
+              value: {{ printf "%dh" (mul (int $v.warmDays) 24) | quote }}
           ports:
             - name: tcp
               containerPort: 1234

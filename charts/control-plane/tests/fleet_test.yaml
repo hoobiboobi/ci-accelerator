@@ -637,7 +637,7 @@ tests:
       - equal: { path: spec.podSelector.matchLabels, value: { app.kubernetes.io/name: control-plane, app.kubernetes.io/instance: c, app.kubernetes.io/component: hub } }
       - equal:
           path: spec.ingress[0].from[1].podSelector.matchExpressions
-          value: [{ key: ci-accelerator.io/component, operator: NotIn, values: [buildkit] }]
+          value: [{ key: ci-accelerator.io/component, operator: NotIn, values: [buildkit, ci-job] }]
   - it: renders no web policy on a member, and its controller admits no web
     template: networkpolicy.yaml
     values: [values/fleet-member.yaml]

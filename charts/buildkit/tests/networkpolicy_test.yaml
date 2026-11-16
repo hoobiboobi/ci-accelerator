@@ -98,10 +98,29 @@ tests:
             - to:
                 - ipBlock:
                     cidr: 0.0.0.0/0
-                    except: [169.254.169.254/32]
+                    except: [169.254.169.254/32, 168.63.129.16/32, 100.100.100.200/32]
                 - ipBlock:
                     cidr: ::/0
-                    except: [fd00:ec2::254/128]
+                    except: [fd00:ec2::254/128, fd20:ce::254/128]
+            - to:
+                - namespaceSelector: {}
+
+  # Cilium, by default, does not match pod addresses with ipBlock rules:
+  # in-cluster services stay reachable by a selector, unless clusterCIDRs
+  # says to keep builds out of the cluster.
+  - it: drops the in-cluster selector rule when clusterCIDRs are listed
+    template: networkpolicy.yaml
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.namespaces: [ci-jobs]
+      networkPolicy.egress.clusterCIDRs: [10.244.0.0/16]
+    asserts:
+      - lengthEqual: { path: spec.egress, count: 2 }
+      - notContains:
+          path: spec.egress
+          content:
+            to:
+              - namespaceSelector: {}
 
   - it: blocks the cluster CIDRs per address family and appends extra rules
     template: networkpolicy.yaml
@@ -122,10 +141,10 @@ tests:
           value:
             - ipBlock:
                 cidr: 0.0.0.0/0
-                except: [169.254.169.254/32, 10.244.0.0/16, 10.96.0.0/12]
+                except: [169.254.169.254/32, 168.63.129.16/32, 100.100.100.200/32, 10.244.0.0/16, 10.96.0.0/12]
             - ipBlock:
                 cidr: ::/0
-                except: [fd00:ec2::254/128, fd00:10::/56]
+                except: [fd00:ec2::254/128, fd20:ce::254/128, fd00:10::/56]
       - equal:
           path: spec.egress[2].ports
           value:
@@ -226,6 +245,6 @@ tests:
                   app.kubernetes.io/instance: "{{ .Release.Name }}"
     asserts:
       - equal:
-          path: spec.egress[2].to[0].podSelector.matchLabels
+          path: spec.egress[3].to[0].podSelector.matchLabels
           value:
             app.kubernetes.io/instance: bk

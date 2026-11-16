@@ -66,7 +66,7 @@ tests:
     set:
       log.level: verbose
     asserts:
-      - failedTemplate: {}
+      - failedTemplate: { errorPattern: '/log/level.*value must be one of' }
 
   # The web holds no key and no Kubernetes access: the CA alone, and a token
   # only the controller accepts.
@@ -201,7 +201,7 @@ tests:
     set:
       web.replica: 2
     asserts:
-      - failedTemplate: {}
+      - failedTemplate: { errorPattern: '/web.*additional properties .replica. not allowed' }
 
   # The web reads the controller's setup at start: turning sign-in on (or
   # adding a token) must roll it.

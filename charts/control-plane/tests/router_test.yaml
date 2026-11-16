@@ -52,6 +52,26 @@ tests:
       router.warmDays: 3
     asserts:
       - contains: { path: "spec.template.spec.containers[0].args", content: "-warm-for=72h" }
+  # The router ages warmth itself while the controller is away.
+  - it: gives the routers the warmth window
+    template: router.yaml
+    documentSelector: { path: kind, value: DaemonSet }
+    set:
+      router.enabled: true
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].env"
+          content: { name: CI_ACCELERATOR_WARM_FOR, value: "168h" }
+  - it: gives the routers a warmth window that is set
+    template: router.yaml
+    documentSelector: { path: kind, value: DaemonSet }
+    set:
+      router.enabled: true
+      router.warmDays: 3
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].env"
+          content: { name: CI_ACCELERATOR_WARM_FOR, value: "72h" }
   - it: runs with global.router.enabled when router.enabled is not set
     template: router.yaml
     set:

@@ -155,7 +155,7 @@ by digest: another tag with it would still run the appVersion image. */}}
 {{- end }}
 
 {{- /* A NetworkPolicy without ingress peers would cut every client off. */}}
-{{- if and $v.networkPolicy.enabled (not (include "buildkit.clientNamespaces" . | fromJsonArray)) (not $v.networkPolicy.ingress.extraFrom) (not (include "buildkit.routerService" .)) }}
+{{- if and $v.networkPolicy.enabled (not (include "buildkit.clientNamespaces" . | fromJsonArray)) (not $v.networkPolicy.ingress.extraFrom) (not (dig "controller" false $v.networkPolicy.ingress)) (not (include "buildkit.routerService" .)) }}
 {{- fail "networkPolicy.enabled: no client could reach the daemons. List the CI job namespaces in tls.client.namespaces or networkPolicy.ingress.namespaces, or add peers to networkPolicy.ingress.extraFrom." }}
 {{- end }}
 
@@ -177,9 +177,18 @@ by digest: another tag with it would still run the appVersion image. */}}
 
 {{- /* The rendered buildkitd.toml must parse, and extraConfig must not add GC
        policies behind config.gcPolicy's back. */}}
+{{- /* buildkitd's debug server (pprof, cache endpoints) has no
+       authentication and RUN steps share the daemon's network: never
+       through extraConfig, whatever form the key takes. */}}
+{{- if regexMatch "(?i)debug[-_]?addr" (toString (default "" $v.config.extraConfig)) }}
+{{- fail "config.extraConfig: sets buildkitd's debug address (grpc.debugAddress). Its debug server is unauthenticated and every RUN step reaches it; the chart does not enable it." }}
+{{- end }}
 {{- $toml := include "buildkit.config" . | fromToml }}
 {{- if hasKey $toml "Error" }}
 {{- fail (printf "config.extraConfig: the rendered buildkitd.toml is invalid (%s). extraConfig is inserted before the chart's tables: use it for top-level keys and new tables only. Never repeat [grpc], [worker.oci], [worker.containerd], [history], [system] or [cdi]; [worker.oci] keys go to config.workerOCI." (get $toml "Error")) }}
+{{- end }}
+{{- if hasKey (dig "grpc" (dict) $toml) "debugAddress" }}
+{{- fail "config.extraConfig: sets buildkitd's debug address (grpc.debugAddress). Its debug server is unauthenticated and every RUN step reaches it; the chart does not enable it." }}
 {{- end }}
 {{- $rendered := len (include "buildkit.gcPolicyList" . | fromJsonArray) }}
 {{- $parsed := len (dig "worker" "oci" "gcpolicy" (list) $toml) }}

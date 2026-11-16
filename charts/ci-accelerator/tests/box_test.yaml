@@ -64,8 +64,8 @@ tests:
           value:
             - to: [{namespaceSelector: {}}]
             - to:
-                - ipBlock: {cidr: 0.0.0.0/0, except: [169.254.169.254/32]}
-                - ipBlock: {cidr: "::/0", except: ["fd00:ec2::254/128"]}
+                - ipBlock: {cidr: 0.0.0.0/0, except: [169.254.169.254/32, 168.63.129.16/32, 100.100.100.200/32]}
+                - ipBlock: {cidr: "::/0", except: ["fd00:ec2::254/128", "fd20:ce::254/128"]}
   - it: blocks for job pods what the daemons may not reach, and takes more egress rules
     template: jobs-namespace.yaml
     documentIndex: 1
@@ -359,6 +359,36 @@ tests:
       - failedTemplate:
           errorPattern: 'global.jobs.namespace is the release namespace'
 
+  # The jobs' policy selects every pod there and admits nothing.
+  - it: refuses a system namespace for the jobs
+    template: validate.yaml
+    set:
+      global.jobs.namespace: kube-system
+      gitlab-runner.runners.jobNamespace: kube-system
+      jobsNamespace.create: false
+    asserts:
+      - failedTemplate:
+          errorPattern: 'global.jobs.namespace is kube-system, a namespace other workloads use'
+  - it: refuses the default namespace for the jobs
+    template: validate.yaml
+    set:
+      global.jobs.namespace: default
+      gitlab-runner.runners.jobNamespace: default
+      jobsNamespace.create: false
+    asserts:
+      - failedTemplate:
+          errorPattern: 'global.jobs.namespace is default, a namespace other workloads use'
+  - it: refuses cert-manager's namespace for the jobs
+    template: validate.yaml
+    set:
+      global.jobs.namespace: certs
+      gitlab-runner.runners.jobNamespace: certs
+      buildkit.tls.certManager.clusterResourceNamespace: certs
+      jobsNamespace.create: false
+    asserts:
+      - failedTemplate:
+          errorPattern: 'global.jobs.namespace is certs, a namespace other workloads use'
+
   - it: refuses buildkit name overrides the runner address cannot follow
     template: validate.yaml
     set:
@@ -391,7 +421,7 @@ tests:
     set:
       global.console.url: 'https://x/"]'
     asserts:
-      - failedTemplate: {}
+      - failedTemplate: { errorPattern: '/global/console/url.*does not match pattern' }
   # The console reads the history again after a restart.
   - it: keeps 1000 build records per daemon for the console
     template: charts/buildkit/templates/configmap.yaml

@@ -104,7 +104,7 @@ spec:
   usages:
     - client auth
     - digital signature
-  duration: {{ $cm.duration }}
+  duration: {{ default $cm.duration (dig "duration" "" $.Values.tls.client) }}
   renewBeforePercentage: 33
   privateKey:
     algorithm: ECDSA

@@ -6,11 +6,16 @@
 {{- if ne $role "member" }}
 {{- $denied := list .Release.Namespace }}
 {{- with include "control-plane.jobsNamespace" . }}{{ $denied = append $denied . }}{{ end }}
+{{- /* Every namespace of CI jobs (the router's clients) and of the daemons,
+whose network every RUN step shares. */}}
+{{- range (dig "router" "clientNamespaces" (list) .Values.AsMap) }}{{ $denied = append $denied (tpl . $) }}{{ end }}
+{{- if include "control-plane.discover" . }}{{ $denied = append $denied (include "control-plane.daemonsService" . | fromJson).namespace }}{{ end }}
 {{- range (dig "deniedNamespaces" (list) $np) }}{{ $denied = append $denied (tpl . $) }}{{ end }}
 # Who may open the console's pages. CI jobs and their builds run untrusted
 # code in the same cluster, and without sign-in the console shows every
-# project to whoever reaches it: the jobs namespace and the daemons (RUN
-# steps share their network) are kept out; Ingress controllers and other
+# project to whoever reaches it: the jobs namespaces, the router's client
+# namespaces, the daemons' namespace (RUN steps share their network) and
+# job pods in this namespace are kept out; Ingress controllers and other
 # namespaces, and kubectl port-forward (it enters the pod from the node),
 # still reach it. Only ingress is limited. On a fleet hub the same holds
 # for its pages; its members reach it through the Ingress.
@@ -41,7 +46,7 @@ spec:
                   {{- toYaml (uniq $denied) | nindent 18 }}
         # This namespace, but not the denied components.
         - podSelector:
-            {{- with (dig "deniedComponents" (list "buildkit") $np) }}
+            {{- with (dig "deniedComponents" (list "buildkit" "ci-job") $np) }}
             matchExpressions:
               - key: ci-accelerator.io/component
                 operator: NotIn

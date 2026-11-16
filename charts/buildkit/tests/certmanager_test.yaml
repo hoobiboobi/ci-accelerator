@@ -265,6 +265,31 @@ tests:
           path: metadata.namespace
           value: ci-jobs
 
+  # A copied client key works until its certificate expires: its lifetime
+  # can be shorter than the daemon's.
+  - it: gives the client certificates a lifetime of their own
+    template: certificates.yaml
+    set:
+      tls.client.namespaces: [ci-jobs]
+      tls.client.duration: 48h
+    asserts:
+      - equal:
+          path: spec.duration
+          value: 48h
+        documentSelector: { path: metadata.namespace, value: ci-jobs }
+      - equal:
+          path: spec.duration
+          value: 8760h
+        documentSelector: { path: metadata.name, value: bk-buildkit-tls }
+  - it: refuses a client lifetime that is not a duration
+    template: certificates.yaml
+    set:
+      tls.client.namespaces: [ci-jobs]
+      tls.client.duration: 3d
+    asserts:
+      - failedTemplate:
+          errorPattern: 'duration'
+
   - it: uses the user's issuer and creates no CA then
     template: certificates.yaml
     set:

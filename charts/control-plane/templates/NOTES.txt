@@ -65,6 +65,17 @@ application must list this redirect URI:
   prints it: kubectl -n {{ $.Release.Namespace }} logs deploy/{{ $ctrl }} | grep redirect_uri)
 {{- end }}
 {{- end }}
+{{- /* A GitLab nobody signs in with: its builds are collected, shown to no one. */}}
+{{- $signed := list }}
+{{- range .Values.signIn.gitlab }}{{ $signed = append $signed (default "" .url) }}{{ end }}
+{{- if not (has "" $signed) }}
+{{- range (default (list) .Values.gitlab.urls) }}
+{{- if not (has . $signed) }}
+WARNING: nobody can sign in with {{ . }} (no signIn.gitlab entry): its
+builds are collected but no page shows them to its people.
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if hasPrefix "http://" $u }}
 {{ $u }} is this machine: reach the console with
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $web }} {{ default "80" (regexFind "[0-9]+$" (urlParse $u).host) }}:{{ int .Values.web.port }}

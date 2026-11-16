@@ -8,7 +8,7 @@ BuildKit daemons on the build nodes: DaemonSet {{ $bk }}
 CI jobs run in namespace {{ .Values.global.jobs.namespace }}{{ if .Values.jobsNamespace.create }} (created by this release, Pod Security {{ .Values.jobsNamespace.podSecurity }}; deleted with it){{ end }}.
 {{- if $runner.enabled }}
 The runner takes jobs from {{ $runner.gitlabUrl }}; check that it registered:
-  kubectl -n {{ .Release.Namespace }} logs deploy/{{ .Release.Name }}-gitlab-runner | grep -i -E 'registered|valid|error'
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "ci-accelerator.runnerName" . }} | grep -i -E 'registered|valid|error'
 {{- else }}
 No runner is installed: configure yours with integrations/gitlab-runner/values.yaml
 (BUILDKIT_REMOTE_ADDR={{ include "ci-accelerator.daemonsAddress" . }}).
@@ -67,6 +67,12 @@ The runners never delete old caches: give each bucket a lifecycle rule
 {{- $prefix := default .Release.Name $cp.fullnameOverride | trunc 40 | trimSuffix "-" }}
 {{- $svc := printf "%s-web" $prefix }}
 {{- $port := int (dig "web" "port" 8080 $cp) }}
+{{- /* The GitLab the controller names the redirect URI after: the runner's,
+or the one URL given directly. */}}
+{{- $runnerGL := toString $runner.gitlabUrl }}
+{{- $cpURLs := dig "gitlab" "urls" (list) $cp }}
+{{- if and (not $runnerGL) (eq (len $cpURLs) 1) }}{{ $runnerGL = toString (first $cpURLs) }}{{ end }}
+{{- $logHint := printf "<id> (the controller's log prints it: kubectl -n %s logs deploy/%s-controller | grep redirect_uri)" .Release.Namespace $prefix }}
 {{- if eq (toString (dig "fleet" "role" "" $cp)) "member" }}
 {{- $hubURL := trimSuffix "/" (dig "fleet" "hub" "url" "" $cp) }}
 {{- $name := dig "fleet" "name" "" $cp }}
@@ -88,8 +94,12 @@ collects the daemons' history, the web ({{ $svc }}) serves the pages.
 People sign in through GitLab at {{ $u }}/ and see the projects whose jobs
 GitLab lets them read. Each OAuth application must list the redirect URI:
 {{- range dig "signIn" "gitlab" (list) $cp }}
-{{- $gl := default $runner.gitlabUrl .url }}
+{{- $gl := default $runnerGL .url }}
+{{- if $gl }}
   {{ $gl }}: {{ $u }}/auth/callback/{{ $gl | sha256sum | trunc 6 }}
+{{- else }}
+  the runners' GitLab: {{ $u }}/auth/callback/{{ $logHint }}
+{{- end }}
 {{- end }}
 {{- if hasPrefix "http://" $u }}
 {{ $u }} is this machine: reach the console with
@@ -112,13 +122,13 @@ verdicts, but no job results or runner waits. More (docs/console.md,
     job results, runner waits, "files or node" by comparing commits;
   - sign-in through GitLab (control-plane.signIn): each person sees the
     projects GitLab lets them read; the OAuth application's redirect URI is
-      {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
+      {{ default "<global.console.url>" $cu }}/auth/callback/{{ if $runnerGL }}{{ $runnerGL | sha256sum | trunc 6 }}{{ else }}{{ $logHint }}{{ end }}
 {{- else }}
 With its GitLab token it also shows job results and runner waits and
 settles "files or node" by comparing commits. Sign-in through GitLab
 (control-plane.signIn; docs/console.md, "Setting up the console") would show each
 person only the projects GitLab lets them read; its redirect URI would be
-  {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
+  {{ default "<global.console.url>" $cu }}/auth/callback/{{ if $runnerGL }}{{ $runnerGL | sha256sum | trunc 6 }}{{ else }}{{ $logHint }}{{ end }}
 {{- end }}
 {{- end }}
 {{- end }}

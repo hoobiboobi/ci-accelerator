@@ -42,4 +42,4 @@ tests:
     set:
       gitlab.urls: ["https://a.example.com/,https://b.example.com/"]
     asserts:
-      - failedTemplate: {}
+      - failedTemplate: { errorPattern: '/gitlab/urls/0.*does not match pattern' }

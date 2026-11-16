@@ -127,7 +127,17 @@ spec:
             - -cache-every={{ default "10m" .Values.caches.every }}
             {{- end }}
           {{- $trustGit := dig "reasons" "trustGitComparison" false .Values.AsMap }}
-          {{- if or $caches $trustGit $member }}
+          {{- $discoverAll := include "control-plane.discoverAll" . }}
+          {{- /* The store's bound: retention.storeShare percent of a volume
+          whose size the chart knows (whole Mi, Gi or Ti; no existingClaim). */}}
+          {{- $share := dig "retention" "storeShare" 70 .Values.AsMap | int }}
+          {{- $size := toString $v.persistence.size }}
+          {{- $maxStore := 0 }}
+          {{- if and (gt $share 0) (not $v.persistence.existingClaim) (regexMatch "^[0-9]+(Mi|Gi|Ti)$" $size) }}
+          {{- $mib := get (dict "Mi" 1 "Gi" 1024 "Ti" 1048576) (regexFind "[MGT]i$" $size) }}
+          {{- $maxStore = div (mul (regexFind "^[0-9]+" $size | int) $mib $share) 100 }}
+          {{- end }}
+          {{- if or $caches $trustGit $member $discoverAll $maxStore }}
           env:
             {{- if or $caches $member }}
             # Where the Secrets with the caches' keys are, and where a fleet
@@ -143,6 +153,19 @@ spec:
             # setting still starts.
             - name: CI_ACCELERATOR_TRUST_GIT_COMPARISON
               value: "true"
+            {{- end }}
+            {{- with $discoverAll }}
+            # Every daemon pod, ready or not: a controller that starts while
+            # a daemon drains still reads that daemon's last builds. In the
+            # environment, so an older image still starts.
+            - name: CI_ACCELERATOR_DISCOVER_ALL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $maxStore }}
+            # MiB the store's database may hold. In the environment, so an
+            # older image still starts.
+            - name: CI_ACCELERATOR_MAX_STORE_MIB
+              value: {{ . | quote }}
             {{- end }}
           {{- end }}
           ports:

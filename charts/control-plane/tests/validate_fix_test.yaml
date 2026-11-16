@@ -1,0 +1,51 @@
+suite: values that render but cannot work
+templates:
+  - controller.yaml
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  # A member's values without the role installed a plain box that never
+  # dials the hub.
+  - it: refuses a member's values without fleet.role
+    set:
+      fleet.name: x
+      fleet.hub.url: https://hub.example.com
+      fleet.join.existingSecret: j
+    asserts:
+      - failedTemplate:
+          errorPattern: 'fleet.name is set but fleet.role is empty: set fleet.role to member'
+  - it: refuses a hub's token without fleet.role
+    set:
+      fleet.apiToken.existingSecret: t
+    asserts:
+      - failedTemplate:
+          errorPattern: 'fleet.apiToken.existingSecret is set but fleet.role is empty'
+  - it: renders a box with the fleet's defaults
+    asserts:
+      - isKind: { of: Deployment }
+
+  # The controller refuses a sign-in entry without url when it serves
+  # several GitLabs, at start, after the old controller is gone (Recreate).
+  - it: refuses a sign-in entry without url next to several GitLabs
+    set:
+      gitlab.urls: [https://a.example.com/, https://b.example.com/]
+      signIn:
+        enabled: true
+        url: https://ci.example.com/
+        sessionKey: { existingSecret: s }
+        gitlab: [{ existingSecret: o }]
+    asserts:
+      - failedTemplate:
+          errorPattern: 'gitlab.urls names several GitLabs: each signIn.gitlab entry needs its url'
+  - it: takes a sign-in entry without url for a single GitLab
+    set:
+      signIn:
+        enabled: true
+        url: https://ci.example.com/
+        sessionKey: { existingSecret: s }
+        gitlab: [{ existingSecret: o }]
+    asserts:
+      - isKind: { of: Deployment }

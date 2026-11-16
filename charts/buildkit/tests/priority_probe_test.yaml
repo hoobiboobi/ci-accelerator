@@ -306,7 +306,7 @@ tests:
       diskProbe.enabled: true
       diskProbe.port: 1234
     asserts:
-      - failedTemplate: {}
+      - failedTemplate: { errorPattern: '/diskProbe/port' }
 
   - it: keeps the daemon ready whatever the probe does (no readiness probe on it)
     template: daemonset.yaml

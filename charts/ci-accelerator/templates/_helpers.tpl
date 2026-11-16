@@ -19,6 +19,19 @@ are refused below).
 {{- end }}
 
 {{/*
+Full name of the gitlab-runner subchart (its Deployment), by that chart's
+own rule.
+*/}}
+{{- define "ci-accelerator.runnerName" -}}
+{{- $r := index .Values "gitlab-runner" | default dict }}
+{{- if $r.fullnameOverride }}{{ $r.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default "gitlab-runner" $r.nameOverride }}
+{{- if hasPrefix $name .Release.Name }}{{ .Release.Name | trunc 63 | trimSuffix "-" }}{{ else }}{{ printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}{{ end }}
+{{- end }}
+{{- end }}
+
+{{/*
 The address CI jobs use: the build router's Service (global.router.service,
 the control-plane subchart's name; its name overrides are refused), or the
 daemons' Service without it.
@@ -121,6 +134,12 @@ subcharts must agree on.
 {{- $jobs := .Values.global.jobs.namespace }}
 {{- if eq $jobs .Release.Namespace }}
 {{- fail (printf "global.jobs.namespace is the release namespace (%s). CI jobs run untrusted code: give them their own namespace, apart from the runner and the daemons." $jobs) }}
+{{- end }}
+{{- /* The jobs' NetworkPolicy selects every pod of the namespace and lets
+nothing in, and the runner gets pods/exec and Secrets there. */}}
+{{- $cmNs := toString (dig "buildkit" "tls" "certManager" "clusterResourceNamespace" "cert-manager" .Values.AsMap) }}
+{{- if has $jobs (list "kube-system" "kube-public" "kube-node-lease" "default" $cmNs) }}
+{{- fail (printf "global.jobs.namespace is %s, a namespace other workloads use. The box cuts every pod there off from incoming connections and lets the runner exec into them and read their Secrets: give the CI jobs a namespace of their own." $jobs) }}
 {{- end }}
 {{- if and (ne (toString (dig "router" "enabled" false .Values.global)) "true") (ne (int (dig "buildkit" "service" "port" 1234 .Values.AsMap)) 1234) }}
 {{- fail "buildkit.service.port: without the router the box's jobs reach the daemons' Service on port 1234 (the runner's config is written for it); keep 1234" }}
@@ -283,7 +302,7 @@ at the tag v<chart version>): its integrity is the sha256 of that file, kept
 equal to it by the component's tests and the release check.
 */}}
 {{- define "ci-accelerator.componentIntegrity" -}}
-sha256-Hp1o0lc/x3VdadiYVMbcFywe2DL8YkGSGr2K/KpQ8w8=
+sha256-FV+CMnWRXkmXgyHRv4ky8OTjUlQLi71q9yGnlsWuOog=
 {{- end }}
 
 {{/*

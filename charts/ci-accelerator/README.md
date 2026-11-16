@@ -43,7 +43,8 @@ Kubernetes: `>=1.34.0-0`
 |-----|------|---------|-------------|
 | buildkit.diskProbe.enabled | bool | `true` | The probe next to each daemon (charts/buildkit diskProbe). |
 | buildkit.networkPolicy.enabled | bool | `true` |  |
-| buildkit.networkPolicy.ingress.extraFrom[0].podSelector.matchLabels."ci-accelerator.io/component" | string | `"controller"` |  |
+| buildkit.networkPolicy.ingress.controller | bool | `true` |  |
+| buildkit.tls.client.duration | string | `"72h"` |  |
 | buildkit.tls.client.namespaces[0] | string | `"{{ .Values.global.jobs.namespace }}"` |  |
 | control-plane.caches.fromConfigMap | string | `"{{ .Release.Name }}-runner-caches"` |  |
 | control-plane.daemons.discover | string | `"{{ include \"ci-accelerator.buildkitHeadless\" . }}.{{ .Release.Namespace }}.svc:1234"` |  |
@@ -56,8 +57,13 @@ Kubernetes: `>=1.34.0-0`
 | control-plane.tls.certManager.issuerRef.name | string | `"{{ include \"ci-accelerator.issuerName\" . }}"` |  |
 | control-plane.tls.existingSecret | string | `""` |  |
 | gitlab-runner.enabled | bool | `true` |  |
-| gitlab-runner.gitlabUrl | string | `""` | Required: your GitLab, e.g. https://gitlab.example.com/ |
+| gitlab-runner.gitlabUrl | string | `""` | Required: your GitLab, e.g. `https://gitlab.example.com/` |
 | gitlab-runner.image.tag | string | `"alpine-v19.5.1"` |  |
+| gitlab-runner.metrics.enabled | bool | `false` |  |
+| gitlab-runner.metrics.from | list | `[]` |  |
+| gitlab-runner.podSecurityContext.fsGroup | int | `65533` |  |
+| gitlab-runner.podSecurityContext.runAsUser | int | `100` |  |
+| gitlab-runner.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | gitlab-runner.rbac.create | bool | `true` |  |
 | gitlab-runner.rbac.rules[0].resources[0] | string | `"pods"` |  |
 | gitlab-runner.rbac.rules[0].verbs[0] | string | `"create"` |  |
@@ -93,12 +99,12 @@ Kubernetes: `>=1.34.0-0`
 | global.buildNodes | object | `{"enabled":true,"selector":{"ci-accelerator.io/node-role":"build"},"tolerations":[{"effect":"NoSchedule","key":"ci-accelerator.io/node-role","operator":"Equal","value":"build"}]}` | Dedicated build nodes: the daemons and the CI job pods run there, so a job reaches the daemon (and the cache) on its own node. Label and taint them before install. |
 | global.console.url | string | `""` | The console's address as users reach it (https://...). When set, every job prints the link to its page in its log, sign-in through GitLab (control-plane.signIn) uses it, and links shared in chats show previews with addresses there. Empty: no link in the job logs. |
 | global.jobs.architecture | string | `"amd64"` | CPU architecture of the build nodes (kubernetes.io/arch). The runner picks its helper image by it. |
-| global.jobs.namespace | string | `"ci-accelerator-jobs"` | Namespace of the CI job pods. They run untrusted code, so they get their own namespace, apart from the runner and the daemons. Keep gitlab-runner.runners.jobNamespace equal to it. |
+| global.jobs.namespace | string | `"ci-accelerator-jobs"` | Namespace of the CI job pods. They run untrusted code, so they get their own namespace, apart from the runner and the daemons. Keep gitlab-runner.runners.jobNamespace equal to it. It must hold nothing but CI jobs: the box's NetworkPolicy there selects every pod. |
 | global.router.enabled | bool | `true` | CI jobs connect to the build router (part of the control plane), which sends each job to the daemon where its project's cache is; the daemons then admit only the router and name it in their certificate. false: jobs connect to the daemons' Service (their own node's daemon). |
 | global.router.service | string | `"{{ .Release.Name | trunc 40 | trimSuffix \"-\" }}-router"` |  |
 | global.tls.issuerRef | object | `{"group":"cert-manager.io","kind":"ClusterIssuer","name":""}` | cert-manager issuer for daemon and client certificates. Empty name: a CA dedicated to this release is created (see buildkit.tls). |
 | jobsNamespace.create | bool | `true` | false: the namespace exists already (or GitOps creates it); it needs the client certificate (issued here) and Pod Security "baseline". Switching an installed release to false deletes the namespace it created, unless it is annotated helm.sh/resource-policy=keep first (the chart refuses the upgrade until then). |
-| jobsNamespace.networkPolicy.enabled | bool | `true` | A NetworkPolicy for every pod of the jobs namespace: no connection into a job pod, and none out of it to the addresses the daemons may not reach either (buildkit.networkPolicy.egress.blockedCIDRs: cloud instance metadata, which hands out the node's credentials). Every other destination stays open. Needs a CNI that enforces egress policies. |
+| jobsNamespace.networkPolicy.enabled | bool | `true` | A NetworkPolicy for every pod of the jobs namespace: no connection into a job pod, and none out of it to the addresses the daemons may not reach either (buildkit.networkPolicy.egress.blockedCIDRs: cloud instance metadata, which hands out the node's credentials). Every other destination stays open, in-cluster services included: buildkit.networkPolicy.egress.clusterCIDRs does not apply here. Needs a CNI that enforces egress policies. |
 | jobsNamespace.networkPolicy.extraEgress | list | `[]` | More egress rules (NetworkPolicyEgressRule), for a CNI that does not apply ipBlock to in-cluster addresses the way the default rules expect. |
 | jobsNamespace.podSecurity | string | `"baseline"` | Pod Security level enforced for the job pods. |
 | preflight.runnerSecret | bool | `true` | Fail if gitlab-runner.runners.secret exists but lacks a key the runner chart mounts (runner-token, and runner-registration-token, which may be empty), or if runner-token does not look like a token (e.g. a copied placeholder). A Secret that does not exist yet is not an error. Needs read access to Secrets in the release namespace. |

@@ -1,0 +1,33 @@
+suite: NOTES of a console with several GitLabs
+templates:
+  - NOTES.txt
+values:
+  - values/required.yaml
+release:
+  name: c
+  namespace: ci-accelerator
+tests:
+  # A GitLab without a sign-in entry: its builds are stored, nobody sees them.
+  - it: warns about a GitLab nobody can sign in with
+    set:
+      gitlab.urls: [https://a.example.com/, https://b.example.com/]
+      signIn:
+        enabled: true
+        url: https://ci.example.com/
+        sessionKey: { existingSecret: s }
+        gitlab: [{ url: https://a.example.com/, existingSecret: o }]
+    asserts:
+      - matchRegexRaw:
+          pattern: 'WARNING: nobody can sign in with https://b\.example\.com/ \(no signIn\.gitlab entry\)'
+      - notMatchRegexRaw:
+          pattern: 'nobody can sign in with https://a\.example\.com/'
+  - it: does not warn when every GitLab has its sign-in
+    set:
+      signIn:
+        enabled: true
+        url: https://ci.example.com/
+        sessionKey: { existingSecret: s }
+        gitlab: [{ url: https://gitlab.example.com/, existingSecret: o }]
+    asserts:
+      - notMatchRegexRaw:
+          pattern: 'nobody can sign in'
