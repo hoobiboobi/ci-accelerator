@@ -386,6 +386,8 @@ type Hub struct {
 	// replaces the one before it.
 	Up  func(l *Link)
 	Log *slog.Logger
+	// Events keeps what the hub saw of each member's link (nil: nothing).
+	Events *LinkEvents
 
 	once    sync.Once
 	cert    tls.Certificate
@@ -409,6 +411,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			speaks = append(speaks, strconv.Itoa(p))
 		}
 		http.Error(w, fmt.Sprintf("this hub speaks protocol %s; the member speaks %d: upgrade the older side", strings.Join(speaks, " and "), proto), http.StatusConflict)
+		h.Events.Add(name, fmt.Sprintf("refused, from %s: it speaks protocol %d; this hub speaks %s", r.RemoteAddr, proto, strings.Join(speaks, " and ")))
 		return
 	}
 	switch {
@@ -417,14 +420,17 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case !storePattern.MatchString(store):
 		http.Error(w, "invalid store: 12 hex digits", http.StatusBadRequest)
+		h.Events.Add(name, "refused, from "+r.RemoteAddr+": its store id is not 12 hex digits")
 		return
 	case !versionPattern.MatchString(version):
 		http.Error(w, "invalid version", http.StatusBadRequest)
+		h.Events.Add(name, "refused, from "+r.RemoteAddr+": its version text is not valid")
 		return
 	}
 	if h.pending.Add(1) > maxPending {
 		h.pending.Add(-1)
 		http.Error(w, "too many members connecting at once", http.StatusServiceUnavailable)
+		h.Events.Add(name, "refused, from "+r.RemoteAddr+": too many members connecting at once")
 		return
 	}
 	judged := false
@@ -438,6 +444,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		h.Log.Warn("fleet: a member's connection", "remote", r.RemoteAddr, "err", err)
+		h.Events.Add(name, "refused, from "+r.RemoteAddr+": "+err.Error())
 		return
 	}
 	c.SetReadLimit(-1)
@@ -462,6 +469,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	judge()
 	if err != nil {
 		h.Log.Warn("fleet: a member was refused", "said", name, "remote", r.RemoteAddr, "err", err)
+		h.Events.Add(name, "refused, from "+r.RemoteAddr+": "+err.Error())
 		conn.Close()
 		return
 	}
@@ -470,6 +478,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tc.SetWriteDeadline(time.Time{})
 	if err != nil {
 		h.Log.Warn("fleet: confirming a member's link", "name", proven, "remote", r.RemoteAddr, "err", err)
+		h.Events.Add(proven, "closed at once, from "+r.RemoteAddr+": confirming the link: "+err.Error())
 		tc.Close()
 		return
 	}
@@ -487,6 +496,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.Close()
 		h.Log.Warn("fleet: a member opened a stream to the hub: link closed", "name", proven, "remote", r.RemoteAddr)
+		h.Events.Add(proven, "closed, from "+r.RemoteAddr+": the member opened a stream to the hub, which the protocol does not allow")
 		sess.Close()
 	}()
 	l := &Link{Name: proven, Store: store, Version: version, Protocol: proto, Remote: r.RemoteAddr, Since: time.Now(), sess: sess}
@@ -505,4 +515,5 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	<-sess.CloseChan()
 	l.transport.CloseIdleConnections()
 	h.Log.Info("fleet: member disconnected", "name", l.Name, "after", time.Since(l.Since).Round(time.Second))
+	h.Events.Add(l.Name, "closed after "+time.Since(l.Since).Round(time.Second).String()+", from "+l.Remote)
 }

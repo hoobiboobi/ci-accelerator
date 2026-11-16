@@ -41,6 +41,9 @@ type Hub struct {
 	// keys); Version: the chart version the commands install.
 	Info    fleet.HubInfo
 	Version string
+	// Events: what the hub saw of each cluster's link, for its page (nil:
+	// none kept).
+	Events *fleet.LinkEvents
 }
 
 // HubAccess is what the person on a page may do at the hub.
@@ -109,6 +112,9 @@ type TokenRow struct {
 }
 
 func (s *Server) access(w http.ResponseWriter, r *http.Request) {
+	if s.hubAccess(r).Roles && s.accessConfirm(w, r) {
+		return
+	}
 	s.accessPage(w, r, "", "", "", false)
 }
 
@@ -296,6 +302,18 @@ func (s *Server) grantRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role, err := fleet.ParseRole(r.PostFormValue("role"))
+	if err == nil && !confirmed(r) {
+		// A role changed (not one given) is asked once more.
+		b, found, berr := s.binding(r, subject)
+		if berr != nil {
+			s.fail(w, berr)
+			return
+		}
+		if found && b.Role != role {
+			s.confirmRole(w, r, subject, string(role))
+			return
+		}
+	}
 	if err == nil {
 		_, err = s.opt.Hub.Registry.Grant(r.Context(), p.Subject, fleet.OriginUI, subject, role)
 	}
@@ -325,6 +343,10 @@ func (s *Server) revokeRole(w http.ResponseWriter, r *http.Request) {
 	subject := r.PostFormValue("subject")
 	if subject == p.Subject {
 		s.back(w, r, "/access", "Your own role is changed by another owner.", true)
+		return
+	}
+	if !confirmed(r) {
+		s.confirmRevokeRole(w, r, subject)
 		return
 	}
 	if err := s.opt.Hub.Registry.Revoke(r.Context(), p.Subject, subject); err != nil {
@@ -375,6 +397,10 @@ func (s *Server) revokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PostFormValue("name")
+	if !confirmed(r) {
+		s.confirmRevokeToken(w, r, name)
+		return
+	}
 	if err := s.opt.Hub.Registry.RevokeToken(r.Context(), p.Subject, name); err != nil {
 		s.back(w, r, "/access/tokens", errText(err), true)
 		return

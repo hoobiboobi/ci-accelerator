@@ -38,6 +38,9 @@ type FleetMember struct {
 	AddedAt     time.Time
 	// StoreReplaced: when another store came under this name.
 	StoreReplaced time.Time
+	// Store: the id of its store as last seen ("" when not known); its
+	// mark is in its pages' addresses (MemberBase).
+	Store string
 	// RemovedAt: when a removed member was removed (zero: not known).
 	RemovedAt time.Time
 }
@@ -154,11 +157,8 @@ func (s *Server) members(w http.ResponseWriter, r *http.Request) {
 				row.Contact = Ago{Text: "never"}
 			}
 		}
-		if m.State != "removed" && !m.StoreReplaced.IsZero() && now.Sub(m.StoreReplaced) < storeReplacedShown {
-			// A warning while it is recent; the audit keeps it for good.
-			row.StateChip = "warn"
-			row.StateText += " · store replaced " + agoAt(m.StoreReplaced, now).Text
-		}
+		// A store replaced is a fact on the cluster's own page and in the
+		// audit, not a state of the row.
 		if m.State == "removed" {
 			v.Removed = append(v.Removed, row)
 			continue
@@ -171,10 +171,6 @@ func (s *Server) members(w http.ResponseWriter, r *http.Request) {
 	}
 	s.render(w, "members", http.StatusOK, v)
 }
-
-// storeReplacedShown is how long Members points out that a cluster came
-// with another store.
-const storeReplacedShown = 7 * 24 * time.Hour
 
 // viewerHome is the hub's home for a person without a role: the first
 // cluster connected (the switcher leads to the others); the Members page

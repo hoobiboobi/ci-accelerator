@@ -4,13 +4,13 @@
   <header class="phead"><div class="crumbs"><a class="link" href="/~/">Members</a></div>
     <div class="titlerow"><h1 class="t" tabindex="-1">{{.Title}}</h1>
       {{if .Waiting}}<span class="chip warn">waiting to join</span>{{else if eq .Member.State "connected"}}<span class="chip ok">connected</span>{{else}}<span class="chip warn">not connected</span>{{end}}</div>
-    <div class="sub"><span>{{if .Waiting}}Settings saved at the hub; the cluster has not joined yet.{{else}}{{with .Member}}Joined with {{template "joinedBy" .}} · key <span class="mono">{{.Fingerprint}}</span>{{if and .Remote (eq .State "connected")}} · from <span class="mono">{{.Remote}}</span>{{end}}{{end}}{{end}}</span></div></header>
+    <div class="sub"><span>{{if .Waiting}}Settings saved at the hub; the cluster has not joined yet.{{else}}{{with .Member}}Joined with {{template "joinedBy" .}} · key <span class="mono">{{.Fingerprint}}</span>{{if and .Remote (eq .State "connected")}} · from <span class="mono">{{.Remote}}</span>{{end}}{{end}}{{end}}</span></div>
+    {{if .StoreReplaced.Text}}<div class="sub"><span>Store replaced on <span title="{{.StoreReplaced.UTC}}">{{.StoreReplaced.Text}}</span>: builds from before then are gone.{{if .Audit}} <a class="link" href="/~/audit?target={{.Title}}">Audit</a>{{end}}</span></div>{{end}}</header>
   {{with .Message}}<div class="callout{{if $.Bad}} warn{{end}}" role="status"><div>{{.}}</div></div>{{end}}
   {{if .Manage}}<div class="cactions left">
     {{if and .Member (eq .Member.State "connected")}}<a class="btn" href="/~/m/{{.Title}}/">Open its console</a>{{end}}
     <a class="btn" href="/~/clusters/{{.Title}}/edit">Change settings</a>
-    {{if and .Waiting .Settings}}<form method="post" action="/~/clusters/{{.Title}}/join" class="inline"><button class="btn" type="submit">New join token</button></form>{{end}}
-    <form method="post" action="/~/clusters/{{.Title}}/remove" class="inline"><button class="btn" type="submit">Remove from the fleet</button></form>
+    {{if and .Waiting .Settings}}{{if .JoinVoids}}<a class="btn" href="/~/clusters/{{.Title}}?confirm=join">New join token</a>{{else}}<form method="post" action="/~/clusters/{{.Title}}/join" class="inline"><button class="btn" type="submit">New join token</button></form>{{end}}{{end}}
   </div>{{end}}
   {{if .Settings}}
   <section class="box" aria-labelledby="csT"><div class="boxh"><h2 class="h" id="csT">Settings</h2><span class="muted">changed <span title="{{.Changed.UTC}}">{{.Changed.Text}}</span></span></div>
@@ -26,5 +26,15 @@
     <div class="tbox flat"><table class="ptable"><thead><tr><th scope="col">#</th><th scope="col">Issued</th><th scope="col">State</th></tr></thead><tbody>
     {{range .}}<tr><td class="mono">{{.ID}}</td><td><span title="{{.Created.UTC}}">{{.Created.Text}}</span> <span class="muted">· {{.By}}</span></td><td>{{.State}}</td></tr>{{end}}
     </tbody></table></div></section>{{end}}
+  {{if .Events}}<section class="box" aria-labelledby="leT"><div class="boxh"><h2 class="h" id="leT">Link events at the hub</h2><span class="muted">the last 5 since the hub started, kept in its memory; the cluster logs its own side</span></div>
+    {{if .LinkEvents}}<div class="tbox flat"><table class="ptable"><thead><tr><th scope="col">When</th><th scope="col">What the hub saw</th></tr></thead><tbody>
+    {{range .LinkEvents}}<tr><td><span title="{{.At.UTC}}">{{.At.Text}}</span></td><td class="mono">{{.Text}}</td></tr>{{end}}
+    </tbody></table></div>{{else}}<p class="pad muted">None since the hub started.</p>{{end}}</section>{{end}}
+  {{if .Manage}}<section class="box danger" aria-labelledby="rmT"><div class="boxh"><h2 class="h" id="rmT">Remove from the fleet</h2><span class="muted">cannot be undone</span></div>
+    <p class="pad" id="rmD">{{.RemoveText}}</p>
+    <form method="post" action="/~/clusters/{{.Title}}/remove" class="filters pad" autocomplete="off">
+      <label><span>Type {{.Title}} to confirm</span><input type="text" name="name" required spellcheck="false" autocapitalize="off" aria-describedby="rmD"></label>
+      <button class="btn danger" type="submit">Remove {{.Title}}</button>
+    </form></section>{{end}}
 </div>
 {{end}}

@@ -154,7 +154,13 @@ A cluster's page (Members, **Settings**) shows its settings, which secrets
 are kept and when they were delivered, its join tokens, and:
 **Change settings** (new values for `helm upgrade`; changed secrets go to
 the cluster at once), **New join token** (while it has not joined),
-**Remove from the fleet**.
+**Remove from the fleet** (in a block of its own at the bottom, which
+says what is lost; it takes the cluster's name typed). Revoking an API
+token, changing or taking away a role, and a new join token that voids an
+unused one are asked once more on a page that says what happens. The
+cluster's page also lists the last 5 link events the hub saw (connections
+refused and why, links closed), kept in the hub's memory since it started;
+the cluster logs its own side.
 
 **Through the API** (`/api/v1/fleet/`, a token or a session; machines and
 Terraform). Either register the cluster by its public key:
@@ -438,13 +444,16 @@ back at your own runner Secret, then delete them.
 - **Members** (operators and owners): every cluster, connected or not,
   its version, last contact, how it joined and its key's fingerprint;
   clusters added and waiting to join; removed ones while their record is
-  kept. When a cluster's store is replaced (its controller's volume was
-  replaced), the Members page says so; addresses of the old store's builds
-  (`/m/<name>/builds/<id>`) then open the new store's builds of the same
-  number.
-- **A cluster** (`/m/<name>/`): the console you know, with a cluster
+  kept.
+- **A cluster** (`/m/<name>.<mark>/`, the mark of its store; `/m/<name>/`
+  works too): the console you know, with a cluster
   switcher above the project switcher. A removed cluster's addresses
-  answer 410, an unknown name's 404.
+  answer 410, an unknown name's 404. When a cluster's store is replaced
+  (its controller's volume was replaced), its page says when, with a link
+  to the audit; a build address with the old store's mark answers "This
+  build is gone" (410), other pages of the old mark lead to the store now.
+  Addresses without a mark (saved before this release) open what the
+  store has now, including another build of the same number.
 - **A pipeline whose jobs ran in several clusters**: its jobs grouped by
   cluster, each linking to that cluster's pages.
 - **Access** and **Audit**, as above.

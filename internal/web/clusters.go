@@ -251,6 +251,25 @@ type ClusterPage struct {
 	Bad      bool
 	// Changed: when the settings were last changed.
 	Changed Stamp
+	// StoreReplaced: when the cluster last came with another store (its
+	// builds from before then are gone); Audit: the person reads the audit.
+	StoreReplaced Stamp
+	Audit         bool
+	// Events: the hub keeps link events; LinkEvents: this cluster's, the
+	// newest first.
+	Events     bool
+	LinkEvents []LinkEventRow
+	// JoinVoids: a new join token would void one still unused (it is
+	// asked once more).
+	JoinVoids bool
+	// RemoveText: what removing it does.
+	RemoveText string
+}
+
+// LinkEventRow is a link event as the cluster's page shows it.
+type LinkEventRow struct {
+	At   Stamp
+	Text string
 }
 
 // SettingRow is a setting as the cluster's page shows it.
@@ -283,6 +302,12 @@ func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
 	reg := s.opt.Hub.Registry
 	ctx := r.Context()
 	v := ClusterPage{Manage: s.canManage(r)}
+	if v.Manage && r.URL.Query().Get("confirm") == "join" {
+		// "New join token" when it would void one still unused.
+		if _, err := reg.Settings(ctx, name); err == nil && s.confirmJoin(w, r, name) {
+			return
+		}
+	}
 	for _, m := range s.opt.Fleet.Members() {
 		if m.Name == name && m.State != "removed" {
 			v.Member = &m
@@ -351,6 +376,18 @@ func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
 		}
 		v.Joins = append(v.Joins, row)
 	}
+	if v.Member != nil && !v.Member.StoreReplaced.IsZero() {
+		v.StoreReplaced = stampOf(v.Member.StoreReplaced, zone(r), "Jan 2, 2006 15:04")
+	}
+	v.Audit = s.hubAccess(r).Audit
+	if ev := s.opt.Hub.Events; ev != nil {
+		v.Events = true
+		for _, e := range ev.Last(name) {
+			v.LinkEvents = append(v.LinkEvents, LinkEventRow{At: stampOf(e.At, zone(r), "Jan 2 15:04:05"), Text: e.Text})
+		}
+	}
+	v.JoinVoids = anyActive(js, now)
+	v.RemoveText = removeText(v.Member, v.Settings, js, now)
 	sh, err := s.shell(r, "members", "")
 	if err != nil {
 		s.fail(w, err)
@@ -360,6 +397,56 @@ func (s *Server) cluster(w http.ResponseWriter, r *http.Request) {
 	v.Shell = sh
 	w.Header().Set("Cache-Control", "no-store")
 	s.render(w, "cluster", http.StatusOK, v)
+}
+
+// removeText says what removing a cluster does: m is its registration
+// (nil: it has not joined), set its settings at the hub (nil: none), js
+// its join tokens.
+func removeText(m *FleetMember, set *fleet.Settings, js []fleet.JoinToken, now time.Time) string {
+	var parts []string
+	switch {
+	case m != nil && m.State == "connected":
+		parts = append(parts, "Closes its link now")
+	case m != nil:
+		parts = append(parts, "Takes it out of the fleet: its key no longer connects")
+	}
+	unused := 0
+	for _, j := range js {
+		if j.Active(now) {
+			unused++
+		}
+	}
+	if unused > 0 {
+		parts = append(parts, "voids its "+unitN(unused, "unused join token"))
+	}
+	kept := 0
+	if set != nil {
+		kept = len(set.Secrets)
+		if kept > 0 {
+			parts = append(parts, "forgets its settings and "+unitN(kept, "kept secret"))
+		} else {
+			parts = append(parts, "forgets its settings")
+		}
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "Forgets it")
+	}
+	text := parts[0]
+	for i, p := range parts[1:] {
+		if i == len(parts)-2 {
+			text += " and " + p
+		} else {
+			text += ", " + p
+		}
+	}
+	text = strings.ToUpper(text[:1]) + text[1:] + "."
+	if m != nil {
+		text += " Its builds stay in the cluster."
+	}
+	if kept > 0 {
+		text += " Joining again needs those secrets entered anew."
+	}
+	return text
 }
 
 // anyActive says whether any of js can still be traded at now.
@@ -508,6 +595,10 @@ func (s *Server) newJoin(w http.ResponseWriter, r *http.Request) {
 		s.back(w, r, "/clusters/"+name, "This cluster has no settings at the hub: issue its token through the API.", true)
 		return
 	}
+	// One still unused stops working: asked once more.
+	if !confirmed(r) && s.confirmJoin(w, r, name) {
+		return
+	}
 	j, secret, err := reg.IssueJoin(r.Context(), s.opt.Hub.Who(r).Subject, name, joinHours(set.Values))
 	if err != nil {
 		s.back(w, r, "/clusters/"+name, errText(err), true)
@@ -533,6 +624,19 @@ func (s *Server) removeCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !found {
 		s.back(w, r, "/", "No cluster named "+name+" is in the fleet or waiting to join: nothing was removed.", true)
+		return
+	}
+	// The name typed on the cluster's page, checked here: a form sent
+	// without it removes nothing.
+	switch typed := strings.TrimSpace(r.PostFormValue("name")); {
+	case typed == "":
+		s.back(w, r, "/clusters/"+name, "Not removed: type "+name+" to confirm.", true)
+		return
+	case typed != name:
+		if len(typed) > 60 {
+			typed = strings.ToValidUTF8(typed[:60], "") + "…"
+		}
+		s.back(w, r, "/clusters/"+name, "Not removed: the name typed was \""+typed+"\", not \""+name+"\".", true)
 		return
 	}
 	// The member, its unused join tokens, its settings and secrets: one

@@ -129,10 +129,14 @@ func TestFleetHubPages(t *testing.T) {
 	ts := httptest.NewServer(Secure(mux))
 	defer ts.Close()
 	pg := get(t, ts, "/")
-	for _, want := range []string{"Members", "2 connected of 3", `href="/m/eu/"`, "not connected", "14 minutes ago", "store replaced", "Removed", ">old<"} {
+	for _, want := range []string{"Members", "2 connected of 3", `href="/m/eu/"`, "not connected", "14 minutes ago", "Removed", ">old<"} {
 		if !strings.Contains(pg.body, want) {
 			t.Errorf("members page: no %q", want)
 		}
+	}
+	// A store replaced is said on the cluster's page, not in its row.
+	if strings.Contains(pg.body, "store replaced") {
+		t.Error("a store replaced is a state of the Members row")
 	}
 	// An away cluster's address shows its pages as they were last seen.
 	if !strings.Contains(pg.body, `href="/m/ap/"`) {

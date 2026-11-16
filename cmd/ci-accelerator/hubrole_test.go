@@ -165,9 +165,13 @@ func TestMemberJoinsWithAToken(t *testing.T) {
 // called an owner an operator).
 func TestMemberPagesKnowTheHub(t *testing.T) {
 	h := &hub{admin: &web.Hub{}, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	opt := h.memberOptions("eu", "box")
+	opt := h.memberOptions("eu", "", "box")
 	if opt.Hub != h.admin || opt.Base != "/m/eu" || opt.Fleet.Current() != "eu" {
 		t.Errorf("a cluster's pages: hub %v, base %q", opt.Hub != nil, opt.Base)
+	}
+	// With its store known, the base carries the store's mark.
+	if opt := h.memberOptions("eu", "0a1b2c3d4e5f", "box"); opt.Base != "/m/eu.0a1b" {
+		t.Errorf("a cluster's pages with its store: base %q, want /m/eu.0a1b", opt.Base)
 	}
 }
 
@@ -327,5 +331,44 @@ func TestHubMembersWhileTheRegistryFails(t *testing.T) {
 	reg.Close()
 	if ms := (view{h, ""}).Members(); len(ms) != 1 || ms[0].Name != "eu" {
 		t.Errorf("members, the registry failing: %+v", ms)
+	}
+}
+
+// A cluster's pages are served under the mark of its store too; a build's
+// address with the mark of a store it no longer has says the build is gone
+// (its id now names another build), other pages lead to the store now, and
+// addresses without a mark open what the store has now.
+func TestHubMemberStoreMark(t *testing.T) {
+	h, mux, reg := pagesHub(t)
+	register(t, reg, "eu")
+	ctx := context.Background()
+	if _, err := reg.Seen(ctx, "eu", "0a1b2c3d4e5f", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if replaced, err := reg.Seen(ctx, "eu", "ffee2c3d4e5f", "v1"); err != nil || !replaced {
+		t.Fatalf("the store was not replaced: %v %v", replaced, err)
+	}
+	if ms := (view{h, ""}).Members(); len(ms) != 1 || ms[0].Store != "ffee2c3d4e5f" {
+		t.Fatalf("members do not carry the store: %+v", ms)
+	}
+	h.links["eu"] = &memberLink{link: &fleet.Link{Name: "eu", Store: "ffee2c3d4e5f"}, pages: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "page "+r.URL.Path)
+	})}
+	do := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		return rec
+	}
+	if r := do("/m/eu.0a1b/builds/27"); r.Code != http.StatusGone || !strings.Contains(r.Body.String(), "This build is gone") ||
+		!strings.Contains(r.Body.String(), "build 27 of its store now is another build") {
+		t.Errorf("a build of the old store: %d %q", r.Code, r.Body.String())
+	}
+	if r := do("/m/eu.0a1b/pipelines?ref=main"); r.Code != http.StatusFound || r.Header().Get("Location") != "/m/eu.ffee/pipelines?ref=main" {
+		t.Errorf("a page of the old store: %d %q", r.Code, r.Header().Get("Location"))
+	}
+	for _, p := range []string{"/m/eu.ffee/builds/27", "/m/eu/builds/27"} {
+		if r := do(p); r.Code != 200 || r.Body.String() != "page /builds/27" {
+			t.Errorf("%s: %d %q", p, r.Code, r.Body.String())
+		}
 	}
 }

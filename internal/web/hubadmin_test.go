@@ -150,7 +150,7 @@ func TestHubAccessPages(t *testing.T) {
 			t.Errorf("owner's Access: no %q", want)
 		}
 	}
-	if strings.Count(p.body, `action="/access/people/remove"`) != 2 {
+	if strings.Count(p.body, `href="/access?confirm=remove-role&amp;subject=`) != 2 {
 		t.Error("the owner from the values can be removed, or the others cannot")
 	}
 	p = as(t, ts, "owner", "POST", "/access/people", url.Values{"gitlab": {"gitlab.example.com"}, "user": {"id:42"}, "role": {"operator"}})
@@ -162,7 +162,7 @@ func TestHubAccessPages(t *testing.T) {
 	} else if _, bad := flashOf(p); !bad || p.header.Get("Location") != "/access" {
 		t.Errorf("a username for an id: %q", p.header.Get("Location"))
 	}
-	if p := as(t, ts, "owner2", "POST", "/access/people/remove", url.Values{"subject": {"gitlab:gitlab.example.com/1"}}); reg.RoleOf("gitlab:gitlab.example.com/1") != fleet.Owner {
+	if p := as(t, ts, "owner2", "POST", "/access/people/remove", url.Values{"subject": {"gitlab:gitlab.example.com/1"}, "confirm": {"yes"}}); reg.RoleOf("gitlab:gitlab.example.com/1") != fleet.Owner {
 		t.Errorf("removing the values' owner: %s", p.header.Get("Location"))
 	} else if _, bad := flashOf(p); !bad {
 		t.Error("removing the values' owner: no failure said")
@@ -186,7 +186,7 @@ func TestHubAccessPages(t *testing.T) {
 	if again := as(t, ts, "owner", "GET", "/access/tokens", nil); strings.Contains(again.body, secret) || !strings.Contains(again.body, "terraform") {
 		t.Error("the secret is shown again, or the token is not listed")
 	}
-	p = as(t, ts, "owner", "POST", "/access/tokens/revoke", url.Values{"name": {"terraform"}})
+	p = as(t, ts, "owner", "POST", "/access/tokens/revoke", url.Values{"name": {"terraform"}, "confirm": {"yes"}})
 	if p.status != http.StatusSeeOther {
 		t.Errorf("revoke: %d", p.status)
 	}
@@ -327,7 +327,7 @@ func TestHubClusters(t *testing.T) {
 			t.Errorf("cluster page: no %q", want)
 		}
 	}
-	if j := as(t, ts, "operator", "POST", "/clusters/prod-ap/join", url.Values{}); j.status != 200 || !strings.Contains(j.body, "cia_join_") {
+	if j := as(t, ts, "operator", "POST", "/clusters/prod-ap/join", url.Values{"confirm": {"yes"}}); j.status != 200 || !strings.Contains(j.body, "cia_join_") {
 		t.Errorf("a new join token: %d", j.status)
 	}
 	if js, _ := reg.JoinTokens(ctx, "prod-ap"); len(js) != 2 || js[1].RevokedAt.IsZero() {
@@ -353,7 +353,7 @@ func TestHubClusters(t *testing.T) {
 	if v := as(t, ts, "viewer", "POST", "/clusters/prod-ap/remove", url.Values{}); v.status != http.StatusForbidden {
 		t.Errorf("a viewer removes: %d", v.status)
 	}
-	if r := as(t, ts, "operator", "POST", "/clusters/prod-ap/remove", url.Values{}); r.status != http.StatusSeeOther {
+	if r := as(t, ts, "operator", "POST", "/clusters/prod-ap/remove", url.Values{"name": {"prod-ap"}}); r.status != http.StatusSeeOther {
 		t.Errorf("remove: %d", r.status)
 	}
 	if _, err := reg.Settings(ctx, "prod-ap"); err == nil {

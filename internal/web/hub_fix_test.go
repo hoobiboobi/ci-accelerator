@@ -325,7 +325,7 @@ func TestHubRemoveClosesTheLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	removed = nil
-	p := as(t, ts, "operator", "POST", "/clusters/eu/remove", url.Values{})
+	p := as(t, ts, "operator", "POST", "/clusters/eu/remove", url.Values{"name": {"eu"}})
 	if p.status != http.StatusSeeOther || len(removed) != 1 || removed[0] != "eu" {
 		t.Errorf("remove: %d, links closed %v", p.status, removed)
 	}
@@ -414,7 +414,7 @@ func TestHubUnknownClusterNames(t *testing.T) {
 	if _, err := reg.Settings(ctx, "ghost"); err == nil {
 		t.Error("settings made for a name nobody added")
 	}
-	p := as(t, ts, "operator", "POST", "/clusters/ghost/remove", url.Values{})
+	p := as(t, ts, "operator", "POST", "/clusters/ghost/remove", url.Values{"name": {"ghost"}})
 	if msg, bad := flashOf(p); !bad || strings.Contains(msg, "is removed") {
 		t.Errorf("remove ghost: %q bad=%v", msg, bad)
 	}
@@ -507,7 +507,7 @@ func TestHubTokenPage(t *testing.T) {
 	}
 	as(t, ts, "owner", "POST", "/access/tokens", url.Values{"name": {"t1"}, "role": {"owner"}, "days": {"30"}})
 	as(t, ts, "owner", "POST", "/access/tokens", url.Values{"name": {"t2"}, "role": {"owner"}, "days": {"30"}})
-	as(t, ts, "owner", "POST", "/access/tokens/revoke", url.Values{"name": {"t2"}})
+	as(t, ts, "owner", "POST", "/access/tokens/revoke", url.Values{"name": {"t2"}, "confirm": {"yes"}})
 	if p := as(t, ts, "owner", "GET", "/access", nil); !strings.Contains(p.body, "API tokens · 2") {
 		t.Error("the tab counts tokens that open nothing")
 	}
@@ -517,18 +517,19 @@ func TestHubTokenPage(t *testing.T) {
 // their own row.
 func TestHubOwnRole(t *testing.T) {
 	ts, reg := hubAdmin(t, true)
-	p := as(t, ts, "owner2", "POST", "/access/people", url.Values{"subject": {"gitlab:gitlab.example.com/5"}, "role": {"operator"}})
+	p := as(t, ts, "owner2", "POST", "/access/people", url.Values{"subject": {"gitlab:gitlab.example.com/5"}, "role": {"operator"}, "confirm": {"yes"}})
 	if _, bad := flashOf(p); !bad || reg.RoleOf("gitlab:gitlab.example.com/5") != fleet.Owner {
 		t.Errorf("own role: %s", reg.RoleOf("gitlab:gitlab.example.com/5"))
 	}
-	as(t, ts, "owner2", "POST", "/access/people/remove", url.Values{"subject": {"gitlab:gitlab.example.com/5"}})
+	as(t, ts, "owner2", "POST", "/access/people/remove", url.Values{"subject": {"gitlab:gitlab.example.com/5"}, "confirm": {"yes"}})
 	if reg.RoleOf("gitlab:gitlab.example.com/5") != fleet.Owner {
 		t.Error("an owner removed their own role")
 	}
 }
 
-// Members: a recent store replacement is a warning; a cluster away is a
-// link (its pages as last seen).
+// Members: a store replaced is no warning in the row (the cluster's page
+// says it, with its date); a cluster away is a link (its pages as last
+// seen).
 func TestHubMembersStates(t *testing.T) {
 	srv, err := New(Empty{}, testLogger(), Options{Fleet: fakeFleet{}})
 	if err != nil {
@@ -540,8 +541,8 @@ func TestHubMembersStates(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	p := get(t, ts, "/")
-	if !strings.Contains(p.body, `<span class="chip warn">connected · store replaced`) {
-		t.Error("a store replaced is not a warning")
+	if strings.Contains(p.body, "store replaced") {
+		t.Error("a store replaced is a warning in the row")
 	}
 	if !strings.Contains(p.body, `href="/m/ap/"`) {
 		t.Error("an away cluster has no link")
@@ -593,7 +594,7 @@ func TestHubRemoveIsOneRemoval(t *testing.T) {
 		t.Fatalf("add: %d", p.status)
 	}
 	removed = nil
-	if p := as(t, ts, "operator", "POST", "/clusters/ap2/remove", url.Values{}); p.status != http.StatusSeeOther {
+	if p := as(t, ts, "operator", "POST", "/clusters/ap2/remove", url.Values{"name": {"ap2"}}); p.status != http.StatusSeeOther {
 		t.Fatalf("remove: %d", p.status)
 	}
 	if len(removed) != 0 {
