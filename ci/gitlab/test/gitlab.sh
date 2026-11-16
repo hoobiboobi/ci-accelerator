@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A real GitLab for the component's tests: GitLab CE in Docker, pinned by
 # digest, at the oldest version the component supports (17.9, amd64 only)
-# and at a current one (the runner's minor line).
+# and at a current one (19.4).
 #
 #   ci/gitlab/test/gitlab.sh lint [min|current|all]
 #       boots each GitLab, has it lint and simulate pipelines that include
@@ -23,9 +23,10 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
 # 17.9.8 (2025-05-07), the last patch of the oldest minor the component
-# claims (include:integrity is 17.9); amd64 only. 19.4.3 (2026-10-21), the
-# minor of the runner the box installs (19.4), a security patch (an
-# unauthenticated RCE in its regular expressions), multi-arch.
+# claims (include:integrity is 17.9); amd64 only. 19.4.3 (2026-10-21), a
+# security patch (an unauthenticated RCE in its regular expressions),
+# multi-arch: the minor of the box's runner when it was chosen (the box runs
+# 19.5 since). Both by hand, by digest (Renovate does not read this file).
 GITLAB_MIN=gitlab/gitlab-ce:17.9.8-ce.0@sha256:c34e039c9505ef945b97f5ffa61841f7e45abccc347680c87a250fb21261eb39
 GITLAB_MIN_PLATFORM=linux/amd64
 GITLAB_CURRENT=gitlab/gitlab-ce:19.4.3-ce.0@sha256:483fb4cc5c75237a7a6c7c8b8b2a1832ed790d86e0449ff55e8b6f6d62d2d5f5

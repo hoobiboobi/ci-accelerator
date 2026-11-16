@@ -14,7 +14,11 @@ to the log's 0.1 s.
         --project 87786070 --pipeline 2996722598 \\
         --controller https://127.0.0.1:18443 --controller-token-file TOKEN
 
-Exit status 1 when anything disagrees. Python 3 standard library only.
+Exit status 1 when anything disagrees, when the console has builds for a
+job whose log shows none, and when nothing was compared at all (no job
+log with a `$ buildctl ... build` line). Steps, results and durations
+only: the console's reasons are not compared. Python 3 standard library
+only.
 """
 import argparse, hashlib, json, re, ssl, sys, time, urllib.error, urllib.request
 from datetime import datetime
@@ -109,8 +113,10 @@ def main():
     a.add_argument("--tolerance", type=float, default=0.15, help="seconds between the log's and the console's duration")
     a.add_argument("--verbose", action="store_true")
     o = a.parse_args()
-    gl = {"PRIVATE-TOKEN": open(o.token_file).read().strip()}
-    ct = {"Authorization": "Bearer " + open(o.controller_token_file).read().strip()}
+    with open(o.token_file) as f:
+        gl = {"PRIVATE-TOKEN": f.read().strip()}
+    with open(o.controller_token_file) as f:
+        ct = {"Authorization": "Bearer " + f.read().strip()}
     insecure = ssl.create_default_context()
     insecure.check_hostname, insecure.verify_mode = False, ssl.CERT_NONE
     instance = hashlib.sha256(o.gitlab.encode()).hexdigest()[:6]
@@ -137,11 +143,15 @@ def main():
                 continue
             trace = get(f"{api}/projects/{o.project}/jobs/{j['id']}/trace", gl).decode("utf-8", "replace")
             runs = log_steps(trace)
-            if not runs:
-                continue
             ids = call("JobBuilds", instance, j["id"])[0] or []
-            pages = sorted((call("BuildPage", i)[0] for i in ids), key=lambda p: p["Build"]["Started"])
             where = f"pipeline {pid} job {j['id']} ({j['name']})"
+            if not runs:
+                # A build the console gives a job that ran none (a wrong
+                # attribution) is a disagreement too.
+                if ids:
+                    problems.append(f"{where}: no buildctl build in the log, {len(ids)} builds in the console")
+                continue
+            pages = sorted((call("BuildPage", i)[0] for i in ids), key=lambda p: p["Build"]["Started"])
             if len(pages) != len(runs):
                 problems.append(f"{where}: {len(runs)} buildctl builds in the log, {len(pages)} builds in the console")
                 continue
@@ -171,6 +181,8 @@ def main():
                             problems.append(f"{where} {key}: the log says {secs:.1f}s, the console {d:.2f}s")
                     if o.verbose:
                         print(f"ok {where} {key} {res} {state}")
+    if checked_builds == 0:
+        problems.append("nothing compared: no job log has a `$ buildctl ... build` line with Dockerfile steps the console has too")
     print(f"{checked_builds} builds, {checked_steps} steps compared; {len(problems)} disagreements")
     for p in problems:
         print("  " + p)

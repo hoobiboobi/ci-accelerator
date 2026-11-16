@@ -6,7 +6,8 @@
 # the runner integration and docs/gitops.md install it and no guide installs
 # another version, the README's one-node upgrade uses the quickstart's Helm,
 # the box's notes carry the component's integrity, the disk probe's image is
-# a released one, and CHANGELOG.md has an entry with upgrade notes for it.
+# a released one, SECURITY.md names its minor line as supported, and
+# CHANGELOG.md has an entry with upgrade notes for it.
 # Prints the version on success.
 #
 #   scripts/check-release-version.sh v0.1.0
@@ -102,6 +103,11 @@ done
 grep -q '^  artifacthub.io/changes: |$' "$ROOT/charts/ci-accelerator/Chart.yaml" \
   || { echo "charts/ci-accelerator/Chart.yaml has no artifacthub.io/changes" >&2; fail=1; }
 # Every release says what an upgrade to it means.
+# The supported-versions table names this release's line.
+line=${version%%-*}
+line=${line%.*}.x
+grep -qF "| $line | yes |" "$ROOT/SECURITY.md" \
+  || { echo "SECURITY.md does not name $line as supported" >&2; fail=1; }
 "$ROOT/scripts/changelog-section.sh" "$version" >/dev/null || fail=1
 [ "$fail" = 0 ] || exit 1
 echo "$version"

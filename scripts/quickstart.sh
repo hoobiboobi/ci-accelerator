@@ -6,22 +6,24 @@
 # before a real deployment, not for production: one node, no high
 # availability, the console reachable only through an SSH tunnel.
 #
-#   sudo ./quickstart.sh --gitlab-url https://gitlab.example.com/   # asks for the runner's token
-#   sudo ./quickstart.sh --gitlab-url ... --runner-token-file ./runner-token
-#   sudo ./quickstart.sh --uninstall
+#   sudo bash quickstart.sh --gitlab-url https://gitlab.example.com/   # asks for the runner's token
+#   sudo bash quickstart.sh --gitlab-url ... --runner-token-file ./runner-token
+#   sudo bash quickstart.sh --uninstall
 #
 # Options:
 #   --gitlab-url URL         your GitLab (required to install)
 #   --runner-token-file F    a file with the runner's token (glrt-...); without
-#                            it the script asks, or reads RUNNER_TOKEN from the
+#                            it the script reads RUNNER_TOKEN from the
 #                            environment (not `sudo RUNNER_TOKEN=...`: that is
-#                            visible in ps and kept in the shell history)
+#                            visible in ps and kept in the shell history), or
+#                            asks
 #   --gitlab-token-file F    optional: a GitLab token with read_api, so the
 #                            console shows how long jobs waited for a runner
 #                            and decides "files or node" for rebuilds
 #   --version V              the release to install (default: this script's)
-#   --build-dir DIR          the build cache (default /var/lib/ci-accelerator/buildkit;
-#                            first install only: then values.yaml says where)
+#   --build-dir DIR          the build cache, an absolute path without spaces
+#                            (default /var/lib/ci-accelerator/buildkit; first
+#                            install only: then values.yaml says where)
 #   --allow-docker           install next to Docker (its iptables rules can
 #                            break pod networking)
 #   --yes                    do not ask before installing
@@ -72,14 +74,25 @@ export KUBECONFIG
 CHART=${CI_ACCELERATOR_CHART:-}
 IMAGE_TAR=${CI_ACCELERATOR_IMAGE_TAR:-}
 
+# How to run this script again (the closing note's --uninstall line): the
+# file is usually not executable after a download.
+SELF=quickstart.sh
+[ ! -f "$0" ] || SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+# value <option> <value...>: the option's value, or a clear stop without one.
+value() {
+  [ $# -ge 2 ] && [ -n "$2" ] || { echo "$1 needs a value (see --help)" >&2; exit 2; }
+  printf '%s' "$2"
+}
 gitlab_url="" runner_token_file="" gitlab_token_file="" build_dir_set=0 allow_docker=0 yes=0 uninstall=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --gitlab-url) gitlab_url=${2:?}; shift 2 ;;
-    --runner-token-file) runner_token_file=${2:?}; shift 2 ;;
-    --gitlab-token-file) gitlab_token_file=${2:?}; shift 2 ;;
-    --version) VERSION=${2:?}; shift 2 ;;
-    --build-dir) BUILD_DIR=${2:?}; build_dir_set=1; shift 2 ;;
+    --gitlab-url) gitlab_url=$(value "$@"); shift 2 ;;
+    --runner-token-file) runner_token_file=$(value "$@"); shift 2 ;;
+    --gitlab-token-file) gitlab_token_file=$(value "$@"); shift 2 ;;
+    # The chart's version; the release's tag is v<version>.
+    --version) VERSION=$(value "$@"); VERSION=${VERSION#v}; shift 2 ;;
+    --build-dir) BUILD_DIR=$(value "$@"); build_dir_set=1; shift 2 ;;
     --allow-docker) allow_docker=1; shift ;;
     --yes) yes=1; shift ;;
     --uninstall) uninstall=1; shift ;;
@@ -87,6 +100,16 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
+# The daemons' hostPath: absolute, without whitespace (the chart's schema),
+# and not the root itself. Checked before anything is installed.
+if [ "$build_dir_set" = 1 ]; then
+  case "$BUILD_DIR" in
+    /*[![:space:]/]*) ;;
+    *) echo "--build-dir $BUILD_DIR: give an absolute path other than / (e.g. /data/ci-accelerator)" >&2; exit 2 ;;
+  esac
+  case "$BUILD_DIR" in *[[:space:]]*) echo "--build-dir '$BUILD_DIR': the path must not contain spaces" >&2; exit 2 ;; esac
+  BUILD_DIR=${BUILD_DIR%/}
+fi
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -122,10 +145,18 @@ esac
 # --- uninstall ---------------------------------------------------------------
 
 if [ "$uninstall" = 1 ]; then
-  [ -x /usr/local/bin/k3s-uninstall.sh ] || [ -d "$STATE" ] || die "nothing to uninstall"
+  [ -x /usr/local/bin/k3s-uninstall.sh ] || [ -e /usr/local/bin/k3s ] || [ -d "$STATE" ] || die "nothing to uninstall"
   # Only what this script installed: k3s found here otherwise is someone
   # else's, and so is everything it runs.
-  [ -f "$STATE/.quickstart" ] || die "$STATE/.quickstart is missing: this machine's k3s was not installed by quickstart.sh, nothing removed (k3s's own /usr/local/bin/k3s-uninstall.sh removes it)"
+  if [ ! -f "$STATE/.quickstart" ]; then
+    if [ -e /usr/local/bin/k3s ] || [ -x /usr/local/bin/k3s-uninstall.sh ]; then
+      die "$STATE/.quickstart is missing: this machine's k3s was not installed by quickstart.sh, nothing removed (k3s's own /usr/local/bin/k3s-uninstall.sh removes it)"
+    fi
+    # A run that stopped before it installed anything (a check, or "no" to
+    # its question) may have left the empty state directory.
+    rmdir "$STATE" 2>/dev/null || true
+    die "nothing to uninstall: quickstart.sh installed nothing on this machine"
+  fi
   # The build cache may live outside $STATE (--build-dir): where the
   # daemons keep it is in values.yaml, else in the install's record (which
   # earlier releases rewrote on every run, whatever values.yaml said). Only
@@ -149,10 +180,19 @@ if [ "$uninstall" = 1 ]; then
   if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
     say "Removing k3s"
     /usr/local/bin/k3s-uninstall.sh
+  elif [ -e /usr/local/bin/k3s ] || [ -d /etc/rancher/k3s ]; then
+    # k3s's installer failed before it wrote its uninstall script: what
+    # this script had put in place for it goes.
+    say "Removing the k3s this script placed (its installer did not finish)"
+    for l in kubectl crictl ctr; do
+      [ "$(readlink "/usr/local/bin/$l" 2>/dev/null)" != k3s ] && [ "$(readlink "/usr/local/bin/$l" 2>/dev/null)" != /usr/local/bin/k3s ] ||
+        rm -f "/usr/local/bin/$l"
+    done
+    rm -rf /usr/local/bin/k3s /etc/rancher/k3s
   fi
   rm -rf "$STATE" "$TOOLS" ${cache:+"$cache"}
   say "Removed."
-  [ -z "$kept" ] || say "Left $kept: it was there before the install. BuildKit's cache in it can be removed by hand."
+  [ -z "$kept" ] || say "Left $kept: not known to be made by this script (it was there before the install, or an earlier release did not record it). BuildKit's cache in it can be removed by hand: sudo rm -rf $kept"
   exit 0
 fi
 
@@ -205,11 +245,11 @@ if [ -f "$STATE/values.yaml" ]; then
   (the daemons' certificate outlives the release; the new one names the build router), then in $STATE/values.yaml rename the top-level console: to control-plane: or delete the file to start over, and run this script again (with --gitlab-token-file to keep reading GitLab with a token). The old console's history stays on the PersistentVolumeClaim $REL-console-data until you delete it."
   fi
 fi
+# The free disk where the cache will be: on the nearest directory that
+# exists already (nothing is created before the question below).
 disk_dir=$STATE
-if [ -n "$BUILD_DIR" ]; then
-  disk_dir=$(dirname "$BUILD_DIR")
-  mkdir -p "$disk_dir"
-fi
+[ -z "$BUILD_DIR" ] || disk_dir=$BUILD_DIR
+while [ ! -d "$disk_dir" ]; do disk_dir=$(dirname "$disk_dir"); done
 free_gb=$(df -Pk "$disk_dir" | awk 'NR == 2 {print int($4 / 1048576)}')
 if [ "$rerun" = 1 ]; then
   # The build cache itself fills the disk down to its garbage collector's
@@ -224,11 +264,27 @@ if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: activ
   warn "  ufw allow from 10.42.0.0/16 to any && ufw allow from 10.43.0.0/16 to any"
 fi
 
-# The runner's token: from the environment, a file, or asked for. Never on
+# token_from <file> <option>: the token in the file, without a byte order
+# mark or the blanks and line ends around it; a token is one word.
+token_from() {
+  local t
+  [ -r "$1" ] || die "$2 $1: no such file, or not readable"
+  t=$(cat "$1")
+  t=${t#$'\xef\xbb\xbf'}
+  t=${t#"${t%%[![:space:]]*}"}
+  t=${t%"${t##*[![:space:]]}"}
+  [ -n "$t" ] || die "$2 $1: the file is empty"
+  case "$t" in *[[:space:]]*) die "$2 $1: the token has spaces or line breaks inside: one token, on one line" ;; esac
+  printf '%s' "$t"
+}
+# The runner's token: from a file, the environment, or asked for. Never on
 # the command line, where other users and the shell history see it.
-runner_token=${RUNNER_TOKEN:-}
-if [ -z "$runner_token" ] && [ -n "$runner_token_file" ]; then
-  runner_token=$(tr -d '\r\n' <"$runner_token_file")
+runner_token=""
+if [ -n "$runner_token_file" ]; then
+  runner_token=$(token_from "$runner_token_file" --runner-token-file)
+  [ -z "${RUNNER_TOKEN:-}" ] || warn "the runner token comes from $runner_token_file (--runner-token-file), not from RUNNER_TOKEN"
+else
+  runner_token=${RUNNER_TOKEN:-}
 fi
 if [ -z "$runner_token" ] && [ -t 0 ]; then
   read -r -s -p "The runner's token (glrt-...; create the runner in GitLab first): " runner_token
@@ -238,11 +294,11 @@ fi
 case "$runner_token" in glrt-*) ;; *) warn "the runner token does not start with glrt-: is it a runner authentication token?" ;; esac
 gitlab_token=""
 if [ -n "$gitlab_token_file" ]; then
-  gitlab_token=$(tr -d '\r\n' <"$gitlab_token_file")
+  gitlab_token=$(token_from "$gitlab_token_file" --gitlab-token-file)
 fi
 
 k3s_line="k3s $K3S_VERSION (Kubernetes, one node, also the build node)"
-if [ -x /usr/local/bin/k3s ]; then
+if [ -x /usr/local/bin/k3s ] && [ -x /usr/local/bin/k3s-uninstall.sh ]; then
   k3s_line="k3s: kept as installed ($(/usr/local/bin/k3s --version 2>/dev/null | awk 'NR == 1 {print $3}')); this script never upgrades it"
 fi
 cat <<EOF
@@ -275,7 +331,10 @@ touch "$STATE/.quickstart"
 
 # --- k3s ---------------------------------------------------------------------
 
-if [ ! -x /usr/local/bin/k3s ]; then
+# k3s counts as installed once its installer finished (it writes
+# k3s-uninstall.sh): a binary this script placed for an installer that then
+# failed is replaced, and the installer runs again.
+if [ ! -x /usr/local/bin/k3s ] || [ ! -x /usr/local/bin/k3s-uninstall.sh ]; then
   say "Installing k3s $K3S_VERSION"
   tag=${K3S_VERSION//+/%2B}
   case "$ARCH" in
@@ -300,7 +359,9 @@ kubectl() { /usr/local/bin/k3s kubectl "$@"; }
 say "Waiting for Kubernetes"
 # The API server answers before the node has registered, and `kubectl wait`
 # fails at once when nothing matches: wait for the node itself first.
-for _ in $(seq 1 90); do [ -n "$(kubectl get nodes -o name 2>/dev/null)" ] && break; sleep 2; done
+up=0
+for _ in $(seq 1 90); do [ -n "$(kubectl get nodes -o name 2>/dev/null)" ] && up=1 && break; sleep 2; done
+[ "$up" = 1 ] || die "k3s does not answer after 3 minutes: see systemctl status k3s and journalctl -u k3s; fix the cause and run this script again, or remove everything with: sudo bash $SELF --uninstall"
 kubectl wait node --all --for=condition=Ready --timeout=5m >/dev/null
 for d in coredns local-path-provisioner; do
   for _ in $(seq 1 60); do kubectl -n kube-system get deploy "$d" >/dev/null 2>&1 && break; sleep 2; done
@@ -439,11 +500,12 @@ helm upgrade --install "$REL" "$CHART" -n "$NS" -f "$STATE/values.yaml" ${image_
 # --- done --------------------------------------------------------------------
 
 host=$(hostname -f 2>/dev/null || hostname)
-# What the console can read from GitLab depends on the token in the values
-# (passed now, or kept from an earlier run), not on this run's options.
+# What the console can read from GitLab depends on the token the release
+# uses: in the values file, or applied with --set by this run.
 gitlab_note="The console also reads GitLab with the token you gave: job results,
 runner waits and the comparison of commits for rebuilds."
-if ! grep -q 'existingSecret: gitlab-api-token' "$STATE/values.yaml"; then
+if ! grep -q 'existingSecret: gitlab-api-token' "$STATE/values.yaml" &&
+  ! printf '%s\n' ${value_set[@]+"${value_set[@]}"} | grep -q 'existingSecret=gitlab-api-token'; then
   gitlab_note="The console shows image builds, their steps and cache verdicts; job results
 and runner waits come from GitLab, which it cannot read yet. To add them,
 run this script again with --gitlab-token-file FILE (a token with read_api)."
@@ -452,7 +514,7 @@ cat <<EOF
 
 Done. ci-accelerator $VERSION runs on this machine.
 
-$(helm get notes "$REL" -n "$NS")
+$(helm get notes "$REL" -n "$NS" | sed -E 's/(^|[^[:alnum:]_.-])kubectl /\1sudo k3s kubectl /g')
 
 The console (no sign-in: reachable only through a tunnel). On this machine:
   sudo k3s kubectl -n $NS port-forward svc/$REL-web 8080:8080
@@ -463,11 +525,11 @@ then open http://localhost:8080
 $gitlab_note
 For sign-in through GitLab, see https://ci-accelerator.io/docs/console/; the values
 are in $STATE/values.yaml, apply changes with
-  sudo KUBECONFIG=$KUBECONFIG $HELM upgrade $REL $CHARTS/ci-accelerator --version $VERSION -n $NS -f $STATE/values.yaml --wait --timeout 15m
+  sudo KUBECONFIG=$KUBECONFIG $HELM upgrade $REL $CHARTS/ci-accelerator --version $VERSION -n $NS -f $STATE/values.yaml${value_set[@]+ ${value_set[*]}} --wait --timeout 15m
 To upgrade to a later release, run that release's quickstart.sh: see
 https://ci-accelerator.io/docs/upgrading/
 
 Values: $STATE/values.yaml   Install log: $STATE/install.log
 Kubernetes: sudo k3s kubectl get pods -A
-Remove everything: sudo $0 --uninstall
+Remove everything: sudo bash $SELF --uninstall
 EOF

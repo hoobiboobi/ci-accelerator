@@ -29,11 +29,20 @@ What the job does for you:
 - stops the build after `timeout-minutes`, and says so (buildctl has no
   keepalive of its own: a build node that disappears without closing the
   connection could hold the job until GitLab's job timeout); a buildctl
-  that has not stopped a minute later is killed;
+  that has not stopped a minute later is killed. When the job's own
+  timeout (the project's, 60 minutes by default, or the job's `timeout:`)
+  comes first, the build stops about a minute and a half before it, so the
+  job still says why and uploads its files. A buildctl killed earlier (out
+  of memory in the job pod, a cancelled job) is named as such, not as a
+  timeout;
 - prints how much context it sent and how many Dockerfile steps came from
   the cache;
 - hands the image digest to later jobs (`IMAGE`, `IMAGE_DIGEST`,
-  `IMAGE_REF` as a dotenv report).
+  `IMAGE_REF` as a dotenv report; a job with `push: false` hands on
+  nothing). Later jobs get the reports of every job before them, and a
+  name that repeats keeps one job's value only: with several component
+  jobs in a pipeline, give each its own `output-prefix` (`API_` gives
+  `API_IMAGE_REF`).
 - names its job to the box (the job's `TRACEPARENT`, which the box's
   runner sets, as the build option `ci-accelerator.io/traceparent`): the
   console shows the build live on the job's page while it runs. BuildKit's
@@ -80,6 +89,7 @@ include:
       job-name: build-api
       runner-tags: [ci-accelerator]
       context: services/api
+      output-prefix: API_
       images: |
         $CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA
         $CI_REGISTRY_IMAGE/api:latest
@@ -89,6 +99,7 @@ include:
       job-name: build-web
       runner-tags: [ci-accelerator]
       context: services/web
+      output-prefix: WEB_
       images: $CI_REGISTRY_IMAGE/web:$CI_COMMIT_SHORT_SHA
 ```
 
@@ -123,6 +134,16 @@ deploy:
   needs: [build-image]
   script:
     - echo "deploying $IMAGE_REF"
+```
+
+With several images (the monorepo above), each later job reads the one it
+needs by its prefix:
+
+```yaml
+deploy-api:
+  needs: [build-api]
+  script:
+    - echo "deploying $API_IMAGE_REF"
 ```
 
 ## Huge repositories: `context-source: git`
@@ -193,7 +214,13 @@ build:
 
 The inputs are declared and described in the `spec` of
 [build.yml](build.yml), which GitLab validates: an unknown input or a
-value outside `options` stops the pipeline before it starts.
+value outside `options` stops the pipeline before it starts. The inputs
+reach the job as CI/CD variables named `CIA_*`, and GitLab ranks the
+variables of a pipeline run, a project, a group and the instance above a
+job's: a `CIA_IMAGES` or `CIA_BUILDCTL_ARGS` set there replaces what the
+include says. Whoever may set such variables can change what the job
+builds and where it pushes; keep pipeline variables to maintainers
+(Settings > CI/CD > Variables, "Minimum role to use pipeline variables").
 
 | Input | Default | What |
 |---|---|---|
@@ -211,10 +238,11 @@ value outside `options` stops the pipeline before it starts.
 | `push` | `true` | `false` only builds |
 | `registry-auth` | `job-token` | `job-token` (GitLab's registry and Dependency Proxy), `docker-auth-config` or `none` |
 | `labels` | `true` | OCI labels `source` and `revision` |
-| `provenance` | `false` | Attach a SLSA provenance attestation |
+| `provenance` | `false` | Attach a SLSA provenance attestation (mode=min). It records the build's options, so whoever can pull the image reads the job's trace id (GitLab's pipeline and job ids) and the context folder; no credential |
 | `interruptible` | `false` | Let GitLab cancel the job for a newer pipeline; off while moby/buildkit#7268 (a cancelled build can fail another build that shares its steps) is open |
-| `timeout-minutes` | `60` | Stop the build after this |
+| `timeout-minutes` | `60` | Stop the build after this (at least 1); earlier when the job's own timeout comes first |
 | `buildctl-args` | | More `buildctl build` arguments, one per line |
+| `output-prefix` | | Prefix of the names later jobs get (`API_` gives `API_IMAGE`, `API_IMAGE_DIGEST`, `API_IMAGE_REF`); one per component job of a pipeline |
 | `buildkit-image` | `moby/buildkit:v0.34.2` by digest | Image with buildctl for the job; keep it at the daemons' BuildKit release |
 
 Values may use CI/CD variables (`$CI_COMMIT_REF_SLUG`); write `$$` for a
@@ -237,8 +265,8 @@ literal `$`.
 - `ci/gitlab/test/run.sh` (`make component-test`) runs the job's script in
   its own image against a fake buildctl, one case per input and failure.
 - `ci/gitlab/test/gitlab.sh` (`make component-gitlab-test`) boots GitLab CE
-  in Docker, at 17.9 (the oldest this component supports) and at the
-  runner's minor, and has GitLab itself read pipelines that include the
+  in Docker, at 17.9 (the oldest this component supports) and at a
+  current release (19.4), and has GitLab itself read pipelines that include the
   component: CI lint and pipeline simulation with every kind of input, the
   job GitLab builds from it (stage, tags, image, variables, an untouched
   script), and the inputs and integrity hashes it must refuse. Every pull

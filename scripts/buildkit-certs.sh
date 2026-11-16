@@ -6,6 +6,8 @@
 #   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
 #     --no-server --client runner      # one more client from the same CA
 #   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
+#     --no-server --client controller  # the controller's client (box namespace)
+#   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
 #     --controller bk                  # the controller API's server certificate
 #   scripts/buildkit-certs.sh --name bk-buildkit --namespace ci-accelerator \
 #     --router bk                      # daemons reached through the build router
@@ -26,7 +28,12 @@
 #                                 controller.api.tls.existingSecret (with
 #                                 --controller <prefix>: its fullnameOverride,
 #                                 or the release name)
-# An existing CA in <out>/ca is reused; certificates are reissued.
+# An existing CA in <out>/ca is reused; certificates are reissued. With
+# ca.crt there and ca.key away (kept offline), the script stops: put ca.key
+# back to issue from that CA. A new CA is made only when neither is there.
+# The client "controller" is the control plane's (control-plane.tls.
+# existingSecret, in the box's namespace); other clients are for the CI
+# jobs' namespace.
 #
 # Any certificate signed by this CA can control the daemons: use the CA for
 # nothing else. buildkitd reads its certificate only at start; restart the
@@ -36,7 +43,7 @@
 
 set -euo pipefail
 
-usage() { sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit "${1:-0}"; }
 die() { echo "buildkit-certs: $*" >&2; exit 1; }
 
 NAME=""
@@ -140,6 +147,10 @@ CA_CRT=$OUT/ca/ca.crt
 CA_KEY=$OUT/ca/ca.key
 if [ -f "$CA_CRT" ] && [ -f "$CA_KEY" ]; then
   echo "reusing CA $CA_CRT"
+elif [ -f "$CA_CRT" ]; then
+  die "$CA_KEY is missing: put it back to issue from the CA in $CA_CRT (the daemons trust that one), or use another --out for a new CA"
+elif [ -f "$CA_KEY" ]; then
+  die "$CA_CRT is missing next to $CA_KEY: put it back, or use another --out for a new CA"
 else
   newkey "$CA_KEY"
   openssl req -x509 -new -key "$CA_KEY" -sha256 -days "$CA_DAYS" \
@@ -147,6 +158,12 @@ else
     -config "$WORK/ext.cnf" -extensions ca -out "$CA_CRT" 2>/dev/null || die "cannot create the CA"
   echo "created CA $CA_CRT (valid $CA_DAYS days)"
 fi
+
+# files <dir>: the --from-file arguments of a Secret from <dir>, quoted for
+# a shell (an --out with spaces).
+files() {
+  printf '    --from-file=%q --from-file=%q --from-file=%q\n' "$1/tls.crt" "$1/tls.key" "$1/ca.crt"
+}
 
 # issue <dir> <common name> <extension section>
 issue() {
@@ -177,7 +194,7 @@ if [ -n "$CONTROLLER" ]; then
   echo
   echo "Controller API Secret (set controller.api.tls.existingSecret=$api-tls in the control plane's values):"
   echo "  kubectl create secret generic $api-tls -n $NAMESPACE \\"
-  echo "    --from-file=$OUT/controller-tls/tls.crt --from-file=$OUT/controller-tls/tls.key --from-file=$OUT/controller-tls/ca.crt"
+  files "$OUT/controller-tls"
   exit 0
 fi
 
@@ -208,9 +225,15 @@ echo
 if [ "$SERVER" = 1 ]; then
   echo "Daemon Secret (set tls.existingSecret=$NAME-tls):"
   echo "  kubectl create secret generic $NAME-tls -n $NAMESPACE \\"
-  echo "    --from-file=$OUT/server/tls.crt --from-file=$OUT/server/tls.key --from-file=$OUT/server/ca.crt"
+  files "$OUT/server"
 fi
-echo "Client Secret, in the namespace of the CI job pods:"
-echo "  kubectl create secret generic $NAME-$CLIENT -n <jobs-namespace> \\"
-echo "    --from-file=$OUT/$CLIENT/tls.crt --from-file=$OUT/$CLIENT/tls.key --from-file=$OUT/$CLIENT/ca.crt"
-echo "Try it: buildctl --addr tcp://<address>:1234 --tlsdir $OUT/$CLIENT debug workers"
+if [ "$CLIENT" = controller ]; then
+  # The control plane's client certificate: next to the controller.
+  echo "Controller client Secret, in the box's namespace (set control-plane.tls.existingSecret=$NAME-$CLIENT):"
+  echo "  kubectl create secret generic $NAME-$CLIENT -n ${NAMESPACE:-<box-namespace>} \\"
+else
+  echo "Client Secret, in the namespace of the CI job pods:"
+  echo "  kubectl create secret generic $NAME-$CLIENT -n <jobs-namespace> \\"
+fi
+files "$OUT/$CLIENT"
+printf 'Try it: buildctl --addr tcp://<address>:1234 --tlsdir %q debug workers\n' "$OUT/$CLIENT"

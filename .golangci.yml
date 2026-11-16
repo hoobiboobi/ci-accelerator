@@ -1,7 +1,9 @@
 # golangci-lint v2 (make go-lint): the analyzers that find bugs and dead
-# code. errcheck is off for now: of its 50 findings (2026-11-09) almost all
-# are deferred Close and Rollback calls whose errors change nothing.
-# staticcheck's quick fixes (QF) are refactoring suggestions, not findings.
+# code. errcheck is off for now: 227 findings outside the tests on
+# 2026-11-16 (deferred Close and Rollback calls, writes to a ResponseWriter,
+# drained bodies and the like). staticcheck's quick fixes (QF) are
+# refactoring suggestions, not findings; ST1022 (the form of a variable's
+# doc comment) is the one style check that fires (11 comments).
 version: "2"
 linters:
   default: none
@@ -12,4 +14,4 @@ linters:
     - unused
   settings:
     staticcheck:
-      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022", "-QF*"]
+      checks: ["all", "-ST1022", "-QF*"]

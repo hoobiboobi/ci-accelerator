@@ -40,10 +40,30 @@ if [ "${1:-}" = --check ]; then CHECK=1; shift; fi
 
 ALL="helm-unittest kubeconform shellcheck gitlab-runner helm kind kubectl oras trivy go node k3s cert-manager victoria-metrics-single victoria-traces-single component"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/update-pins.XXXXXX")
-trap 'rm -rf "$WORK"' EXIT
 DIFFER=0
 say() { echo "update-pins: $*" >&2; }
 die() { say "$*"; exit 1; }
+# All or nothing: every file is kept as it was before its first change, and
+# a run that fails (a later download of the same dependency, say) puts them
+# all back, so the tree never holds half of a bump.
+mkdir "$WORK/orig"
+: >"$WORK/changed"
+keep() { # <file>: before the first change to it
+  grep -qxF -- "$1" "$WORK/changed" && return 0
+  mkdir -p "$WORK/orig/$(dirname "$1")"
+  cp -p "$1" "$WORK/orig/$1"
+  printf '%s\n' "$1" >>"$WORK/changed"
+}
+finish() {
+  local rc=$? f
+  if [ "$rc" != 0 ] && [ -s "$WORK/changed" ]; then
+    while IFS= read -r f; do cat "$WORK/orig/$f" >"$f"; done <"$WORK/changed"
+    say "nothing changed: the files this run had changed are back as they were"
+  fi
+  rm -rf "$WORK"
+  exit "$rc"
+}
+trap finish EXIT
 
 fetch() { # <url> <file>
   curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors -o "$2" "$1" || die "download failed: $1"
@@ -68,6 +88,7 @@ set_sum() { # <file> <name> <sum>
     DIFFER=1
     return 0
   fi
+  keep "$file"
   awk -v n="$name" -v s="$sum" '
     !done && $0 ~ "^" n "[[:space:]]*[:?]?=" { sub(/[0-9a-f]{64}[[:space:]]*$/, s); done = 1 }
     { print }' "$file" >"$WORK/edit" && cat "$WORK/edit" >"$file"
@@ -90,6 +111,7 @@ follow() { # <file> <sed expression> <what>
     DIFFER=1
     return 0
   fi
+  keep "$1"
   cat "$WORK/follow" >"$1"
   say "$1: expects $3"
 }
@@ -143,17 +165,37 @@ dep_shellcheck() {
     set_sum Makefile "SHELLCHECK_SHA256_${os}_${arch}" "$(sum_of "$WORK/sc.tar.gz")"
   done; done
 }
+# The runner image tag of a values file (the first `tag: alpine-v...`), in
+# the tree or, with a revision, at that revision.
+runner_tag() { # <file> [revision]
+  if [ -n "${2:-}" ]; then git show "$2:$1" 2>/dev/null; else cat "$1"; fi |
+    sed -n 's/^ *tag: \(alpine-v[0-9.]*\)$/\1/p' | sed -n 1p
+}
 dep_gitlab_runner() {
-  local v s tag test=charts/ci-accelerator/tests/runner_cache_tiers_test.yaml
+  local v s tag old oldtag f test=charts/ci-accelerator/tests/runner_cache_tiers_test.yaml
   v=$(var Makefile RUNNER_CHART_VERSION)
   same "gitlab-runner chart version" "$v" "$(var test/e2e/run.sh RUNNER_CHART_VERSION)"
+  # The fragment for a runner of one's own runs what the box runs, and its
+  # docs name the chart version the checks render it with.
+  tag=$(runner_tag charts/ci-accelerator/values.yaml)
+  [ -n "$tag" ] || die "charts/ci-accelerator/values.yaml: no gitlab-runner image tag"
+  same "gitlab-runner image of the box and of integrations/gitlab-runner" "$tag" "$(runner_tag integrations/gitlab-runner/values.yaml)"
+  read -r old _ <<<"$(moved Makefile RUNNER_CHART_VERSION)"
+  oldtag=""
+  ! git rev-parse --verify -q HEAD >/dev/null 2>&1 || oldtag=$(runner_tag charts/ci-accelerator/values.yaml HEAD)
+  [ "$oldtag" != "$tag" ] || oldtag=""
+  for f in integrations/gitlab-runner/values.yaml integrations/gitlab-runner/README.md docs/install-existing-cluster.md; do
+    retext "$f" "charts.gitlab.io --version " " \\" "$old" "$v"
+  done
+  retext integrations/gitlab-runner/README.md "Tested with chart " " and gitlab-runner" "$old" "$v"
+  retext integrations/gitlab-runner/README.md "and gitlab-runner " ", the versions" "${oldtag#alpine-v}" "${tag#alpine-v}"
+  retext integrations/gitlab-runner/values.yaml "Tested with chart " " and" "$old" "$v"
+  retext integrations/gitlab-runner/values.yaml "# runner " ", the versions" "${oldtag#alpine-v}" "${tag#alpine-v}"
   fetch "https://gitlab-charts.s3.amazonaws.com/gitlab-runner-$v.tgz" "$WORK/runner.tgz"
   s=$(sum_of "$WORK/runner.tgz")
   set_sum Makefile RUNNER_CHART_SHA256 "$s"
   set_sum test/e2e/run.sh RUNNER_CHART_SHA256 "$s"
   # The box's unit test expects the runner image the box runs.
-  tag=$(sed -n 's/^    tag: \(alpine-v[0-9.]*\)$/\1/p' charts/ci-accelerator/values.yaml | sed -n 1p)
-  [ -n "$tag" ] || die "charts/ci-accelerator/values.yaml: no gitlab-runner image tag"
   follow "$test" 's#gitlab-runner:alpine-v[0-9.]*"#gitlab-runner:'"$tag"'"#g' "the runner image $tag"
   # The box's README (helm-docs output, checked by lint) names both.
   v=$(awk '/^  - name: gitlab-runner$/ { f = 1; next } f && /^    version: / { print $2; exit }' charts/ci-accelerator/Chart.yaml)
@@ -181,6 +223,7 @@ dep_helm() {
       DIFFER=1
     else
       # Rename the v4 line of this arch, keeping the names aligned.
+      keep Makefile
       width=$(awk '/^HELM_SHA256_/ { if (length($1) > w) w = length($1) } END { print w }' Makefile)
       awk -v n="HELM_SHA256_${v}_linux_$arch" -v s="$s" -v arch="$arch" -v w="$width" '
         !done && $0 ~ "^HELM_SHA256_v4[^ ]*_linux_" arch " " { printf "%-" (w > length(n) ? w : length(n)) "s := %s\n", n, s; done = 1; next }
@@ -307,6 +350,7 @@ dep_component() {
     DIFFER=1
     return 0
   fi
+  keep charts/ci-accelerator/templates/_helpers.tpl
   awk -v s="sha256-$b64" '
     hit { print s; hit = 0; next }
     /define "ci-accelerator.componentIntegrity"/ { hit = 1 }
@@ -335,6 +379,7 @@ dep_buildkit() { # [previous default digest]
       say "$helpers: the default digest it maps earlier defaults to is not $now (values.yaml's)"
       DIFFER=1
     else
+      keep "$helpers"
       awk -v d="$now" '
         /\{\{- \$digest = "sha256:[0-9a-f]+" \}\}/ { sub(/"sha256:[0-9a-f]+"/, "\"" d "\"") }
         { print }' "$helpers" >"$WORK/edit" && cat "$WORK/edit" >"$helpers"
@@ -370,6 +415,7 @@ dep_buildkit() { # [previous default digest]
     DIFFER=1
     return 0
   fi
+  keep "$helpers"
   awk -v d="$prev" '
     !done && /has \$digest \(list / { sub(/\(list /, "(list \"" d "\" "); done = 1 }
     { print }' "$helpers" >"$WORK/edit" && cat "$WORK/edit" >"$helpers"

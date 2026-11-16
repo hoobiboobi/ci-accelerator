@@ -16,6 +16,9 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ref=${1:?usage: $0 <image:tag> push|check}
 mode=${2:?usage: $0 <image:tag> push|check}
+# The daemons' BuildKit (charts/buildkit's appVersion and default digest;
+# make lint checks that they agree).
+# renovate: datasource=docker depName=moby/buildkit
 BUILDKIT_IMAGE=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
 # The SBOM generator BuildKit runs for the image's SPDX attestation (next
 # to the provenance), pinned like every other image.

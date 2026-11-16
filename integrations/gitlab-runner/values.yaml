@@ -1,21 +1,23 @@
 # Values fragment for the official gitlab-runner Helm chart that sends CI jobs
-# to the buildkit daemons of this project. Tested with chart 0.93.0 and
-# runner 19.4.2 (see README.md next to this file).
+# to the buildkit daemons of this project. Tested with chart 0.94.1 and
+# runner 19.5.1, the versions the box installs (see README.md next to this
+# file).
 #
 #   helm upgrade --install gitlab-runner gitlab-runner \
-#     --repo https://charts.gitlab.io --version 0.93.0 \
-#     -n ci-accelerator -f integrations/gitlab-runner/values.yaml -f my-values.yaml
+#     --repo https://charts.gitlab.io --version 0.94.1 \
+#     -n ci-accelerator -f values.yaml -f my-values.yaml
 #
 # Replace the names marked ADJUST if your buildkit release is not
 # "ci-accelerator" in namespace "ci-accelerator" with jobs in
 # "ci-accelerator-jobs". runners.config is one TOML string: Helm does not
 # merge it with yours, so keep every line below if you write your own.
 
-# 19.4.0 lists pod events on every poll and overloaded API servers; 19.4.1
-# fixes that, and 19.4.2 is the same runner rebuilt on Go 1.26.10. The chart
-# 0.93.0 default would be 19.4.0.
+# The runner the box runs. 19.4.0 lists pod events on every poll and
+# overloaded API servers (fixed from 19.4.1): keep 19.4.1 or newer with an
+# older chart.
 image:
-  tag: alpine-v19.4.2
+  # renovate: datasource=docker depName=registry.gitlab.com/gitlab-org/gitlab-runner
+  tag: alpine-v19.5.1
 
 # ADJUST: your GitLab.
 gitlabUrl: https://gitlab.example.com/
@@ -108,7 +110,11 @@ runners:
         # Job data from GitLab's CI variables on the job pod, for tools that
         # show builds by pipeline and job (the runner adds the job id, name,
         # URL, ref, commit and project id itself). An unset variable gives an
-        # empty value; values are expanded once, never as templates.
+        # empty value; values are expanded once, never as templates. Leave
+        # pod_annotations_overwrite_allowed unset, or match no
+        # job.runner.gitlab.com/, project.runner.gitlab.com/ or
+        # ci-accelerator.io/ key with it: a job could otherwise pass for
+        # another project and job.
         [runners.kubernetes.pod_annotations]
           "ci-accelerator.io/pipeline-id" = "$CI_PIPELINE_ID"
           "ci-accelerator.io/pipeline-source" = "$CI_PIPELINE_SOURCE"

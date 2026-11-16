@@ -155,7 +155,7 @@ every = {
   "images" => "$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA\n$CI_REGISTRY_IMAGE/api:latest\n",
   "push" => false, "registry-auth" => "none", "labels" => false, "provenance" => true,
   "timeout-minutes" => 5, "buildctl-args" => "--no-cache\n", "buildkit-image" => "moby/buildkit:v0.34.2",
-  "interruptible" => true, "context-source" => "git",
+  "interruptible" => true, "context-source" => "git", "output-prefix" => "API_",
 }
 valid("every input reaches the job as a variable, never the script", include_yaml(every, extra: "stages: [images]\n")) do |m, jobs|
   j = m["build api"] or next "no job 'build api' in #{m.keys}"
@@ -165,7 +165,7 @@ valid("every input reaches the job as a variable, never the script", include_yam
     "CIA_PLATFORM" => "linux/amd64,linux/arm64", "CIA_BUILD_ARGS" => "NODE_VERSION=22\nGREETING=hello world\n",
     "CIA_SECRETS" => "npmrc=NPM_TOKEN", "CIA_IMAGES" => "$CI_REGISTRY_IMAGE/api:$CI_COMMIT_SHORT_SHA\n$CI_REGISTRY_IMAGE/api:latest\n",
     "CIA_PUSH" => "false", "CIA_REGISTRY_AUTH" => "none", "CIA_LABELS" => "false", "CIA_PROVENANCE" => "true",
-    "CIA_TIMEOUT_MINUTES" => "5", "CIA_BUILDCTL_ARGS" => "--no-cache\n",
+    "CIA_TIMEOUT_MINUTES" => "5", "CIA_BUILDCTL_ARGS" => "--no-cache\n", "CIA_OUTPUT_PREFIX" => "API_",
   }
   expect(j["stage"], "images", "stage") || expect(j["tags"], %w[a b], "tags") ||
     expect(j.dig("image", "name"), "moby/buildkit:v0.34.2", "image") ||
@@ -186,6 +186,7 @@ end
 
 refused("an input the component does not have", include_yaml({ "runner-tag" => ["x"] }), /runner-tag/)
 refused("a job name the regex refuses", include_yaml({ "job-name" => "-x" }), /job-name.*(RegEx|regex)/i)
+refused("an output-prefix that is not a variable name", include_yaml({ "output-prefix" => "1-x" }), /output-prefix.*(RegEx|regex)/i)
 refused("a registry-auth outside its options", include_yaml({ "registry-auth" => "token" }), /registry-auth.*(allowed options|not in the list)/i)
 refused("a context-source outside its options", include_yaml({ "context-source" => "remote" }), /context-source.*(allowed options|not in the list)/i)
 refused("push that is not a boolean", include_yaml({ "push" => "yes" }), /push.*boolean/i)
