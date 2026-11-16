@@ -110,14 +110,15 @@ func TestOrderHints(t *testing.T) {
 		r   history.Reason
 		via string
 	}{
-		"a dependency file changed":   {withPaths(r, "main.py", "pyproject.toml"), "gitlab a..b"},
-		"in a sub-folder too":         {withPaths(r, "libs/x/setup.cfg"), "gitlab a..b"},
-		"the changed files cut short": {withPaths(r, "main.py", "21 more"), "gitlab a..b"},
-		"not settled by GitLab":       {r, ""},
-		"settled by the same commit":  {r, "same commit 0612237d"},
-		"an unclear rebuild":          {withKind(r, history.CacheElsewhere), "gitlab a..b"},
-		"no changed files known":      {withPaths(r), "gitlab a..b"},
-		"a rebuild from another step": {withStep(r, ta2.Steps[0]), "gitlab a..b"},
+		"a dependency file changed":     {withPaths(r, "main.py", "pyproject.toml"), "gitlab a..b"},
+		"in a sub-folder too":           {withPaths(r, "libs/x/setup.cfg"), "gitlab a..b"},
+		"the changed files cut short":   {withPaths(r, "main.py", "21 more"), "gitlab a..b"},
+		"GitLab's comparison cut short": {r, "gitlab aaaaaaaa..bbbbbbbb cut short"},
+		"not settled by GitLab":         {r, ""},
+		"settled by the same commit":    {r, "same commit 0612237d"},
+		"an unclear rebuild":            {withKind(r, history.CacheElsewhere), "gitlab a..b"},
+		"no changed files known":        {withPaths(r), "gitlab a..b"},
+		"a rebuild from another step":   {withStep(r, ta2.Steps[0]), "gitlab a..b"},
 	}
 	for name, c := range none {
 		if hs := orderHints(ta2, c.r, c.via, df); len(hs) != 0 {
@@ -146,8 +147,8 @@ func withKind(r history.Reason, k history.ReasonKind) history.Reason {
 func withStep(r history.Reason, s history.Step) history.Reason { r.Step = s; return r }
 
 // Settling a rebuild keeps its order time; the build page, the image's
-// figures and the Insights rows read it; a later rebuild of the image
-// whose dependencies came from the cache says the order was fixed.
+// figures and the Insights rows read it; a later rebuild whose
+// dependencies came from the cache with another manager fixed nothing.
 func TestOrderStored(t *testing.T) {
 	c := &clock{time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)}
 	s := open(t, t.TempDir(), c)
@@ -228,13 +229,11 @@ func TestOrderStored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := q.OrderFixed
-	if len(q.Order) != 0 || f == nil {
-		t.Fatalf("later build: order %+v, fixed %+v", q.Order, f)
-	}
-	if f.Before != ids["ta2"] || f.Wasted != time.Duration(ms["ta2"])*time.Millisecond || f.Took <= f.Wasted ||
-		strings.Join(f.Managers, ",") != "uv" || f.ThisBuild <= 0 {
-		t.Errorf("fixed %+v", f)
+	// Its uv install came from the cache, but the earlier builds installed
+	// with pip again: nothing of theirs was fixed (TestOrderFixedNeedsTheSameInstall
+	// has a fixed one).
+	if len(q.Order) != 0 || q.OrderFixed != nil {
+		t.Fatalf("later build: order %+v, fixed %+v", q.Order, q.OrderFixed)
 	}
 	rows, err := s.Builds(ctx, BuildQuery{Project: ProjectKey{Instance: "000001", ID: 5}})
 	if err != nil {

@@ -275,8 +275,8 @@ func TestPipelineWithoutBuilds(t *testing.T) {
 	if rows := mustBuilds(t, s, BuildQuery{Project: ProjectKey{Instance: inst, ID: 42}, Pipeline: 5000}); len(rows) != 0 {
 		t.Errorf("builds of a pipeline that built nothing: %d", len(rows))
 	}
-	if n, err := s.PipelineJobCount(ctx, inst, 5000); err != nil || n != 3 {
-		t.Errorf("its jobs: %d %v", n, err)
+	if jobs, err := s.PipelineJobs(ctx, inst, 5000); err != nil || len(jobs) != 3 {
+		t.Errorf("its jobs: %d %v", len(jobs), err)
 	}
 	// The console explains image builds: a project that only ever deployed
 	// is not one of its projects.

@@ -17,15 +17,19 @@ type CacheObject struct {
 
 // CacheStore is a bucket folder as the console last saw it.
 type CacheStore struct {
-	ID      string
-	Scanned time.Time
+	ID string
+	// Scanned is when the folder was last listed (zero: never), the time
+	// of the figures; Attempted is when a listing was last tried.
+	Scanned, Attempted time.Time
 	// Lifecycle: the bucket expires old caches; nil: not known.
 	Lifecycle *bool
-	Err       string
+	// Err is why the last attempt failed; empty when it succeeded.
+	Err string
 }
 
 // ReplaceCacheScan stores what a store's folder holds now, in place of what
-// it held. With an error the objects are kept and the error recorded.
+// it held. With an error the objects and the time of the last listing are
+// kept, and the attempt's time and error recorded.
 func (s *Store) ReplaceCacheScan(ctx context.Context, store, instance string, at time.Time, objects []CacheObject, lifecycle *bool, scanErr error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -33,8 +37,9 @@ func (s *Store) ReplaceCacheScan(ctx context.Context, store, instance string, at
 	}
 	defer tx.Rollback()
 	msg := ""
+	scanned := sql.NullInt64{Int64: at.UnixMilli(), Valid: true}
 	if scanErr != nil {
-		msg = scanErr.Error()
+		msg, scanned = scanErr.Error(), sql.NullInt64{}
 	} else {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM cache_objects WHERE store = ?`, store); err != nil {
 			return err
@@ -43,6 +48,9 @@ func (s *Store) ReplaceCacheScan(ctx context.Context, store, instance string, at
 		// keep their own archive of it. Every one takes room, so the key
 		// counts them all and is as new as the newest.
 		for _, o := range objects {
+			if !nullUint(o.ProjectID).Valid {
+				continue // not a project's folder
+			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO cache_objects (store, instance, project_id, key, bytes, modified_at) VALUES (?, ?, ?, ?, ?, ?)
 				ON CONFLICT (store, project_id, key) DO UPDATE SET bytes = cache_objects.bytes + excluded.bytes,
 				modified_at = CASE WHEN excluded.modified_at > cache_objects.modified_at THEN excluded.modified_at ELSE cache_objects.modified_at END`,
@@ -58,9 +66,10 @@ func (s *Store) ReplaceCacheScan(ctx context.Context, store, instance string, at
 			lc.Int64 = 1
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO cache_stores (store, scanned_at, lifecycle, error) VALUES (?, ?, ?, ?)
-		ON CONFLICT (store) DO UPDATE SET scanned_at = excluded.scanned_at, lifecycle = COALESCE(excluded.lifecycle, cache_stores.lifecycle), error = excluded.error`,
-		store, at.UnixMilli(), lc, msg); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO cache_stores (store, scanned_at, attempted_at, lifecycle, error) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (store) DO UPDATE SET scanned_at = COALESCE(excluded.scanned_at, cache_stores.scanned_at),
+			attempted_at = excluded.attempted_at, lifecycle = COALESCE(excluded.lifecycle, cache_stores.lifecycle), error = excluded.error`,
+		store, scanned, at.UnixMilli(), lc, msg); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -96,7 +105,7 @@ func (s *Store) KeepCacheStores(ctx context.Context, ids []string) error {
 // state of the stores that hold them (or of every store, when none does).
 func (s *Store) ProjectCache(ctx context.Context, p ProjectKey) ([]CacheObject, []CacheStore, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT store, project_id, key, bytes, modified_at FROM cache_objects
-		WHERE instance = ? AND project_id = ? ORDER BY bytes DESC, key`, nullInstance(p.Instance), p.ID)
+		WHERE instance = ? AND project_id = ? ORDER BY bytes DESC, key`, nullInstance(p.Instance), nullUint(p.ID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -114,7 +123,9 @@ func (s *Store) ProjectCache(ctx context.Context, p ProjectKey) ([]CacheObject, 
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
-	srows, err := s.db.QueryContext(ctx, `SELECT store, scanned_at, lifecycle, error FROM cache_stores ORDER BY store`)
+	// A store written before attempted_at was kept: its scanned_at is the
+	// last attempt.
+	srows, err := s.db.QueryContext(ctx, `SELECT store, scanned_at, COALESCE(attempted_at, scanned_at), lifecycle, error FROM cache_stores ORDER BY store`)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,11 +137,11 @@ func (s *Store) ProjectCache(ctx context.Context, p ProjectKey) ([]CacheObject, 
 	var stores []CacheStore
 	for srows.Next() {
 		var c CacheStore
-		var at, lc sql.NullInt64
-		if err := srows.Scan(&c.ID, &at, &lc, &c.Err); err != nil {
+		var at, tried, lc sql.NullInt64
+		if err := srows.Scan(&c.ID, &at, &tried, &lc, &c.Err); err != nil {
 			return nil, nil, err
 		}
-		c.Scanned = msTime(at)
+		c.Scanned, c.Attempted = msTime(at), msTime(tried)
 		if lc.Valid {
 			v := lc.Int64 == 1
 			c.Lifecycle = &v

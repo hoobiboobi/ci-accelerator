@@ -136,10 +136,15 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			return 0, err
 		}
 	}
+	// A value is shown on the build and compare pages and by the API: a
+	// secret-looking name hides it, and a token or a password in any other
+	// value is masked as in the steps' output.
 	args := map[string]string{}
 	for k, v := range b.BuildArgs {
 		if history.SecretArg(k) {
 			v = history.Masked
+		} else {
+			v = history.MaskSecrets(v)
 		}
 		args[k] = v
 	}
@@ -161,6 +166,10 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		outDay = day(end)
 	}
 	r := b.Reason
+	if r.Arg != "" {
+		// A changed build argument's values.
+		r.Old, r.New = history.MaskSecrets(r.Old), history.MaskSecrets(r.New)
+	}
 	reasonStep, reasonBy := sql.NullInt64{}, sql.NullInt64{}
 	for i, st := range b.Steps {
 		if r.Kind != "" && st.Key == r.Step.Key {
@@ -201,12 +210,12 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 			context_bytes = excluded.context_bytes, images = excluded.images,
 			reason_kind = excluded.reason_kind, reason_step = excluded.reason_step, reason_old = excluded.reason_old,
 			reason_new = excluded.reason_new, reason_arg = excluded.reason_arg, reason_paths = excluded.reason_paths,
-			reason_by = excluded.reason_by, reason_via = '', saved_ms = excluded.saved_ms,
+			reason_by = excluded.reason_by, reason_via = '', order_ms = 0, saved_ms = excluded.saved_ms,
 			output_day = COALESCE(excluded.output_day, builds.output_day),
 			built = excluded.built, built_ms = excluded.built_ms, warnings = excluded.warnings,
 			no_cache = excluded.no_cache, truncated = excluded.truncated, context = excluded.context,
 			context_commit = excluded.context_commit, context_files = excluded.context_files
-		WHERE excluded.generation >= builds.generation
+		WHERE excluded.generation >= builds.generation AND `+sameRecord+`
 		RETURNING id`,
 		daemon, b.Ref, b.Generation, attributions[a.State], instance, pipeline, job, project,
 		b.Target, dockerfile, string(argsJSON), b.Started.UnixMilli(), nullTime(b.Completed), b.Error, b.ContextBytes, string(images),
@@ -214,7 +223,8 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 		string(warnings), b.NoCache, b.Truncated, b.Context, b.ContextCommit, contextFiles(b.Build),
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		// A newer generation is stored already.
+		// A newer generation is stored already, or the ref is another
+		// build's (sameRecord).
 		err = tx.QueryRowContext(ctx, "SELECT id FROM builds WHERE ref = ?", b.Ref).Scan(&id)
 		if err != nil {
 			return 0, err
@@ -284,6 +294,18 @@ func (s *Store) SaveBuild(ctx context.Context, b Build) (int64, error) {
 	return id, nil
 }
 
+// sameRecord is an SQL condition of SaveBuild's upsert: the arriving record
+// (excluded) is the stored build again, not another build that reuses its
+// ref. The ref is the client's choice, and every certificate holder can
+// list the daemons' refs: a record that started at another time, or that
+// names another job or pipeline than the one stored, does not replace it.
+// A record the daemon updates (the trace attached later) names the job it
+// did not name before.
+const sameRecord = `excluded.started_at = builds.started_at
+		AND (builds.instance IS NULL OR excluded.instance IS builds.instance)
+		AND (builds.pipeline_id IS NULL OR excluded.pipeline_id IS builds.pipeline_id)
+		AND (builds.job_id IS NULL OR excluded.job_id IS builds.job_id)`
+
 // timeSaved estimates what the cache and other builds saved this build: for
 // each step it did not execute, how long that step took the last time it
 // was built in the project (in any project when the project is unknown).
@@ -327,7 +349,7 @@ func (s *Store) SetReason(ctx context.Context, ref, daemon string, r history.Rea
 	paths, _ := json.Marshal(nonNil(r.Paths))
 	var instance, pipeline sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
-		UPDATE builds SET reason_kind = ?, reason_old = ?, reason_new = ?, reason_arg = ?, reason_paths = ?, reason_via = '',
+		UPDATE builds SET reason_kind = ?, reason_old = ?, reason_new = ?, reason_arg = ?, reason_paths = ?, reason_via = '', order_ms = 0,
 			reason_step = (SELECT idx FROM steps WHERE build_id = builds.id AND key = ? ORDER BY idx LIMIT 1),
 			reason_by = (SELECT id FROM builds b WHERE b.ref = ? LIMIT 1)
 		WHERE ref = ? AND daemon_id = (SELECT id FROM daemons WHERE name = ?)
@@ -441,7 +463,7 @@ type Job struct {
 // to the job's builds saved before the job was known.
 func (s *Store) SaveJob(ctx context.Context, j Job) error {
 	instance := nullInstance(j.Instance)
-	if !instance.Valid || j.JobID == 0 {
+	if !instance.Valid || !nullUint(j.JobID).Valid {
 		return fmt.Errorf("store: job without instance or id: %+v", j)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)

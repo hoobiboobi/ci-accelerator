@@ -69,7 +69,11 @@ type BuildQuery struct {
 	Outcome string
 	// Since and Before bound the start time (Before excluded).
 	Since, Before time.Time
-	Limit         int
+	// BeforeID, with Before, is the id of the last build of the previous
+	// page: builds that started in the same millisecond come after it by
+	// id, so a page never leaves them out.
+	BeforeID int64
+	Limit    int
 	// Light leaves out the pipeline and the job (branch, commit, job
 	// name): for figures over many builds.
 	Light bool
@@ -116,7 +120,7 @@ const feedCols = `b.id, b.instance, b.pipeline_id, b.job_id, b.target, d.name, b
 	b.reason_via, d.node,
 	CASE WHEN b.reason_old = '' THEN '' ELSE COALESCE((SELECT od.node FROM daemons od WHERE od.name = b.reason_old), '') END,
 	CASE WHEN b.reason_old = '' THEN 0 ELSE COALESCE((SELECT od.persists FROM daemons od WHERE od.name = b.reason_old), 0) END,
-	b.images, b.order_ms`
+	b.images, CASE WHEN b.reason_kind = 'files-changed' AND b.reason_via LIKE 'gitlab %' THEN b.order_ms ELSE 0 END`
 
 // Builds returns a project's builds, newest first.
 func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
@@ -142,7 +146,10 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 	if !q.Since.IsZero() {
 		where, args = append(where, "b.started_at >= ?"), append(args, q.Since.UnixMilli())
 	}
-	if !q.Before.IsZero() {
+	if !q.Before.IsZero() && q.BeforeID != 0 {
+		where = append(where, "(b.started_at < ? OR (b.started_at = ? AND b.id < ?))")
+		args = append(args, q.Before.UnixMilli(), q.Before.UnixMilli(), q.BeforeID)
+	} else if !q.Before.IsZero() {
 		where, args = append(where, "b.started_at < ?"), append(args, q.Before.UnixMilli())
 	}
 	limit := q.Limit
@@ -158,7 +165,7 @@ func (s *Store) Builds(ctx context.Context, q BuildQuery) ([]BuildRow, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+cols+`
 		FROM builds b JOIN daemons d ON d.id = b.daemon_id `+joins+`
 		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY b.started_at DESC LIMIT ?`, append(args, limit)...)
+		ORDER BY b.started_at DESC, b.id DESC LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -265,14 +272,6 @@ func (s *Store) Branches(ctx context.Context, p ProjectKey, since time.Time) ([]
 		out = append(out, ref)
 	}
 	return out, rows.Err()
-}
-
-// PipelineJobCount is how many jobs of a pipeline the console saw.
-func (s *Store) PipelineJobCount(ctx context.Context, instance string, pipeline uint64) (int, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM jobs INDEXED BY jobs_pipeline WHERE instance = ? AND pipeline_id = ? AND "+pipelinesOwn,
-		nullInstance(instance), nullUint(pipeline)).Scan(&n)
-	return n, err
 }
 
 // StepCount is how often a step of a target ran instead of coming from

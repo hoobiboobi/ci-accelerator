@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -109,7 +112,7 @@ func orderHints(b *history.Build, r history.Reason, via, dockerfile string) []Or
 		c := b.Steps[copyIdx]
 		h := OrderHint{Step: j, Key: s.Key, Name: s.Name, Lines: s.Lines, CopyStep: copyIdx, CopyKey: c.Key, CopyName: c.Name,
 			CopyLines: c.Lines, Managers: is.Managers(), Files: installFiles(is), Others: is.Others, Took: s.Duration()}
-		if next(c.Key, s.Key) {
+		if next(c.Key, s.Key) && onlyBlankBetween(dockerfile, c.Lines, s.Lines) {
 			h.Fragment = is.OrderFragment(c.Name, parents)
 		}
 		out = append(out, h)
@@ -119,9 +122,10 @@ func orderHints(b *history.Build, r history.Reason, via, dockerfile string) []Or
 
 // orderCopy is the COPY of the whole context a verified "your change"
 // rebuild started from; ok false for any other reason, an unverified
-// one, or a changed-files list cut short.
+// one, or a changed-files list cut short (here, or by GitLab: a comparison
+// it cut short proves the change, not that no other file changed).
 func orderCopy(b *history.Build, r history.Reason, via string) (int, bool) {
-	if r.Kind != history.FilesChanged || !strings.HasPrefix(via, "gitlab ") || len(r.Paths) == 0 {
+	if r.Kind != history.FilesChanged || !strings.HasPrefix(via, "gitlab ") || strings.HasSuffix(via, " cut short") || len(r.Paths) == 0 {
 		return -1, false
 	}
 	for _, p := range r.Paths {
@@ -137,17 +141,55 @@ func orderCopy(b *history.Build, r history.Reason, via string) (int, bool) {
 	return -1, false
 }
 
-// installedBelow lists the managers whose installs run in the steps the
-// copy builds on.
+// installedBelow lists the managers whose installs of the project's
+// dependencies (from its files) run in the steps the copy builds on.
 func installedBelow(b *history.Build, copyIdx int) []string {
 	_, anc := b.StepOps(copyIdx)
 	var out []string
 	for _, a := range anc {
-		if is := hints.Installs(a, ""); is != nil {
-			out = append(out, is.Managers()...)
+		out = append(out, fileManagers(hints.Installs(a, ""))...)
+	}
+	return out
+}
+
+// fileManagers lists the managers of a step's installs that read files of
+// the project (requirements, lock files, pyproject.toml), once each. An
+// install of named packages only ("pip install poetry", a tool) installs
+// none of the project's dependencies.
+func fileManagers(is *hints.InstallStep) []string {
+	if is == nil {
+		return nil
+	}
+	var out []string
+	for _, in := range is.Installs {
+		if len(in.Files) > 0 && !slices.Contains(out, in.Manager) {
+			out = append(out, in.Manager)
 		}
 	}
 	return out
+}
+
+// onlyBlankBetween reports whether the Dockerfile lines after the copy's
+// and before the step's are blank or comments: a fragment that replaces
+// the lines from the copy to the step must not drop an instruction that
+// takes no step number (ENV, ARG, USER, LABEL). Without the text or the
+// lines it is not known.
+func onlyBlankBetween(dockerfile string, copyLines, stepLines []history.LineRange) bool {
+	if dockerfile == "" || len(copyLines) == 0 || len(stepLines) == 0 {
+		return false
+	}
+	end, start := copyLines[len(copyLines)-1].End, stepLines[0].Start
+	lines := strings.Split(dockerfile, "\n")
+	if end < 1 || start <= end || start-1 > len(lines) {
+		return false
+	}
+	// Line numbers start at 1: lines[end] is the line after the copy's last.
+	for _, l := range lines[end : start-1] {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			return false
+		}
+	}
+	return true
 }
 
 // installFiles lists the files a step's installs read, once each, without
@@ -233,25 +275,70 @@ func frontendHasParents(dockerfile string) bool {
 	return true
 }
 
+// orderKept is an SQL condition on builds alias o: its order time
+// (order_ms) still stands. Only a rebuild GitLab's comparison proved a
+// change of keeps it; a build stored or settled again since (or by a
+// release that does not know the column) may keep a stale value.
+func orderKept(o string) string {
+	return o + ".order_ms > 0 AND " + o + ".reason_kind = 'files-changed' AND " + o + ".reason_via LIKE 'gitlab %'"
+}
+
+// imageBuilds is the query of the other builds of a build's project and
+// target since a time, with their pushed images and order time, for
+// SameImage: the target alone does not tell a project's images apart.
+const imageBuilds = `SELECT o.id, o.started_at, o.completed_at, o.order_ms, o.images FROM builds b JOIN builds o
+		ON o.instance IS b.instance AND o.project_id = b.project_id AND o.target = b.target
+	WHERE b.id = ? AND o.id <> b.id AND o.started_at >= ? AND o.started_at < ? AND `
+
+type imageBuild struct {
+	id, started, orderMs int64
+	completed            sql.NullInt64
+}
+
+// sameImageBuilds returns the builds of the query imageBuilds (cond added)
+// that are of b's image, in the query's order.
+func (s *Store) sameImageBuilds(ctx context.Context, b *history.Build, id, from, to int64, cond string) ([]imageBuild, error) {
+	rows, err := s.db.QueryContext(ctx, imageBuilds+cond, id, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []imageBuild
+	for rows.Next() {
+		var (
+			x      imageBuild
+			images string
+			imgs   []string
+		)
+		if err := rows.Scan(&x.id, &x.started, &x.completed, &x.orderMs, &images); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(images), &imgs)
+		if SameImage(b.Target, b.Images, b.Target, imgs) {
+			out = append(out, x)
+		}
+	}
+	return out, rows.Err()
+}
+
 // orderRuns adds to each hint how often the image's builds installed
 // again this way since HintWindow (builds.order_ms), this build included.
-func (s *Store) orderRuns(ctx context.Context, id int64, started time.Time, hs []OrderHint) error {
+func (s *Store) orderRuns(ctx context.Context, st *Stored, hs []OrderHint) error {
 	if len(hs) == 0 {
 		return nil
 	}
+	started := st.Build.Started
 	since := s.opts.Now().Add(-HintWindow)
 	if !started.IsZero() && started.Before(since) {
 		since = started
 	}
-	var (
-		n     int
-		total int64
-	)
-	err := s.db.QueryRowContext(ctx, `SELECT count(*), COALESCE(sum(o.order_ms), 0) FROM builds b JOIN builds o
-			ON o.instance IS b.instance AND o.project_id = b.project_id AND o.target = b.target
-		WHERE b.id = ? AND o.order_ms > 0 AND o.started_at >= ? AND o.id <> b.id`, id, since.UnixMilli()).Scan(&n, &total)
+	others, err := s.sameImageBuilds(ctx, st.Build, st.ID, since.UnixMilli(), math.MaxInt64, orderKept("o"))
 	if err != nil {
 		return err
+	}
+	n, total := len(others), int64(0)
+	for _, o := range others {
+		total += o.orderMs
 	}
 	var mine time.Duration
 	for _, h := range hs {
@@ -282,40 +369,54 @@ func (s *Store) orderFixed(ctx context.Context, st *Stored, found []OrderHint) (
 	if !ok {
 		return nil, nil
 	}
-	fix := &OrderFixed{Step: -1}
+	// The installs of the project's dependencies (from its files) that came
+	// from the cache below the copy, by manager.
+	cached := map[string]int{}
 	for k, step := range b.Steps {
 		if step.State != history.Cached || !b.DependsOn(copyIdx, k) {
 			continue
 		}
 		op, _ := b.StepOps(k)
-		if is := hints.Installs(op, step.Name); is != nil {
-			fix.Step, fix.Name, fix.Managers = k, step.Name, is.Managers()
-			if len(step.Lines) > 0 {
-				fix.Line = step.Lines[0].Start
+		for _, m := range fileManagers(hints.Installs(op, step.Name)) {
+			cached[m] = k
+		}
+	}
+	if len(cached) == 0 {
+		return nil, nil
+	}
+	// The latest earlier build of the image that installed again because
+	// of the order.
+	earlier, err := s.sameImageBuilds(ctx, b, st.ID, b.Started.Add(-HintWindow).UnixMilli(), b.Started.UnixMilli(), orderKept("o")+" ORDER BY o.started_at DESC")
+	if err != nil || len(earlier) == 0 {
+		return nil, err
+	}
+	o := earlier[0]
+	// Fixed only for a manager that build installed again and this one
+	// took from the cache.
+	hs, err := s.storedOrderHints(ctx, o.id)
+	if err != nil {
+		return nil, err
+	}
+	fix := &OrderFixed{Step: -1}
+	for _, h := range hs {
+		for _, m := range h.Managers {
+			if k, ok := cached[m]; ok && !slices.Contains(fix.Managers, m) {
+				fix.Managers = append(fix.Managers, m)
+				fix.Step = max(fix.Step, k)
 			}
 		}
 	}
 	if fix.Step < 0 {
 		return nil, nil
 	}
-	var (
-		before          int64
-		started, wasted int64
-		completed       sql.NullInt64
-	)
-	err := s.db.QueryRowContext(ctx, `SELECT o.id, o.started_at, o.completed_at, o.order_ms FROM builds b JOIN builds o
-			ON o.instance IS b.instance AND o.project_id = b.project_id AND o.target = b.target
-		WHERE b.id = ? AND o.order_ms > 0 AND o.started_at < b.started_at AND o.started_at >= ?
-		ORDER BY o.started_at DESC LIMIT 1`, st.ID, b.Started.Add(-HintWindow).UnixMilli()).Scan(&before, &started, &completed, &wasted)
-	if err == sql.ErrNoRows {
-		return nil, nil
+	step := b.Steps[fix.Step]
+	fix.Name = step.Name
+	if len(step.Lines) > 0 {
+		fix.Line = step.Lines[0].Start
 	}
-	if err != nil {
-		return nil, err
-	}
-	fix.Before, fix.BeforeAt, fix.Wasted = before, time.UnixMilli(started), time.Duration(wasted)*time.Millisecond
-	if completed.Valid {
-		fix.Took = time.Duration(completed.Int64-started) * time.Millisecond
+	fix.Before, fix.BeforeAt, fix.Wasted = o.id, time.UnixMilli(o.started), time.Duration(o.orderMs)*time.Millisecond
+	if o.completed.Valid {
+		fix.Took = time.Duration(o.completed.Int64-o.started) * time.Millisecond
 	}
 	if !b.Completed.IsZero() {
 		fix.ThisBuild = b.Completed.Sub(b.Started)
@@ -323,19 +424,32 @@ func (s *Store) orderFixed(ctx context.Context, st *Stored, found []OrderHint) (
 	return fix, nil
 }
 
-// storeOrder computes a settled build's order hints and keeps their time
-// (builds.order_ms) for the image's figures and the Insights page.
-func (s *Store) storeOrder(ctx context.Context, id int64) error {
+// storedOrderHints computes a stored build's order hints from the store
+// alone; none for a build that is not stored.
+func (s *Store) storedOrderHints(ctx context.Context, id int64) ([]OrderHint, error) {
 	st, err := s.Load(ctx, id)
 	if st == nil {
-		return err
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		}
+		return nil, err
 	}
 	var text sql.NullString
 	if err := s.db.QueryRowContext(ctx, `SELECT d.text FROM builds b LEFT JOIN dockerfiles d ON d.id = b.dockerfile_id WHERE b.id = ?`, id).Scan(&text); err != nil {
+		return nil, err
+	}
+	return orderHints(st.Build, st.Reason, st.Via, text.String), nil
+}
+
+// storeOrder computes a settled build's order hints and keeps their time
+// (builds.order_ms) for the image's figures and the Insights page.
+func (s *Store) storeOrder(ctx context.Context, id int64) error {
+	hs, err := s.storedOrderHints(ctx, id)
+	if err != nil {
 		return err
 	}
 	var ms int64
-	for _, h := range orderHints(st.Build, st.Reason, st.Via, text.String) {
+	for _, h := range hs {
 		ms += h.Took.Milliseconds()
 	}
 	_, err = s.db.ExecContext(ctx, "UPDATE builds SET order_ms = ? WHERE id = ?", ms, id)
@@ -374,7 +488,7 @@ func (s *Store) BuildOrder(ctx context.Context, ids []int64) (map[int64][]OrderH
 			return nil, err
 		}
 		hs := orderHints(st.Build, st.Reason, st.Via, text.String)
-		if err := s.orderRuns(ctx, id, st.Build.Started, hs); err != nil {
+		if err := s.orderRuns(ctx, st, hs); err != nil {
 			return nil, err
 		}
 		if len(hs) > 0 {

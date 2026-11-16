@@ -86,8 +86,10 @@ func TestRoutesForRoutersOnly(t *testing.T) {
 	if at := w.Projects[0].Activity[0].At; at.After(now) {
 		t.Errorf("decision dated %s, after the controller's now %s", at, now)
 	}
-	got, err := st.JobRoutes(ctx, "0a1b2c", 5)
-	if err != nil || len(got) != 1 || got[0].Daemon != "bk-1" {
+	// Stored at the controller's time: the latest decision for the job on
+	// bk-1 as of now.
+	got, err := st.JobRoute(ctx, "0a1b2c", 5, "bk-1", now)
+	if err != nil || got == nil || got.Daemon != "bk-1" || got.Node != "n1" || got.Reason != route.ZoneHash {
 		t.Fatalf("stored %+v %v", got, err)
 	}
 	for _, bad := range []string{`[{"node":"n1","daemon":"bk"}]`, `{"not":"a list"}`} {

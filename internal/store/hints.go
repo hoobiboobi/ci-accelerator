@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -55,23 +56,29 @@ func (h StepHints) Broken() bool {
 // mount it has cannot work (whether it ran or not). The build's graph
 // must be restored (Load); without it there are none.
 func (s *Store) Hints(ctx context.Context, st *Stored) ([]StepHints, error) {
-	return s.hints(ctx, st, nil)
+	return s.hints(ctx, st, s.opts.Now(), nil)
 }
 
 // runsMemo keeps step runs already read, by scope and step name: the
-// builds of one list are mostly of the same images.
+// builds of one list are mostly of the same images. A list's builds share
+// the time their window ends (now), so its key does not change from one
+// build to the next.
 type runsMemo map[string][]time.Duration
 
-func (s *Store) hints(ctx context.Context, st *Stored, memo runsMemo) ([]StepHints, error) {
+func (s *Store) hints(ctx context.Context, st *Stored, now time.Time, memo runsMemo) ([]StepHints, error) {
 	b := st.Build
 	// The 30 days before now; an older build's own runs count too.
-	since := s.opts.Now().Add(-HintWindow)
+	since := now.Add(-HintWindow)
 	if !b.Started.IsZero() && b.Started.Before(since) {
 		since = b.Started
 	}
 	var out []StepHints
 	var names []string
 	for i, step := range b.Steps {
+		// Each step walks its ancestors: a request that went away stops.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		op, anc := b.StepOps(i)
 		if op == nil {
 			continue
@@ -113,7 +120,7 @@ func (s *Store) hints(ctx context.Context, st *Stored, memo runsMemo) ([]StepHin
 }
 
 const (
-	stepRunsQuery = `SELECT COALESCE(s.name, sd.name, ''), s.dur_ms
+	stepRunsQuery = `SELECT COALESCE(s.name, sd.name, ''), s.dur_ms, b.images
 		FROM builds b JOIN steps s ON s.build_id = b.id AND s.state = 1
 		LEFT JOIN step_defs sd ON sd.identity = s.identity
 		WHERE `
@@ -123,18 +130,21 @@ const (
 // stepRuns returns, by step name, how long each execution of those steps
 // took since t in the builds of the same image: the build's project and
 // target (or, without a known project, its pipeline; or only the build
-// itself). A step is the same when its instruction is the same.
+// itself), and the same pushed repository where SameImage needs it. A
+// step is the same when its instruction is the same.
 func (s *Store) stepRuns(ctx context.Context, buildID int64, names []string, since time.Time, memo runsMemo) (map[string][]time.Duration, error) {
 	var (
 		instance, pipeline, project sql.NullInt64
-		target                      string
+		target, imagesJSON          string
+		images                      []string
 	)
-	err := s.db.QueryRowContext(ctx, `SELECT b.instance, b.pipeline_id, COALESCE(b.project_id, p.project_id), b.target
+	err := s.db.QueryRowContext(ctx, `SELECT b.instance, b.pipeline_id, COALESCE(b.project_id, p.project_id), b.target, b.images
 		FROM builds b LEFT JOIN pipelines p ON p.instance = b.instance AND p.pipeline_id = b.pipeline_id
-		WHERE b.id = ?`, buildID).Scan(&instance, &pipeline, &project, &target)
+		WHERE b.id = ?`, buildID).Scan(&instance, &pipeline, &project, &target, &imagesJSON)
 	if err != nil {
 		return nil, err
 	}
+	_ = json.Unmarshal([]byte(imagesJSON), &images)
 	// One query by the narrowest index that fits: the image's builds of the
 	// window (builds_target), the pipeline's, or the build alone.
 	var scope string
@@ -148,7 +158,7 @@ func (s *Store) stepRuns(ctx context.Context, buildID int64, names []string, sin
 		scope, args = "b.id = ?", []any{buildID}
 	}
 	out := map[string][]time.Duration{}
-	key := fmt.Sprint(scope, args, "|")
+	key := fmt.Sprint(scope, args, firstRepository(images), "|")
 	var ask []string
 	for _, n := range names {
 		if r, ok := memo[key+n]; ok {
@@ -171,11 +181,18 @@ func (s *Store) stepRuns(ctx context.Context, buildID int64, names []string, sin
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			name string
-			ms   int64
+			name, other string
+			ms          int64
+			imgs        []string
 		)
-		if err := rows.Scan(&name, &ms); err != nil {
+		if err := rows.Scan(&name, &ms, &other); err != nil {
 			return nil, err
+		}
+		if other != imagesJSON {
+			_ = json.Unmarshal([]byte(other), &imgs)
+			if !SameImage(target, images, target, imgs) {
+				continue
+			}
 		}
 		out[name] = append(out[name], time.Duration(ms)*time.Millisecond)
 	}
@@ -196,7 +213,7 @@ func (s *Store) BuildHints(ctx context.Context, ids []int64) (map[int64][]StepHi
 	if len(ids) > MaxHintBuilds {
 		ids = ids[:MaxHintBuilds]
 	}
-	memo := runsMemo{}
+	memo, now := runsMemo{}, s.opts.Now()
 	for _, id := range ids {
 		st, err := s.Load(ctx, id)
 		if st == nil {
@@ -206,7 +223,7 @@ func (s *Store) BuildHints(ctx context.Context, ids []int64) (map[int64][]StepHi
 			return nil, err
 		}
 		// A graph past retention restores nothing: no hints, no error.
-		hs, err := s.hints(ctx, st, memo)
+		hs, err := s.hints(ctx, st, now, memo)
 		if err != nil {
 			return nil, err
 		}

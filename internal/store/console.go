@@ -28,8 +28,11 @@ type APIPipeline struct {
 	ProjectID uint64
 	Status    string
 	WebURL    string
-	Jobs      []APIJob
-	Read      time.Time
+	// SHA is the pipeline's commit: stored when nothing named it before
+	// (a pipeline whose job pods were never seen).
+	SHA  string
+	Jobs []APIJob
+	Read time.Time
 }
 
 // Finished says whether a pipeline status is final: its jobs no longer
@@ -46,7 +49,9 @@ func Finished(status string) bool {
 // jobs; p.ProjectID is the project GitLab answered for. Jobs that ran on
 // other runners are stored too: the pipeline page lists them without
 // builds. It returns the jobs whose builds took their project from it
-// (their pods were never seen): they are to be compared now.
+// (their pods were never seen): they are to be compared now. The
+// pipeline's subscribers hear of it only when something they show
+// changed, not of every read that found it as it was.
 func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) (attached []uint64, err error) {
 	instance := nullInstance(p.Instance)
 	if !instance.Valid || p.ID == 0 {
@@ -59,6 +64,11 @@ func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) (attached []
 	defer tx.Rollback()
 	project := nullUint(p.ProjectID)
 	seen := s.opts.Now().UnixMilli()
+	before, err := pipelineState(ctx, tx, instance, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	changed := false
 	var owner sql.NullInt64
 	err = tx.QueryRowContext(ctx, "SELECT project_id FROM pipelines WHERE instance = ? AND pipeline_id = ?", instance, nullUint(p.ID)).Scan(&owner)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -76,17 +86,19 @@ func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) (attached []
 			instance, nullUint(p.ID), project); err != nil {
 			return nil, err
 		}
+		changed = true
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO pipelines (instance, pipeline_id, project_id, status, web_url, api_at, seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO pipelines (instance, pipeline_id, project_id, status, web_url, api_at, seen_at, sha)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (instance, pipeline_id) DO UPDATE SET project_id = COALESCE(excluded.project_id, pipelines.project_id),
-			status = excluded.status, web_url = excluded.web_url, api_at = excluded.api_at`,
-		instance, nullUint(p.ID), project, p.Status, p.WebURL, p.Read.UnixMilli(), seen); err != nil {
+			status = excluded.status, web_url = excluded.web_url, api_at = excluded.api_at,
+			sha = CASE WHEN pipelines.sha = '' THEN excluded.sha ELSE pipelines.sha END`,
+		instance, nullUint(p.ID), project, p.Status, p.WebURL, p.Read.UnixMilli(), seen, p.SHA); err != nil {
 		return nil, err
 	}
 	for _, j := range p.Jobs {
-		if j.ID == 0 {
-			continue
+		if !nullUint(j.ID).Valid {
+			continue // no id, or one no GitLab issues
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO jobs (instance, job_id, pipeline_id, project_id, name, stage, url,
 			started_at, status, queued_at, finished_at, duration_ms, queued_ms, runner, seen_at, allow_failure, started_by)
@@ -116,11 +128,63 @@ func (s *Store) SaveAPIPipeline(ctx context.Context, p APIPipeline) (attached []
 			attached = append(attached, j.ID)
 		}
 	}
+	after, err := pipelineState(ctx, tx, instance, p.ID)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	s.changed(PipelineKey(fmt.Sprintf("%06x", instance.Int64), p.ID))
+	if changed || len(attached) > 0 || after != before {
+		s.changed(PipelineKey(fmt.Sprintf("%06x", instance.Int64), p.ID))
+	}
 	return attached, nil
+}
+
+// pipelineState is what a pipeline's pages show of its row and its jobs'
+// rows, as one comparable text: every column but the time GitLab was last
+// read (api_at), which changes with every read.
+func pipelineState(ctx context.Context, tx *sql.Tx, instance sql.NullInt64, id uint64) (string, error) {
+	var b strings.Builder
+	for _, q := range []string{
+		"SELECT * FROM pipelines WHERE instance = ? AND pipeline_id = ?",
+		"SELECT * FROM jobs INDEXED BY jobs_pipeline WHERE instance = ? AND pipeline_id = ? ORDER BY job_id",
+	} {
+		if err := rowsText(ctx, tx, &b, q, instance, nullUint(id)); err != nil {
+			return "", err
+		}
+	}
+	return b.String(), nil
+}
+
+// rowsText writes the rows a query returns to b, leaving out api_at.
+func rowsText(ctx context.Context, tx *sql.Tx, b *strings.Builder, q string, args ...any) error {
+	rows, err := tx.QueryContext(ctx, q, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+	vals := make([]any, len(cols))
+	ptrs := make([]any, len(cols))
+	for i := range vals {
+		ptrs[i] = &vals[i]
+	}
+	for rows.Next() {
+		if err := rows.Scan(ptrs...); err != nil {
+			return err
+		}
+		for i, c := range cols {
+			if c != "api_at" {
+				fmt.Fprintf(b, "%q=%#v;", c, vals[i])
+			}
+		}
+		b.WriteByte('\n')
+	}
+	return rows.Err()
 }
 
 func nullDuration(d time.Duration) sql.NullInt64 {
