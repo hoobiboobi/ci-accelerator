@@ -28,12 +28,12 @@
   {{else}}<p class="muted pad">The same Dockerfile.</p>{{end}}
 </section>
 
-<section class="box" aria-labelledby="csT"><div class="boxh"><h2 class="h" id="csT">Steps</h2><span class="muted">by their place in the Dockerfile</span></div>
-  <div class="tbox"><table class="cmp steps {{if .A.Self}}self-a{{else}}self-b{{end}}"><thead><tr><th>Step</th><th>Earlier {{template "cmpwho" .A}}</th><th>Later {{template "cmpwho" .B}}</th><th class="num">Time</th></tr></thead><tbody>
+<section class="box" aria-labelledby="csT"><div class="boxh"><h2 class="h" id="csT">Steps</h2><span class="muted">by their place in the Dockerfile · <b>bold</b>: at least 1&nbsp;s and 20&nbsp;%, or 30&nbsp;s</span></div>
+  <div class="tbox"><table class="cmp steps {{if .A.Self}}self-a{{else}}self-b{{end}}"><thead><tr><th>Step</th><th>Earlier {{template "cmpwho" .A}}</th><th>Later {{template "cmpwho" .B}}</th><th class="num">Time <span class="muted">(of earlier)</span></th></tr></thead><tbody>
   {{range .Steps}}<tr{{if or .Changed (ne .StateA .StateB)}} class="dif"{{end}}><td><span class="mono">{{.Key}}</span> {{.Name}}{{with .NameA}}<div class="diff"><div class="del">- {{.}}</div></div>{{end}}</td>
     <td>{{if .StateA}}{{template "stchip" .StateA}} {{.DA}}{{else}}<span class="muted" title="Not in the build's records: a later step came from the cache, or the step did not exist">not reported</span>{{end}}</td>
     <td>{{if .StateB}}{{template "stchip" .StateB}} {{.DB}}{{else}}<span class="muted" title="Not in the build's records: a later step came from the cache, or the step does not exist">not reported</span>{{end}}</td>
-    <td class="num">{{if .Delta}}<span class="{{if .Slower}}slow{{else}}fast{{end}}">{{.Delta}}</span>{{end}}</td></tr>{{end}}
+    <td class="num dt">{{if .Delta}}{{if .Big}}<b class="{{if .Slower}}slow{{else}}fast{{end}}">{{.Delta}}</b><span class="sr"> (large)</span>{{else}}<span class="muted">{{.Delta}}</span>{{end}}{{with .Pct}} <span class="muted pct">{{.}}</span>{{end}}{{end}}</td></tr>{{end}}
   </tbody></table></div>
 </section>
 {{else}}
