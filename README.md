@@ -228,6 +228,10 @@ Known, deliberate or not yet solved; the full list, with the reasons:
   it built; a project new to a node starts cold there.
 - **Probes miss some hangs,** and a renewed certificate needs a restart.
 - **One controller** (SQLite on a ReadWriteOnce volume) and **GitLab only**.
+- **A fleet hub is experimental** (docs/fleet.md): while a cluster is away
+  it shows only the pages people opened before, a member serves no web or
+  JSON API of its own, and the fleet's values, API and protocol may change
+  between releases.
 
 ## Documentation
 
@@ -237,6 +241,7 @@ Known, deliberate or not yet solved; the full list, with the reasons:
 | [docs/install-existing-cluster.md](docs/install-existing-cluster.md) | A cluster that already runs cert-manager, a runner or admission policies |
 | [docs/quickstart.md](docs/quickstart.md) | One machine with quickstart.sh: install, console, token, sign-in, upgrade, remove |
 | [docs/first-build.md](docs/first-build.md) | The first CI job, a cold and a cached run |
+| [docs/fleet.md](docs/fleet.md) | Several boxes under one console: a hub, and boxes that join it (experimental) |
 | [docs/production.md](docs/production.md) | A dedicated cache disk, daemon sizes, digests, zones, OTLP, mirrors |
 | [docs/console.md](docs/console.md) | The console: its pages, its three levels, sign-in, logs |
 | [docs/upgrading.md](docs/upgrading.md) | Upgrading: Helm, one machine, GitOps, rollbacks |

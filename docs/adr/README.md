@@ -66,3 +66,5 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0060](0060-sbom.md) | An SBOM on the ci-accelerator image: SPDX per platform from BuildKit, checked before the release signs |
 | [0061](0061-drain-before-sigterm.md) | A daemon drains before SIGTERM and the collector reads a leaving daemon to the end: builds that finish during a rollout are stored |
 | [0062](0062-order-hint.md) | Dependencies installed again only because of the step order: a verified "your change" that reinstalled without a dependency file changing gets the measured time and a fragment built in the lab |
+| [0063](0063-fleet-hub.md) | A fleet hub: one console for several boxes; members dial out through the hub's Ingress, keys pinned both ways, the controller's API unchanged over a multiplexer |
+| [0064](0064-fleet-administration.md) | Fleet administration: roles and API tokens kept in the hub, clusters added from the console with a one-time join token, their secrets sealed at the hub and delivered over the link |
