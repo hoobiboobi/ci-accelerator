@@ -3,7 +3,9 @@ info:
   title: ci-accelerator console API
   version: v1
   description: |
-    The console's read-only JSON API, served by the console (the Service
+    Two APIs in one file.
+
+    The box's console serves a read-only JSON API (the Service
     `<release>-web`, port 8080) under `/api/v1`. It has no authentication of
     its own: with sign-in, only the console's admins reach it; without
     sign-in it is as open as the console's pages (see "Limitations").
@@ -13,12 +15,24 @@ info:
     client should ignore what it does not know. The project's CI checks
     this file against the last release's with oasdiff, and the console's
     responses against this file.
+
+    A fleet hub serves its management API under `/api/v1/fleet/`, on the
+    hub's console address: it reads and changes the fleet (members, join
+    tokens, cluster settings, roles, API tokens) and needs an API token of
+    the hub (`Authorization: Bearer ...`) or a signed-in person, whose role
+    decides what they may do. Its paths are experimental
+    (`x-stability-level: alpha`): they may change between releases, and
+    the breaking-change check leaves them out. Every answer of it is JSON
+    with `Cache-Control: no-store`, also a path or method it does not have
+    (404 `not_found`, 405 `method_not_allowed` with `Allow`).
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
   - url: http://localhost:8080
     description: the console through `kubectl port-forward svc/<release>-web 8080:8080`
+  - url: https://hub.example.com
+    description: a fleet hub's console address (the paths under /api/v1/fleet/)
 paths:
   /api/v1/builds:
     get:
@@ -58,8 +72,681 @@ paths:
             text/plain:
               schema:
                 type: string
+  /api/v1/fleet/version:
+    get:
+      operationId: fleetVersion
+      x-stability-level: alpha
+      summary: A fleet hub's version and the versions of its management API and link
+      description: Served by a fleet hub only (experimental; may change between releases).
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: The versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [hub, api, protocols]
+                properties:
+                  hub: { type: string }
+                  api: { type: string, example: 1-alpha }
+                  protocols: { type: array, items: { type: integer, minimum: 1 }, description: "the versions of the link's protocol the hub accepts from a member" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/members:
+    get:
+      operationId: listFleetMembers
+      x-stability-level: alpha
+      summary: The clusters registered at a fleet hub, with their links' state
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: Every member, removed ones (`removed_at`, kept a while) last.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members: { type: array, items: { $ref: "#/components/schemas/FleetMember" } }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    post:
+      operationId: addFleetMember
+      x-stability-level: alpha
+      summary: Registers a cluster by name and public key
+      description: |
+        The values the hub generates for a member registered this way name
+        the key's Secret (`control-plane.fleet.key.existingSecret`),
+        whatever its settings say about `joins`.
+      security: [{fleetToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, public_key]
+              properties:
+                name: { type: string, pattern: "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$" }
+                public_key: { type: string, description: "PEM (-----BEGIN PUBLIC KEY-----), Ed25519 or ECDSA P-256/P-384" }
+      responses:
+        "201":
+          description: Registered.
+          headers:
+            Location: { description: "the member's address", schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetMember" }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "409": { $ref: "#/components/responses/FleetError" }
+        "413": { $ref: "#/components/responses/FleetTooLarge" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/members/{name}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getFleetMember
+      x-stability-level: alpha
+      summary: One member, a removed one too while its name stays taken
+      description: |
+        A removed member is answered with `removed_at` set for as long as
+        the hub keeps its record (30 days by default); then 404.
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: The member; removed when `removed_at` is set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetMember" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "404": { $ref: "#/components/responses/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    delete:
+      operationId: removeFleetMember
+      x-stability-level: alpha
+      summary: Takes a cluster out of the fleet (removing a missing one succeeds)
+      description: |
+        The member's link is closed and its name stays taken a while; the
+        cluster's unused join tokens are revoked and its settings and kept
+        secrets are forgotten (a cluster waiting to join is forgotten the
+        same way). A cluster registered later under the name starts with
+        none of them.
+      security: [{fleetToken: []}]
+      responses:
+        "204": { description: "Removed, or not there." }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/members/{name}/join-tokens:
+    parameters:
+      - { name: name, in: path, required: true, description: "the member name the token is bound to", schema: { type: string } }
+    get:
+      operationId: listFleetJoinTokens
+      x-stability-level: alpha
+      summary: A member name's join tokens (never their secrets)
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [join_tokens]
+                properties:
+                  join_tokens: { type: array, items: { $ref: "#/components/schemas/FleetJoinToken" } }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    post:
+      operationId: issueFleetJoinToken
+      x-stability-level: alpha
+      summary: Issues a join token for a cluster about to be installed (the name must not be registered); unused older ones are revoked
+      security: [{fleetToken: []}]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expires_in_minutes: { type: integer, minimum: 0, maximum: 10080, description: "absent or 0: 60" }
+      responses:
+        "201":
+          description: Issued; the secret is in this answer only.
+          headers:
+            Location: { description: "the join token's address", schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [join_token, secret]
+                properties:
+                  join_token: { $ref: "#/components/schemas/FleetJoinToken" }
+                  secret: { type: string, description: "cia_join_...: works once, for this name only" }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "409": { $ref: "#/components/responses/FleetError" }
+        "413": { $ref: "#/components/responses/FleetTooLarge" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/members/{name}/join-tokens/{id}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: getFleetJoinToken
+      x-stability-level: alpha
+      summary: One join token of a member name (never its secret)
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: The join token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetJoinToken" }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "404": { $ref: "#/components/responses/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    delete:
+      operationId: revokeFleetJoinToken
+      x-stability-level: alpha
+      summary: Revokes an unused join token (revoking a missing or ended one succeeds)
+      security: [{fleetToken: []}]
+      responses:
+        "204": { description: "Revoked, or not active." }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/members/{name}/settings:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getFleetSettings
+      x-stability-level: alpha
+      summary: A cluster's settings (from the hub's curated list) and which secrets the hub keeps for it, never their values
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetSettings" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "404":
+          description: The cluster has no settings at the hub; the message says whether a member of the name is registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    put:
+      operationId: putFleetSettings
+      x-stability-level: alpha
+      summary: Sets a cluster's settings; a secret not given stays as kept, and goes to the cluster over its link
+      description: |
+        `values` replaces the settings: values are trimmed, and a value of
+        a setting that does not apply (`host_path` with `storage`
+        emptyDir, the S3 ones without `s3_server`) is left out; the answer
+        is what was kept. A secret given for a setting that does not apply
+        is refused. A secret given empty or not at all stays as kept;
+        `forget` drops kept optional secrets (`gitlab_token`). A hub
+        without a secrets key keeps no secrets and asks for none: the
+        cluster's Secrets are made there by hand. Saving what is kept
+        already changes nothing. `joins`, `token_hours` and `public_key`
+        are the console's "Add a cluster" form: through the API, register
+        a cluster by key with POST members (its values then name the key's
+        Secret) or issue a join token; a `public_key` other than the
+        registered one is refused.
+      security: [{fleetToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [values]
+              properties:
+                values: { type: object, additionalProperties: { type: string }, description: "param key -> value: joins, token_hours, public_key, storage, host_path, cache_limit, gitlab_url, runner_token, concurrent, gitlab_token, s3_server, s3_bucket, s3_region, s3_access_key, s3_secret_key" }
+                forget: { type: array, items: { type: string }, description: "kept secrets to forget: optional ones only (gitlab_token)" }
+      responses:
+        "200":
+          description: The settings as kept now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetSettings" }
+        "400":
+          description: Refused values, each with why.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: object
+                    required: [code, message]
+                    properties:
+                      code: { type: string }
+                      message: { type: string }
+                      fields: { type: array, items: { type: object, required: [key, message], properties: { key: { type: string }, message: { type: string } } } }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "413": { $ref: "#/components/responses/FleetTooLarge" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/members/{name}/values:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getFleetValues
+      x-stability-level: alpha
+      summary: The box's values file the hub generates from a cluster's settings (no secret in it)
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: The values file.
+          content:
+            application/yaml:
+              schema: { type: object, description: "the values (a YAML mapping) to install the box with" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "404":
+          description: The cluster has no settings at the hub; the message says whether a member of the name is registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/audit:
+    get:
+      operationId: fleetAudit
+      x-stability-level: alpha
+      summary: Who changed the fleet, newest first
+      security: [{fleetToken: []}]
+      parameters:
+        - { name: limit, in: query, required: false, description: "How many records: 1-1000, 100 by default; another value is refused (400).", schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+        - { name: before, in: query, required: false, description: "Older than this record id: the last id of a page gives the next one.", schema: { type: integer, minimum: 1 } }
+        - { name: actor, in: query, required: false, description: "Only this actor's records.", schema: { type: string } }
+        - { name: target, in: query, required: false, description: "Only records of this target.", schema: { type: string } }
+      responses:
+        "200":
+          description: The audit records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, at, actor, action, target]
+                      properties:
+                        id: { type: integer }
+                        at: { type: string, format: date-time }
+                        actor: { type: string, description: "token:<name>, gitlab:<host>/<user id>, member:<name>, values, local" }
+                        action: { type: string }
+                        target: { type: string }
+                        detail: { type: string }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/role-bindings:
+    get:
+      operationId: listFleetRoleBindings
+      x-stability-level: alpha
+      summary: Who has a role at the hub (operators and owners; everyone else is a viewer)
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: Every binding, owners first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [role_bindings]
+                properties:
+                  role_bindings: { type: array, items: { $ref: "#/components/schemas/FleetRoleBinding" } }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/role-bindings/gitlab/{host}/{id}:
+    parameters:
+      - { name: host, in: path, required: true, description: "the GitLab's host in lower case (with its port, if any): the subject is exactly gitlab:<host>/<id>, as sign-in writes it", schema: { type: string, pattern: "^[a-z0-9.-]+(:[0-9]+)?$" } }
+      - { name: id, in: path, required: true, description: "the person's GitLab user id: an integer, at least 1, no white space", schema: { type: integer, minimum: 1 } }
+    get:
+      operationId: getFleetRoleBinding
+      x-stability-level: alpha
+      summary: One person's binding (404 for a person without one, a viewer)
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: The binding.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetRoleBinding" }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "404": { $ref: "#/components/responses/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    put:
+      operationId: setFleetRoleBinding
+      x-stability-level: alpha
+      summary: Gives a person a role (viewer takes the binding away); an owner from the values is locked
+      description: |
+        `viewer` removes the person's binding, as DELETE does (204: a
+        viewer has no binding). On a hub with sign-in, a host that is none
+        of the GitLabs people sign in with is refused (400 invalid): such
+        a binding would match nobody.
+      security: [{fleetToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role]
+              properties:
+                role: { type: string, enum: [viewer, operator, owner] }
+      responses:
+        "200":
+          description: The binding as it is now (operator or owner).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetRoleBinding" }
+        "204": { description: "viewer: the binding removed, or not there." }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "409": { $ref: "#/components/responses/FleetError" }
+        "413": { $ref: "#/components/responses/FleetTooLarge" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    delete:
+      operationId: removeFleetRoleBinding
+      x-stability-level: alpha
+      summary: Takes a person's role away (removing a missing one succeeds; an owner from the values is locked)
+      security: [{fleetToken: []}]
+      responses:
+        "204": { description: "Removed, or not there." }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "409": { $ref: "#/components/responses/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/tokens:
+    get:
+      operationId: listFleetTokens
+      x-stability-level: alpha
+      summary: The hub's API tokens (never their secrets)
+      description: The bootstrap token of the hub's values is not kept by the hub and not listed.
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: Every token kept, active ones first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens: { type: array, items: { $ref: "#/components/schemas/FleetToken" } }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    post:
+      operationId: issueFleetToken
+      x-stability-level: alpha
+      summary: Issues an API token; its secret is in this answer only
+      security: [{fleetToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, role]
+              properties:
+                name: { type: string, pattern: "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$" }
+                role: { type: string, enum: [viewer, operator, owner] }
+                expires_in_days: { type: integer, description: "1 to 3650; -1: never; absent or 0: 90" }
+      responses:
+        "201":
+          description: Issued.
+          headers:
+            Location: { description: "the token's address", schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, secret]
+                properties:
+                  token: { $ref: "#/components/schemas/FleetToken" }
+                  secret: { type: string, description: "cia_pat_...: shown this once, kept only as a hash" }
+        "400": { $ref: "#/components/responses/FleetError" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "409": { $ref: "#/components/responses/FleetError" }
+        "413": { $ref: "#/components/responses/FleetTooLarge" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /api/v1/fleet/tokens/{name}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getFleetToken
+      x-stability-level: alpha
+      summary: One API token (never its secret)
+      security: [{fleetToken: []}]
+      responses:
+        "200":
+          description: The token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetToken" }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "404": { $ref: "#/components/responses/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+    delete:
+      operationId: revokeFleetToken
+      x-stability-level: alpha
+      summary: Revokes a token at once (revoking a missing or ended one succeeds)
+      description: The bootstrap token lives in the hub's values (its Secret) and is changed or removed there (409 locked).
+      security: [{fleetToken: []}]
+      responses:
+        "204": { description: "Revoked, or not active." }
+        "401": { $ref: "#/components/responses/FleetUnauthorized" }
+        "403": { $ref: "#/components/responses/FleetForbidden" }
+        "409": { $ref: "#/components/responses/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
+  /fleet/v1/join:
+    post:
+      operationId: fleetJoin
+      x-stability-level: alpha
+      summary: A box trades its join token for its registration at a fleet hub
+      description: |
+        Served by a fleet hub to the boxes that join it (experimental), not
+        under `/api/v1/fleet/` and without an API token: the join token is
+        the credential. A box sends it once, with its name and public key;
+        a box whose key is already registered under the name with that
+        name's token (used, expired or revoked) gets 200 again.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, token, public_key]
+              properties:
+                name: { type: string, pattern: "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$" }
+                token: { type: string, description: "the join token the hub issued for the name" }
+                public_key: { type: string, description: "PEM (-----BEGIN PUBLIC KEY-----), Ed25519 or ECDSA P-256/P-384" }
+      responses:
+        "200":
+          description: Registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, fingerprint]
+                properties:
+                  name: { type: string }
+                  fingerprint: { type: string, example: "SHA256:n63g/VaLcmgBLZ4AUW+jimCBUQbrgeHa9KaPRvJdxm0" }
+        "400":
+          description: Not a JSON object with a valid name, token and public key (code invalid).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetError" }
+        "403":
+          description: No token was issued for the name, or it was used, revoked or has expired (code denied).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetError" }
+        "409":
+          description: The key is another member's (code exists); answered only to a caller with a token for the name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetError" }
+        "500": { $ref: "#/components/responses/FleetInternal" }
 components:
+  securitySchemes:
+    fleetToken:
+      type: http
+      scheme: bearer
+      description: A fleet hub's API token, or the session of a person signed in to the hub; what it may do is its role's.
+  responses:
+    FleetUnauthorized:
+      description: No token of the hub, and nobody signed in (with `WWW-Authenticate` Bearer).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/FleetError" }
+    FleetForbidden:
+      description: The token's or the person's role does not allow this (code forbidden).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/FleetError" }
+    FleetError:
+      description: The request was refused; the code says why (invalid, exists, locked, not_found).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/FleetError" }
+    FleetTooLarge:
+      description: The request's body is larger than 64 KiB (code too_large).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/FleetError" }
+    FleetInternal:
+      description: The hub could not do it, such as its store failing (code internal).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/FleetError" }
   schemas:
+    FleetError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [unauthorized, forbidden, denied, invalid, exists, locked, not_found, too_large, method_not_allowed, internal]
+            message: { type: string }
+    FleetMember:
+      type: object
+      required: [name, public_key, fingerprint, origin, added_at, added_by, status]
+      properties:
+        name: { type: string }
+        public_key: { type: string, description: "The key as the hub stores it: PEM (PKIX), LF line ends, a trailing newline. It may differ in white space from the key given; compare keys by fingerprint." }
+        fingerprint: { type: string, example: "SHA256:n63g/VaLcmgBLZ4AUW+jimCBUQbrgeHa9KaPRvJdxm0" }
+        origin: { type: string, description: "how it was registered: api, ui, join" }
+        added_at: { type: string, format: date-time }
+        added_by: { type: string }
+        store: { type: string, description: "the id of the member's store as last seen" }
+        store_replaced: { type: string, format: date-time, description: "when another store came under this name" }
+        version: { type: string }
+        seen_at: { type: string, format: date-time }
+        removed_at: { type: string, format: date-time, description: "set when the member was removed: its record is kept a while, its name stays taken" }
+        status:
+          type: object
+          required: [connected]
+          properties:
+            connected: { type: boolean }
+            since: { type: string, format: date-time }
+            remote: { type: string }
+            protocol: { type: integer }
+    FleetRoleBinding:
+      type: object
+      required: [subject, role, origin, added_at, added_by]
+      properties:
+        subject: { type: string, example: "gitlab:gitlab.example.com/1234567" }
+        role: { type: string, enum: [viewer, operator, owner] }
+        origin: { type: string, description: "values (locked here), ui, api, local" }
+        label: { type: string, description: "the person's name as last seen signing in" }
+        added_at: { type: string, format: date-time }
+        added_by: { type: string }
+    FleetSettings:
+      type: object
+      required: [member, values, version, created_at, created_by, updated_at, updated_by, secrets]
+      properties:
+        member: { type: string }
+        values: { type: object, additionalProperties: { type: string } }
+        version: { type: integer, description: "the version of the hub's parameter list" }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        updated_at: { type: string, format: date-time }
+        updated_by: { type: string }
+        secrets:
+          type: array
+          items:
+            type: object
+            required: [param, updated_at, updated_by]
+            properties:
+              param: { type: string }
+              updated_at: { type: string, format: date-time }
+              updated_by: { type: string }
+              delivered_at: { type: string, format: date-time }
+              stale: { type: boolean, description: "it does not open with the hub's secrets key (the key was changed): not delivered until it is given again" }
+    FleetJoinToken:
+      type: object
+      required: [id, member, created_at, created_by, expires_at]
+      properties:
+        id: { type: integer }
+        member: { type: string }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        expires_at: { type: string, format: date-time }
+        used_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    FleetToken:
+      type: object
+      required: [name, role, hint, created_at, created_by]
+      properties:
+        name: { type: string }
+        role: { type: string, enum: [viewer, operator, owner] }
+        hint: { type: string, description: "the secret's last four characters" }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        expires_at: { type: string, format: date-time, description: "absent: never" }
+        used_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
     BuildList:
       type: object
       additionalProperties: false
