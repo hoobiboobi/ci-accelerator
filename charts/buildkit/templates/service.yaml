@@ -58,3 +58,26 @@ spec:
       protocol: TCP
       # gRPC inside mutual TLS: meshes must pass it through, not parse it.
       appProtocol: tls
+---
+# Every daemon pod, ready or not and stopping ones too, for the controller
+# only: a controller that starts while a daemon drains still reads the
+# builds that daemon finishes. The router keeps reading the headless
+# Service above (readiness).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "buildkit.allName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "buildkit.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "buildkit.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: grpc
+      port: 1234
+      targetPort: grpc
+      protocol: TCP
+      appProtocol: tls

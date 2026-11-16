@@ -29,7 +29,8 @@ global:
   jobs:
     # -- Namespace of the CI job pods. They run untrusted code, so they get
     # their own namespace, apart from the runner and the daemons. Keep
-    # gitlab-runner.runners.jobNamespace equal to it.
+    # gitlab-runner.runners.jobNamespace equal to it. It must hold nothing
+    # but CI jobs: the box's NetworkPolicy there selects every pod.
     namespace: ci-accelerator-jobs
     # -- CPU architecture of the build nodes (kubernetes.io/arch). The
     # runner picks its helper image by it.
@@ -75,8 +76,9 @@ jobsNamespace:
     # into a job pod, and none out of it to the addresses the daemons may
     # not reach either (buildkit.networkPolicy.egress.blockedCIDRs: cloud
     # instance metadata, which hands out the node's credentials). Every
-    # other destination stays open. Needs a CNI that enforces egress
-    # policies.
+    # other destination stays open, in-cluster services included:
+    # buildkit.networkPolicy.egress.clusterCIDRs does not apply here. Needs
+    # a CNI that enforces egress policies.
     enabled: true
     # -- More egress rules (NetworkPolicyEgressRule), for a CNI that does
     # not apply ipBlock to in-cluster addresses the way the default rules
@@ -90,19 +92,22 @@ buildkit:
       # The client certificate goes into the jobs namespace.
       namespaces:
         - "{{ .Values.global.jobs.namespace }}"
+      # Only job pods mount it, each the current one: a key a job copies
+      # stops working within three days (it is renewed after two).
+      duration: 72h
   # Clients only through the router (and the controller); builds never
   # reach cloud metadata. List the cluster's pod and Service CIDRs in
-  # networkPolicy.egress.clusterCIDRs to keep builds out of the cluster.
+  # networkPolicy.egress.clusterCIDRs to keep RUN steps out of the
+  # cluster; CI job scripts still reach in-cluster services (see
+  # jobsNamespace.networkPolicy).
   networkPolicy:
     enabled: true
     ingress:
       # The controller (control-plane.enabled) reads the daemons' build
       # history; the web never reaches them. The jobs come through the
       # router (global.router), which the daemons admit by themselves.
-      extraFrom:
-        - podSelector:
-            matchLabels:
-              ci-accelerator.io/component: controller
+      # Entries in extraFrom add to these.
+      controller: true
   # The free space of each daemon's disk for the console's Nodes page: a
   # container running the ci-accelerator image at its own pinned tag (see
   # charts/buildkit diskProbe.image — a mirror sets it there). The daemons
@@ -119,12 +124,27 @@ gitlab-runner:
   enabled: true
   # 19.4.0 lists pod events on every poll and overloaded API servers
   # (fixed from 19.4.1); 19.5.1, the chart's default, has the fix and is
-  # built on Go 1.26.10.
+  # built on Go 1.26.10. To pin the image by digest (the runner tiers use
+  # the same image), append it to the tag: alpine-v19.5.1@sha256:<digest>.
   image:
     # renovate: datasource=docker depName=registry.gitlab.com/gitlab-org/gitlab-runner
     tag: alpine-v19.5.1
-  # -- Required: your GitLab, e.g. https://gitlab.example.com/
+  # -- Required: your GitLab, e.g. `https://gitlab.example.com/`
   gitlabUrl: ""
+  # The runner chart's defaults, plus the RuntimeDefault seccomp profile
+  # the runner tiers have.
+  podSecurityContext:
+    runAsUser: 100
+    fsGroup: 65533
+    seccompProfile:
+      type: RuntimeDefault
+  # Nothing reaches the runner's pod (a NetworkPolicy of this chart): with
+  # metrics.enabled, list the NetworkPolicyPeers that may scrape it in
+  # metrics.from, e.g. [{namespaceSelector: {matchLabels:
+  # {kubernetes.io/metadata.name: monitoring}}}].
+  metrics:
+    enabled: false
+    from: []
   runners:
     # -- Required: a Secret in this release's namespace with the runner
     # authentication token (runner-token: glrt-...) and an empty

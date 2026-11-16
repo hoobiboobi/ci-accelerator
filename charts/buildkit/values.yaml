@@ -93,6 +93,11 @@ tls:
     # Entries are rendered with tpl, so a parent chart may write
     # "{{ .Values.global.<key> }}".
     namespaces: []
+    # -- Lifetime of the client certificates; empty: certManager.duration.
+    # Whoever holds a copy of a client key can drive the daemons until the
+    # certificate expires (there is no revocation), so when only CI job
+    # pods mount it, keep it short: each new pod mounts the renewed Secret.
+    duration: ""
   # -- Annotate the DaemonSet for Stakater Reloader. buildkitd reads its
   # certificates only at start, so a renewed Secret takes effect after a
   # restart; with Reloader in the cluster that is a rolling restart (per
@@ -177,18 +182,33 @@ networkPolicy:
     # -- More NetworkPolicyPeer entries for port 1234 (e.g. an ipBlock for
     # NodePort clients outside the cluster).
     extraFrom: []
+    # -- Admit the ci-accelerator controller (pods labelled
+    # ci-accelerator.io/component: controller in this namespace), which
+    # reads the daemons' build history. The ci-accelerator chart sets it.
+    controller: false
   egress:
-    # -- Never reachable: cloud instance metadata (node credentials) for
-    # IPv4 and IPv6.
+    # -- Never reachable: cloud instance metadata (node credentials). The
+    # defaults cover the metadata address of AWS, GCP, Azure, Oracle and
+    # most others (169.254.169.254), Azure's WireServer (168.63.129.16),
+    # Alibaba Cloud (100.100.100.200), and over IPv6 AWS (fd00:ec2::254)
+    # and GCP (fd20:ce::254). Add your provider's if it uses another
+    # address; a list set here replaces the defaults.
     blockedCIDRs:
       - 169.254.169.254/32
+      - 168.63.129.16/32
+      - 100.100.100.200/32
       - fd00:ec2::254/128
+      - fd20:ce::254/128
     # -- The cluster's pod and Service CIDRs. Listed here, the daemons and
     # every build lose access to in-cluster services (allow what they need
     # in extraRules, e.g. an in-cluster registry or the OTLP backends). The
     # API offers no way to discover them. Traffic to the node itself is
     # always allowed by Kubernetes, and whether the API server can be
-    # blocked depends on the CNI.
+    # blocked depends on the CNI. Empty, the policy also admits every pod
+    # of the cluster by a namespace selector, because some CNIs (Cilium by
+    # default) do not apply ipBlock rules to pod addresses. This limits RUN
+    # steps only: CI job scripts follow jobsNamespace.networkPolicy of the
+    # ci-accelerator chart, which keeps in-cluster services open.
     clusterCIDRs: []
     # -- Peers that serve DNS on port 53.
     dns:
@@ -327,11 +347,11 @@ config:
 # the daemon's network and could reach it.
 otel:
   # -- Full OTLP URL for metrics (with the path, e.g.
-  # http://otel-collector:4318/v1/metrics). Empty: no metrics are pushed. Both endpoints are rendered with tpl, so a parent
+  # `http://otel-collector:4318/v1/metrics`). Empty: no metrics are pushed. Both endpoints are rendered with tpl, so a parent
   # chart can build them from the release name.
   metricsEndpoint: ""
   # -- Full OTLP URL for traces (e.g.
-  # http://otel-collector:4318/v1/traces). Empty: no traces are exported. CI jobs join a build to their own trace by
+  # `http://otel-collector:4318/v1/traces`). Empty: no traces are exported. CI jobs join a build to their own trace by
   # setting TRACEPARENT for buildctl.
   tracesEndpoint: ""
   # -- http/protobuf (what most OTLP receivers accept over HTTP) or grpc.
@@ -399,18 +419,23 @@ resources:
 # 2^30 or more, and old tools loop over every possible descriptor: yum on
 # CentOS 7 ran for an hour instead of three minutes (a lab run, 2026-11-11).
 # Docker gives containers 1024 by default. 0 keeps what the node gives.
+# It must not exceed the node's fs.nr_open (1048576 on a stock kernel):
+# buildkitd does not start otherwise ("ulimit: error setting limit").
 openFilesLimit: 1048576
 
-# -- Seconds a stopping daemon gets to finish running builds (it stops
-# accepting new ones at once). Builds still running after this are killed.
+# -- Seconds a stopping daemon gets to finish running builds (its preStop
+# waits while builds run, then 15 s more, before SIGTERM; everything counts
+# against this). Builds still running after this are killed.
 # With maxUnavailable 1 a rollout takes up to nodes x this, so pass a helm
 # `--timeout` to match. Production builds took 7-21 min: consider 1200-1800
-# there. Pod evictions and node shutdowns do not honour it.
+# there. Pod evictions and node shutdowns do not honour it. The console's
+# collector reads a stopping daemon's last builds for at most 35 minutes:
+# a build that ends later than that into the stop is not recorded.
 terminationGracePeriodSeconds: 300
 
-# -- On deletion, keep serving for this long before buildkitd gets SIGTERM,
-# so kube-proxy withdraws the endpoint first and no new connection is
-# refused. Counts against terminationGracePeriodSeconds. 0 disables.
+# -- On deletion, sleep this long before the preStop hook waits for running
+# builds (and 15 s more), so kube-proxy withdraws the endpoint first.
+# Counts against terminationGracePeriodSeconds. 0 removes only this sleep.
 preStopSleepSeconds: 5
 
 # -- A new daemon must stay ready this long before the rollout moves on to

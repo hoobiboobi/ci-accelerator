@@ -49,7 +49,9 @@ gitlab:
   # commits, which settles "files or node"; and the end of a job's log on
   # request. Without it, job times come from the job pods and "files or
   # node" stays unclear. Not with sign-in: GitLab is then read with each
-  # person's own token.
+  # person's own token. A token is of one GitLab: with urlsFrom the key
+  # must hold one URL, or the controller does not start (also when the
+  # ConfigMap gets a second URL later).
   token:
     existingSecret: ""
     key: token
@@ -119,6 +121,11 @@ daemons:
   # -- host:port of the BuildKit chart's headless Service; every address it
   # resolves to is a daemon. Rendered with tpl.
   discover: ""
+  # -- host:port of the BuildKit chart's Service of all daemon pods
+  # (<fullname>-all), ready or not: the controller still reads a daemon
+  # that drains. Derived from discover when that names a -headless Service.
+  # Rendered with tpl.
+  discoverAll: ""
   # -- Name in the daemons' certificate. Default: the host of discover.
   serverName: ""
 
@@ -154,6 +161,12 @@ retention:
   days: 30
   # -- Days the steps' output is kept.
   outputDays: 7
+  # -- Percent of controller.persistence.size (in whole Mi, Gi or Ti) the
+  # store's database may take; above it the oldest builds are deleted
+  # before retention.days end (never today's, nor those of a day not yet
+  # summed up), and a warning is logged. The images' daily figures stay.
+  # The step output and the write-ahead log use the rest. 0: no bound.
+  storeShare: 70
 
 # Why an image was rebuilt: "your change", "build farm", or unclear.
 reasons:
@@ -307,7 +320,8 @@ router:
 # enforces NetworkPolicy. kubectl port-forward keeps working.
 networkPolicy:
   # -- Render the NetworkPolicies: the web admits connections from every
-  # namespace except this one, the jobs namespace and deniedNamespaces, and
+  # namespace except this one, the jobs namespace, router.clientNamespaces,
+  # the daemons' namespace (from daemons.discover) and deniedNamespaces, and
   # from pods of this namespace except deniedComponents; the controller
   # admits only the web and the routers; the routers admit only their
   # clients' namespaces. Only ingress is limited.
@@ -317,12 +331,14 @@ networkPolicy:
   deniedNamespaces: []
   # -- Pods of this namespace whose ci-accelerator.io/component label is one
   # of these may not reach the web: the daemons, whose network every build
-  # shares.
+  # shares, and CI job pods (ci-job, the label the box's runners give them).
   deniedComponents:
     - buildkit
+    - ci-job
   # -- More NetworkPolicyPeer entries that may reach the web, e.g. an
   # ipBlock with the node addresses when the Ingress controller runs on the
-  # host network.
+  # host network (Cilium matches node addresses in an ipBlock only with its
+  # policyCIDRMatchMode set to nodes).
   extraFrom: []
 
 # A fleet (experimental: its values and protocol may change between

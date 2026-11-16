@@ -69,14 +69,14 @@ tests:
     set:
       signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: console-oauth, admins: ["id:alice"] }]
     asserts:
-      - failedTemplate: {}
+      - failedTemplate: { errorPattern: '/signIn/gitlab/0/admins/0.*does not match pattern' }
   # GitLab gives a freed username to the next account that takes it.
   - it: refuses an admin named by username (the schema)
     template: signin-configmap.yaml
     set:
       signIn.gitlab: [{ url: "https://gitlab.example.com/", existingSecret: console-oauth, admins: [alice] }]
     asserts:
-      - failedTemplate: {}
+      - failedTemplate: { errorPattern: '/signIn/gitlab/0/admins/0.*alice.*does not match pattern' }
   - it: takes the console's address from global.console.url
     template: signin-configmap.yaml
     set:

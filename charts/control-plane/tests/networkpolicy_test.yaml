@@ -29,7 +29,7 @@ tests:
           value: [{ key: kubernetes.io/metadata.name, operator: NotIn, values: [ci-accelerator, ci-jobs] }]
       - equal:
           path: spec.ingress[0].from[1].podSelector.matchExpressions
-          value: [{ key: ci-accelerator.io/component, operator: NotIn, values: [buildkit] }]
+          value: [{ key: ci-accelerator.io/component, operator: NotIn, values: [buildkit, ci-job] }]
       - isNull: { path: spec.egress }
 
   - it: renders denied namespaces through tpl and adds peers
@@ -75,3 +75,36 @@ tests:
       networkPolicy: null
     asserts:
       - hasDocuments: { count: 0 }
+
+  # Namespaces whose pods are CI jobs or share the daemons' network may not
+  # open the console, also when they are not jobs.namespace.
+  - it: keeps the router's client namespaces out of the web
+    set:
+      networkPolicy.enabled: true
+      jobs.namespace: ci-jobs
+      router.enabled: true
+      router.clientNamespaces: [ci-jobs, team-a-ci]
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator, ci-jobs, team-a-ci]
+  - it: keeps the daemons' namespace out of the web
+    set:
+      networkPolicy.enabled: true
+      jobs.namespace: ci-jobs
+      daemons.discover: bk-buildkit-headless.builds.svc:1234
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].namespaceSelector.matchExpressions[0].values
+          value: [ci-accelerator, ci-jobs, builds]
+  - it: keeps CI job pods of this namespace out of the web
+    set:
+      networkPolicy.enabled: true
+      jobs.namespace: ci-accelerator
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.ingress[0].from[1].podSelector.matchExpressions[0].values
+          content: ci-job

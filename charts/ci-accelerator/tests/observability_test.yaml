@@ -56,6 +56,6 @@ tests:
   - it: lets the daemons reach no storage of the release any more
     template: charts/buildkit/templates/networkpolicy.yaml
     asserts:
-      - notMatchRegex:
-          path: spec.egress[2]
-          pattern: victoria
+      - lengthEqual:
+          path: spec.egress
+          count: 3

@@ -1,0 +1,46 @@
+suite: NOTES with an own runner
+templates:
+  - NOTES.txt
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+tests:
+  # Without the box's runner URL the GitLab comes from control-plane.gitlab.urls;
+  # the hash of an empty URL (e3b0c4) is no redirect URI.
+  - it: names the redirect URI after control-plane.gitlab.urls without the runner's URL
+    set:
+      gitlab-runner.enabled: false
+      gitlab-runner.gitlabUrl: ""
+      control-plane.enabled: true
+      control-plane.gitlab.urls: [https://gitlab.example.com/]
+      global.console.url: https://ci.example.com/
+      control-plane.signIn: { enabled: true, sessionKey: { existingSecret: s }, gitlab: [{ existingSecret: o }] }
+    asserts:
+      - matchRegexRaw:
+          pattern: '  https://gitlab\.example\.com/: https://ci\.example\.com/auth/callback/051b90\n'
+      - notMatchRegexRaw:
+          pattern: 'e3b0c4'
+  - it: names it after control-plane.gitlab.urls with sign-in off too
+    set:
+      gitlab-runner.enabled: false
+      gitlab-runner.gitlabUrl: ""
+      control-plane.enabled: true
+      control-plane.gitlab.urls: [https://gitlab.example.com/]
+    asserts:
+      - matchRegexRaw:
+          pattern: '<global\.console\.url>/auth/callback/051b90\n'
+      - notMatchRegexRaw:
+          pattern: 'e3b0c4'
+  - it: points to the controller's log when no single GitLab is known
+    set:
+      gitlab-runner.enabled: false
+      gitlab-runner.gitlabUrl: ""
+      control-plane.enabled: true
+      control-plane.gitlab.urlsFrom.configMap: my-gitlabs
+    asserts:
+      - matchRegexRaw:
+          pattern: '<global\.console\.url>/auth/callback/<id> \(the controller.s log prints it: kubectl -n ci-accelerator logs deploy/box-controller \| grep redirect_uri\)'
+      - notMatchRegexRaw:
+          pattern: 'e3b0c4'

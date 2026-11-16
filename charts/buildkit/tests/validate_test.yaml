@@ -270,6 +270,23 @@ tests:
       - failedTemplate:
           errorPattern: 'config.extraConfig: the rendered buildkitd.toml is invalid'
 
+  # A dotted key before the chart's [grpc] table parses; the debug server
+  # must not depend on buildkitd's parser refusing it.
+  - it: refuses the debug address in extraConfig, dotted or as a table
+    set:
+      config.extraConfig: |
+        grpc.debugAddress = "0.0.0.0:6060"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.extraConfig: sets buildkitd's debug address"
+  - it: refuses the debug address in a quoted key too
+    set:
+      config.extraConfig: |
+        "grpc"."debug\u0041ddress" = "0.0.0.0:6060"
+    asserts:
+      - failedTemplate:
+          errorPattern: "config.extraConfig: sets buildkitd's debug address"
+
   - it: refuses extraConfig that redefines a top-level key
     set:
       config.extraConfig: |

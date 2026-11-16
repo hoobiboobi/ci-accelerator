@@ -8,6 +8,8 @@ templates:
   - charts/control-plane/templates/networkpolicy.yaml
   - charts/control-plane/templates/service.yaml
   - charts/buildkit/templates/networkpolicy.yaml
+  - charts/buildkit/templates/certificates.yaml
+  - charts/buildkit/templates/service.yaml
 values:
   - values/required.yaml
 release:
@@ -47,11 +49,19 @@ tests:
       control-plane.enabled: true
     asserts:
       - contains: { path: "spec.template.spec.containers[0].args", content: -discover=box-buildkit-headless.ci-accelerator.svc:1234 }
+      - contains: { path: "spec.template.spec.containers[0].env", content: { name: CI_ACCELERATOR_DISCOVER_ALL, value: box-buildkit-all.ci-accelerator.svc:1234 } }
       - contains: { path: "spec.template.spec.containers[0].args", content: -jobs-namespace=ci-accelerator-jobs }
       - contains: { path: "spec.template.spec.containers[0].args", content: "-gitlab-urls-file=/gitlab-urls/urls" }
       - contains:
           path: spec.template.spec.volumes
           content: { name: gitlab-urls, configMap: { name: box-runner-gitlab, items: [{ key: urls, path: urls }] } }
+  # The Service the controller's CI_ACCELERATOR_DISCOVER_ALL names exists in the box.
+  - it: renders the daemons' Service of all pods under the derived name
+    template: charts/buildkit/templates/service.yaml
+    documentIndex: 2
+    asserts:
+      - equal: { path: metadata.name, value: box-buildkit-all }
+      - equal: { path: spec.publishNotReadyAddresses, value: true }
   - it: lets the controller read pods in the jobs namespace
     template: charts/control-plane/templates/rbac.yaml
     set:
@@ -126,7 +136,7 @@ tests:
           value: [ci-accelerator, ci-accelerator-jobs]
       - equal:
           path: spec.ingress[0].from[1].podSelector.matchExpressions[0].values
-          value: [buildkit]
+          value: [buildkit, ci-job]
   - it: follows a renamed jobs namespace
     template: charts/control-plane/templates/networkpolicy.yaml
     documentIndex: 0
@@ -146,6 +156,31 @@ tests:
       - contains:
           path: spec.ingress[0].from
           content: { podSelector: { matchLabels: { ci-accelerator.io/component: controller } } }
+  # Helm replaces lists: a user's extraFrom must not drop the controller.
+  - it: keeps the controller's way to the daemons next to a user's extraFrom
+    template: charts/buildkit/templates/networkpolicy.yaml
+    set:
+      buildkit.networkPolicy.ingress.extraFrom:
+        - ipBlock: { cidr: 10.9.0.0/24 }
+    asserts:
+      - contains:
+          path: spec.ingress[0].from
+          content: { podSelector: { matchLabels: { ci-accelerator.io/component: controller } } }
+      - contains:
+          path: spec.ingress[0].from
+          content: { ipBlock: { cidr: 10.9.0.0/24 } }
+  # Job pods mount the client key and may copy it: a short lifetime.
+  - it: gives the jobs' client certificate a short lifetime, the daemons' their own
+    template: charts/buildkit/templates/certificates.yaml
+    asserts:
+      - equal:
+          path: spec.duration
+          value: 72h
+        documentSelector: { path: metadata.name, value: box-buildkit-client }
+      - equal:
+          path: spec.duration
+          value: 8760h
+        documentSelector: { path: metadata.name, value: box-buildkit-tls }
   - it: issues the controller API's certificate from the box's CA
     template: charts/control-plane/templates/certificate.yaml
     documentIndex: 1

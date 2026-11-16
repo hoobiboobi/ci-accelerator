@@ -1,0 +1,32 @@
+{{- $runner := index .Values "gitlab-runner" | default dict }}
+{{- if $runner.enabled }}
+{{- $metrics := default (dict) $runner.metrics }}
+# The main runner, as the runner tiers: with gitlab-runner.metrics.enabled
+# its listener serves /debug/jobs/list (the URL of every job it runs) and
+# /debug/pprof next to the metrics, without authentication, and job pods
+# and RUN steps could reach it. Nothing needs it but a scraper:
+# gitlab-runner.metrics.from (NetworkPolicyPeers) lets one in. The
+# kubelet's probes are not limited by a NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ci-accelerator.runnerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ci-accelerator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "ci-accelerator.runnerName" . }}
+  policyTypes: [Ingress]
+  {{- with $metrics.from }}
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - port: {{ int (default 9252 $metrics.port) }}
+          protocol: TCP
+  {{- else }}
+  ingress: []
+  {{- end }}
+{{- end }}

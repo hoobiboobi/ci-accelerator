@@ -177,6 +177,28 @@ release under the new tag, so it is refused with the way forward.
 {{- tpl .Values.daemons.discover . }}
 {{- end }}
 
+{{/*
+host:port of the Service of every daemon pod, ready or not (the BuildKit
+chart's <fullname>-all): daemons.discoverAll, else derived from discover
+when its host names a -headless Service, else empty.
+*/}}
+{{- define "control-plane.discoverAll" -}}
+{{- with dig "discoverAll" "" .Values.daemons }}
+{{- tpl . $ }}
+{{- else }}
+{{- $d := include "control-plane.discover" . }}
+{{- $parts := splitList ":" $d }}
+{{- if eq (len $parts) 2 }}
+{{- $labels := splitList "." (first $parts) }}
+{{- $name := first $labels }}
+{{- if and (hasSuffix "-headless" $name) (gt (len $name) 9) }}
+{{- $labels = prepend (rest $labels) (printf "%s-all" (trimSuffix "-headless" $name)) }}
+{{- printf "%s:%s" (join "." $labels) (last $parts) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- define "control-plane.jobsNamespace" -}}
 {{- tpl .Values.jobs.namespace . }}
 {{- end }}
@@ -298,6 +320,13 @@ Checks that fail the render with a message naming the value to set.
 {{- end }}
 {{- if regexMatch "^[a-z]+://|/" (toString $c.server) }}
 {{- fail (printf "control-plane: caches.stores[%d].server is a host (and port), without https:// or a path" $i) }}
+{{- end }}
+{{- /* The runners keep archives under project/<id>/: one folder of two
+GitLabs would mix their projects of the same id (the controller refuses it). */}}
+{{- range $j, $e := $.Values.caches.stores }}
+{{- if and (lt $j $i) (eq (toString $e.server) (toString $c.server)) (eq (toString $e.bucket) (toString $c.bucket)) (eq (trimAll "/" (default "" $e.path)) (trimAll "/" (default "" $c.path))) (ne (toString $e.gitlabUrl) (toString $c.gitlabUrl)) }}
+{{- fail (printf "control-plane: caches.stores[%d] and caches.stores[%d] list the same folder (server/bucket/path) for two GitLabs: their projects' archives would mix; give each GitLab its own path" $j $i) }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- include "control-plane.validateSignIn" . }}
@@ -476,6 +505,19 @@ would open the box's store. lookup is empty under helm template.
 {{- fail (printf "control-plane: a fleet member needs fleet.name: lower-case letters, digits and dashes, at most 40, got %q" (dig "name" "" $f)) }}
 {{- end }}
 {{- end }}
+{{- /* A member's or a hub's values without the role would install a plain
+box that never dials a hub, without a word. */}}
+{{- if eq $role "" }}
+{{- $set := list }}
+{{- if dig "name" "" $f }}{{ $set = append $set "name" }}{{ end }}
+{{- range $k := list "hub.url" "hub.publicKeys" "join.existingSecret" "key.existingSecret" "apiToken.existingSecret" "secretsKey.existingSecret" }}
+{{- $parts := splitList "." $k }}
+{{- if dig (first $parts) (last $parts) "" $f }}{{ $set = append $set $k }}{{ end }}
+{{- end }}
+{{- with $set }}
+{{- fail (printf "control-plane: fleet.%s is set but fleet.role is empty: set fleet.role to member (a box that joins a hub) or hub, or remove the fleet values" (first .)) }}
+{{- end }}
+{{- end }}
 {{- if and (eq $role "") .Values.signIn.enabled }}
 {{- range .Values.signIn.gitlab }}
 {{- if .owners }}
@@ -508,6 +550,10 @@ would open the box's store. lookup is empty under helm template.
 {{- end }}
 {{- if and (not .url) (gt (len $gl) 1) }}
 {{- fail "control-plane: with several signIn.gitlab entries each needs its url, exactly as the runners have it" }}
+{{- end }}
+{{- /* The controller takes a url-less entry only for a single GitLab. */}}
+{{- if and (not .url) (gt (len (default (list) $.Values.gitlab.urls)) 1) }}
+{{- fail "control-plane: gitlab.urls names several GitLabs: each signIn.gitlab entry needs its url, exactly as in gitlab.urls" }}
 {{- end }}
 {{- if hasKey $seen (default "" .url) }}
 {{- fail (printf "control-plane: signIn.gitlab names %q twice" (default "" .url)) }}

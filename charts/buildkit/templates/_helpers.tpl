@@ -32,6 +32,15 @@ through it, so keep this the only place the name is built.
 {{- end }}
 
 {{/*
+Name of the Service of every daemon pod, ready or not: <fullname>-all.
+Cut like the headless name, so the control plane derives it from that
+name by replacing the suffix.
+*/}}
+{{- define "buildkit.allName" -}}
+{{- printf "%s-all" (include "buildkit.fullname" . | trunc 54 | trimSuffix "-") }}
+{{- end }}
+
+{{/*
 Value for the helm.sh/chart label.
 */}}
 {{- define "buildkit.chart" -}}

@@ -48,6 +48,12 @@ spec:
             matchLabels:
               ci-accelerator.io/component: router
         {{- end }}
+        {{- if dig "controller" false $np.ingress }}
+        # The controller, which reads the daemons' build history.
+        - podSelector:
+            matchLabels:
+              ci-accelerator.io/component: controller
+        {{- end }}
         {{- with $np.ingress.extraFrom }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -75,6 +81,14 @@ spec:
             except:
               {{- toYaml . | nindent 14 }}
             {{- end }}
+    {{- if not $np.egress.clusterCIDRs }}
+    # In-cluster services (a registry, GitLab, S3, OTLP backends) by pod,
+    # whatever the CNI does with ipBlock for pod addresses: Cilium, by
+    # default, does not match them with the rule above. Listing
+    # clusterCIDRs drops this rule.
+    - to:
+        - namespaceSelector: {}
+    {{- end }}
     {{- with $np.egress.extraRules }}
     {{- tpl (toYaml .) $ | nindent 4 }}
     {{- end }}

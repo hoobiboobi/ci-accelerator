@@ -119,7 +119,11 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["discover", "serverName"],
-      "properties": { "discover": { "type": "string" }, "serverName": { "type": "string" } }
+      "properties": {
+        "discover": { "type": "string" },
+        "discoverAll": { "type": "string" },
+        "serverName": { "type": "string" }
+      }
     },
     "tls": {
       "type": "object",
@@ -159,7 +163,8 @@
       "required": ["days", "outputDays"],
       "properties": {
         "days": { "type": "integer", "minimum": 1, "maximum": 3650 },
-        "outputDays": { "type": "integer", "minimum": 1, "maximum": 3650 }
+        "outputDays": { "type": "integer", "minimum": 1, "maximum": 3650 },
+        "storeShare": { "type": "integer", "minimum": 0, "maximum": 95 }
       }
     },
     "reasons": {

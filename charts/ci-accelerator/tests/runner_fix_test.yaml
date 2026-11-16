@@ -1,0 +1,78 @@
+suite: the main runner's pod
+templates:
+  - runner-networkpolicy.yaml
+  - charts/gitlab-runner/templates/deployment.yaml
+  - charts/gitlab-runner/templates/configmap.yaml
+  - charts/gitlab-runner/templates/secrets.yaml
+  - NOTES.txt
+values:
+  - values/required.yaml
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+tests:
+  # With metrics on, the runner's :9252 serves /debug/jobs/list and pprof
+  # without authentication; job pods and RUN steps must not reach it.
+  - it: lets nothing reach the main runner's pod by default
+    template: runner-networkpolicy.yaml
+    asserts:
+      - equal: {path: kind, value: NetworkPolicy}
+      - equal: {path: spec.podSelector.matchLabels, value: {app: box-gitlab-runner}}
+      - equal: {path: spec.policyTypes, value: [Ingress]}
+      - equal: {path: spec.ingress, value: []}
+  - it: selects the runner chart's pods
+    template: charts/gitlab-runner/templates/deployment.yaml
+    asserts:
+      - equal: {path: spec.template.metadata.labels.app, value: box-gitlab-runner}
+  - it: lets a named scraper reach the metrics port only
+    template: runner-networkpolicy.yaml
+    set:
+      gitlab-runner.metrics.enabled: true
+      gitlab-runner.metrics.from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+    asserts:
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+              ports: [{port: 9252, protocol: TCP}]
+  - it: follows the runner chart's name for a long release name
+    template: runner-networkpolicy.yaml
+    release:
+      name: r53aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaz
+    asserts:
+      - equal: {path: metadata.name, value: r53aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaz-gitlab-ru}
+  - it: follows the runner chart's name for a release named after the runner
+    template: runner-networkpolicy.yaml
+    release:
+      name: gitlab-runner-ci
+    asserts:
+      - equal: {path: metadata.name, value: gitlab-runner-ci}
+  - it: renders nothing without the box's runner
+    template: runner-networkpolicy.yaml
+    set:
+      gitlab-runner.enabled: false
+      gitlab-runner.gitlabUrl: https://gitlab.example.com/
+    asserts:
+      - hasDocuments: {count: 0}
+
+  # The tiers have it; the manager holding the main token should too.
+  - it: runs the main runner with the RuntimeDefault seccomp profile
+    template: charts/gitlab-runner/templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext
+          value: {runAsUser: 100, fsGroup: 65533, seccompProfile: {type: RuntimeDefault}}
+
+  # The install notes name the Deployment the runner chart creates.
+  - it: names the runner's Deployment as the runner chart does in the notes
+    template: NOTES.txt
+    release:
+      name: r53aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaz
+    asserts:
+      - matchRegexRaw:
+          pattern: 'logs deploy/r53a+z-gitlab-ru \|'

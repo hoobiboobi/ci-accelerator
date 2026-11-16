@@ -48,7 +48,7 @@ tests:
       caches.every: 5s
     template: controller.yaml
     asserts:
-      - failedTemplate: {}
+      - failedTemplate: { errorPattern: '/caches/every.*5s.*does not match pattern' }
   - it: takes 10 seconds or more
     set:
       caches.fromConfigMap: x
@@ -62,3 +62,19 @@ tests:
     template: controller.yaml
     asserts:
       - failedTemplate: {errorPattern: "caches.stores\\[0\\].gitlabUrl is needed"}
+  - it: refuses one folder listed for two GitLabs
+    set:
+      caches.stores:
+        - {server: s3.example.com, bucket: ci-cache, region: eu-1, path: shared, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc}
+        - {server: s3.example.com, bucket: ci-cache, region: eu-1, path: /shared/, gitlabUrl: "https://other.example.com/", existingSecret: rc}
+    template: controller.yaml
+    asserts:
+      - failedTemplate: {errorPattern: "caches.stores\\[0\\] and caches.stores\\[1\\] list the same folder"}
+  - it: renders one folder listed twice for the same GitLab
+    set:
+      caches.stores:
+        - {server: s3.example.com, bucket: ci-cache, region: eu-1, path: shared, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc}
+        - {server: s3.example.com, bucket: ci-cache, region: eu-1, path: /shared/, gitlabUrl: "https://gitlab.example.com/", existingSecret: rc}
+    template: controller.yaml
+    asserts:
+      - notFailedTemplate: {}
