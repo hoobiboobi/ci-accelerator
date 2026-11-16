@@ -59,6 +59,15 @@ func (s *Store) DeleteSession(ctx context.Context, id []byte) error {
 	return err
 }
 
+// DeleteSessions removes every session and says how many.
+func (s *Store) DeleteSessions(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // DeleteIdleSessions removes the sessions not used since seenBefore or
 // begun before createdBefore, and says how many.
 func (s *Store) DeleteIdleSessions(ctx context.Context, seenBefore, createdBefore time.Time) (int64, error) {

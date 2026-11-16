@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -70,6 +71,36 @@ func (t Token) Renew(context.Context, string) (string, error) { return "", ErrRe
 
 // Who is the same for every fixed token.
 func (t Token) Who() string { return "token" }
+
+// FileToken is a fixed token read from a file at every use: a Secret
+// mounted as a file is updated in place (a fleet hub delivers its member's
+// token after the member started), and a replaced token counts at once.
+type FileToken string
+
+// Token reads the token from the file.
+func (f FileToken) Token(context.Context) (string, error) {
+	b, err := os.ReadFile(string(f))
+	if err != nil {
+		return "", fmt.Errorf("gitlab: the token file: %w", err)
+	}
+	t := strings.TrimSpace(string(b))
+	if t == "" {
+		return "", fmt.Errorf("gitlab: the token file %s is empty", string(f))
+	}
+	return t, nil
+}
+
+// Renew offers the file's token when it is not the one refused.
+func (f FileToken) Renew(ctx context.Context, refused string) (string, error) {
+	t, err := f.Token(ctx)
+	if err != nil || t == refused {
+		return "", ErrRefused
+	}
+	return t, nil
+}
+
+// Who is the same as a fixed token's.
+func (f FileToken) Who() string { return "token" }
 
 // ErrRefused is returned when GitLab does not accept the credential.
 var ErrRefused = errors.New("gitlab: the token was refused")
@@ -661,7 +692,17 @@ type Fetcher struct {
 	later    map[string]Credential // a read is due later, for the last page that asked
 	until    map[string]time.Time  // rate limited until, by credential
 	lastErr  error
+	slots    chan struct{} // reads that may ask GitLab at once
+	sweepAt  int           // len(last) at which old entries are dropped
 }
+
+// Bounds of Ensure's reads, whoever asks for them: at most maxReads
+// pipelines are being read or wait to be (a page asking for more reads
+// the others when it asks again), at most readsAtOnce ask GitLab at once.
+const (
+	maxReads    = 256
+	readsAtOnce = 16
+)
 
 // limited returns until when GitLab asked cred to wait; f.mu is held.
 func (f *Fetcher) limited(cred Credential) time.Time {
@@ -700,10 +741,16 @@ func (f *Fetcher) Ensure(cred Credential, instance string, project, pipeline uin
 	f.mu.Lock()
 	if f.inflight == nil {
 		f.inflight, f.last, f.later = map[string]chan struct{}{}, map[string]time.Time{}, map[string]Credential{}
+		f.slots = make(chan struct{}, readsAtOnce)
 	}
 	now := time.Now()
+	f.sweep(now, every)
 	until := f.limited(cred)
 	done, running := f.inflight[key]
+	if !running && len(f.inflight) >= maxReads {
+		f.mu.Unlock()
+		return
+	}
 	if !running {
 		if now.Before(until) || now.Sub(f.last[key]) < every || now.Sub(read) < every {
 			// Read too recently: read again when it is due, so a page
@@ -743,8 +790,23 @@ func (f *Fetcher) Ensure(cred Credential, instance string, project, pipeline uin
 	}
 }
 
+// sweep drops the times of reads older than every, which hold nothing
+// back any more, once there are many of them; f.mu is held.
+func (f *Fetcher) sweep(now time.Time, every time.Duration) {
+	if len(f.last) < max(f.sweepAt, 1024) {
+		return
+	}
+	for k, t := range f.last {
+		if _, running := f.inflight[k]; !running && now.Sub(t) >= every {
+			delete(f.last, k)
+		}
+	}
+	f.sweepAt = 2 * len(f.last)
+}
+
 func (f *Fetcher) read(key string, cred Credential, instance string, project, pipeline uint64, done chan struct{}) {
 	defer close(done)
+	f.slots <- struct{}{}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	p, err := f.Client.Pipeline(ctx, cred, instance, project, pipeline)
@@ -752,6 +814,7 @@ func (f *Fetcher) read(key string, cred Credential, instance string, project, pi
 	if err == nil && len(p.Jobs) > 0 {
 		attached, err = f.Store.SaveAPIPipeline(ctx, p)
 	}
+	<-f.slots
 	f.mu.Lock()
 	delete(f.inflight, key)
 	f.lastErr = err

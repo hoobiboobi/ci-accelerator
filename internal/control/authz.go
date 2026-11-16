@@ -30,12 +30,18 @@ type Role string
 const (
 	RoleWeb    Role = "web"
 	RoleRouter Role = "router"
+	// RoleHub is a fleet hub's, over the member's link: it reads what the
+	// web reads, but none of the store's writes or the sign-in, and its
+	// calls carry no session.
+	RoleHub Role = "hub"
 	// RoleAny is a static token's (outside a cluster): every role.
 	RoleAny Role = "any"
 )
 
 // may says whether a caller of role r may use what role want serves.
-func (r Role) may(want Role) bool { return r == want || r == RoleAny }
+func (r Role) may(want Role) bool {
+	return r == want || r == RoleAny || (r == RoleHub && want == RoleWeb)
+}
 
 // Errors of the caller's identity.
 var (
