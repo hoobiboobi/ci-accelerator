@@ -12,6 +12,7 @@
 <script src="{{asset "console.js"}}" defer></script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to the content</a>
 <div class="app" id="app" data-collapsed="false">
   <aside class="side" id="side" aria-label="Sidebar">
     <div class="side-top">
@@ -40,7 +41,7 @@
     {{end}}{{end}}{{end}}
     <div class="projmenu" id="projMenu" hidden>
       <div class="hint">Project</div>
-      {{$cur := .Project}}{{range .Projects}}{{$on := and (eq .ID $cur.ID) (eq .Instance $cur.Instance)}}<a class="sbtn" href="/projects/{{instSeg .Instance}}/{{.ID}}{{with navPage $.Nav}}?to={{.}}{{end}}" aria-current="{{if $on}}true{{else}}false{{end}}">{{if $on}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span></a>{{end}}
+      {{$cur := .Project}}{{range .Projects}}{{$on := and (eq .ID $cur.ID) (eq .Instance $cur.Instance)}}<a class="sbtn" href="/projects/{{instSeg .Instance}}/{{.ID}}{{with navPage $.Nav}}?to={{.}}{{end}}" aria-current="{{if $on}}true{{else}}false{{end}}">{{if $on}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span>{{if $.ManyGitLabs}}<span class="count">{{$.InstHost .Instance}}</span>{{end}}</a>{{end}}
       <div class="hint">{{if gt (len .Projects) 1}}The project filters every page.{{else}}One project on this box. With more, this filters every page.{{end}}</div>
     </div>
     {{if not $hub}}<button class="sbtn search" id="searchBtn" type="button" aria-label="Search or jump to (Ctrl+K)">{{icon "search" 15}}<span class="lbl">Search or jump to…</span><kbd id="kbdK">⌘K</kbd></button>{{end}}
@@ -68,6 +69,7 @@
       {{/* Rendered in its final state, and its line kept on every page, so
          moving between pages does not make it or the buttons below jump. */}}
       <p class="side-live{{if not (or .Live .LiveNodes)}} off{{end}}" id="live" role="status">{{if or .Live .LiveNodes}}Live{{end}}</p>
+      <span class="sr" id="liveSay" role="status">{{if or .Live .LiveNodes}}Live{{end}}</span>
       <button class="sbtn" id="themeBtn" type="button" aria-label="Toggle theme (t)"><span class="th-dark">{{icon "moon" 15}}<span class="lbl">Dark theme</span></span><span class="th-light">{{icon "sun" 15}}<span class="lbl">Light theme</span></span><kbd>t</kbd></button>
       <button class="sbtn" id="helpBtn" type="button" aria-label="Keyboard shortcuts (?)">{{icon "kbd" 15}}<span class="lbl">Shortcuts</span><kbd>?</kbd></button>
       {{with .Viewer}}
@@ -95,11 +97,20 @@
           {{if $.Viewer}}<form method="post" action="/~/auth/sign-out"><button class="sbtn" type="submit"><span class="lbl">Sign out</span></button></form>{{end}}
         </div>
       </details>{{end}}
-      <span class="proj">{{with .Project}}{{.Path}}{{end}}</span>
+      {{$psw := and (not .NoProjects) .Project.ID}}{{$acct := and .Viewer (not .Fleet)}}
+      {{if or $psw $acct}}<details class="mclu mproj" id="mProj">
+        <summary aria-label="{{if $psw}}Project: {{if .Project.Path}}{{.Project.Path}}{{else}}project {{.Project.ID}}{{end}}{{else}}Account{{end}}">{{if $psw}}{{projName .Project.Path .Project.ID}}{{else}}Account{{end}}{{icon "chevD" 13}}</summary>
+        <div class="mclu-menu">
+          {{if $psw}}<div class="hint">Project</div>
+          {{$cur := .Project}}{{range .Projects}}{{$on := and (eq .ID $cur.ID) (eq .Instance $cur.Instance)}}<a class="sbtn" href="/projects/{{instSeg .Instance}}/{{.ID}}{{with navPage $.Nav}}?to={{.}}{{end}}" aria-current="{{if $on}}true{{else}}false{{end}}"><span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span>{{if $.ManyGitLabs}}<span class="count">{{$.InstHost .Instance}}</span>{{end}}</a>{{end}}{{end}}
+          {{if $acct}}{{with .Viewer}}<div class="hint">@{{.Username}} · {{.Host}}</div>{{end}}<form method="post" action="/auth/sign-out"><button class="sbtn" type="submit"><span class="lbl">Sign out</span></button></form>{{end}}
+        </div>
+      </details>{{end}}
+      <span class="proj">{{if not $psw}}{{with .Project}}{{.Path}}{{end}}{{end}}</span>
       <button class="iconbtn" id="mTheme" type="button" aria-label="Toggle theme">{{icon "moon" 15}}</button>
     </header>
-    <div id="main" {{with .Live}}data-live="{{.}}"{{end}}{{if .Notify}} data-live-notify="true"{{end}}{{if .LiveNodes}} data-live-nodes="true"{{end}}>
-    <div class="newdata" id="newdata" role="status" hidden><span>New builds since this page loaded.</span><button class="btn" type="button" id="newdataBtn">Show</button></div>
+    <div id="main" {{with .Live}}data-live="{{.}}"{{end}}{{if .Notify}} data-live-notify="true"{{end}}{{if .LiveNodes}} data-live-nodes="true"{{end}} role="main">
+    <div class="newdata" id="newdata" role="status" hidden><span>Something changed in this project since this page loaded.</span><button class="btn" type="button" id="newdataBtn">Show</button></div>
     {{template "content" .}}
     </div>
   </div>
@@ -126,7 +137,8 @@
   <div class="help">
     <h2 id="helpT">Keyboard shortcuts <button class="iconbtn" type="button" data-close-help aria-label="Close">{{icon "x" 14}}</button></h2>
     <h3>Anywhere</h3>
-    <dl><dt>Search or jump to</dt><dd><kbd>⌘</kbd> <kbd>K</kbd></dd><dt>Search (alternative)</dt><dd><kbd>/</kbd></dd><dt>This overlay</dt><dd><kbd>?</kbd></dd><dt>Toggle theme</dt><dd><kbd>t</kbd></dd><dt>Collapse sidebar</dt><dd><kbd>[</kbd></dd></dl>
+    <dl><dt>Search or jump to</dt><dd><kbd class="kmod">⌘</kbd> <kbd>K</kbd></dd><dt>Search (alternative)</dt><dd><kbd>/</kbd></dd><dt>This overlay</dt><dd><kbd>?</kbd></dd><dt>Toggle theme</dt><dd><kbd>t</kbd></dd><dt>Collapse sidebar</dt><dd><kbd>[</kbd></dd></dl>
+    <p class="muted">Single-key shortcuts can be turned off (and on again) from search.</p>
     {{if not $hub}}<h3>Go to</h3>
     <dl><dt>Pipelines</dt><dd><kbd>g</kbd> <kbd>p</kbd></dd><dt>Insights</dt><dd><kbd>g</kbd> <kbd>s</kbd></dd><dt>Builds</dt><dd><kbd>g</kbd> <kbd>b</kbd></dd><dt>Images</dt><dd><kbd>g</kbd> <kbd>i</kbd></dd><dt>Nodes</dt><dd><kbd>g</kbd> <kbd>n</kbd></dd></dl>
     <h3>A build</h3>

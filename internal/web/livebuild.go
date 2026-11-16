@@ -397,7 +397,11 @@ func (s *Server) liveView(ctx context.Context, lb *collector.LiveBuild, instance
 					lo = min(lo, mustFloat(b.L))
 				}
 			}
-			r.LabelEnd = strconv.FormatFloat(100-lo+0.6, 'f', 2, 64)
+			at := 100 - lo + 0.6 // before the bars
+			if lo < 40 {
+				at = 0 // no room before them: at the right edge (as waterfall does)
+			}
+			r.LabelEnd = strconv.FormatFloat(at, 'f', 2, 64)
 		}
 		switch st.State {
 		case history.LiveWaiting:

@@ -278,7 +278,7 @@ func compareFacts(a, b *built) []CmpFact {
 		}
 		return bytesText(x.ContextBytes)
 	}
-	ran := func(d *built) string { return fmt.Sprintf("%d of %d", d.Built, len(d.Page.Build.Steps)) }
+	ran := func(d *built) string { return fmt.Sprintf("%d of %d", stepsRan(d.Page.Build), len(d.Page.Build.Steps)) }
 	out := []CmpFact{
 		{K: "Time", A: dur(ab), B: dur(bb)},
 		{K: "Steps run", A: ran(a), B: ran(b)},

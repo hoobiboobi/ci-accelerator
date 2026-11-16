@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +98,27 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	if v := viewer(r); v != nil {
+		who := v.Instance + "/" + strconv.FormatUint(v.UserID, 10)
+		s.streamMu.Lock()
+		if s.streamsBy == nil {
+			s.streamsBy = map[string]int{}
+		}
+		if s.streamsBy[who] >= StreamsPerPerson {
+			s.streamMu.Unlock()
+			http.Error(w, "too many live pages open in your name", http.StatusServiceUnavailable)
+			return
+		}
+		s.streamsBy[who]++
+		s.streamMu.Unlock()
+		defer func() {
+			s.streamMu.Lock()
+			if s.streamsBy[who]--; s.streamsBy[who] <= 0 {
+				delete(s.streamsBy, who)
+			}
+			s.streamMu.Unlock()
+		}()
+	}
 	select {
 	case s.streams <- struct{}{}:
 		defer func() { <-s.streams }()
@@ -104,6 +126,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many live pages open", http.StatusServiceUnavailable)
 		return
 	}
+	rc := http.NewResponseController(w)
 	sub := s.data.Subscribe()
 	defer s.data.Unsubscribe(sub)
 	h := w.Header()
@@ -158,12 +181,15 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		defer t.Stop()
 		recheck = t.C
 	}
+	// Each write may take streamWrite; not every writer in between
+	// supports it, and then TCP decides.
+	deadline := func() { _ = rc.SetWriteDeadline(time.Now().Add(streamWrite)) }
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-recheck:
-			now, err := s.opt.Auth.Load(headerSink{}, r)
+			now, err := s.opt.Auth.Check(r)
 			if err != nil {
 				// Asked again at the next check.
 				continue
@@ -173,8 +199,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		case <-beat.C:
+			deadline()
 			fmt.Fprint(w, ": ping\n\n")
 		case <-sub.C:
+			deadline()
 			for _, k := range sub.Take() {
 				switch {
 				case k == "*":
@@ -222,14 +250,6 @@ func validKey(k string) bool {
 	_, ok := store.ParseProjectKey(k)
 	return ok
 }
-
-// headerSink takes the cookie a session check would set again: a stream's
-// headers are long sent, and the browser's next request sets it.
-type headerSink struct{}
-
-func (headerSink) Header() http.Header         { return http.Header{} }
-func (headerSink) Write(b []byte) (int, error) { return len(b), nil }
-func (headerSink) WriteHeader(int)             {}
 
 // origin is the console's address as the browser reached it.
 func origin(r *http.Request) string {

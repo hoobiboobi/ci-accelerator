@@ -1,7 +1,7 @@
 {{define "waterfall"}}{{if .}}
 <div class="wfv" data-wf>
   <div class="wtools">
-    <div class="seg" role="group" aria-label="Show"><button type="button" data-wf-filter="all" aria-pressed="true">All</button><button type="button" data-wf-filter="built" aria-pressed="false">Rebuilt only</button><button type="button" data-wf-filter="received" aria-pressed="false">Received</button></div>
+    <div class="seg" role="group" aria-label="Show"><button type="button" data-wf-filter="all" aria-pressed="true">All</button><button type="button" data-wf-filter="built" aria-pressed="false">Rebuilt only</button><button type="button" data-wf-filter="received" aria-pressed="false">From another job</button></div>
     <label class="wsearch">{{icon "search" 13}}<input type="search" data-wf-q placeholder="filter jobs, stages, steps" aria-label="Filter the timeline"></label>
     {{if and (gt .Jobs 1) (not .Unfinished)}}<button class="tog" type="button" data-wf-crit aria-pressed="false">◆ Critical path</button>{{end}}
     <div class="seg" role="group" aria-label="Depth">{{if gt .Jobs 1}}<button type="button" data-wf-depth="jobs" aria-pressed="true">Jobs</button>{{end}}<button type="button" data-wf-depth="stages" aria-pressed="{{if gt .Jobs 1}}false{{else}}true{{end}}">Stages</button><button type="button" data-wf-depth="steps" aria-pressed="false">Steps</button></div>
@@ -11,8 +11,8 @@
     <div class="tg" role="tree" aria-label="Timeline">
       <div class="gridl" aria-hidden="true">{{range .Ticks}}<b style="left: {{.L}}%"></b>{{end}}</div>
       {{range .Rows}}
-      <div class="row k-{{.Kind}} d{{.Depth}}{{if .Crit}} critrow{{end}}{{if .OnCrit}} oncrit{{end}}" role="treeitem" data-id="{{.ID}}" data-parent="{{.Parent}}" data-state="{{.State}}" data-text="{{.Text}}" {{if .Kids}}aria-expanded="{{if .Open}}true{{else}}false{{end}}"{{end}}{{if .Hidden}} hidden{{end}} tabindex="-1"{{with .Step}} data-wstep="{{.}}"{{end}}{{with .Link}} data-link="{{.}}"{{end}}>
-        <div class="tc">{{if .Kids}}<button class="wchev" type="button" tabindex="-1" aria-label="Expand or fold">{{icon "chev" 12}}</button>{{else}}<span class="sp16"></span>{{end}}<span class="wg {{.Glyph}}">{{icon .Icon 11}}</span>
+      <div class="row k-{{.Kind}} d{{.Depth}}{{if .Crit}} critrow{{end}}{{if .OnCrit}} oncrit{{end}}" role="treeitem" aria-level="{{add .Depth 1}}" data-id="{{.ID}}" data-parent="{{.Parent}}" data-state="{{.State}}" data-text="{{.Text}}" {{if .Kids}}aria-expanded="{{if .Open}}true{{else}}false{{end}}"{{end}}{{if .Hidden}} hidden{{end}} tabindex="-1"{{with .Step}} data-wstep="{{.}}"{{end}}{{with .Link}} data-link="{{.}}"{{end}}>
+        <div class="tc">{{if .Kids}}<button class="wchev" type="button" tabindex="-1" aria-hidden="true">{{icon "chev" 12}}</button>{{else}}<span class="sp16"></span>{{end}}<span class="wg {{.Glyph}}">{{icon .Icon 11}}</span>
           {{if .Link}}<a class="nm{{if .Mono}} cmd{{end}}" href="{{.Link}}" title="{{.Name}}">{{.Name}}</a>{{else}}<span class="nm{{if .Mono}} cmd{{end}}" title="{{if .Key}}{{.Key}} {{end}}{{.Name}}">{{if .Key}}<span class="k">{{.Key}}</span>{{end}}{{.Name}}</span>{{end}}
           <span class="meta">{{with .Chip}}<span class="stat st-{{.Key}} vtag">{{icon .Icon 11}}{{.Label}}</span>{{end}}{{if and .Crit (eq .Kind "job")}}<span class="chip crit" title="Sets the pipeline time">◆</span>{{end}}</span></div>
         <div class="tl"><div class="trk">{{range .Bars}}<i class="bar c-{{.Class}}" style="left: {{.L}}%; width: {{.W}}%"{{with .Title}} title="{{.}}"{{end}}></i>{{end}}{{if .LabelEnd}}<span class="lab end over" style="right: {{.LabelEnd}}%">{{.Label}}</span>{{else}}<span class="lab" style="left: {{.LabelL}}%">{{.Label}}</span>{{end}}</div></div>

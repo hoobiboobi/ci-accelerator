@@ -555,7 +555,7 @@ func TestBuildListPages(t *testing.T) {
 	if !strings.Contains(first.body, `<span class="bgrip" role="separator"`) {
 		t.Error("no grip for the image names' column")
 	}
-	m := regexp.MustCompile(`href="(/builds\?before=\d+)"`).FindStringSubmatch(first.body)
+	m := regexp.MustCompile(`href="(/builds\?before=\d+&amp;bid=\d+)"`).FindStringSubmatch(first.body)
 	if m == nil {
 		t.Fatal("no address for older builds")
 	}
@@ -1186,7 +1186,7 @@ func TestRoutedBuild(t *testing.T) {
 	}
 	page := get(t, ts, fmt.Sprintf("/builds/%d", row.ID))
 	page.safe(t)
-	if !strings.Contains(page.body, "node-2, whose cache holds the project&#39;s most recently used layers (the job ran on node-1)") ||
+	if !strings.Contains(page.body, "node-2, whose cache holds layers of the project (the job ran on node-1)") ||
 		strings.Contains(page.body, "node-3") {
 		t.Errorf("the build page does not say why the router chose its node")
 	}
@@ -1770,7 +1770,8 @@ func TestNodesDisk(t *testing.T) {
 		notes, err int
 	}{
 		{"roomy", disk(60, 55), "", 0, 0},
-		{"under the GC floor", disk(25, 20), "warn", 1, 0},
+		{"at the GC floor (a full cache)", disk(27, 22), "", 0, 0},
+		{"well under the GC floor", disk(20, 16), "warn", 1, 0},
 		{"near eviction", disk(18, 12), "warn", 2, 0},
 		{"evicting", disk(9, 6), "crit", 2, 0},
 	} {

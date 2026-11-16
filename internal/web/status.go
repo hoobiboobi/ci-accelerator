@@ -29,6 +29,10 @@ var statuses = map[string]Status{
 	"running":  {"running", "Running", "Running", "clock"},
 }
 
+// isCanceled says whether a status is a canceled build's, which shares
+// the key "failed" (grouped and filtered with them) but is said apart.
+func isCanceled(st Status) bool { return st.Label == statuses["canceled"].Label }
+
 // statusKeys are the statuses in the order the pages list them.
 var statusKeys = []string{"cached", "change", "farm", "unclear", "failed"}
 
@@ -89,6 +93,9 @@ func whyShort(b store.BuildRow) string {
 		}
 		return "the files it copies changed"
 	case history.StepChanged, history.NewStep:
+		if b.Reason == history.StepChanged && sourceChange(b.Old, b.New) {
+			return "a step's source changed"
+		}
 		return "its Dockerfile changed"
 	case history.ArgChanged:
 		return "build argument " + b.Arg + " changed"

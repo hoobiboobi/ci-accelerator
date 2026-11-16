@@ -413,6 +413,13 @@ func waterfall(pipeName string, jobs []wfJob, start time.Time) *Waterfall {
 			w.Rows[i].OnCrit = true
 		}
 	}
+	// A bar of times outside the axis (clocks apart) ends at its end.
+	for i := range w.Rows {
+		for j := range w.Rows[i].Bars {
+			b := &w.Rows[i].Bars[j]
+			b.W = fitWidth(b.L, b.W)
+		}
+	}
 	// A label that would run off the right edge ends where its bars begin.
 	for i := range w.Rows {
 		r := &w.Rows[i]

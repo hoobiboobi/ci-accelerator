@@ -26,6 +26,10 @@ const statsFor = 7 * 24 * time.Hour
 // statsFresh is how long they are reused.
 const statsFresh = time.Minute
 
+// statsRows bounds the builds kept for the projects' figures together:
+// the least recently read projects go first, the one just read stays.
+const statsRows = 100_000
+
 type cachedStats struct {
 	at     time.Time
 	builds []store.BuildRow     // newest first, over statsFor
@@ -69,8 +73,33 @@ func (s *Server) recent(ctx context.Context, p store.ProjectKey) (*cachedStats, 
 		s.stats = map[string]*cachedStats{}
 	}
 	s.stats[key] = c
+	evictStats(s.stats, key, s.now())
 	s.statsMu.Unlock()
 	return c, nil
+}
+
+// evictStats drops the figures no page would reuse (older than
+// statsFresh), then the oldest until the builds kept fit statsRows; keep
+// stays.
+func evictStats(stats map[string]*cachedStats, keep string, now time.Time) {
+	rows := 0
+	for k, c := range stats {
+		if k != keep && now.Sub(c.at) >= statsFresh {
+			delete(stats, k)
+			continue
+		}
+		rows += len(c.builds)
+	}
+	for rows > statsRows && len(stats) > 1 {
+		oldest := ""
+		for k, c := range stats {
+			if k != keep && (oldest == "" || c.at.Before(stats[oldest].at)) {
+				oldest = k
+			}
+		}
+		rows -= len(stats[oldest].builds)
+		delete(stats, oldest)
+	}
 }
 
 // minForUsual is how many builds of a kind a "usual" time needs.
@@ -238,6 +267,9 @@ type Filters struct {
 	Branch, Outcome, Image string
 	Mine, Group            bool
 	Before                 int64
+	// BeforeID is the id of the previous page's last build: builds that
+	// started in the same millisecond as it follow by id.
+	BeforeID int64
 	// Pick: picking two builds to compare; A is the first one picked.
 	Pick bool
 	A    int64
@@ -263,6 +295,7 @@ func filtersOf(r *http.Request) Filters {
 	f := Filters{Branch: q.Get("branch"), Outcome: q.Get("outcome"), Image: q.Get("image"), Mine: q.Get("mine") == "1", Group: q.Get("group") == "pipeline",
 		Pick: q.Get("pick") == "1"}
 	f.Before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
+	f.BeforeID, _ = strconv.ParseInt(q.Get("bid"), 10, 64)
 	if f.Pick {
 		f.A, _ = strconv.ParseInt(q.Get("a"), 10, 64)
 	}
@@ -363,7 +396,7 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 	target, none := targetOf(f.Image)
 	q := store.BuildQuery{Project: sh.Project.ProjectKey, Ref: f.Branch, Target: target, NoTarget: none, Outcome: f.Outcome, Limit: pageSize + 1}
 	if f.Before > 0 {
-		q.Before = time.UnixMilli(f.Before)
+		q.Before, q.BeforeID = time.UnixMilli(f.Before), f.BeforeID
 	}
 	if f.Mine && sh.Viewer != nil {
 		q.Author = sh.Viewer.Name
@@ -381,9 +414,10 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	// cut: where the next page starts (the started time of the last build
-	// this page covers); zero when no build is older.
+	// cut, cutID: where the next page starts (the started time and id of
+	// the last build this page covers); zero when no build is older.
 	var cut time.Time
+	var cutID int64
 	if anchor != nil && anchor.Page.Build.Target == "" {
 		// The first build picked has no target: only builds of its
 		// repository are of its image. Read on until a page of them is
@@ -401,7 +435,7 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 			if len(kept) > pageSize || len(last) <= pageSize || reads == maxReads {
 				break
 			}
-			q.Before = last[len(last)-1].Started
+			q.Before, q.BeforeID = last[len(last)-1].Started, last[len(last)-1].ID
 			if last, err = s.data.Builds(ctx, q); err != nil {
 				s.fail(w, err)
 				return
@@ -409,17 +443,18 @@ func (s *Server) builds(w http.ResponseWriter, r *http.Request) {
 		}
 		switch {
 		case len(kept) > pageSize:
-			cut, kept = kept[pageSize-1].Started, kept[:pageSize]
+			cut, cutID, kept = kept[pageSize-1].Started, kept[pageSize-1].ID, kept[:pageSize]
 		case len(last) > pageSize:
-			cut = last[len(last)-1].Started
+			cut, cutID = last[len(last)-1].Started, last[len(last)-1].ID
 		}
 		rows = kept
 	} else if len(rows) > pageSize {
-		cut, rows = rows[pageSize-1].Started, rows[:pageSize]
+		cut, cutID, rows = rows[pageSize-1].Started, rows[pageSize-1].ID, rows[:pageSize]
 	}
 	if !cut.IsZero() {
 		older := f.Query()
 		older.Set("before", strconv.FormatInt(cut.UnixMilli(), 10))
+		older.Set("bid", strconv.FormatInt(cutID, 10))
 		v.Older = "/builds?" + older.Encode()
 	}
 	if f.Before > 0 {
@@ -542,6 +577,9 @@ func fingerprint(b store.BuildRow, st Status) string {
 		}
 		return "unclear:elsewhere"
 	case "failed":
+		if isCanceled(st) {
+			return "failed:canceled" // one text for them all
+		}
 		return "failed:" + firstLine(b.Error)
 	case "farm":
 		switch {
@@ -591,6 +629,9 @@ func reasonText(b store.BuildRow, st Status) string {
 		}
 		return "Steps ran with nothing on record to compare them with"
 	case "failed":
+		if isCanceled(st) {
+			return "Canceled before it ended; nothing in the Dockerfile failed"
+		}
 		return "Failed: " + clip(failureText(b.Error), 120)
 	case "farm":
 		switch {
@@ -613,6 +654,9 @@ func reasonText(b store.BuildRow, st Status) string {
 		}
 		return "The files a step copies changed"
 	case history.StepChanged, history.NewStep:
+		if b.Reason == history.StepChanged && sourceChange(b.Old, b.New) {
+			return "The step's source changed: " + clip(b.ReasonStep, 80)
+		}
 		return "Dockerfile changed: " + clip(b.ReasonStep, 80)
 	case history.ArgChanged:
 		return "Build argument " + b.Arg + " changed"
@@ -887,7 +931,7 @@ func (s *Server) insights(w http.ResponseWriter, r *http.Request) {
 	all := s.reasons(in, 0, zone(r))
 	v.Reasons = all
 	if len(all) > 6 {
-		v.Reasons, v.MoreReasons = all[:6], fmt.Sprintf("%d more reasons", len(all)-6)
+		v.Reasons, v.MoreReasons = all[:6], fmt.Sprintf("%d more reason%s", len(all)-6, plural(len(all)-6))
 	}
 	if !v.Empty && !sh.NoProjects {
 		sh.Desc = fmt.Sprintf("%d image build%s in %s, %d%% fully from the cache.", v.Builds, plural(v.Builds), v.WindowLabel, v.Cached)
@@ -1247,7 +1291,10 @@ func (s *Server) chart(bs []store.BuildRow, since time.Time, usual time.Duration
 			if b.Duration() <= 0 {
 				continue
 			}
-			k := key{int(float64(chartSlices) * float64(b.Started.Sub(from)) / float64(span)), rowStatus(b).Key}
+			// A build stamped outside the window (a node's clock ahead)
+			// falls into its edge slice.
+			slice := min(max(int(float64(chartSlices)*float64(b.Started.Sub(from))/float64(span)), 0), chartSlices-1)
+			k := key{slice, rowStatus(b).Key}
 			groups[k] = append(groups[k], b)
 		}
 		for k, g := range groups {
@@ -1277,7 +1324,7 @@ func (s *Server) chart(bs []store.BuildRow, since time.Time, usual time.Duration
 	pct := func(f float64) string { return strconv.FormatFloat(f, 'f', 2, 64) }
 	c.UsualY = pct(100 - 100*float64(min(usual, top))/float64(top))
 	for _, p := range pts {
-		c.Dots = append(c.Dots, Dot{X: pct(100 * float64(p.at.Sub(from)) / float64(span)), Y: pct(100 - 100*float64(p.d)/float64(top)),
+		c.Dots = append(c.Dots, Dot{X: pct(pctOf(p.at.Sub(from), span)), Y: pct(100 - 100*float64(p.d)/float64(top)),
 			URL: p.url, Status: p.st, Title: p.title})
 	}
 	return c

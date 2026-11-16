@@ -30,6 +30,7 @@ func (gateSigner) Load(w http.ResponseWriter, r *http.Request) (*auth.Viewer, er
 	}
 	return &auth.Viewer{Instance: "0a1b2c", Host: "gitlab.example.com", UserID: 8, Username: "bob"}, nil
 }
+func (g gateSigner) Check(r *http.Request) (*auth.Viewer, error) { return g.Load(nil, r) }
 func (g gateSigner) CanRead(_ context.Context, v *auth.Viewer, _ string, project uint64) (bool, error) {
 	if g.asked != nil {
 		g.asked.Add(1)

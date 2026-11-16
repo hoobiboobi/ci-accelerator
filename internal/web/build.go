@@ -298,14 +298,8 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		pinProject(&sh, a.Instance, project)
 	}
 	running := b.Completed.IsZero()
-	ran := d.Built
-	for _, sv := range d.Views {
-		if sv.State == "failed" || sv.State == "canceled" {
-			ran++
-		}
-	}
 	v := &BuildView{ID: id, Target: b.Target, Status: statusOf(p.Reason.Kind, b.Error, d.Built, running), Verdict: d.Verdict,
-		Ran: ran, Steps: len(b.Steps), Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b), DfName: p.DockerfileName, Warnings: safeWarnings(b.Warnings),
+		Ran: stepsRan(b), Steps: len(b.Steps), Tone: d.Cat.Tone, Lines: dockerfile(p.Dockerfile, d.Views, b), DfName: p.DockerfileName, Warnings: safeWarnings(b.Warnings),
 		StepViews: d.Views, Node: shortDaemon(b.Daemon), Failed: b.Error != "", Unparsed: history.ParseErrorLine(b.Error)}
 	if v.Failed && len(v.Lines) == 0 {
 		v.NoDockerfile = noDockerfile(b.Error)
@@ -562,7 +556,9 @@ func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stor
 	}
 	switch r.Kind {
 	case history.StepChanged, history.NewStep:
-		if r.Old != "" && r.Old != r.New {
+		if r.Kind == history.StepChanged && sourceChange(r.Old, r.New) {
+			out = append(out, Change{"Source", template.HTML(fmt.Sprintf(`%s <span class="muted">reads from</span><br><span class="old mono">%s</span><br><span class="new mono">%s</span>`, at, e(r.Old), e(r.New)))})
+		} else if r.Old != "" && r.Old != r.New {
 			out = append(out, Change{"Dockerfile", template.HTML(fmt.Sprintf(`<span class="old mono">%s</span><br><span class="new mono">%s</span>`, e(r.Old), e(r.New)))})
 		} else {
 			out = append(out, Change{"Dockerfile", template.HTML(at + " is new or changed")})
@@ -584,16 +580,22 @@ func (s *Server) changes(ctx context.Context, b *history.Build, prev *store.Stor
 		}
 		out = append(out, Change{"Files", template.HTML(at + " reads " + orContext(r.Paths) + " — changed or not: " + why)})
 	}
-	prevBuilt := 0
-	for i := range pb.Steps {
-		if pb.Ran(i) {
-			prevBuilt++
-		}
-	}
-	if prevBuilt != d.Built {
-		out = append(out, Change{"Steps run", template.HTML(fmt.Sprintf("%d, last time %d", d.Built, prevBuilt))})
+	if now, before := stepsRan(b), stepsRan(pb); now != before {
+		out = append(out, Change{"Steps run", template.HTML(fmt.Sprintf("%d, last time %d", now, before))})
 	}
 	return out, nil
+}
+
+// stepsRan is how many of a build's steps ran: built (not a source
+// resolved again), failed or canceled. Every page counts them so.
+func stepsRan(b *history.Build) int {
+	n := 0
+	for i, st := range b.Steps {
+		if st.Error != "" || b.Ran(i) {
+			n++
+		}
+	}
+	return n
 }
 
 // ---- the step panel ----
@@ -672,7 +674,6 @@ func (s *Server) step(w http.ResponseWriter, r *http.Request) {
 		if sp.Step != idx {
 			continue
 		}
-		sp := sp
 		if sp.Order {
 			sd.Order = &sp
 		} else {
@@ -884,11 +885,11 @@ func routeText(d store.Decision) string {
 		return fmt.Sprintf("the build router: the job's own node, %s, whose cache holds the project's layers", node)
 	case route.ZoneWarm:
 		if d.JobNode != "" && d.JobNode != node {
-			return fmt.Sprintf("the build router: %s, whose cache holds the project's most recently used layers (the job ran on %s)", node, d.JobNode)
+			return fmt.Sprintf("the build router: %s, whose cache holds layers of the project (the job ran on %s)", node, d.JobNode)
 		}
-		return fmt.Sprintf("the build router: %s, whose cache holds the project's most recently used layers", node)
+		return fmt.Sprintf("the build router: %s, whose cache holds layers of the project", node)
 	case route.ZoneHash:
-		return fmt.Sprintf("the build router: %s, the project's node by hash: no cache held its layers", node)
+		return fmt.Sprintf("the build router: %s, the project's node by hash: no ready node was known to hold its layers", node)
 	case route.CrossZone:
 		return fmt.Sprintf("the build router: %s, in another zone: no daemon of the job's zone was ready", node)
 	case route.UnknownLocal:

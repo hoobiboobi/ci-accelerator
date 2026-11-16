@@ -112,8 +112,8 @@ var periods = []struct {
 // the view and the query.
 func pipeFilter(q url.Values, now time.Time, v *PipelinesView, pq *store.PipeQuery) {
 	v.Q = strings.TrimSpace(q.Get("q"))
-	if len(v.Q) > 200 {
-		v.Q = v.Q[:200]
+	if q := []rune(v.Q); len(q) > 200 {
+		v.Q = string(q[:200]) // whole letters
 	}
 	pq.Search = v.Q
 	v.Period = q.Get("period")
@@ -183,7 +183,8 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	sh.Title = "Pipelines"
 	q := r.URL.Query()
 	v := &PipelinesView{Branch: q.Get("branch"), Mine: q.Get("mine") == "1", CanMine: sh.Viewer != nil}
-	pq := store.PipeQuery{Project: sh.Project.ProjectKey, Ref: v.Branch, Limit: pipePage}
+	// One more than a page: whether an older pipeline exists.
+	pq := store.PipeQuery{Project: sh.Project.ProjectKey, Ref: v.Branch, Limit: pipePage + 1}
 	pipeFilter(q, inZone(s.now(), zone(r)), v, &pq)
 	if sh.Project.ID == 0 {
 		v.Shell = sh
@@ -220,7 +221,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	v.NoAPI = api == nil
 	if api != nil {
 		var wg sync.WaitGroup
-		for _, p := range list {
+		for _, p := range list[:min(len(list), pipePage)] {
 			if store.Finished(p.Status) && !p.APIAt.IsZero() {
 				continue
 			}
@@ -242,6 +243,10 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	more := len(list) > pipePage
+	if more {
+		list = list[:pipePage]
+	}
 	ids := make([]uint64, len(list))
 	for i, p := range list {
 		ids[i] = p.ID
@@ -259,7 +264,7 @@ func (s *Server) pipelines(w http.ResponseWriter, r *http.Request) {
 	for _, p := range list {
 		v.Cards = append(v.Cards, s.pipeCard(p, jobs[p.ID], builds[p.ID], zone(r)))
 	}
-	if len(list) == pipePage {
+	if more {
 		last := list[len(list)-1]
 		v.Older = pipeLink(v, url.Values{"before": {strconv.FormatInt(last.Created.UnixMilli(), 10)}, "bid": {strconv.FormatUint(last.ID, 10)}})
 	}
@@ -476,8 +481,10 @@ func (s *Server) pipeCard(p store.PipeRow, jobs []store.JobInfo, builds []store.
 			}
 			title += " · ran " + duration(max(pl.e.Sub(pl.s), 0))
 			lj := LaneJob{L: pct(pl.s.Sub(origin)), W: wid(pl.e.Sub(pl.s)), Row: row, Class: pl.class, Title: title}
+			lj.W = fitWidth(lj.L, lj.W)
 			if pl.s.After(pl.q) {
 				lj.QL, lj.QW = pct(pl.q.Sub(origin)), wid(pl.s.Sub(pl.q))
+				lj.QW = fitWidth(lj.QL, lj.QW)
 			}
 			if bs := byJob[pl.j.ID]; len(bs) > 0 {
 				lj.URL = fmt.Sprintf("/builds/%d", bs[0].ID)

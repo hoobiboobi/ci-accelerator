@@ -47,6 +47,13 @@ function check(name, ok, detail = "") {
   console.log(`${ok ? "ok  " : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
 }
 
+// A control the fixtures have: its absence is a failure of its own.
+async function need(s, name, sel) {
+  const ok = await s.eval(`!!document.querySelector(${JSON.stringify(sel)})`);
+  check(name, ok, ok ? "" : sel + " is missing");
+  return ok;
+}
+
 // ---- Chrome ----
 function findChrome() {
   if (args.chrome) return args.chrome;
@@ -177,9 +184,9 @@ async function page(port, { width = 1400, height = 900 } = {}) {
     await sleep(300);
     return true;
   };
-  s.key = async (key, { meta = false, ctrl = false, wait = 300 } = {}) => {
-    const modifiers = (meta ? 4 : 0) | (ctrl ? 2 : 0);
-    const vk = { Escape: 27, Enter: 13, ArrowDown: 40, ArrowUp: 38 }[key] || key.toUpperCase().charCodeAt(0);
+  s.key = async (key, { meta = false, ctrl = false, shift = false, wait = 300 } = {}) => {
+    const modifiers = (meta ? 4 : 0) | (ctrl ? 2 : 0) | (shift ? 8 : 0);
+    const vk = { Escape: 27, Enter: 13, Tab: 9, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35 }[key] || key.toUpperCase().charCodeAt(0);
     const text = key.length === 1 && !meta && !ctrl ? key : undefined;
     const code = key.length === 1 ? "Key" + key.toUpperCase() : key;
     await s.send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", key, code, windowsVirtualKeyCode: vk, modifiers, text });
@@ -328,7 +335,7 @@ async function buildPage(s, pages) {
   check(`${b} hint on a step`, await s.visible("#pop"));
   await s.click(sel, 900);
   check(`${b} step panel opens`, (await s.visible("#drawer")) && (await s.eval(`document.querySelector("#drawer h2").textContent.trim().length > 0`)));
-  if (await s.eval(`!!document.querySelector("#drawer [data-dstep]")`)) {
+  if (await need(s, `${b} the step panel links the next step`, "#drawer [data-dstep]")) {
     await s.click("#drawer [data-dstep]", 900);
     check(`${b} panel moves to another step`, await s.visible("#drawer"));
   }
@@ -355,7 +362,7 @@ async function buildPage(s, pages) {
   await s.key("Escape");
   check(`${b} Esc closes the panel`, !(await s.visible("#drawer")));
   await s.click(sel, 900);
-  if (await s.eval(`!!document.querySelector(".grpbtn")`)) {
+  if (await need(s, `${b} has stage folds`, ".grpbtn")) {
     // The panel loads its step first (failed once in CI when it took
     // longer than the click's pause); then the fold must leave it open.
     const opened = await s.shows("#drawer");
@@ -365,10 +372,17 @@ async function buildPage(s, pages) {
   }
   await s.click("h1", 300);
   check(`${b} a click outside the panel closes it`, !(await s.visible("#drawer")));
-  if (await s.eval(`!!document.querySelector('[data-act="toggleall"]')`)) {
+  if (await need(s, `${b} has the expand-all button`, '[data-act="toggleall"]')) {
+    // The page opens with runs of cached stages folded: e must show more,
+    // and e again goes back to the page's own folding. A build with no
+    // cached stage has nothing folded (the e2e's build): a stage is folded
+    // by hand first, e must show it, and e again leaves every stage open.
+    const own = await s.eval(`!!document.querySelector('.grpbtn[data-fold="true"]')`);
+    if (!own && await s.eval(`!!document.querySelector(".grpbtn")`)) await s.click(".grpbtn", 300);
     const rows = () => s.eval(`document.querySelectorAll("tr[data-of]:not([hidden])").length`);
+    const back = own ? null : await s.eval(`document.querySelectorAll("tr[data-of]").length`);
     const a = await rows(); await s.key("e"); const c = await rows(); await s.key("e"); const d = await rows();
-    check(`${b} e expands every stage and back`, c >= a && d === a, `${a} → ${c} → ${d}`);
+    check(`${b} e expands every stage and back`, c > a && d === (own ? a : back), `${a} → ${c} → ${d}${own ? "" : " (no cached stage: one folded by hand)"}`);
   }
   check(`${b} no errors`, s.take().length === 0);
 }
@@ -399,7 +413,7 @@ async function speedups(s, pages) {
   await s.click(`[data-pane="steps"] [data-step="${step}"]`, 900);
   check(`${b} a step with a speed-up opens on its output, the Speed-up tab beside it`, (await sel("out")) && !!(await s.eval(`document.querySelector('#drawer [data-dtab="speed"]')`)));
   await s.key("Escape");
-  if (await s.eval(`!!document.querySelector('[data-tab="dockerfile"]')`)) {
+  if (await need(s, `${b} has a Dockerfile tab`, '[data-tab="dockerfile"]')) {
     await s.click('[data-tab="dockerfile"]', 200);
     const beside = await s.eval(`(() => { const n = document.querySelector('[data-pane="dockerfile"] .dfnotes').getBoundingClientRect(), f = document.querySelector('[data-pane="dockerfile"] .dfbox').getBoundingClientRect(); return n.left >= f.right - 1; })()`);
     check(`${b} the Dockerfile tab notes the speed-up beside the file and marks its line`, beside && !!(await s.eval(`document.querySelector('[data-pane="dockerfile"] .dl.sphl .dr .spmk')`)));
@@ -424,7 +438,7 @@ async function pipelinePage(s, pages) {
   }
   if (!p) return check("a pipeline with a timeline", false, "none found");
   await s.go(p);
-  if (await s.eval(`!!document.querySelector("#cachedFold")`)) {
+  if (await need(s, `${p} has a fold of cached images`, "#cachedFold")) {
     await s.click("#cachedFold > summary");
     check(`${p} the cached images unfold`, await s.eval(`document.querySelector("#cachedFold").open && document.querySelectorAll("#cachedFold .brow").length > 0`));
   }
@@ -441,7 +455,7 @@ async function pipelinePage(s, pages) {
   await s.type("zzzqqq");
   check(`${p} timeline search without a match hides every row`, (await visibleRows()) === 0);
   await s.eval(`(() => { const i = document.querySelector("[data-wf-q]"); i.value = ""; i.dispatchEvent(new Event("input")); i.blur(); })()`);
-  if (await s.click("[data-wf-crit]")) {
+  if (await need(s, `${p} has the critical path toggle`, "[data-wf-crit]") && await s.click("[data-wf-crit]")) {
     // The toggle must change what one sees: rows off the path fade, the path does not.
     const fade = await s.eval(`(() => { const rows = [...document.querySelectorAll("[data-wf] .row.k-job")].filter(r => !r.hidden);
       const op = r => parseFloat(getComputedStyle(r).opacity); const on = rows.filter(r => r.classList.contains("oncrit")), off = rows.filter(r => !r.classList.contains("oncrit"));
@@ -451,6 +465,7 @@ async function pipelinePage(s, pages) {
   }
   await s.click('[data-wf-depth="steps"]');
   const row = await s.eval(`(() => { const r = [...document.querySelectorAll("[data-wf] .row[data-wstep]")].find(r => !r.hidden); return r && r.dataset.id; })()`);
+  check(`${p} the timeline shows steps`, !!row);
   if (row) {
     await s.click(`[data-wf] .row[data-id="${row}"]`, 900);
     check(`${p} a timeline step opens the panel`, await s.visible("#drawer"));
@@ -463,6 +478,7 @@ async function pipelinePage(s, pages) {
     await s.key("Escape");
   }
   const href = await s.eval(`(() => { const a = document.querySelector('[data-wf] .row.k-job a.nm[href^="/builds/"]'); return a && a.getAttribute("href"); })()`);
+  check(`${p} a job of the timeline links its build`, !!href);
   if (href) {
     await s.click(`[data-wf] .row.k-job a.nm[href="${href}"]`, 1200);
     check(`${p} a job's build opens from the timeline`, (await s.eval("location.pathname")) === href, href);
@@ -927,6 +943,19 @@ async function liveUpdate(s, p) {
   }
   const open = fold ? await s.eval(`document.querySelector("#cachedFold").open`) : true;
   check("a live update keeps what the reader unfolded", /^Updated/.test(status) && open, `${status} fold ${fold} open ${open}`);
+  // The keyboard's place too: a row of the timeline moved to with the
+  // arrow keys keeps the focus through the next update.
+  const row = await s.eval(`(() => { const r = [...document.querySelectorAll("[data-wf] .row")].find(r => !r.hidden); if (!r) return null; r.focus(); return r.dataset.id; })()`);
+  check("the live pipeline has a timeline", !!row);
+  if (row) {
+    await s.key("ArrowDown", { wait: 100 });
+    const at = await s.eval(`(document.activeElement.dataset || {}).id || null`);
+    await s.eval(`document.getElementById("live").textContent = "waiting"`);
+    await s.until(`/^Updated/.test(document.getElementById("live").textContent)`, 10000);
+    await sleep(200);
+    const now = await s.eval(`(() => { const a = document.activeElement; return (a.dataset && a.dataset.id) || a.tagName; })()`);
+    check("a live update keeps the keyboard's place on the timeline", !!at && now === at, `${at} -> ${now}`);
+  }
   check("live update: no errors", s.take().length === 0);
 }
 
@@ -942,8 +971,15 @@ async function signedIn(s) {
     const issues = await s.eval(audit);
     check(`${w}px: the sign-in page`, s.main === 200 && issues.length === 0 && await s.visible(".signin-btn"), issues.join("; "));
   }
+  await s.size(390, 844);
+  await s.go("/");
+  check("390px signed in: the header's menu offers to sign out", await s.eval(`!!document.querySelector('#mProj form[action$="/auth/sign-out"] button')`));
   await s.size(1400, 900);
   await s.go("/");
+  await s.key("k", { ctrl: true, wait: 600 });
+  await s.type("sign out");
+  check("signed in: search offers to sign out", await s.eval(`[...document.querySelectorAll(".pal-o .lb3 > span")].some(e => e.textContent === "Sign out")`));
+  await s.key("Escape");
   await s.click("form.signout button", 1200);
   check("signing out lands on the sign-in page and says so", (await s.eval("location.pathname + location.search")) === "/auth/sign-in?e=out" &&
     /You are signed out/.test(await s.eval("document.body.innerText")));
@@ -953,6 +989,222 @@ async function signedIn(s) {
   // That refusal is the point; anything else is a problem.
   const left = before.concat(s.take().filter(p => !/search-index|status of 401/.test(p)));
   check("sign-in: no errors", left.length === 0, left.join("; "));
+}
+
+// A build's tabs from the keyboard: the arrow keys, Home and End move to
+// (and show) the others; each tab names its pane. A step opened from a
+// pipeline's timeline gives the focus back to its row on Esc.
+async function keyboardReach(s, pages) {
+  await s.size(1400, 900);
+  let bp = null;
+  for (const p of pages.filter(p => /^\/builds\/\d+$/.test(p))) {
+    await s.go(p);
+    if (await s.eval(`document.querySelectorAll("[data-tab]").length > 2`)) { bp = p; break; }
+  }
+  check("a build with three tabs or more", !!bp);
+  if (bp) {
+    const tabs = await s.eval(`[...document.querySelectorAll("[data-tab]")].map(t => t.dataset.tab)`);
+    const at = () => s.eval(`(() => { const a = document.activeElement, p = document.querySelector("[data-pane]:not([hidden])");
+      return { focus: (a && a.dataset && a.dataset.tab) || (a ? a.tagName : ""), sel: (document.querySelector('[data-tab][aria-selected="true"]') || { dataset: {} }).dataset.tab, pane: p && p.dataset.pane }; })()`);
+    await s.eval(`document.querySelector('[data-tab][aria-selected="true"]').focus()`);
+    await s.key("ArrowRight");
+    const r = await at();
+    check(`${bp} ArrowRight on the tabs moves to the next and shows it`, r.focus === tabs[1] && r.sel === tabs[1] && r.pane === tabs[1], JSON.stringify(r));
+    await s.key("End");
+    const e = await at(), last = tabs[tabs.length - 1];
+    check(`${bp} End shows the last tab`, e.focus === last && e.sel === last && e.pane === last, JSON.stringify(e));
+    await s.key("Home");
+    const h = await at();
+    check(`${bp} Home shows the first tab`, h.focus === tabs[0] && h.sel === tabs[0] && h.pane === tabs[0], JSON.stringify(h));
+    check(`${bp} every tab names its pane`, await s.eval(`[...document.querySelectorAll("[data-tab]")].every(t => {
+      const p = document.getElementById(t.getAttribute("aria-controls") || ""); return !!p && p.dataset.pane === t.dataset.tab; })`));
+  }
+  let pp = null;
+  for (const x of settled(pages)) {
+    await s.go(x);
+    if (await s.eval(`!!document.querySelector("[data-wf] .row[data-wstep]")`)) { pp = x; break; }
+  }
+  check("a pipeline whose timeline has steps", !!pp);
+  if (pp) {
+    if (await s.eval(`!!document.querySelector('[data-wf-depth="steps"]')`)) await s.click('[data-wf-depth="steps"]');
+    const lv = await s.eval(`(() => { const rows = [...document.querySelectorAll("[data-wf] .row")];
+      return { level: rows.every(r => +r.getAttribute("aria-level") >= 1), deeper: rows.some(r => +r.getAttribute("aria-level") >= 2),
+        chev: [...document.querySelectorAll("[data-wf] .wchev")].every(c => c.getAttribute("aria-hidden") === "true" && !c.hasAttribute("aria-label")) }; })()`);
+    check(`${pp} the timeline's rows carry their level, the chevrons are not read`, lv.level && lv.deeper && lv.chev, JSON.stringify(lv));
+    const id = await s.eval(`(() => { const r = [...document.querySelectorAll("[data-wf] .row[data-wstep]")].find(r => !r.hidden); r.focus(); return r.dataset.wstep; })()`);
+    await s.key("Enter", { wait: 900 });
+    const open = await s.shows("#drawer");
+    await s.key("Escape");
+    const back = await s.eval(`(() => { const a = document.activeElement; return (a && a.dataset && a.dataset.wstep) || (a ? a.tagName : ""); })()`);
+    check(`${pp} Esc on a step opened from the timeline goes back to its row`, open && back === id, `${open} ${back} vs ${id}`);
+  }
+  check("keyboard reach: no errors", s.take().length === 0);
+}
+
+// A filter changed from the keyboard applies on Enter, not at every arrow
+// key; the page it leads to keeps it focused.
+async function filterKeys(s) {
+  await s.size(1400, 900);
+  await s.go("/builds");
+  await s.eval(`document.getElementById("fOutcome").focus()`);
+  const url0 = await s.eval("location.href");
+  await s.key("ArrowDown", { wait: 1500 });
+  const k = await s.eval(`({ url: location.href, focus: document.activeElement.id })`);
+  check("builds: an arrow key on a filter does not reload the page", k.url === url0 && k.focus === "fOutcome", JSON.stringify(k));
+  await s.key("Enter", { wait: 300 });
+  await s.until(`location.href !== ${JSON.stringify(url0)} && document.readyState === "complete"`, 5000);
+  await sleep(300);
+  const k2 = await s.eval(`({ url: location.search, focus: document.activeElement.id })`);
+  check("builds: Enter applies it, the new page keeps the filter focused", /outcome=/.test(k2.url) && k2.focus === "fOutcome", JSON.stringify(k2));
+  check("filters: no errors", s.take().length === 0);
+}
+
+// Dialogs hold the keys: the page behind is inert, Tab goes round the
+// dialog, a shortcut key does nothing there; search takes what is typed
+// at once; single-key shortcuts can be turned off from search.
+async function dialogs(s, pages) {
+  await s.size(1400, 900);
+  const b = pages.find(p => /^\/builds\/\d+$/.test(p)) || "/";
+  await s.go(b);
+  const theme = () => s.eval("document.documentElement.dataset.theme");
+  const th0 = await theme();
+  await s.key("?");
+  const inert = await s.eval(`document.getElementById("app").inert === true`);
+  await s.key("t");
+  const th1 = await theme();
+  await s.key("Tab");
+  await s.key("Tab");
+  const inside = await s.eval(`document.getElementById("help").contains(document.activeElement)`);
+  await s.key("Escape");
+  const after = await s.eval(`({ inert: document.getElementById("app").inert, help: document.getElementById("help").hidden })`);
+  check("the shortcuts dialog: the page behind is inert, t does nothing, Tab stays in it",
+    inert && th1 === th0 && inside && !after.inert && after.help, JSON.stringify({ inert, th0, th1, inside, after }));
+  await s.go(b);
+  await s.key("k", { ctrl: true, wait: 0 });
+  await s.key("t", { wait: 600 });
+  const typed = await s.eval(`({ theme: document.documentElement.dataset.theme, q: document.getElementById("palQ").value })`);
+  check("search: what is typed at once is the search, not a shortcut", typed.theme === th0 && typed.q === "t", JSON.stringify(typed));
+  await s.key("Escape");
+  const command = async q => {
+    await s.key("k", { ctrl: true, wait: 600 });
+    await s.type(q);
+    await s.key("Enter", { wait: 400 });
+  };
+  await command("single-key");
+  await s.key("t");
+  const off = await theme();
+  await command("single-key");
+  await s.key("t");
+  const on = await theme();
+  check("single-key shortcuts turn off and on from search", off === th0 && on !== th0, `${th0} ${off} ${on}`);
+  if (on !== th0) await s.key("t");
+  await s.eval(`localStorage.removeItem("ci-accelerator-keys")`);
+  check("dialogs: no errors", s.take().length === 0);
+}
+
+// The project switcher works beside a narrow or collapsed sidebar, and on
+// a phone from the header.
+async function projectSwitch(s) {
+  for (const [w, collapse] of [[1100, false], [1400, true]]) {
+    await s.size(w, 900);
+    await s.go("/");
+    const name = `${w}px${collapse ? ", sidebar collapsed" : ""}`;
+    if (collapse) await s.key("[");
+    if (await need(s, `${name}: the project switcher is there`, "#projBtn")) {
+      await s.click("#projBtn", 300);
+      const st = await s.eval(`(() => { const m = document.getElementById("projMenu"), r = m.getBoundingClientRect();
+        return { shown: !m.hidden && getComputedStyle(m).display !== "none" && r.width > 0, inside: r.left >= 0 && r.right <= innerWidth && r.top >= 0,
+          links: [...m.querySelectorAll("a.sbtn")].filter(a => a.getClientRects().length).length, expanded: document.getElementById("projBtn").getAttribute("aria-expanded") }; })()`);
+      check(`${name}: the project menu opens`, st.shown && st.inside && st.links > 0 && st.expanded === "true", JSON.stringify(st));
+      await s.key("Escape");
+      check(`${name}: Esc closes it, back on its button`, await s.eval(`document.getElementById("projMenu").hidden && document.activeElement.id === "projBtn"`));
+    }
+    if (collapse) await s.key("[");
+  }
+  await s.size(390, 844);
+  await s.go("/");
+  if (await need(s, "390px: the header has a project menu", "#mProj > summary")) {
+    await s.click("#mProj > summary", 300);
+    const ph = await s.eval(`(() => { const m = document.querySelector("#mProj .mclu-menu"), r = m.getBoundingClientRect();
+      return { open: document.getElementById("mProj").open, links: [...m.querySelectorAll("a.sbtn")].filter(a => a.getClientRects().length).length, inside: r.left >= 0 && r.right <= innerWidth + 1 }; })()`);
+    check("390px: the header's menu lists the projects", ph.open && ph.links > 0 && ph.inside, JSON.stringify(ph));
+  }
+  await s.size(1400, 900);
+  check("project switch: no errors", s.take().length === 0);
+}
+
+// Page structure and smaller fixes: a main landmark and a skip link, the
+// live clock shown but not announced, print styles, Ctrl in the shortcuts
+// on a non-Apple system, a node's Load rows on one line each, a step's
+// own page with an h1, the bottom bar inside a 340 px screen, the year
+// view of an image never pointing to a longer window.
+async function structure(s, pages) {
+  await s.size(1400, 900);
+  await s.go("/");
+  const st = await s.eval(`({ main: !!document.querySelector('#main[role="main"]'), liveRole: document.getElementById("live").getAttribute("aria-live"),
+    say: !!document.querySelector("#liveSay[role=status]"), kmod: (document.querySelector("#help kbd.kmod") || {}).textContent,
+    want: /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "\u2318" : "Ctrl",
+    print: [...document.styleSheets].some(ss => { try { return [...ss.cssRules].some(r => r.media && /print/.test(r.media.mediaText)); } catch (e) { return false; } }) })`);
+  check("pages: a main landmark, the live clock not announced, print styles, the system's modifier key",
+    st.main && st.liveRole === "off" && st.say && st.print && st.kmod === st.want, JSON.stringify(st));
+  await s.key("Tab");
+  check("Tab first reaches the skip link", await s.eval(`document.activeElement.matches("a.skip[href='#main']")`));
+  // The fixture with daemons (the one with a running build) has a node
+  // whose probe reports its load.
+  let np = null;
+  for (const x of pages.filter(p => /^\/nodes\/[^/?]+$/.test(p))) {
+    await s.go(x);
+    if (await s.eval(`!!document.querySelector(".nload .lrow")`)) { np = x; break; }
+  }
+  if (args["live-job"]) check("a node's page with its load", !!np);
+  if (np) {
+    const lr = await s.eval(`(() => { const r = document.querySelector(".nload .lrow"), cs = getComputedStyle(r);
+      return { cols: cs.gridTemplateColumns.split(" ").length, cursor: cs.cursor, h: Math.round(r.getBoundingClientRect().height) }; })()`);
+    check(`${np} the Load rows are one line each and not clickable`, lr.cols === 3 && lr.cursor !== "pointer" && lr.h < 30, JSON.stringify(lr));
+  }
+  const sp = pages.find(p => /^\/builds\/\d+\/steps\/\d+$/.test(p));
+  check("a step's own page", !!sp);
+  if (sp) {
+    await s.go(sp);
+    check(`${sp} names the step in an h1`, await s.eval(`!!document.querySelector("h1#drT")`));
+  }
+  const img = pages.find(p => /^\/images\/[^/?]+$/.test(p));
+  check("an image's page", !!img);
+  if (img) {
+    await s.go(img + "?window=1y");
+    check(`${img}?window=1y never asks for a longer window`, !(await s.eval(`/Try a longer window/.test(document.getElementById("main").innerText)`)));
+  }
+  await s.go("/builds");
+  const quiet = await s.eval(`(() => { const q = document.querySelector(".brow.quiet .stat"); return q ? getComputedStyle(q).opacity : null; })()`);
+  check("builds: a quiet row's status at full contrast", quiet === null || quiet === "1", String(quiet));
+  await s.size(340, 700);
+  await s.go("/");
+  const bb = await s.eval(`(() => { const r = document.getElementById("bbar").getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right), innerWidth]; })()`);
+  check("340px: the bottom bar fits the screen", bb[0] >= 0 && bb[1] <= bb[2], JSON.stringify(bb));
+  await s.size(1400, 900);
+  check("structure: no errors", s.take().length === 0);
+}
+
+// A stream that drops and comes back by itself (EventSource reconnects on
+// its own): the page asks for itself again, as what changed meanwhile was
+// never announced.
+async function reconnect(s, pages) {
+  await s.size(1400, 900);
+  const p = settled(pages).find(x => x !== args.live);
+  if (!p) return check("a pipeline page for the reconnect", false, "none found");
+  const { identifier } = await s.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const E = window.EventSource; if (!E) return;
+    window.__es = []; window.EventSource = class extends E { constructor(...a) { super(...a); window.__es.push(this); } }; })()` });
+  try {
+    await s.go(p);
+    const up = await s.until(`document.getElementById("live").textContent === "Live" && window.__es.length > 0 && window.__es[window.__es.length - 1].readyState === 1`);
+    await s.eval(`document.getElementById("live").textContent = "waiting"`);
+    await s.eval(`(() => { const es = window.__es[window.__es.length - 1]; es.dispatchEvent(new Event("error")); es.dispatchEvent(new Event("open")); })()`);
+    const caught = await s.until(`/^Updated/.test(document.getElementById("live").textContent)`, 4000);
+    check(`${p} after the stream came back by itself the page catches up`, up && caught, await s.eval(`document.getElementById("live").textContent`));
+  } finally {
+    await s.send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+  check("reconnect: no errors", s.take().length === 0);
 }
 
 // ---- run ----
@@ -978,6 +1230,12 @@ try {
   await jobPage(s, pages);
   await readersZone(s, pages);
   await keys(s, pages);
+  await keyboardReach(s, pages);
+  await filterKeys(s);
+  await dialogs(s, pages);
+  await projectSwitch(s);
+  await structure(s, pages);
+  await reconnect(s, pages);
   await notFound(s);
   if (args.running) await running(s);
   if (args["live-job"]) await liveBuild(s);

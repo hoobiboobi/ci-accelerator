@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -57,6 +58,9 @@ type NodesView struct {
 	RouterLine string
 	APIStatus  string
 	Measured   string
+	// Unknown: the controller did not answer, so the daemons are not known
+	// now (Measured says so); not "none".
+	Unknown bool
 }
 
 // NodeRow is one daemon in the table, and the head of its own page.
@@ -77,9 +81,12 @@ type NodeRow struct {
 	Cache                 int64
 	Inspected             bool
 	Err                   string
-	Segs                  []NSeg // the cache by kind
-	Disk                  *DiskView
-	Load                  *LoadView
+	// CacheFrom: the cache could not be listed (Err); the cache figures are
+	// of this reading, the disk and load figures are current.
+	CacheFrom string
+	Segs      []NSeg // the cache by kind
+	Disk      *DiskView
+	Load      *LoadView
 }
 
 // NodeNote is one problem, with the nodes it is on.
@@ -159,6 +166,9 @@ func (s *Server) nodeRow(d collector.DaemonState, c store.DaemonCount, loc *time
 	row := NodeRow{Name: d.Name, Short: shortDaemon(d.Name), Node: d.Inspection.Node, Version: d.Inspection.Version,
 		URL: nodeURL(d.Name), Ready: d.Connected, Builds: c.Builds, Farm: c.Farm, Unclear: c.Unclear,
 		Running: len(d.Active), Projects: c.ProjectCount, Err: d.InspectErr, Inspected: !d.InspectedAt.IsZero()}
+	if d.InspectErr != "" && !d.InspectedAt.IsZero() {
+		row.CacheFrom = stampOf(d.InspectedAt, loc, "15:04:05").Text
+	}
 	if row.Node == "" {
 		row.Node = c.Node
 	}
@@ -231,6 +241,33 @@ func nodeLabel(r NodeRow) string {
 // (A box shows its nodes to everyone signed in.)
 func (s *Server) nodesHidden(sh Shell) bool { return s.opt.Fleet != nil && sh.NoProjects }
 
+// namesHidden says whether the person on a page sees what builds name on
+// a node (running targets, cache mounts, base images) only as counts and
+// sizes: with sign-in, everyone but admins. Builds of every project share
+// the nodes, and those names are chosen by each project's jobs.
+func (s *Server) namesHidden(sh Shell) bool {
+	return s.opt.Auth != nil && (sh.Viewer == nil || !sh.Viewer.Admin)
+}
+
+// hiddenName stands for a name only admins see.
+const hiddenName = "name shown to admins"
+
+// daemonsUnknown says why no daemon is listed while the controller does
+// not answer.
+const daemonsUnknown = "The console's controller did not answer; the daemons are not known now. The page updates when it answers again."
+
+// daemons is the build daemons now, and whether they are known: a backend
+// in another process (the box's controller) may not answer, and then an
+// empty list means "not known", not "none".
+func (s *Server) daemons() ([]collector.DaemonState, bool) {
+	if k, ok := s.data.(interface {
+		DaemonsKnown() ([]collector.DaemonState, bool)
+	}); ok {
+		return k.DaemonsKnown()
+	}
+	return s.data.Daemons(), true
+}
+
 func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	loc := zone(r)
 	ctx := r.Context()
@@ -255,14 +292,16 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	daemons := s.data.Daemons()
+	daemons, known := s.daemons()
+	v.Unknown = !known
 	shown := map[string]bool{}
 	for _, d := range daemons {
 		shown[d.Name] = true
 	}
 	all := map[string]int{}
 	for name, c := range counts {
-		if !shown[name] && c.Builds > 0 {
+		// Not known now is not replaced.
+		if known && !shown[name] && c.Builds > 0 {
 			v.GoneBuilds += c.Builds
 			v.GoneDaemons++
 		}
@@ -277,8 +316,9 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	}
 	images := map[string][]int64{}
 	versions := map[string]bool{}
-	var gc []collector.GCRule
+	var gcs [][]collector.GCRule
 	var rows []NodeRow
+	var oldest time.Time
 	for _, d := range daemons {
 		c := counts[d.Name]
 		row := s.nodeRow(d, c, loc)
@@ -298,15 +338,24 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 			v.Probe = true
 		}
 		for name, n := range d.Inspection.Usage.ImageSizes {
-			images[name] = append(images[name], n)
+			if !s.namesHidden(sh) {
+				images[name] = append(images[name], n)
+			}
 		}
-		if len(gc) == 0 {
-			gc = d.Inspection.GC
+		if len(d.Inspection.GC) > 0 {
+			gcs = append(gcs, d.Inspection.GC)
 		}
-		if !d.InspectedAt.IsZero() {
-			v.Measured = "Read from the running daemons at " + stampOf(d.InspectedAt, loc, "15:04:05").Text
+		if !d.InspectedAt.IsZero() && (oldest.IsZero() || d.InspectedAt.Before(oldest)) {
+			oldest = d.InspectedAt
 		}
 		rows = append(rows, row)
+	}
+	switch {
+	case !known:
+		v.Measured = daemonsUnknown
+	case !oldest.IsZero():
+		// Each daemon is read on its own; one that lags dates the page.
+		v.Measured = "Read from the running daemons; the oldest reading at " + stampOf(oldest, loc, "15:04:05").Text
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if a, b := levelRank(rows[i].Level), levelRank(rows[j].Level); a != b {
@@ -328,11 +377,11 @@ func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 		}
 		v.Rows = append(v.Rows, row)
 	}
-	if in.Only.ID != 0 {
+	if in.Only.ID != 0 && known {
 		v.Where = where(sh.Project, daemons, counts, rows, loc)
 	}
 	v.Dups, v.DupMore, v.DupBytes = duplicates(images)
-	v.GC, v.Caps = gcRows(gc)
+	v.GC, v.Caps = gcFleet(gcs)
 	if v.Cache, err = s.bucket(ctx, sh.Project.ProjectKey, loc); err != nil {
 		s.fail(w, err)
 		return
@@ -354,7 +403,11 @@ func nodeNotes(rows []NodeRow) []NodeNote {
 		case !r.Ready:
 			down = append(down, nodeLabel(r)+" (for "+r.Down+")")
 		case r.Err != "":
-			unread = append(unread, nodeLabel(r))
+			label := nodeLabel(r)
+			if r.CacheFrom != "" {
+				label += " (cache figures from " + r.CacheFrom + ")"
+			}
+			unread = append(unread, label)
 		}
 		// A daemon that is not reachable has its last reading only.
 		if r.Disk == nil || !r.Ready {
@@ -387,7 +440,7 @@ func nodeNotes(rows []NodeRow) []NodeNote {
 	}
 	if len(unread) > 0 {
 		out = append(out, NodeNote{Level: "warn", Title: "A daemon's cache could not be read", Nodes: unread,
-			Text: "Its row shows the builds the console stored; the cache and disk figures come back with the next reading (each minute)."})
+			Text: "Its row shows the builds the console stored; the cache figures come back once the daemon's cache can be listed again; disk and load are read each minute."})
 	}
 	return out
 }
@@ -474,6 +527,37 @@ func gcRows(gc []collector.GCRule) (rows []GCRow, caps []KV) {
 	return rows, caps
 }
 
+// gcFleet is what the daemons keep, said once for all: a limit that is
+// not the same on every node (the chart's percentages are of each node's
+// own disk) is said to differ, each node's page shows its own.
+func gcFleet(gcs [][]collector.GCRule) (rows []GCRow, caps []KV) {
+	if len(gcs) == 0 {
+		return gcRows(nil)
+	}
+	rows, caps = gcRows(gcs[0])
+	for _, gc := range gcs[1:] {
+		other, otherCaps := gcRows(gc)
+		for i := range rows {
+			if i >= len(other) || other[i] != rows[i] {
+				rows[i].Rule = differs
+			}
+		}
+		for i := range caps {
+			same := false
+			for _, kv := range otherCaps {
+				same = same || kv == caps[i]
+			}
+			if !same {
+				caps[i].V = differs
+			}
+		}
+	}
+	return rows, caps
+}
+
+// differs stands for a limit that is not the same on every node.
+const differs = "differs per node (each node's page shows its own)"
+
 // apiStatus is GitLab's API as the console last found it.
 func (s *Server) apiStatus(loc *time.Location) string {
 	if s.opt.GitLab == nil {
@@ -497,7 +581,7 @@ func (s *Server) node(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := r.PathValue("daemon")
 	var d *collector.DaemonState
-	daemons := s.data.Daemons()
+	daemons, known := s.daemons()
 	for i := range daemons {
 		if daemons[i].Name == name {
 			d = &daemons[i]
@@ -518,6 +602,14 @@ func (s *Server) node(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if d == nil && !known {
+		// Not "gone": the controller did not answer. The page updates
+		// when it answers again.
+		sh.Title, sh.LiveNodes = "Build node not known now", true
+		w.Header().Set("Retry-After", "5")
+		s.render(w, "notfound", http.StatusServiceUnavailable, NotFound{Shell: sh, What: "node", Hint: daemonsUnknown})
+		return
+	}
 	if d == nil {
 		s.nodeGone(w, r, sh, name, counts[name], daemons, loc)
 		return
@@ -526,7 +618,11 @@ func (s *Server) node(w http.ResponseWriter, r *http.Request) {
 	sh.Title = shortDaemon(name) + " · Build nodes"
 	c := counts[name]
 	v := &NodeView{Row: s.nodeRow(*d, c, loc), Persists: d.Inspection.Persists}
-	if !d.InspectedAt.IsZero() {
+	switch {
+	case v.Row.CacheFrom != "":
+		// The disk and load figures are current; the cache's are not.
+		v.Measured = "cache figures from " + v.Row.CacheFrom
+	case !d.InspectedAt.IsZero():
 		v.Measured = "read at " + stampOf(d.InspectedAt, loc, "15:04:05").Text
 	}
 	if len(d.Active) == 0 {
@@ -536,7 +632,11 @@ func (s *Server) node(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, a := range d.Active {
 		age := s.now().Sub(a.Started)
-		v.Active = append(v.Active, ActiveRow{Target: buildName(a.Target, nil), For: duration(age.Truncate(time.Second)), Stuck: age > stuckAfter})
+		row := ActiveRow{Target: buildName(a.Target, nil), For: duration(age.Truncate(time.Second)), Stuck: age > stuckAfter}
+		if s.namesHidden(sh) {
+			row.Target = hiddenName
+		}
+		v.Active = append(v.Active, row)
 	}
 	keep := mountKeep(d.Inspection.GC)
 	for i, m := range d.Inspection.Usage.MountList {
@@ -545,6 +645,9 @@ func (s *Server) node(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		row := MountRow{Name: mountName(m.Description), Size: bytesText(m.Size)}
+		if s.namesHidden(sh) {
+			row.Name = hiddenName
+		}
 		if keep > 0 && !m.LastUsed.IsZero() {
 			row.Until = m.LastUsed.Add(keep).In(loc).Format("2 Jan")
 		}
@@ -708,7 +811,8 @@ func diskView(in collector.Inspection) *DiskView {
 			v.Segs = append(v.Segs, NSeg{Class: sg.class, Label: sg.label, Size: bytesText(int64(sg.n)), Flex: pct(sg.n)})
 		}
 	}
-	share := func(n uint64) string { return strconv.FormatFloat(100*float64(n)/total, 'f', 0, 64) + " %" }
+	// Rounded down: "9 %" next to "Under 10 % available", never "10 %".
+	share := func(n uint64) string { return strconv.FormatFloat(math.Floor(100*float64(n)/total), 'f', 0, 64) + " %" }
 	v.Rows = append(v.Rows, KV{"Disk", bytesText(int64(d.Total))},
 		KV{"Free", bytesText(int64(d.Free)) + " (" + share(d.Free) + ")"},
 		KV{"Available to pods", bytesText(int64(d.Available)) + " (" + share(d.Available) + ")"})
@@ -733,8 +837,11 @@ func diskView(in collector.Inspection) *DiskView {
 	case avail < evictImagefs:
 		raise("warn", "Under 15 % available: close to the kubelet's eviction thresholds if the cache shares the node's disk.")
 	}
-	if minFree > 0 && int64(d.Free) < minFree {
-		raise("warn", "Less free than the garbage collection keeps ("+bytesText(minFree)+"): BuildKit deletes cache after each build until it is.")
+	// A full cache sits at the floor: each build takes free space below
+	// it, and BuildKit's next collection gives it back. Only a node well
+	// under it (by 5 % of the disk) needs a look.
+	if minFree > 0 && int64(d.Free) < minFree-int64(d.Total/20) {
+		raise("warn", "Well under the free space the garbage collection keeps ("+bytesText(minFree)+"): BuildKit deletes cache after builds to get back to it, but never what it always keeps (reservedSpace), and other files on the disk are not its to delete.")
 	}
 	if d.Inodes > 0 && float64(d.InodesFree)/float64(d.Inodes) < 0.05 {
 		raise("warn", "Under 5 % of inodes free: the disk fills up by file count before bytes.")
@@ -760,11 +867,13 @@ type GCRow struct{ What, Rule string }
 
 // BucketView is what the runners' S3 cache holds for the project.
 type BucketView struct {
-	Bytes   int64
-	Keys    int
-	Scanned string
-	NoRule  bool
-	Err     string
+	Bytes int64
+	Keys  int
+	// Scanned is when the figures were listed ("never" before a listing
+	// succeeded); Attempted is when the failed listing of Err was tried.
+	Scanned, Attempted string
+	NoRule             bool
+	Err                string
 }
 
 // mountKeep is how long cache mounts are kept after their last use.
@@ -838,7 +947,7 @@ func (s *Server) bucket(ctx context.Context, p store.ProjectKey, loc *time.Locat
 	for _, o := range objs {
 		v.Bytes += o.Bytes
 	}
-	var at time.Time
+	var at, tried time.Time
 	for _, st := range stores {
 		if st.Scanned.After(at) {
 			at = st.Scanned
@@ -846,11 +955,14 @@ func (s *Server) bucket(ctx context.Context, p store.ProjectKey, loc *time.Locat
 		if st.Lifecycle != nil && !*st.Lifecycle {
 			v.NoRule = true
 		}
-		if st.Err != "" {
-			v.Err = st.Err
+		if st.Err != "" && (v.Err == "" || st.Attempted.After(tried)) {
+			v.Err, tried = st.Err, st.Attempted
 		}
 	}
-	v.Scanned = ago(at, loc)
+	v.Scanned, v.Attempted = ago(at, loc), ago(tried, loc)
+	if at.IsZero() {
+		v.Scanned = "never"
+	}
 	return v, nil
 }
 

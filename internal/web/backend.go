@@ -86,6 +86,9 @@ type Signer interface {
 	Begin(w http.ResponseWriter, r *http.Request, instance, to string) error
 	Finish(w http.ResponseWriter, r *http.Request, instance string) (string, error)
 	Load(w http.ResponseWriter, r *http.Request) (*auth.Viewer, error)
+	// Check is Load without renewing the session (an open event stream
+	// cannot set the cookie again, so the next page does).
+	Check(r *http.Request) (*auth.Viewer, error)
 	SignOut(w http.ResponseWriter, r *http.Request) error
 	CanRead(ctx context.Context, v *auth.Viewer, instance string, project uint64) (bool, error)
 }

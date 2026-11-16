@@ -2,7 +2,7 @@
 {{define "content"}}
 <div class="page">
   <header class="phead"><div class="crumbs">{{with .Project}}{{projName .Path .ID}}{{end}}</div><div class="titlerow"><h1 class="t" tabindex="-1">Builds</h1>
-    <div class="tools"><a class="btn" href="{{.PickURL}}" aria-pressed="{{if .F.Pick}}true{{else}}false{{end}}">{{icon "cmp" 13}}<span>Compare two builds</span></a></div></div></header>
+    <div class="tools"><a class="btn" href="{{.PickURL}}" aria-pressed="{{if .F.Pick}}true{{else}}false{{end}}" role="button">{{icon "cmp" 13}}<span>Compare two builds</span></a></div></div></header>
   {{if .F.Pick}}<div class="pickbar" role="status">{{icon "cmp" 14}}{{with .Anchor}}<span>Comparing with <b>{{.Target}}</b>{{with .PipeLabel}} · {{.}}{{end}} · <span title="{{.When.UTC}}">{{.When}}</span> {{template "status" .Status}} — <b>pick the second build</b></span><a class="btn" href="{{$.Again}}">Change</a>
     {{else}}<span><b>Pick the first build</b> — then a second one of the same image.</span>{{end}}<a class="btn ml" href="{{.Cancel}}">{{icon "x" 12}}Cancel</a></div>
   {{with .Anchor}}<p class="muted">Only builds of <b>{{.Target}}</b> are listed: two builds are compared when they are of the same image.</p>{{end}}{{end}}
