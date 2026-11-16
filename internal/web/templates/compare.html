@@ -18,7 +18,7 @@
 </section>
 
 <section class="box" aria-labelledby="caT"><div class="boxh"><h2 class="h" id="caT">Build arguments</h2></div>
-  {{if .Args}}<div class="tbox"><table class="cmp {{if .A.Self}}self-a{{else}}self-b{{end}}"><tbody>{{range .Args}}<tr{{if .Differs}} class="dif"{{end}}><th scope="row" class="mono">{{.K}}</th><td class="mono">{{if .A}}{{.A}}{{else}}<span class="muted">not set</span>{{end}}</td><td class="mono">{{if .B}}{{.B}}{{else}}<span class="muted">not set</span>{{end}}</td></tr>{{end}}</tbody></table></div>
+  {{if .Args}}<div class="tbox"><table class="cmp {{if .A.Self}}self-a{{else}}self-b{{end}}"><thead><tr><th>Argument</th><th>Earlier</th><th>Later</th></tr></thead><tbody>{{range .Args}}<tr{{if .Differs}} class="dif"{{end}}><th scope="row" class="mono">{{.K}}</th><td class="mono">{{if .A}}{{.A}}{{else}}<span class="muted">not set</span>{{end}}</td><td class="mono">{{if .B}}{{.B}}{{else}}<span class="muted">not set</span>{{end}}</td></tr>{{end}}</tbody></table></div>
   {{else}}<p class="muted pad">Neither build set a build argument.</p>{{end}}
 </section>
 

@@ -13,8 +13,8 @@ import (
 
 // ResourcesView is a build's Resources tab: what its executed steps used,
 // the heaviest first, and how many cores they wanted together over the
-// build. Every figure is BuildKit's cgroup reading of the step; nothing
-// is estimated.
+// build. Every figure is BuildKit's cgroup reading of the step; the cores
+// over time add up each running step's average over its whole run.
 type ResourcesView struct {
 	Rows []ResRow
 	// More folds the steps after resRows into one line: how many, their
@@ -31,8 +31,8 @@ type ResourcesView struct {
 	TopMemory, TopMemoryStep string
 	// Demand is the sum of the running steps' cores over the build.
 	Demand *DemandChart
-	// Peak says when the steps wanted more cores than the node has; ""
-	// when they never did or the node's cores are unknown.
+	// Peak says when the steps' averages added up to more cores than the
+	// node has; "" when they never did or the node's cores are unknown.
 	Peak string
 }
 
@@ -109,7 +109,11 @@ func resources(b *history.Build, views []StepView, cores int, wall time.Duration
 	for n, e := range exs {
 		if e.s.Usage.Memory > topMem {
 			topMem = e.s.Usage.Memory
-			v.TopMemory, v.TopMemoryStep = bytesText(topMem), e.s.Key
+			// Named by its command, as the rows below name it.
+			v.TopMemory, v.TopMemoryStep = bytesText(topMem), stepNameShort(e.s.Name)
+			if v.TopMemoryStep == "" {
+				v.TopMemoryStep = e.s.Key
+			}
 		}
 		if n >= resRows {
 			continue
@@ -257,7 +261,10 @@ func demand(steps []history.Step, start time.Time, wall time.Duration, cores int
 		}
 		if above > 0 {
 			c.Over = poly(float64(cores), true)
-			peak = fmt.Sprintf("The steps wanted up to %s cores of the node's %d: more than it has for %s of the build.",
+			// Each step's rate is its average over its whole run: a sum
+			// above the cores is steps competing for them, or a step that
+			// waited part of its run. The text says no more.
+			peak = fmt.Sprintf("The running steps' averages add up to %s cores of the node's %d, more than it has, for %s of the build: they competed for the CPU, or a step waited part of its run.",
 				strconv.FormatFloat(most, 'f', 1, 64), cores, duration(above))
 		}
 	}

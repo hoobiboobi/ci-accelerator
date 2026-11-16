@@ -32,13 +32,22 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 	if err := csrf.AddTrustedOrigin(a.PublicURL()); err != nil {
 		s.log.Warn("console origin not trusted for posts", "err", err)
 	}
+	hsts := strictTransport(a.PublicURL())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hsts {
+			// Sign-in needs https: a browser that came once never asks
+			// over plain http again.
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		p := r.URL.Path
-		if p == "/healthz" || p == "/livez" || strings.HasPrefix(p, "/static/") {
+		// The open parts are judged on the path as sent, the way the mux
+		// routes it: "/static%2Fx" is no static file.
+		ep := r.URL.EscapedPath()
+		if p == "/healthz" || p == "/livez" || strings.HasPrefix(ep, "/static/") {
 			h.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(p, "/auth/") {
+		if strings.HasPrefix(ep, "/auth/") {
 			csrf.Handler(h).ServeHTTP(w, r)
 			return
 		}
@@ -47,7 +56,7 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 			s.fail(w, err)
 			return
 		}
-		w.Header().Set("Vary", "Cookie")
+		w.Header().Add("Vary", "Cookie")
 		if v == nil {
 			if r.Method == http.MethodGet && isPage(s.pagePath(p)) && navigation(r) {
 				http.Redirect(w, r, "/auth/sign-in?to="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
@@ -58,6 +67,7 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 			return
 		}
 		if strings.HasPrefix(p, "/api/") && !v.Admin && !(s.opt.Hub != nil && strings.HasPrefix(p, "/api/v1/fleet/")) {
+			w.Header().Set("Cache-Control", "no-store")
 			http.Error(w, "The console's JSON API answers admins only.", http.StatusForbidden)
 			return
 		}
@@ -71,6 +81,21 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 		}
 		csrf.Handler(h).ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// strictTransport says whether the console tells browsers to reach it
+// over https only: its public address is https, and not a loopback one.
+func strictTransport(public string) bool {
+	u, err := url.Parse(public)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip == nil || !ip.IsLoopback()
 }
 
 // pagePath is a path as isPage judges it: at a fleet hub, a cluster's

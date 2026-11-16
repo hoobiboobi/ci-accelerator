@@ -639,6 +639,7 @@ func (s *hfSigner) Finish(http.ResponseWriter, *http.Request, string) (string, e
 	return auth.SafePath(s.to), nil
 }
 func (s *hfSigner) Load(http.ResponseWriter, *http.Request) (*auth.Viewer, error) { return nil, nil }
+func (s *hfSigner) Check(*http.Request) (*auth.Viewer, error)                     { return nil, nil }
 func (s *hfSigner) SignOut(http.ResponseWriter, *http.Request) error              { return nil }
 func (s *hfSigner) CanRead(_ context.Context, _ *auth.Viewer, _ string, project uint64) (bool, error) {
 	return s.read[project], nil

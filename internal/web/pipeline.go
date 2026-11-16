@@ -455,6 +455,9 @@ func oneImageSentence(v *PipelineView) string {
 	case "unclear":
 		return fmt.Sprintf("The image was rebuilt; files or cache, unclear. It was ready %s after its build started.", v.Ready)
 	case "failed":
+		if isCanceled(v.Rebuilt[0].Status) {
+			return "The image's build was canceled."
+		}
 		return "The image's build failed."
 	}
 	return fmt.Sprintf("The image was rebuilt. It was ready %s after its build started.", v.Ready)
@@ -474,10 +477,14 @@ func pipelineSentence(v *PipelineView) string {
 	}
 	by := map[string]int{}
 	for _, it := range v.Rebuilt {
-		by[it.Status.Key]++
+		k := it.Status.Key
+		if isCanceled(it.Status) {
+			k = "canceled"
+		}
+		by[k]++
 	}
 	var parts []string
-	for _, k := range []string{"change", "farm", "unclear", "failed", "running"} {
+	for _, k := range []string{"change", "farm", "unclear", "failed", "canceled", "running"} {
 		if by[k] == 0 {
 			continue
 		}
@@ -490,6 +497,8 @@ func pipelineSentence(v *PipelineView) string {
 			parts = append(parts, fmt.Sprintf("%d unclear (files or cache)", by[k]))
 		case "failed":
 			parts = append(parts, fmt.Sprintf("%d failed", by[k]))
+		case "canceled":
+			parts = append(parts, fmt.Sprintf("%d canceled", by[k]))
 		case "running":
 			parts = append(parts, fmt.Sprintf("%d still building", by[k]))
 		}
@@ -635,6 +644,22 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 			pipeline = p.Build.Attribution.Pipeline
 		}
 	}
+	if len(ids) > 0 && j == nil {
+		// A job not known: only someone who may see its build learns that
+		// it built something, as the build's page would decide.
+		p, err := s.buildPage(ctx, ids[len(ids)-1])
+		if err == nil && s.askOwner(r, p) {
+			p, err = s.buildPage(ctx, ids[len(ids)-1])
+		}
+		if errors.Is(err, store.ErrNotFound) || (err == nil && !s.mayBuild(r, p)) {
+			s.notFound(w, r, "job")
+			return
+		}
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 	if len(ids) > 0 {
 		// A job with several builds opens its last; the page lists the others.
 		// The link in a job's log comes here: the page says so. (The build
@@ -714,7 +739,7 @@ func (s *Server) jobLog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	api := s.api(r)
-	if j == nil || api == nil || !s.may(r, instance, j.ProjectID) {
+	if j == nil || api == nil || !api.Knows(instance) || !s.may(r, instance, j.ProjectID) {
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprint(w, "The console has no GitLab token, or does not know this job.")
 		return

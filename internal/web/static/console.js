@@ -58,24 +58,36 @@
   const collapseBtn = $("#collapseBtn");
   if (collapseBtn) collapseBtn.addEventListener("click", () => setCollapsed(app.dataset.collapsed !== "true"));
   // The project switcher, and in a fleet hub the cluster switcher above it.
-  for (const [b, m] of [["#projBtn", "#projMenu"], ["#clusterBtn", "#clusterMenu"]]) {
-    const btn = $(b), menu = $(m);
-    if (!btn || !menu) continue;
+  // Beside a narrow or collapsed sidebar a menu pops out over the page,
+  // level with its button: one at a time, and a click elsewhere or Esc
+  // closes it.
+  const menus = [["#projBtn", "#projMenu"], ["#clusterBtn", "#clusterMenu"]]
+    .map(([b, m]) => [$(b), $(m)]).filter(([btn, menu]) => btn && menu);
+  function closeMenus(except) {
+    let closed = false;
+    for (const [btn, menu] of menus) {
+      if (menu === except || menu.hidden) continue;
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+      closed = true;
+    }
+    return closed;
+  }
+  for (const [btn, menu] of menus) {
     btn.addEventListener("click", () => {
+      closeMenus(menu);
+      menu.style.setProperty("--mtop", Math.round(btn.getBoundingClientRect().top) + "px");
       menu.hidden = !menu.hidden;
       btn.setAttribute("aria-expanded", String(!menu.hidden));
     });
   }
-  // Beside a narrow sidebar the cluster menu pops out over the page: a
-  // click elsewhere closes it.
-  {
-    const btn = $("#clusterBtn"), menu = $("#clusterMenu");
-    if (btn && menu) document.addEventListener("click", ev => {
-      if (menu.hidden || btn.contains(ev.target) || menu.contains(ev.target)) return;
+  document.addEventListener("click", ev => {
+    for (const [btn, menu] of menus) {
+      if (menu.hidden || btn.contains(ev.target) || menu.contains(ev.target)) continue;
       menu.hidden = true;
       btn.setAttribute("aria-expanded", "false");
-    });
-  }
+    }
+  });
 
   // ---- a fleet hub's cluster form: settings that apply only when another
   // has a value (data-when="key=value", "key=*" for any) ----
@@ -93,6 +105,14 @@
     form.addEventListener("change", show);
     show();
   }
+
+  // A link that is a toggle button (role=button, aria-pressed) answers
+  // Space as a button does.
+  document.addEventListener("keydown", ev => {
+    if (ev.key !== " " || !ev.target.closest) return;
+    const a = ev.target.closest('a[role="button"]');
+    if (a) { ev.preventDefault(); a.click(); }
+  });
 
   // ---- copy buttons ----
   document.addEventListener("click", ev => {
@@ -203,11 +223,24 @@
     refitWaterfalls();
   }
   function setupTabs() {
-    $$("[data-tab]", main).forEach(t => t.addEventListener("click", ev => {
-      ev.preventDefault();
+    const tabs = $$("[data-tab]", main);
+    const pick = t => {
       history.replaceState(null, "", "#" + t.dataset.tab);
       showTab(t.dataset.tab);
-    }));
+    };
+    tabs.forEach((t, i) => {
+      t.addEventListener("click", ev => { ev.preventDefault(); pick(t); });
+      // Only the selected tab is a tab stop: the arrow keys, Home and End
+      // move to the others (and show them).
+      t.addEventListener("keydown", ev => {
+        const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[ev.key];
+        if (to === undefined) return;
+        ev.preventDefault();
+        const next = tabs[(to + tabs.length) % tabs.length];
+        pick(next);
+        next.focus();
+      });
+    });
     showTab(location.hash.slice(1));
   }
 
@@ -343,6 +376,7 @@
   // ---- step hints and the step panel ----
   let popFor = null;
   let opened = null; // "build/step" whose panel is open
+  let opener = null; // the element focused when it opened
   function showPop(el) {
     const tpl = document.getElementById("pop-" + el.dataset.step);
     if (!tpl || !pop || matchMedia("(max-width: 760px)").matches) return;
@@ -355,12 +389,23 @@
     if (y + h > window.innerHeight - 8) y = Math.max(8, r.top - h - 6);
     pop.style.left = x + "px";
     pop.style.top = y + "px";
+    if (popFor && popFor !== el) popFor.removeAttribute("aria-describedby");
+    // The hint describes the row while it shows (a screen reader reads it).
+    el.setAttribute("aria-describedby", "pop");
     popFor = el;
   }
-  function hidePop() { if (pop) pop.hidden = true; popFor = null; }
+  function hidePop() {
+    if (pop) pop.hidden = true;
+    if (popFor) popFor.removeAttribute("aria-describedby");
+    popFor = null;
+  }
 
   async function openPanel(build, step, tab) {
     if (!drawer) return;
+    // Where Esc takes the reader back to: what opened the first panel (a
+    // panel moving to another step keeps it).
+    const from = document.activeElement;
+    if (drawer.hidden && from && main.contains(from)) opener = from;
     hidePop();
     let res;
     try { res = await fetch(BASE + "/builds/" + build + "/steps/" + step + "?part=panel"); } catch (e) { toast("Could not open the step: the console is not reachable"); return; }
@@ -398,12 +443,19 @@
     if (!drawer || drawer.hidden) return false;
     drawer.hidden = true;
     drawer.replaceChildren();
-    const was = opened;
+    const was = opened, from = opener;
     opened = null;
+    opener = null;
     markOpen();
     if (was) {
-      const el = $('[data-step="' + was.split("/")[1] + '"]:not([data-dtab-open])', main);
-      if (el && el.offsetParent !== null) el.focus();
+      // The element that opened it, or (replaced by a live update since)
+      // its step's row in the steps table or on the timeline.
+      const [b, s] = was.split("/");
+      const ctx = $("#ctx", main);
+      const el = [from && from.isConnected ? from : null,
+        ctx && ctx.dataset.build === b ? $('[data-step="' + s + '"]:not([data-dtab-open])', main) : null,
+        $('[data-wstep="' + was + '"]', main)].find(x => x && x.offsetParent !== null);
+      if (el) el.focus({ preventScroll: true });
     }
     return true;
   }
@@ -536,11 +588,37 @@
   // focus, so clicking a result after typing would run the search instead.
   // The address keeps only the filters that are set (dates only for a
   // period of dates).
+  // A control changed from the keyboard (the arrow keys change a closed
+  // select one option at a time) applies on Enter or once focus leaves
+  // it, not at every key; the page that loads then focuses it again.
   function setupFilters() {
+    let again = null;
+    try { again = sessionStorage.getItem("ci-accelerator-refocus"); sessionStorage.removeItem("ci-accelerator-refocus"); } catch (e) { /* storage blocked */ }
+    const was = again && document.getElementById(again);
+    if (was && main.contains(was)) was.focus();
     $$("form[data-autosubmit]", main).forEach(f => {
       const btn = $('button[type="submit"]', f);
       if (btn) btn.hidden = true;
-      $$('select, input:not([type="search"])', f).forEach(el => el.addEventListener("change", () => f.requestSubmit ? f.requestSubmit() : f.submit()));
+      const apply = el => {
+        if (el.id) { try { sessionStorage.setItem("ci-accelerator-refocus", el.id); } catch (e) { /* storage blocked */ } }
+        if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      };
+      $$('select, input:not([type="search"])', f).forEach(el => {
+        const box = el.type === "checkbox" || el.type === "radio";
+        let keyed = false, pending = false;
+        if (!box) {
+          el.addEventListener("keydown", ev => {
+            if (ev.key === "Enter" && pending) { ev.preventDefault(); pending = false; apply(el); return; }
+            if (ev.key !== "Tab" && ev.key !== "Shift") keyed = true;
+          });
+          el.addEventListener("pointerdown", () => { keyed = false; });
+          el.addEventListener("blur", () => { if (pending) { pending = false; apply(el); } });
+        }
+        el.addEventListener("change", () => {
+          if (keyed) { pending = true; return; }
+          apply(el);
+        });
+      });
       f.addEventListener("submit", ev => {
         ev.preventDefault();
         const period = f.elements.period ? f.elements.period.value : "";
@@ -791,6 +869,24 @@
     { kind: "Command", label: "Keyboard shortcuts", sub: "?", run: () => openHelp() },
     { kind: "Command", label: "Collapse sidebar", sub: "[", run: () => setCollapsed(app.dataset.collapsed !== "true") },
   ];
+  // Single-key shortcuts (t, [, e, c, x, /, ?, g then a letter) can be
+  // turned off, remembered in this browser; Ctrl K and Esc always work.
+  let keysOn = store.get("keys") !== "off";
+  function toggleKeys() {
+    keysOn = !keysOn;
+    if (keysOn) store.del("keys"); else store.set("keys", "off");
+    toast(keysOn ? "Single-key shortcuts on" : "Single-key shortcuts off");
+  }
+  // From the page itself: the projects of the switcher, signing out, and
+  // the shortcuts' switch.
+  function pageCommands() {
+    const out = $$("#projMenu a.sbtn").filter(a => a.getAttribute("aria-current") !== "true")
+      .map(a => ({ kind: "Project", label: a.textContent.trim(), sub: "switch to this project", url: a.getAttribute("href") }));
+    const so = $("form.signout");
+    if (so) out.push({ kind: "Command", label: "Sign out", run: () => (so.requestSubmit ? so.requestSubmit() : so.submit()) });
+    out.push({ kind: "Command", label: keysOn ? "Turn single-key shortcuts off" : "Turn single-key shortcuts on", sub: "t [ e c x / ? g", run: toggleKeys });
+    return out;
+  }
   // Comparing builds: from anywhere, and this build when one is open.
   function compareCommands() {
     if (HUB) return [];
@@ -822,7 +918,7 @@
   }
   function search() {
     const q = palQ.value.trim().toLowerCase();
-    const items = (index || []).concat(commands, compareCommands());
+    const items = (index || []).concat(commands, compareCommands(), pageCommands());
     results = [];
     items.forEach(it => {
       if (!q) { results.push({ it, idx: [], score: 0 }); return; }
@@ -831,7 +927,7 @@
       if (it.sub && fuzzy(q, it.sub)) results.push({ it, idx: [], score: 100 });
     });
     if (q) results.sort((a, b) => b.score - a.score);
-    const order = ["Image", "Pipeline", "Node", "Page", "Command", "Search"];
+    const order = ["Image", "Pipeline", "Node", "Project", "Page", "Command", "Search"];
     results = results.slice(0, 40).sort((a, b) => order.indexOf(a.it.kind) - order.indexOf(b.it.kind));
     // The index holds recent pipelines only: the pipelines page searches
     // them all.
@@ -886,13 +982,23 @@
     closePal(true);
     if (r.it.run) r.it.run(); else location.href = r.it.url;
   }
+  // While a dialog is open the page behind it is inert: nothing behind it
+  // can be reached, and Tab goes round the dialog's own controls.
+  function setInert(on) {
+    for (const el of [app, $("#bbar")]) if (el) el.inert = on;
+  }
   async function openPal() {
     if (!pal) return;
     closeHelp(true);
-    lastFocus = document.activeElement;
+    closeMenus();
+    if (pal.hidden) lastFocus = document.activeElement;
     pal.hidden = false;
     scrim.hidden = false;
+    setInert(true);
     palQ.value = "";
+    // Focused before the index arrives: what is typed meanwhile is the
+    // search, not shortcuts.
+    palQ.focus();
     let failed = false;
     if (HUB) index = [];
     if (!index) {
@@ -903,23 +1009,26 @@
         else failed = res.status;
       } catch (e) { failed = true; }
     }
+    if (pal.hidden) return; // closed while the index was read
     search();
     if (failed) toast(failed === 502 ? "Search lists only commands: this cluster is not connected now" : "Search lists only commands: the console did not answer");
-    palQ.focus();
   }
   function closePal(keep) {
     if (!pal || pal.hidden) return false;
     pal.hidden = true;
     scrim.hidden = true;
+    setInert(false);
     if (!keep && lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
     return true;
   }
   function openHelp() {
     if (!help) return;
     closePal(true);
-    lastFocus = document.activeElement;
+    closeMenus();
+    if (help.hidden) lastFocus = document.activeElement;
     help.hidden = false;
     scrim.hidden = false;
+    setInert(true);
     const x = $("[data-close-help]", help);
     if (x) x.focus();
   }
@@ -927,6 +1036,7 @@
     if (!help || help.hidden) return false;
     help.hidden = true;
     scrim.hidden = true;
+    setInert(false);
     if (!keep && lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
     return true;
   }
@@ -944,8 +1054,25 @@
   if (bSearch) bSearch.addEventListener("click", openPal);
   if (helpBtn) helpBtn.addEventListener("click", openHelp);
   if (help) help.addEventListener("click", ev => { if (ev.target.closest("[data-close-help]")) closeHelp(); });
-  const kbdK = $("#kbdK");
-  if (kbdK && !/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) kbdK.textContent = "Ctrl K";
+  // The Command key on Apple devices, Ctrl elsewhere: the sidebar's key
+  // and the shortcuts' list.
+  if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
+    const kbdK = $("#kbdK");
+    if (kbdK) kbdK.textContent = "Ctrl K";
+    $$("kbd.kmod").forEach(k => { k.textContent = "Ctrl"; });
+  }
+  // Tab inside an open dialog goes round its own controls.
+  document.addEventListener("keydown", ev => {
+    if (ev.key !== "Tab") return;
+    const dlg = [pal, help].find(d => d && !d.hidden);
+    if (!dlg) return;
+    const els = $$("input, button, a[href], [tabindex]:not([tabindex='-1'])", dlg).filter(e => !e.disabled && e.getClientRects().length);
+    if (!els.length) return;
+    const i = els.indexOf(document.activeElement);
+    const to = ev.shiftKey ? (i <= 0 ? els.length - 1 : i - 1) : (i < 0 || i === els.length - 1 ? 0 : i + 1);
+    ev.preventDefault();
+    els[to].focus();
+  });
 
   // ---- keyboard ----
   let gPressed = 0;
@@ -954,13 +1081,16 @@
     if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); openPal(); return; }
     if (ev.key === "Escape") {
       if (closePal() || closeHelp() || closePanel()) return;
+      const menu = menus.find(([, m]) => !m.hidden);
+      if (menu) { closeMenus(); menu[0].focus(); return; }
       if (pop && !pop.hidden) { hidePop(); return; }
       if (typing) { ev.target.blur(); return; }
       const back = $("[data-back]", main);
       if (back) location.href = back.getAttribute("href");
       return;
     }
-    if (typing || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (typing || ev.metaKey || ev.ctrlKey || ev.altKey || !keysOn) return;
+    if ((pal && !pal.hidden) || (help && !help.hidden)) return;
     if (gPressed && Date.now() - gPressed < 1200 && !HUB) {
       gPressed = 0;
       const to = { p: BASE + "/", s: BASE + "/insights", b: BASE + "/builds", i: BASE + "/images", n: BASE + "/nodes" }[ev.key];
@@ -1012,28 +1142,61 @@
   else if (live && live !== "all") params.set("pipeline", live);
   if (main.dataset.liveNodes) params.set("nodes", "1");
   const filterQ = params.toString() ? "?" + params.toString() : "";
-  let timer = null, busy = false, signedOut = false;
+  // A big page (a pipeline of many jobs) is asked for less often: up to
+  // every 5 s instead of every second.
+  let timer = null, busy = false, signedOut = false, gap = 1000;
+  // What identifies a focused control across an update (the update
+  // replaces every element): a selector and its place among the matches.
+  function focusKey(el) {
+    const q = v => '"' + CSS.escape(v) + '"';
+    const d = el.dataset;
+    let sel = null;
+    if (el.id) sel = "#" + CSS.escape(el.id);
+    else if (d.id !== undefined && el.closest("[data-wf]")) sel = "[data-wf] .row[data-id=" + q(d.id) + "]";
+    else if (d.step !== undefined) sel = el.tagName.toLowerCase() + "[data-step=" + q(d.step) + "]";
+    else if (d.tab !== undefined) sel = "[data-tab=" + q(d.tab) + "]";
+    else if (d.wfFilter !== undefined) sel = "[data-wf-filter=" + q(d.wfFilter) + "]";
+    else if (d.wfDepth !== undefined) sel = "[data-wf-depth=" + q(d.wfDepth) + "]";
+    else if (d.wfCrit !== undefined) sel = "[data-wf-crit]";
+    else if (d.blk !== undefined) sel = ".grpbtn[data-blk=" + q(d.blk) + "]";
+    else if (d.act !== undefined) sel = "[data-act=" + q(d.act) + "]";
+    else if (el.matches("summary") && el.parentElement.id) sel = "#" + CSS.escape(el.parentElement.id) + " > summary";
+    else if (el.matches("a[href]")) sel = "a[href=" + q(el.getAttribute("href")) + "]";
+    if (!sel) return null;
+    return [sel, $$(sel, main).indexOf(el)];
+  }
+  // The boxes that scroll inside the page keep where the reader was.
+  const scrollers = ".wfbox, .dfbox, .tbox, .ltscroll";
   async function refresh() {
     timer = null;
     if (signedOut) return;
     if (busy) { timer = setTimeout(refresh, 1000); return; }
     busy = true;
     try {
-      const res = await fetch(location.pathname + location.search, { cache: "no-store" });
+      let res;
+      try {
+        res = await fetch(location.pathname + location.search, { cache: "no-store" });
+      } catch (e) {
+        say("Not updating: the console did not answer");
+        return;
+      }
       // The session ended: the page stops updating and says so; a reload
       // (the reader's) leads to sign in.
       if (res.status === 401) { signedOut = true; disconnect(); say("Signed out: reload to sign in"); return; }
-      if (!res.ok) return;
+      if (!res.ok) { say("Not updating: the console answered " + res.status); return; }
       // The page became another (a running job's page, once its build is
       // stored, is the build's): go there.
       if (res.redirected) { location.replace(res.url); return; }
-      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      const body = await res.text();
+      gap = Math.min(5000, Math.max(1000, Math.round(body.length / 100)));
+      const doc = new DOMParser().parseFromString(body, "text/html");
       const next = doc.getElementById("main");
       if (!next) return;
       const active = document.activeElement;
-      const focused = active && main.contains(active) ? active.dataset.step : undefined;
+      const focused = active && main.contains(active) ? focusKey(active) : null;
       // Typing in the waterfall's search: keep the caret where it was.
       const typing = active && main.contains(active) && active.matches("[data-wf-q]") ? [active.selectionStart, active.selectionEnd] : null;
+      const scrolled = $$(scrollers, main).map(b => [b.scrollTop, b.scrollLeft]);
       const folds = new Map($$(".grpbtn[data-blk]", main).map(b => [b.dataset.blk, b.getAttribute("aria-expanded")]));
       const unfolded = $$("details[id][open]:not([data-auto])", main).map(d => d.id);
       const held = new Map();
@@ -1055,15 +1218,19 @@
         if (old && fresh) fresh.replaceWith(old);
       });
       paused.forEach(id => { if (!held.has(id) || !document.getElementById(id)) paused.delete(id); });
-      if (focused !== undefined) {
-        const el = $('[data-step="' + focused + '"]', main);
+      const boxes = $$(scrollers, main);
+      if (boxes.length === scrolled.length) boxes.forEach((b, i) => { [b.scrollTop, b.scrollLeft] = scrolled[i]; });
+      if (focused) {
+        const all = $$(focused[0], main);
+        const el = all[focused[1]] || all[0];
         if (el) el.focus({ preventScroll: true });
       }
       if (typing) {
         const q = $("[data-wf-q]", main);
         if (q) { q.focus({ preventScroll: true }); q.setSelectionRange(typing[0], typing[1]); }
       }
-      // The browser's own clock and zone: when this page last changed.
+      // The browser's own clock and zone: when this page last changed
+      // (shown, not announced: it changes every few seconds).
       if (status) status.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
     } finally {
       busy = false;
@@ -1089,7 +1256,7 @@
     const src = new EventSource(BASE + "/events" + filterQ);
     es = src;
     es.addEventListener("changed", () => {
-      if (!notify) { if (!timer) timer = setTimeout(refresh, 1000); return; }
+      if (!notify) { if (!timer) timer = setTimeout(refresh, gap); return; }
       // A page on a whole project only says something is new, at most
       // every 30 seconds: with hundreds of builds an hour it would
       // otherwise never hold still.
@@ -1103,9 +1270,20 @@
       lost = null;
       again = 5000;
       say("Live");
-      if (catchUp) { catchUp = false; if (!notify && !timer) timer = setTimeout(refresh, 0); }
+      // Back after a drop (EventSource reconnected by itself, or a new one
+      // was opened): what changed meanwhile was never announced.
+      if (catchUp) {
+        catchUp = false;
+        if (!notify) { if (!timer) timer = setTimeout(refresh, 0); }
+        else {
+          const nd = $("#newdata", main), t = nd && $("span", nd);
+          if (t) t.textContent = "The live connection dropped for a while: this page may be out of date.";
+          if (nd) nd.hidden = false;
+        }
+      }
     });
     es.addEventListener("error", () => {
+      catchUp = true;
       if (!lost) lost = setTimeout(() => say("Reconnecting…"), 3000);
       // An answer other than a stream (the console restarting, or at a
       // fleet hub a cluster not connected yet) ends an EventSource for
@@ -1114,13 +1292,20 @@
       if (src.readyState === EventSource.CLOSED && es === src) {
         es = null;
         clearTimeout(reopen);
-        reopen = setTimeout(() => { reopen = null; if (!document.hidden && !es) { catchUp = true; connect(); } }, again);
+        reopen = setTimeout(() => { reopen = null; if (!document.hidden && !es) connect(); }, again);
         again = Math.min(again * 2, 60000);
       }
     });
   }
   let lost = null, reopen = null, again = 5000, catchUp = false;
-  function say(text) { if (status) status.textContent = text; }
+  // The state of the stream is shown and, when it changes, announced (the
+  // shown line also carries the clock of every update, which is not).
+  const sayEl = $("#liveSay");
+  if (status) status.setAttribute("aria-live", "off");
+  function say(text) {
+    if (status) status.textContent = text;
+    if (sayEl && sayEl.textContent !== text) sayEl.textContent = text;
+  }
   function disconnect() {
     clearTimeout(reopen);
     reopen = null;

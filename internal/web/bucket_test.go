@@ -57,11 +57,24 @@ func TestProjectBucket(t *testing.T) {
 	if v := view(43); v == nil || v.Keys != 1 || !v.NoRule || !strings.Contains(v.Err, "AccessDenied") {
 		t.Errorf("project 43 (its folder warns): %+v", v)
 	}
+	// The failed listing keeps the figures' time and shows its own.
+	if v := view(43); v == nil || v.Scanned != "20 Oct 11:00 UTC" || v.Attempted != "20 Oct 11:01 UTC" {
+		t.Errorf("project 43: listed and attempted: %+v", v)
+	}
 	if v := view(44); v == nil || v.Keys != 0 || !v.NoRule || !strings.Contains(v.Err, "AccessDenied") {
 		t.Errorf("project 44 (nothing stored: every folder's state): %+v", v)
 	}
 	p := get(t, ts, "/nodes?project="+inst+"/42")
 	if !strings.Contains(p.body, "in 2 keys") || strings.Contains(p.body, "Old caches are never deleted") || strings.Contains(p.body, "AccessDenied") {
 		t.Error("project 42's page: its keys, and no other folder's warnings")
+	}
+	// Its own folder's listing fails: the figures keep their time, the
+	// failed attempt is dated apart.
+	if err := st.ReplaceCacheScan(ctx, "big", inst, at.Add(2*time.Minute), nil, nil, errors.New("AccessDenied: listing big/")); err != nil {
+		t.Fatal(err)
+	}
+	p = get(t, ts, "/nodes?project="+inst+"/42")
+	if !strings.Contains(p.body, "<span>Listed</span><span>20 Oct 11:00 UTC</span>") || !strings.Contains(p.body, "Last attempt 20 Oct 11:02 UTC: AccessDenied: listing big/") {
+		t.Error("project 42's page after a failed listing: the listing's and the attempt's times")
 	}
 }

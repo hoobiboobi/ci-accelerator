@@ -88,6 +88,9 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 		switch r.Kind {
 		case history.StepChanged:
 			v.Title = template.HTML(fmt.Sprintf("The build failed at %s, a step this build changed.", code(r.Step.Name)))
+			if sourceChange(r.Old, r.New) {
+				v.Title = template.HTML(fmt.Sprintf("The build failed at %s, a step whose source changed.", code(r.Step.Name)))
+			}
 			if r.Old != "" && r.Old != r.New {
 				v.Diff = []string{r.Old, r.New}
 			}
@@ -106,7 +109,7 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 		if built > 0 {
 			// Its project is not known yet, or the records of this build or
 			// of the previous one lack the definition of a step that ran.
-			return Verdict{Tone: "first", Kicker: "Not compared", Title: template.HTML(fmt.Sprintf("%d steps were built.", built)),
+			return Verdict{Tone: "first", Kicker: "Not compared", Title: template.HTML(fmt.Sprintf("%d step%s %s built.", built, plural(built), map[bool]string{true: "was", false: "were"}[built == 1])),
 				Detail: template.HTML(strings.TrimSpace("Nothing on record to compare them with: no earlier build of " + thisImage(b) + " is known, or BuildKit's records lack the definition of a step that ran. " + recLine))}
 		}
 		cached, received := 0, 0
@@ -144,6 +147,13 @@ func verdictFor(b *history.Build, r history.Reason, by string, built int, saved 
 			Title:  template.HTML(fmt.Sprintf("First build of %s<code>%s</code> on record — nothing to compare with yet.", map[bool]string{true: "target ", false: ""}[b.Target != ""], e(buildName(b.Target, b.Images)))),
 			Detail: template.HTML(d)}
 	case history.StepChanged, history.NewStep:
+		if r.Kind == history.StepChanged && sourceChange(r.Old, r.New) {
+			// The line is the same; what it reads from (a context, a git
+			// repository, an image) is not.
+			return Verdict{Tone: "built", Kicker: "Source changed",
+				Title:  template.HTML(fmt.Sprintf("Rebuilt from %s%s: the step's source changed.", code(r.Step.Name), at)),
+				Detail: template.HTML(strings.TrimSpace(fmt.Sprintf("<code>%s</code> → <code>%s</code>. The Dockerfile line did not change; every step after it was rebuilt too, because its input is new. ", e(r.Old), e(r.New)) + recLine))}
+		}
 		what := "this step changed"
 		switch {
 		case r.Kind == history.NewStep:
@@ -347,9 +357,9 @@ func nodeHint(d *store.Decision) template.HTML {
 	}
 	switch d.Reason {
 	case route.LocalWarm, route.ZoneWarm:
-		return "<b>Why here:</b> the build router follows the project, not each image: it sent the job to the node where the project built most recently, and this image's previous build ran on another node."
+		return "<b>Why here:</b> the build router follows the project, not each image: it sent the job to a node where the project had built recently, and this image's previous build ran on another node."
 	case route.ZoneHash:
-		return "<b>Why here:</b> when the job started, no node's cache was known to hold the project's layers (its builds were older than the router's window, or their daemons were replaced), so the build router chose the project's node by hash."
+		return "<b>Why here:</b> when the job started, no ready node was known to hold the project's layers, so the build router chose the project's node by hash: the project's builds were older than the router's window or their daemons were replaced, or the node that held them was not ready, marked down or busy."
 	case route.CrossZone:
 		return "<b>Why here:</b> no daemon in the job's zone was ready, so the build router sent the job to another zone."
 	case route.UnknownLocal, route.UnknownHash:
@@ -367,16 +377,36 @@ func orContext(ps []string) string {
 
 // duration prints a duration the way the pages do: 0.4 s, 12 s, 1 min 16 s.
 func duration(d time.Duration) string {
-	s := d.Seconds()
-	switch {
+	// Rounded once, then put in its form: 59.6 s is "1 min 0 s", never
+	// "60 s". A time below zero (a clock stepped back) is none.
+	d = max(d, 0)
 	// A no-break space keeps a number with its unit.
-	case s < 10:
-		return fmt.Sprintf("%.1f\u00a0s", s)
-	case s < 60:
-		return fmt.Sprintf("%.0f\u00a0s", s)
-	case s >= 3600:
-		return fmt.Sprintf("%d\u00a0h %d\u00a0min", int(s)/3600, int(s)%3600/60)
-	default:
-		return fmt.Sprintf("%d\u00a0min %d\u00a0s", int(s)/60, int(s)%60)
+	if t := d.Round(100 * time.Millisecond); t < 10*time.Second {
+		return fmt.Sprintf("%.1f\u00a0s", t.Seconds())
 	}
+	s := int64(d.Round(time.Second) / time.Second)
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%d\u00a0s", s)
+	case s >= 3600:
+		m := int64(d.Round(time.Minute) / time.Minute)
+		return fmt.Sprintf("%d\u00a0h %d\u00a0min", m/60, m%60)
+	default:
+		return fmt.Sprintf("%d\u00a0min %d\u00a0s", s/60, s%60)
+	}
+}
+
+// sourceChange: a step-changed reason whose old and new values are the
+// addresses of a source below the step (its Dockerfile line is the same).
+func sourceChange(was, now string) bool {
+	return was != now && sourceAddr(was) && sourceAddr(now)
+}
+
+func sourceAddr(s string) bool {
+	for _, p := range []string{"local://", "git://", "http://", "https://", "docker-image://"} {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }

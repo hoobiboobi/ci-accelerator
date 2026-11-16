@@ -17,13 +17,16 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
+	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
@@ -95,6 +98,9 @@ type Server struct {
 	assets map[string]string // static file -> its URL with a content version
 	// Open event streams, bounded: each holds a connection.
 	streams chan struct{}
+	// Open event streams by person (sign-in), bounded by StreamsPerPerson.
+	streamMu  sync.Mutex
+	streamsBy map[string]int
 	// Job logs being read from GitLab, bounded: each streams a whole log.
 	logs chan struct{}
 	// refs are the builds running ones are compared with.
@@ -121,8 +127,43 @@ type Server struct {
 // MaxStreams bounds the open live-update streams.
 const MaxStreams = 256
 
+// StreamsPerPerson bounds one signed-in person's open live-update streams
+// (each visible console tab holds one), so that nobody holds all of them.
+const StreamsPerPerson = 16
+
+// streamWrite bounds how long one event may take to reach the browser: a
+// browser gone without closing the connection frees its stream then.
+const streamWrite = time.Minute
+
 // MaxLogReads bounds the job logs read from GitLab at once.
 const MaxLogReads = 4
+
+// MaxHeavy bounds the heavy reads a process serves at once: a build's page
+// and its steps, a comparison. Each holds a whole build record and its
+// page in memory; a few large ones at once could take the process down.
+const MaxHeavy = 4
+
+// heavyReads is per process: a fleet hub serves one Server per cluster.
+var heavyReads = make(chan struct{}, MaxHeavy)
+
+// Heavy serves h once one of MaxHeavy places is free, waiting while the
+// request lasts. Other handlers (the JSON API's build list) use it too.
+func Heavy(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case heavyReads <- struct{}{}:
+		case <-r.Context().Done():
+			// Gone, or the server stops: nobody reads an answer.
+			w.Header().Set("Retry-After", "5")
+			http.Error(w, "The console is busy; try again in a moment.", http.StatusServiceUnavailable)
+			return
+		}
+		defer func() { <-heavyReads }()
+		h.ServeHTTP(w, r)
+	})
+}
+
+func heavy(h http.HandlerFunc) http.Handler { return Heavy(h) }
 
 // The templates of each page besides the layout and the shared parts.
 var pageFiles = map[string][]string{
@@ -302,7 +343,7 @@ func parsePages(src fs.FS) (map[string]*template.Template, map[string]string, er
 // Register adds the pages to mux.
 func (s *Server) Register(mux *http.ServeMux) {
 	static, _ := fs.Sub(s.files, "static")
-	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheFor(http.FileServerFS(static))))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", s.cacheFor(http.FileServerFS(static))))
 	if s.opt.Fleet != nil && s.opt.Fleet.Current() == "" {
 		// The hub's own pages: the clusters, and signing in.
 		mux.HandleFunc("GET /{$}", s.members)
@@ -345,9 +386,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /pipelines/{instance}/{id}", s.pipeline)
 	mux.HandleFunc("GET /jobs/{instance}/{id}", s.job)
 	mux.HandleFunc("GET /jobs/{instance}/{id}/log", s.jobLog)
-	mux.HandleFunc("GET /builds/{id}", s.build)
-	mux.HandleFunc("GET /builds/{id}/steps/{step}", s.step)
-	mux.HandleFunc("GET /builds/{id}/compare", s.compare)
+	mux.Handle("GET /builds/{id}", heavy(s.build))
+	mux.Handle("GET /builds/{id}/steps/{step}", heavy(s.step))
+	mux.Handle("GET /builds/{id}/compare", heavy(s.compare))
 	mux.HandleFunc("GET /nodes", s.nodes)
 	mux.HandleFunc("GET /nodes/{daemon}", s.node)
 	mux.HandleFunc("GET /projects/{instance}/{id}", s.chooseProject)
@@ -386,16 +427,21 @@ func Secure(h http.Handler) http.Handler {
 }
 
 // cacheFor lets browsers keep a static file for a year when it is asked
-// for by its versioned URL (the pages link nothing else), and revalidate
-// otherwise.
-func cacheFor(h http.Handler) http.Handler {
+// for by its versioned URL (the pages link nothing else) with this file's
+// version, and revalidate otherwise: while an upgrade runs, a page of a
+// new console may ask an old one for the new version, which must not be
+// kept as it.
+func (s *Server) cacheFor(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Files only: no listing of the directory.
 		if r.URL.Path == "" || strings.HasSuffix(r.URL.Path, "/") {
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Query().Get("v") != "" {
+		s.tmplMu.Lock()
+		current := s.assets[r.URL.Path]
+		s.tmplMu.Unlock()
+		if v := r.URL.Query().Get("v"); v != "" && current == "/static/"+r.URL.Path+"?v="+v {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-cache")
@@ -498,6 +544,20 @@ type Shell struct {
 	Fleet *FleetShell
 	// Base is the path the pages are served under ("" at the root).
 	Base string
+	// ManyGitLabs: the projects listed come from more than one GitLab, so
+	// a project's name alone may not tell it apart (InstHost does).
+	ManyGitLabs bool
+	// hosts are the GitLabs' hosts by instance, where sign-in names them.
+	hosts map[string]string
+}
+
+// InstHost names the GitLab a project of instance is on: its host where
+// the console knows it (sign-in), else "GitLab <instance>".
+func (sh Shell) InstHost(instance string) string {
+	if h := sh.hosts[instance]; h != "" {
+		return h
+	}
+	return "GitLab " + instance
 }
 
 // NotFound is the page for an address with nothing behind it.
@@ -527,6 +587,10 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {
 func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r), Version: s.opt.Version, Zone: zone(r).String(),
 		Origin: s.origin(r), Path: s.based(r.URL.EscapedPath()), Posted: r.Method == http.MethodPost, Base: s.opt.Base}
+	if win := r.URL.Query().Get("window"); win != "" {
+		// The preview describes the window: its address keeps it.
+		sh.Path += "?window=" + url.QueryEscape(win)
+	}
 	sh.Fleet = s.fleetShell(r)
 	ps, err := s.data.Projects(r.Context())
 	if err != nil {
@@ -534,6 +598,16 @@ func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 	}
 	ps, sh.Unanswered = s.readable(r, ps)
 	sh.Projects = ps
+	insts := map[string]bool{}
+	for _, p := range ps {
+		insts[p.Instance] = true
+	}
+	if sh.ManyGitLabs = len(insts) > 1; sh.ManyGitLabs && s.opt.Auth != nil {
+		sh.hosts = map[string]string{}
+		for _, c := range s.opt.Auth.Instances() {
+			sh.hosts[c.Instance] = c.Host
+		}
+	}
 	want := r.URL.Query().Get("project")
 	if want == "" {
 		if c, err := r.Cookie("project"); err == nil {
@@ -634,8 +708,8 @@ func (s *Server) api(r *http.Request) GitLab {
 		return nil
 	}
 	if s.opt.Auth != nil {
-		if viewer(r) != nil {
-			return s.opt.GitLab
+		if v := viewer(r); v != nil {
+			return ownGitLab{s.opt.GitLab, v.Instance}
 		}
 		return nil
 	}
@@ -643,6 +717,41 @@ func (s *Server) api(r *http.Request) GitLab {
 		return nil
 	}
 	return s.opt.GitLab
+}
+
+// ownGitLab is GitLab read with a signed-in person's token: only the
+// GitLab that issued it is asked. A token of one GitLab is never sent to
+// another, whatever page (an admin's, or one answered "not found") asks.
+type ownGitLab struct {
+	GitLab
+	instance string
+}
+
+// errOtherGitLab refuses a read of another GitLab than the person's own.
+var errOtherGitLab = errors.New("the person signed in with another GitLab")
+
+func (g ownGitLab) Knows(instance string) bool {
+	return instance == g.instance && g.GitLab.Knows(instance)
+}
+
+func (g ownGitLab) Ensure(ctx context.Context, instance string, project, pipeline uint64, status string, read time.Time, wait time.Duration) {
+	if instance == g.instance {
+		g.GitLab.Ensure(ctx, instance, project, pipeline, status, read, wait)
+	}
+}
+
+func (g ownGitLab) JobLogPart(ctx context.Context, instance string, project, job uint64, q gitlab.LogQuery) (gitlab.LogPart, error) {
+	if instance != g.instance {
+		return gitlab.LogPart{}, errOtherGitLab
+	}
+	return g.GitLab.JobLogPart(ctx, instance, project, job, q)
+}
+
+func (g ownGitLab) Changed(ctx context.Context, instance string, project uint64, from, to string) ([]string, bool, error) {
+	if instance != g.instance {
+		return nil, false, errOtherGitLab
+	}
+	return g.GitLab.Changed(ctx, instance, project, from, to)
 }
 
 // ensureAPI reads a pipeline's jobs from GitLab when that is due, waiting
@@ -684,7 +793,7 @@ func (s *Server) askOwner(r *http.Request, p *store.BuildPage) bool {
 		project = p.Job.ProjectID
 	}
 	api := s.api(r)
-	if api == nil {
+	if api == nil || !api.Knows(p.Pipeline.Instance) {
 		return false
 	}
 	// This read decides whether the page may be shown at all: wait for it
@@ -721,7 +830,8 @@ func projInitial(path string) string {
 	if n == "" {
 		return "P"
 	}
-	return strings.ToUpper(n[:1])
+	first, _ := utf8.DecodeRuneInString(n)
+	return strings.ToUpper(string(first))
 }
 
 var funcs = template.FuncMap{

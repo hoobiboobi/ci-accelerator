@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -122,10 +123,15 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 		// marked: submodules are marked (GitLab asked now, or stored so);
 		// a git context's verdict needs that.
 		marked bool
+		// skip: GitLab failed this comparison for now; its builds wait
+		// for a later pass.
+		skip bool
 	}
 	diffs := map[pair]*diff{}
 	var out []store.Settled
-	var stop error
+	// stop: no more requests this pass; failed: the first comparison that
+	// failed for now.
+	var stop, failed error
 	for _, e := range pending {
 		if only != 0 && e.ID != only {
 			continue
@@ -137,12 +143,20 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 		case e.SHA == e.PrevSHA && checkoutGit(e):
 			out = append(out, asked(store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: []string{".git"}, Via: viaCheckout}, e))
 			continue
+		case e.SHA == e.PrevSHA && remoteSource(e):
+			// The repository did not change, but the step also builds on
+			// something fetched from the network: still unclear.
+			out = append(out, asked(store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "same commit " + short(e.SHA, 8)}, e))
+			continue
 		case e.SHA == e.PrevSHA:
 			out = append(out, asked(store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: "same commit " + short(e.SHA, 8)}, e))
 			continue
 		}
 		k := pair{e.PrevSHA, e.SHA}
 		d := diffs[k]
+		if d != nil && d.skip {
+			continue
+		}
 		if d != nil && e.Git && !d.marked {
 			d = nil // read for a local context from an older comparison
 		}
@@ -156,7 +170,7 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 				return 0, err
 			}
 			if ok {
-				d = &diff{files, complete, nil, e.Git}
+				d = &diff{files: files, complete: complete, marked: e.Git}
 				diffs[k] = d
 			}
 		}
@@ -168,22 +182,36 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 			files, complete, err := api.Changed(ctx, p.Instance, p.ID, k.from, k.to)
 			var rl *gitlab.RateLimited
 			var se *gitlab.StatusError
+			status := errors.As(err, &se)
 			switch {
 			case errors.As(err, &rl) || ctx.Err() != nil:
 				stop = err
 				continue
-			case err != nil && !(errors.As(err, &se) && se.Code >= 400 && se.Code < 500):
-				// GitLab or the network failed for now (5xx, a timeout): asked
-				// again on a later pass, never stored as unresolved.
+			case err != nil && !status:
+				// The network failed for now (a timeout): asked again on a
+				// later pass, never stored as unresolved.
 				stop = err
 				continue
-			case err != nil && isPersonal(api) && (se.Code == 401 || se.Code == 403 || se.Code == 404):
+			case err != nil && isPersonal(api) && (se.Code == 401 || se.Code == 403):
 				// The reader may not read the repository: another reader may.
 				// Nothing is stored for everyone.
 				stop = err
 				continue
+			case err != nil && (se.Code >= 500 || se.Code == 403 || isPersonal(api) && se.Code == 404):
+				// This comparison failed for now (GitLab's diff timed out, the
+				// token may not read it today, a reader's 404 for a commit
+				// that may be gone): asked again on a later pass, never stored
+				// as unresolved. The project's other comparisons go on, unless
+				// a second one fails too: then GitLab, or the reader's access,
+				// is the cause.
+				if failed != nil {
+					stop = err
+				}
+				failed = cmp.Or(failed, err)
+				diffs[k] = &diff{err: err, skip: true}
+				continue
 			}
-			d = &diff{files, complete, err, true}
+			d = &diff{files: files, complete: complete, err: err, marked: true}
 			diffs[k] = d
 			if err == nil {
 				if err := data.SaveCompare(ctx, p, k.from, k.to, files, complete); err != nil {
@@ -196,7 +224,18 @@ func SettleProject(ctx context.Context, data SettleData, api Changer, p store.Pr
 	if err := data.SettleElsewhere(ctx, out); err != nil {
 		return 0, err
 	}
-	return len(out), stop
+	return len(out), cmp.Or(stop, failed)
+}
+
+// remoteSource says whether a rebuilt step also builds on something
+// fetched from the network without a checksum.
+func remoteSource(e store.Elsewhere) bool {
+	for _, src := range e.Paths {
+		if history.RemotePath(src) {
+			return true
+		}
+	}
+	return false
 }
 
 func isPersonal(c Changer) bool {
@@ -219,6 +258,7 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 	}
 	var hit []string
 	seen := map[string]bool{}
+	ignoreEdit := false
 	for _, f := range changed {
 		// A submodule's new commit is its path with a trailing slash
 		// (gitlab.Client.Changed): everything below it changed.
@@ -238,6 +278,7 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 			hit = append(hit, f)
 			continue
 		}
+		ignoreEdit = ignoreEdit || dockerignoreOf(e, f)
 		if !inContext(e, f) {
 			continue // .dockerignore kept it out, or the frontend never asked for it
 		}
@@ -259,22 +300,30 @@ func decideByDiff(e store.Elsewhere, changed []string, complete bool, err error)
 		}
 	}
 	switch {
+	case len(hit) > 0 && !complete:
+		// A change is proven; that nothing else changed is not, which a
+		// claim about the files left out (the order hint) needs.
+		return store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: clipList(hit, 20), Via: via + viaCutShort}
 	case len(hit) > 0:
 		return store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: clipList(hit, 20), Via: via}
 	case complete && checkoutGit(e):
 		return store.Settled{ID: e.ID, Kind: history.FilesChanged, Paths: []string{".git"}, Via: viaCheckout}
 	case complete && len(e.Paths) > 0:
-		for _, src := range e.Paths {
-			if history.RemotePath(src) {
-				// The repository did not change, but the step also builds
-				// on something fetched from the network: still unclear.
-				return store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: via}
-			}
+		if remoteSource(e) || ignoreEdit {
+			// The files the step copies did not change, but the step also
+			// builds on something fetched from the network, or an edited
+			// .dockerignore may let other files into what it copies: still
+			// unclear.
+			return store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: via}
 		}
 		return store.Settled{ID: e.ID, Kind: noChangeKind(e), Via: via}
 	}
 	return store.Settled{ID: e.ID, Kind: history.CacheElsewhere, Via: "unresolved: GitLab's comparison was cut short"}
 }
+
+// viaCutShort ends the Via of a change found in a comparison GitLab cut
+// short: the files it lists changed, others may have too.
+const viaCutShort = " cut short"
 
 // viaCheckout is the Via of a rebuild settled as the job's .git: the
 // commit's files did not change what the step reads, the checkout did.
@@ -320,7 +369,7 @@ func inContext(e store.Elsewhere, file string) bool {
 		follow := false
 		for _, fp := range lc.Follow {
 			fp = strings.TrimSuffix(strings.TrimPrefix(fp, "./"), "/")
-			if fp == "." || fp == "" || rel == fp || strings.HasPrefix(rel, fp+"/") {
+			if fp == "." || fp == "" || rel == fp || strings.HasPrefix(rel, fp+"/") || followGlob(fp, rel) {
 				follow = true
 				break
 			}
@@ -347,6 +396,38 @@ func inContext(e store.Elsewhere, file string) bool {
 		excluded, info = m, next
 	}
 	return !excluded
+}
+
+// dockerignoreOf says whether a changed file is the .dockerignore of a
+// build's local context (.dockerignore, or <Dockerfile>.dockerignore, in
+// the context folder): it decides which files a COPY reads.
+func dockerignoreOf(e store.Elsewhere, file string) bool {
+	if e.Git || e.GitFolder != "" || !strings.HasSuffix(path.Base(file), ".dockerignore") {
+		return false
+	}
+	switch e.Folder {
+	case "":
+		return true // the folder is not known: any of the repository's
+	case ".":
+		return !strings.Contains(file, "/")
+	}
+	return path.Dir(file) == strings.TrimSuffix(e.Folder, "/")
+}
+
+// followGlob says whether a follow path with a wildcard (BuildKit keeps a
+// COPY source such as "package*.json" as written, and its file walker
+// expands it) takes in a file: the glob matches the file or a folder
+// above it.
+func followGlob(fp, rel string) bool {
+	if !strings.ContainsAny(fp, "*?[") {
+		return false
+	}
+	for d := rel; d != "." && d != "/" && d != ""; d = path.Dir(d) {
+		if ok, _ := path.Match(fp, d); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // noChangeKind is the verdict for a build whose files provably did not

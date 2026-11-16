@@ -32,7 +32,7 @@
     {{else}}<p class="muted pad">{{if .Filtered}}No daemon needs attention. <a class="link" href="/nodes">Show all {{.Total}}</a>.{{end}}</p>{{end}}
     {{if and .Filtered .Hidden .Rows}}<p class="muted sm pad">{{.Hidden}} daemon{{if ne .Hidden 1}}s need{{else}} needs{{end}} nothing: <a class="link" href="/nodes">show all {{.Total}}</a>.</p>{{end}}
   </section>
-  {{else}}
+  {{else if not .Unknown}}
   <section class="box"><p class="muted pad">No daemon reached yet. The console finds them through the daemons' headless Service.</p></section>
   {{end}}
   {{if or .RouterLine .GoneBuilds}}<p class="muted">{{.RouterLine}}{{if .GoneBuilds}}{{if .RouterLine}} {{end}}{{.GoneBuilds}} more build{{if ne .GoneBuilds 1}}s{{end}} in the last 24 hours ran on {{.GoneDaemons}} daemon{{if ne .GoneDaemons 1}}s{{end}} replaced since (a rollout or a restart).{{end}}</p>{{end}}
@@ -44,7 +44,7 @@
     <section class="box" aria-labelledby="rcT"><h2 class="h" id="rcT">Runner cache in S3 <span class="muted">GitLab's cache:, this project</span></h2>
       {{with .Cache}}<div class="nkv"><span>Stored</span><span>{{if .Keys}}<b>{{bytes .Bytes}}</b> in {{.Keys}} key{{if ne .Keys 1}}s{{end}}{{else}}nothing for this project yet{{end}}</span><span>Listed</span><span>{{.Scanned}}</span></div>
       {{if .NoRule}}<div class="callout warn">{{icon "warn" 15 "i"}}<div><b class="k">Old caches are never deleted</b>The bucket has no lifecycle rule and the runners never delete a cache. docs/runner-cache.md shows a rule.</div></div>{{end}}
-      {{with .Err}}<div class="callout warn">{{icon "warn" 15 "i"}}<div><b class="k">The last listing failed</b>{{.}}</div></div>{{end}}
+      {{if .Err}}<div class="callout warn">{{icon "warn" 15 "i"}}<div><b class="k">The last listing failed</b>{{with .Attempted}}Last attempt {{.}}: {{end}}{{.Err}}</div></div>{{end}}
       {{else}}<p class="muted">No S3 cache is listed for the runners.</p>{{end}}</section>
     <details class="box fold"><summary>{{icon "chev" 14 "chev"}}<b>Garbage collection</b><span class="muted">what each node keeps</span></summary>
       <div class="pad">{{with .Caps}}<div class="nkv">{{range .}}<span>{{.K}}</span><span>{{.V}}</span>{{end}}</div>{{end}}

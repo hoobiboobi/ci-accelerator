@@ -160,6 +160,17 @@ func pctOf(part, whole time.Duration) float64 {
 	return math.Max(0, math.Min(100, 100*float64(part)/float64(whole)))
 }
 
+// fitWidth is a bar's width (percent) cut so that the bar, starting at
+// left, ends inside its axis; left and width are each within 0..100 alone.
+func fitWidth(left, width string) string {
+	l, errL := strconv.ParseFloat(left, 64)
+	w, errW := strconv.ParseFloat(width, 64)
+	if errL != nil || errW != nil || l+w <= 100 {
+		return width
+	}
+	return strconv.FormatFloat(math.Max(0, 100-l), 'f', 2, 64)
+}
+
 // when is a moment with its day, in the reader's zone.
 func when(t time.Time, loc *time.Location) Stamp { return stampOf(t, loc, "2 Jan 15:04:05") }
 

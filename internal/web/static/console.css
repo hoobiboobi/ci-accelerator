@@ -71,20 +71,22 @@ kbd { font-family: var(--mono); font-size: 11px; line-height: 1; padding: 3px 5p
 .wdot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
 .side-foot { margin-top: auto; display: grid; gap: 1px; }
 .side-note { font-size: 11px; color: var(--side-ink-3); padding: 8px 8px 0; line-height: 1.35; white-space: normal; }
-.app[data-collapsed="true"] .side .lbl, .app[data-collapsed="true"] .side kbd, .app[data-collapsed="true"] .side .count, .app[data-collapsed="true"] .side-note, .app[data-collapsed="true"] .brand-name, .app[data-collapsed="true"] .projmenu:not(.clmenu) { display: none; }
+.app[data-collapsed="true"] .side .lbl, .app[data-collapsed="true"] .side kbd, .app[data-collapsed="true"] .side .count, .app[data-collapsed="true"] .side-note, .app[data-collapsed="true"] .brand-name { display: none; }
 .app[data-collapsed="true"] .sbtn { justify-content: center; padding: 0; }
 .app[data-collapsed="true"] .side-top { flex-direction: column; padding-inline: 0; }
 .app[data-collapsed="true"] .side-top .iconbtn { margin: 0; }
 .app[data-collapsed="true"] .nav .wdot { position: absolute; margin: -12px 0 0 14px; }
 .main { min-width: 0; }
+.skip { position: fixed; z-index: 60; left: 8px; top: -60px; padding: 8px 12px; border-radius: 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--line-2); box-shadow: var(--shadow); }
+.skip:focus { top: 8px; }
 .mhead { display: none; }
 .bbar { display: none; }
-/* The cluster switcher beside a narrow sidebar: it pops out instead of
-   being hidden (a person without a role has no other way to a cluster). */
-.app[data-collapsed="true"] .side .clmenu { position: fixed; z-index: 40; left: 60px; top: 56px; width: 220px; max-height: calc(100dvh - 72px); overflow: auto; margin: 0; }
-.app[data-collapsed="true"] .side .clmenu .lbl { display: block; }
-.app[data-collapsed="true"] .side .clmenu .count { display: inline; }
-.app[data-collapsed="true"] .side .clmenu .sbtn { justify-content: flex-start; padding: 0 8px; }
+/* The cluster and project switchers beside a narrow sidebar: they pop out
+   instead of being hidden (there is no other way to a cluster or project). */
+.app[data-collapsed="true"] .side .projmenu { position: fixed; z-index: 40; left: 60px; top: var(--mtop, 56px); width: 240px; max-height: calc(100dvh - var(--mtop, 56px) - 16px); overflow: auto; margin: 0; }
+.app[data-collapsed="true"] .side .projmenu .lbl { display: block; }
+.app[data-collapsed="true"] .side .projmenu .count { display: inline; }
+.app[data-collapsed="true"] .side .projmenu .sbtn { justify-content: flex-start; padding: 0 8px; }
 /* Phones: the cluster and the fleet's pages from the header. */
 .mclu { position: relative; flex: none; max-width: 45%; }
 .mclu > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -93,6 +95,7 @@ kbd { font-family: var(--mono); font-size: 11px; line-height: 1; padding: 3px 5p
 .mclu-menu .sbtn { height: 32px; } .mclu-menu a.sbtn { text-decoration: none; } .mclu-menu a.sbtn[aria-current="true"] { background: var(--sel); color: var(--ink); }
 .mclu-menu .hint { font-size: 11px; color: var(--ink-3); padding: 4px 8px 2px; }
 .mclu-menu .count { font-size: 11px; color: var(--ink-3); }
+.mclu-menu form { margin: 0; }
 
 /* ---------- split ---------- */
 .split { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; }
@@ -410,7 +413,7 @@ details.why ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 5px; c
 .drawer.resizing { user-select: none; }
 .drh { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--raised); }
 .drh .kind { font-size: 11.5px; color: var(--ink-3); }
-.drh h2 { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; font-family: var(--mono); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.drh h2, .drh h1 { margin: 2px 0 0; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; font-family: var(--mono); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .drh h2:focus { outline: none; }
 .drb { overflow-y: auto; padding: 14px; display: grid; gap: 14px; align-content: start; overscroll-behavior: contain; min-height: 0; }
 .drb > * { min-width: 0; }
@@ -443,11 +446,11 @@ pre.logb { margin: 0; font-family: var(--mono); font-size: 11px; line-height: 1.
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
   .app, .app[data-collapsed="false"] { --sw: 56px; }
-  .side .lbl, .side kbd, .side .count, .side-note, .brand-name, .projmenu:not(.clmenu), #collapseBtn { display: none !important; }
-  .side .clmenu { position: fixed; z-index: 40; left: 60px; top: 56px; width: 220px; max-height: calc(100dvh - 72px); overflow: auto; margin: 0; }
-  .side .clmenu .lbl { display: block !important; }
-  .side .clmenu .count { display: inline !important; }
-  .side .clmenu .sbtn { justify-content: flex-start; padding: 0 8px; }
+  .side .lbl, .side kbd, .side .count, .side-note, .brand-name, #collapseBtn { display: none !important; }
+  .side .projmenu, .side .clmenu { position: fixed; z-index: 40; left: 60px; top: var(--mtop, 56px); width: 240px; max-height: calc(100dvh - var(--mtop, 56px) - 16px); overflow: auto; margin: 0; }
+  .side .projmenu .lbl { display: block !important; }
+  .side .projmenu .count { display: inline !important; }
+  .side .projmenu .sbtn { justify-content: flex-start; padding: 0 8px; }
   .sbtn { justify-content: center; padding: 0; }
   .side-top { flex-direction: column; padding-inline: 0; }
   .nav .wdot { position: absolute; margin: -12px 0 0 14px; }
@@ -488,6 +491,20 @@ pre.logb { margin: 0; font-family: var(--mono); font-size: 11px; line-height: 1.
 
 
 
+}
+/* The narrowest phones: the bottom bar fits the screen, its items share it. */
+@media (max-width: 380px) {
+  .bbar { left: 8px; right: 8px; transform: none; }
+  .bbar button, .bbar a { min-width: 0; flex: 1 1 0; padding-inline: 2px; }
+}
+/* Printed: the page's content only, every row of a build's steps shown,
+   boxes that scroll printed whole. */
+@media print {
+  .side, .mhead, .bbar, .scrim, .dlg, .pop, .drawer, .toast, .skip, .newdata, .wtools { display: none !important; }
+  .app { display: block; }
+  .main { padding: 0; }
+  .wfbox, .dfbox, .tbox, .ltscroll { max-height: none !important; overflow: visible !important; }
+  tr[data-of][hidden] { display: table-row !important; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
@@ -663,7 +680,6 @@ a.boxh:hover { background: var(--hover); }
 .brow .bp { color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .brow.quiet { color: var(--ink-3); }
 .brow.quiet .bn { color: var(--ink-2); font-weight: 400; }
-.brow.quiet .stat { opacity: .75; }
 .slow { color: var(--del); } .fast { color: var(--received); }
 .pager { display: flex; gap: 8px; justify-content: flex-end; }
 .pgroup .pgh { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; color: inherit; }
@@ -1034,26 +1050,26 @@ a.boxh:hover { background: var(--hover); }
 .ltaxis span:first-child { transform: none; }
 .ltaxis .nowl { color: var(--accent); font-weight: 600; transform: translateX(calc(-100% - 6px)); }
 .lstep + .lstep { border-top: 1px solid color-mix(in oklab, var(--line) 60%, transparent); }
-.lrow { display: grid; grid-template-columns: var(--lw) minmax(0, 1fr); align-items: center; min-height: 28px; list-style: none; cursor: pointer; }
-.lrow::-webkit-details-marker { display: none; }
-.lrow:hover { background: var(--hover); }
-.lrow:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.lt .lrow { display: grid; grid-template-columns: var(--lw) minmax(0, 1fr); align-items: center; min-height: 28px; list-style: none; cursor: pointer; }
+.lt .lrow::-webkit-details-marker { display: none; }
+.lt .lrow:hover { background: var(--hover); }
+.lt .lrow:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .lstep.wait .lrow { cursor: default; }
 .lstep.wait .lrow:hover { background: none; }
-.lrow .nm { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 10px 0 2px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
-.lrow .nm .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lrow .cv { flex: none; width: 14px; display: inline-grid; place-items: center; color: var(--ink-3); transition: transform .12s; }
+.lt .lrow .nm { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 10px 0 2px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+.lt .lrow .nm .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lt .lrow .cv { flex: none; width: 14px; display: inline-grid; place-items: center; color: var(--ink-3); transition: transform .12s; }
 .lstep[open] > .lrow .cv { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { .lrow .cv { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .lt .lrow .cv { transition: none; } }
 .lstep.st-running .nm { color: var(--accent); }
 .lstep.wait .nm { color: var(--ink-3); }
-.lrow .lane { position: relative; height: 28px; border-left: 1px solid var(--line);
+.lt .lrow .lane { position: relative; height: 28px; border-left: 1px solid var(--line);
   background: repeating-linear-gradient(to right, transparent 0 calc(25% - 1px), color-mix(in oklab, var(--line) 75%, transparent) calc(25% - 1px) 25%); }
 .lbar { position: absolute; top: 8px; height: 12px; border-radius: 3px; min-width: 3px; }
 .lbar.c-ghost, .sw.c-ghost { border: 1px dashed color-mix(in oklab, var(--ink-3) 70%, transparent); background: transparent; box-sizing: border-box; }
 .c-running { background: repeating-linear-gradient(-45deg, var(--accent) 0 6px, color-mix(in oklab, var(--accent) 65%, var(--panel)) 6px 12px); }
 .lnow { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--accent); pointer-events: none; }
-.lrow .lab { position: absolute; top: 6px; font-size: 11px; font-weight: 500; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lt .lrow .lab { position: absolute; top: 6px; font-size: 11px; font-weight: 500; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .slog { margin: 2px 14px 10px var(--lw); }
 .ltail { border: 1px solid var(--line); border-radius: 8px; background: var(--raised); overflow: hidden; }
 .ltail .lh { display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); flex-wrap: wrap; }
