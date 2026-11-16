@@ -3,6 +3,7 @@ package hints
 import (
 	"encoding/json"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -47,7 +48,15 @@ type installer struct {
 	// names are the base names of the files a change to which reinstalls
 	// for good reason: a changed file with one of these names anywhere in
 	// the context counts (a workspace's package.json in a sub-folder too).
+	// A name may be a pattern ("*.gemspec").
 	names []string
+	// dirs are folder names whose files the manager reads besides the
+	// named ones (patches applied on install, yarn's releases and
+	// plugins): a changed file inside such a folder anywhere counts.
+	dirs []string
+	// included: the manager reads requirement files the named ones
+	// include ("-r base.txt"), which the record does not show.
+	included bool
 }
 
 // orderCtx is what a split may need beyond the command: the step's
@@ -82,7 +91,7 @@ var installers = []installer{
 					tmp := "/tmp/requirements-" + strconv.Itoa(n) + ".txt"
 					n++
 					pre = append(pre, "sed -E '/^[[:space:]]*(-e|--editable|-r|--requirement|-c|--constraint|[.]|[/]|file:)/d' "+f+" > "+tmp)
-					before = replaceWord(before, f, tmp)
+					before = replaceFile(before, f, tmp)
 				}
 				return strings.Join(pre, " \\\n && ") + " \\\n && " + before, text, true
 			}
@@ -96,14 +105,15 @@ var installers = []installer{
 			if !ok {
 				return "", "", false
 			}
-			before := pyprojectDeps(extras) + " \\\n && " + replaceWord(text, target, "-r /tmp/requirements.txt")
+			before := pyprojectDeps(extras) + " \\\n && " + replaceTarget(text, target, "-r /tmp/requirements.txt")
 			// The command itself still runs once the code is there: it
 			// finds the dependencies installed and adds the project. A
 			// project whose dependencies are not in pyproject.toml
 			// (dynamic, or setup.py) installs them there, as before.
 			return before, text, true
 		},
-		names: []string{"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "requirements.in", "constraints.txt", "Pipfile", "Pipfile.lock"},
+		names:    []string{"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "requirements.in", "constraints.txt", "Pipfile", "Pipfile.lock"},
+		included: true,
 	},
 	{
 		manager: "uv",
@@ -137,17 +147,21 @@ var installers = []installer{
 			for _, e := range extras {
 				with += " --extra " + e
 			}
-			return replaceWord(text, target, with), text, true
+			return replaceTarget(text, target, with), text, true
 		},
-		names: []string{"pyproject.toml", "uv.lock", "requirements.txt", "requirements.in"},
+		names:    []string{"pyproject.toml", "uv.lock", "requirements.txt", "requirements.in"},
+		included: true,
 	},
 	{
 		manager: "poetry",
 		match: func(c command) ([]string, bool, bool) {
-			if c.prog != "poetry" || !subIs(c, "install") {
+			// --only-root installs the project alone, no dependencies:
+			// it needs the code, so a code change reinstalls for good
+			// reason.
+			if c.prog != "poetry" || !subIs(c, "install") || c.arg("--only-root") {
 				return nil, false, false
 			}
-			return []string{"pyproject.toml", "poetry.lock*"}, !c.arg("--no-root") && !c.arg("--only-root"), true
+			return []string{"pyproject.toml", "poetry.lock*"}, !c.arg("--no-root"), true
 		},
 		split: func(text string, c command, x *orderCtx) (string, string, bool) {
 			if c.arg("--no-root") {
@@ -169,6 +183,7 @@ var installers = []installer{
 		deep:  []string{"package.json"},
 		split: whole,
 		names: []string{"package.json", "package-lock.json", "npm-shrinkwrap.json", ".npmrc"},
+		dirs:  []string{"patches"},
 	},
 	{
 		manager: "yarn",
@@ -185,6 +200,7 @@ var installers = []installer{
 		deep:  []string{"package.json"},
 		split: whole,
 		names: []string{"package.json", "yarn.lock", ".yarnrc", ".yarnrc.yml"},
+		dirs:  []string{".yarn", "patches"},
 	},
 	{
 		manager: "pnpm",
@@ -198,6 +214,7 @@ var installers = []installer{
 		deep:  []string{"package.json"},
 		split: whole,
 		names: []string{"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc", ".pnpmfile.cjs"},
+		dirs:  []string{"patches"},
 	},
 	{
 		manager: "bun",
@@ -211,6 +228,7 @@ var installers = []installer{
 		deep:  []string{"package.json"},
 		split: whole,
 		names: []string{"package.json", "bun.lock", "bun.lockb", "bunfig.toml"},
+		dirs:  []string{"patches"},
 	},
 	{
 		manager: "go",
@@ -236,7 +254,7 @@ var installers = []installer{
 		// kamal, lab 2026-11-14). Which Gemfile does is not in the record:
 		// no fragment, the hint says it in words.
 		split: func(string, command, *orderCtx) (string, string, bool) { return "", "", false },
-		names: []string{"Gemfile", "Gemfile.lock", "gems.rb", "gems.locked"},
+		names: []string{"Gemfile", "Gemfile.lock", "gems.rb", "gems.locked", "*.gemspec"},
 	},
 	{
 		manager: "composer",
@@ -262,6 +280,7 @@ var installers = []installer{
 			return before, text, true
 		},
 		names: []string{"composer.json", "composer.lock", "auth.json"},
+		dirs:  []string{"patches"},
 	},
 	{
 		manager: "mix",
@@ -479,16 +498,27 @@ type InstallStep struct {
 // Installs reads the dependency installs of a RUN step from its
 // operation and its name as BuildKit shows it ("RUN --mount=... npm ci").
 // nil when it runs none.
-func Installs(op json.RawMessage, name string) *InstallStep {
-	defer func() { _ = recover() }()
+func Installs(op json.RawMessage, name string) (out *InstallStep) {
+	defer func() {
+		if v := recover(); v != nil {
+			out = nil
+			logPanic("Installs", v)
+		}
+	}()
+	return installs(op, name)
+}
+
+// installs is Installs without the recover, for the fuzz tests.
+func installs(op json.RawMessage, name string) *InstallStep {
 	s, ok := readStep(op)
 	if !ok || len(s.args) == 0 {
 		return nil
 	}
 	text := script(s.args)
 	out := &InstallStep{env: s.env, cwd: s.cwd}
+	nameCmd := ""
 	if rest, ok := strings.CutPrefix(name, "RUN "); ok {
-		out.flags, _ = runFlags(rest)
+		out.flags, nameCmd = runFlags(rest)
 	}
 	cmds := parse(text, s.env, s.cwd)
 	for _, c := range cmds {
@@ -508,13 +538,21 @@ func Installs(op json.RawMessage, name string) *InstallStep {
 	if len(out.Installs) == 0 {
 		return nil
 	}
-	// The text of each command, for a fragment: "a && b" only.
+	// The text of each command, for a fragment: "a && b" only. The text
+	// shown is the step name's (secrets masked), the command read is the
+	// operation's; a name whose commands are not the operation's gives no
+	// text, never the operation's own (which nothing masks).
 	parts, plain := andList(text)
-	if plain {
+	shown, plainName := andList(nameCmd)
+	if plain && plainName && len(shown) == len(parts) {
 		cwd := s.cwd
-		for _, p := range parts {
+		for i, p := range parts {
 			cs := parse(p, s.env, cwd)
-			sg := segment{text: strings.TrimSpace(p), ok: len(cs) == 1}
+			if !sameProgs(cs, parse(shown[i], s.env, cwd)) {
+				out.segs = nil
+				break
+			}
+			sg := segment{text: strings.TrimSpace(shown[i]), ok: len(cs) == 1}
 			if len(cs) == 1 {
 				sg.cmd = cs[0]
 			}
@@ -548,6 +586,20 @@ func Installs(op json.RawMessage, name string) *InstallStep {
 	return out
 }
 
+// sameProgs reports whether two readings of a command list run the same
+// programs in the same order.
+func sameProgs(a, b []command) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].prog != b[i].prog {
+			return false
+		}
+	}
+	return true
+}
+
 // runFlags splits a RUN instruction's options from its command.
 func runFlags(rest string) (flags []string, cmd string) {
 	for {
@@ -564,12 +616,22 @@ func runFlags(rest string) (flags []string, cmd string) {
 // has anything else at the top (;, ||, |, &, a line break, a subshell, a
 // here-document): such a script is not cut.
 func andList(text string) (parts []string, plain bool) {
+	text = strings.ReplaceAll(text, "\\\n", " ")
+	spans, plain := andSpans(text)
+	for _, sp := range spans {
+		parts = append(parts, text[sp[0]:sp[1]])
+	}
+	return parts, plain
+}
+
+// andSpans is andList as the start and end of each part in text, which
+// may hold line continuations.
+func andSpans(text string) (spans [][2]int, plain bool) {
 	var (
 		quote byte
 		depth int
 		start int
 	)
-	text = strings.ReplaceAll(text, "\\\n", " ")
 	for i := 0; i < len(text); i++ {
 		ch := text[i]
 		switch {
@@ -589,7 +651,7 @@ func andList(text string) (parts []string, plain bool) {
 			depth--
 		case depth > 0:
 		case ch == '&' && i+1 < len(text) && text[i+1] == '&':
-			parts = append(parts, text[start:i])
+			spans = append(spans, [2]int{start, i})
 			i++
 			start = i + 1
 		case ch == ';' || ch == '|' || ch == '&' || ch == '\n' || ch == '<' && i+1 < len(text) && text[i+1] == '<':
@@ -601,30 +663,42 @@ func andList(text string) (parts []string, plain bool) {
 	if quote != 0 || depth != 0 {
 		return nil, false
 	}
-	parts = append(parts, text[start:])
-	for _, p := range parts {
-		if strings.TrimSpace(p) == "" {
+	spans = append(spans, [2]int{start, len(text)})
+	for _, sp := range spans {
+		if strings.TrimSpace(text[sp[0]:sp[1]]) == "" {
 			return nil, false
 		}
 	}
-	return parts, true
+	return spans, true
 }
 
-// Matters reports whether a changed file of the build context is one the
-// step's installs read: a change to it reinstalls for good reason. files
-// are paths relative to the context; a file whose name a manager reads
-// anywhere counts (a workspace's package.json in a sub-folder).
+// Matters reports whether a changed file of the build context may be one
+// the step's installs read: a change to it reinstalls for good reason.
+// files are paths relative to the context; a file whose name a manager
+// reads anywhere counts (a workspace's package.json in a sub-folder), and
+// so does what the named files may pull in that the record does not show
+// (see requirementLike): when in doubt, a file matters, which costs a hint
+// and never claims a reinstall was needless.
 func (s *InstallStep) Matters(file string) bool {
 	base := path.Base(file)
+	folders := strings.Split(path.Dir(path.Clean(file)), "/")
 	for _, in := range s.Installs {
 		for _, x := range installers {
 			if x.manager != in.Manager {
 				continue
 			}
 			for _, n := range x.names {
-				if base == n {
+				if ok, _ := path.Match(n, base); ok {
 					return true
 				}
+			}
+			for _, d := range x.dirs {
+				if slices.Contains(folders, d) {
+					return true
+				}
+			}
+			if x.included && requirementLike(file, in.Files) {
+				return true
 			}
 		}
 		for _, f := range in.Files {
@@ -632,6 +706,38 @@ func (s *InstallStep) Matters(file string) bool {
 			if base == path.Base(f) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// requirementLike reports whether a changed file may be a requirement
+// file another one includes ("-r base.txt", "-c constraints.txt", or a
+// pyproject.toml reading its dependencies from files): a .txt or .in
+// file named like one (requirements-dev.txt), in a folder named like one
+// (requirements/base.txt), or in the folder of a requirement file the
+// command names.
+func requirementLike(file string, named []string) bool {
+	ext := path.Ext(file)
+	if ext != ".txt" && ext != ".in" {
+		return false
+	}
+	file = path.Clean(file)
+	for _, part := range strings.Split(file, "/") {
+		if strings.HasPrefix(part, "requirement") || strings.HasPrefix(part, "constraint") {
+			return true
+		}
+	}
+	dir := path.Dir(file)
+	for _, f := range named {
+		d := path.Dir(path.Clean(strings.TrimSuffix(f, "*")))
+		if d == "." || strings.HasPrefix(d, "/") {
+			// The command's own folder, or one the context path does
+			// not show: a file there counts only by its name.
+			continue
+		}
+		if dir == d || strings.HasSuffix(dir, "/"+d) {
+			return true
 		}
 	}
 	return false
@@ -795,13 +901,40 @@ func relDir(dir, base string) (string, bool) {
 	return "", false
 }
 
-// replaceWord replaces the first whitespace-separated word of cmd that
-// is w (quoted or not) with by.
-func replaceWord(cmd, w, by string) string {
+// replaceTarget replaces a pip install's project folder (pipTarget,
+// quoted or not) with by, and an -e or --editable in front of it with it:
+// "-e ." becomes "-r file", never "-e -r file", which pip would read as
+// an editable folder named "-r".
+func replaceTarget(cmd, target, by string) string {
+	ts := tokens(cmd)
+	for i, t := range ts {
+		if strings.Trim(cmd[t[0]:t[1]], `"'`) != target {
+			continue
+		}
+		start := t[0]
+		if i > 0 {
+			if p := cmd[ts[i-1][0]:ts[i-1][1]]; p == "-e" || p == "--editable" {
+				start = ts[i-1][0]
+			}
+		}
+		return cmd[:start] + by + cmd[t[1]:]
+	}
+	return cmd
+}
+
+// replaceFile replaces a requirement file a pip install names (quoted or
+// not) with by, written as a word of its own ("-r f") or joined to its
+// option ("-rf", "--requirement=f").
+func replaceFile(cmd, f, by string) string {
 	for _, t := range tokens(cmd) {
 		x := strings.Trim(cmd[t[0]:t[1]], `"'`)
-		if x == w {
+		if x == f {
 			return cmd[:t[0]] + by + cmd[t[1]:]
+		}
+		for _, opt := range []string{"--requirement=", "--constraint=", "-r", "-c"} {
+			if v, ok := strings.CutPrefix(x, opt); ok && v == f {
+				return cmd[:t[0]] + opt + by + cmd[t[1]:]
+			}
 		}
 	}
 	return cmd

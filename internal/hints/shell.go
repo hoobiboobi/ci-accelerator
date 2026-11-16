@@ -90,6 +90,34 @@ const maxScript = 64 << 10
 // maxDepth bounds "sh -c" nested in a script.
 const maxDepth = 4
 
+// maxValue bounds a variable's value after expansion: "A=$A$A" repeated
+// doubles it every line, and a script of a few hundred bytes would
+// otherwise take gigabytes. A longer value stays unexpanded, so a path
+// holding it is not used.
+const maxValue = 4 << 10
+
+// maxSpend bounds what reading one script may allocate for the
+// environments of its commands and their expanded words (an environment
+// entry counts as 64 bytes): a script with thousands of assignments and
+// thousands of commands would otherwise copy every variable into every
+// command. Past it, the rest of the script is not read, which errs
+// towards no hint.
+const maxSpend = 8 << 20
+
+// reader keeps what reading one script has spent.
+type reader struct{ spent int }
+
+func (r *reader) expand(s string, env map[string]string) string {
+	v := expand(s, env)
+	r.spent += len(v)
+	return v
+}
+
+func (r *reader) merge(a, b map[string]string) map[string]string {
+	r.spent += 64 * (len(a) + len(b))
+	return merge(a, b)
+}
+
 // parse splits a script into simple commands. It is a reader of common
 // shell, not a shell: quotes, escapes, comments, &&, ||, ;, |, &, line
 // breaks, subshell parentheses and braces, leading assignments, export,
@@ -98,29 +126,30 @@ const maxDepth = 4
 // words that match no rule, which errs towards no hint.
 func parse(text string, env map[string]string, cwd string) []command {
 	var out []command
-	parseInto(&out, text, env, cwd, 0)
+	r := &reader{}
+	r.parseInto(&out, text, env, cwd, 0)
 	return out
 }
 
-func parseInto(out *[]command, text string, env map[string]string, cwd string, depth int) {
+func (r *reader) parseInto(out *[]command, text string, env map[string]string, cwd string, depth int) {
 	if len(text) > maxScript {
 		text = text[:maxScript]
 	}
 	if cwd == "" {
 		cwd = "/"
 	}
-	shellEnv := map[string]string{}
-	for k, v := range env {
-		shellEnv[k] = v
-	}
+	shellEnv := r.merge(env, nil)
 	for _, words := range split(text) {
+		if r.spent > maxSpend {
+			return
+		}
 		inline := map[string]string{}
 		i := 0
 		for ; i < len(words) && assignment(words[i]); i++ {
 			k, v, _ := strings.Cut(words[i], "=")
-			inline[k] = expand(v, shellEnv)
+			inline[k] = r.expand(v, shellEnv)
 		}
-		words = unwrap(words[i:], inline, shellEnv)
+		words = r.unwrap(words[i:], inline, shellEnv)
 		if len(words) == 0 {
 			// "A=b" alone sets a shell variable for what follows.
 			for k, v := range inline {
@@ -133,13 +162,13 @@ func parseInto(out *[]command, text string, env map[string]string, cwd string, d
 		case "export":
 			for _, w := range words[1:] {
 				if k, v, ok := strings.Cut(w, "="); ok && identifier.MatchString(k) {
-					shellEnv[k] = expand(v, shellEnv)
+					shellEnv[k] = r.expand(v, shellEnv)
 				}
 			}
 			continue
 		case "cd":
 			if len(words) > 1 {
-				d := expand(words[1], shellEnv)
+				d := r.expand(words[1], shellEnv)
 				if !strings.HasPrefix(d, "/") {
 					d = path.Join(cwd, d)
 				}
@@ -150,16 +179,16 @@ func parseInto(out *[]command, text string, env map[string]string, cwd string, d
 			if depth < maxDepth {
 				for j := 1; j+1 < len(words); j++ {
 					if strings.HasPrefix(words[j], "-") && strings.Contains(words[j], "c") && !strings.HasPrefix(words[j], "--") {
-						parseInto(out, words[j+1], merge(shellEnv, inline), cwd, depth+1)
+						r.parseInto(out, words[j+1], r.merge(shellEnv, inline), cwd, depth+1)
 						break
 					}
 				}
 			}
 			continue
 		}
-		c := command{prog: normalize(prog), args: words[1:], env: merge(shellEnv, inline), cwd: cwd}
+		c := command{prog: normalize(prog), args: words[1:], env: r.merge(shellEnv, inline), cwd: cwd}
 		for i, a := range c.args {
-			c.args[i] = expand(a, c.env)
+			c.args[i] = r.expand(a, c.env)
 		}
 		*out = append(*out, c)
 	}
@@ -196,7 +225,7 @@ func normalize(prog string) string {
 
 // unwrap removes the wrappers in front of a command, adding the
 // assignments "env" takes to inline.
-func unwrap(words []string, inline, shellEnv map[string]string) []string {
+func (r *reader) unwrap(words []string, inline, shellEnv map[string]string) []string {
 	for len(words) > 0 {
 		switch path.Base(words[0]) {
 		case "sudo", "doas", "exec", "command", "builtin", "nohup", "time", "!", "if", "then", "else", "elif", "do", "while", "until", "stdbuf", "chronic", "eatmydata":
@@ -205,7 +234,7 @@ func unwrap(words []string, inline, shellEnv map[string]string) []string {
 			words = skipOptions(words[1:])
 			for len(words) > 0 && assignment(words[0]) {
 				k, v, _ := strings.Cut(words[0], "=")
-				inline[k] = expand(v, merge(shellEnv, inline))
+				inline[k] = r.expand(v, r.merge(shellEnv, inline))
 				words = words[1:]
 			}
 		case "nice", "ionice":
@@ -268,21 +297,36 @@ var varRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:?[-=][^}]*)?\}|\$
 
 // expand replaces $VAR and ${VAR} (with :- / - defaults) it knows; a
 // reference it does not know stays, so a path holding one is not used.
+// A result longer than maxValue is not made: s comes back as it is.
 func expand(s string, env map[string]string) string {
 	if !strings.Contains(s, "$") {
 		return s
 	}
-	return varRef.ReplaceAllStringFunc(s, func(m string) string {
+	size, long := len(s), false
+	out := varRef.ReplaceAllStringFunc(s, func(m string) string {
+		if long {
+			return m
+		}
 		sub := varRef.FindStringSubmatch(m)
 		name := sub[1] + sub[3]
-		if v, ok := env[name]; ok && (v != "" || !strings.HasPrefix(sub[2], ":")) {
-			return v
+		v, ok := env[name]
+		switch {
+		case ok && (v != "" || !strings.HasPrefix(sub[2], ":")):
+		case strings.HasPrefix(sub[2], ":-") || strings.HasPrefix(sub[2], "-") || strings.HasPrefix(sub[2], ":=") || strings.HasPrefix(sub[2], "="):
+			v = strings.TrimLeft(sub[2], ":-=")
+		default:
+			return m
 		}
-		if strings.HasPrefix(sub[2], ":-") || strings.HasPrefix(sub[2], "-") || strings.HasPrefix(sub[2], ":=") || strings.HasPrefix(sub[2], "=") {
-			return strings.TrimLeft(sub[2], ":-=")
+		if size += len(v) - len(m); size > maxValue {
+			long = true
+			return m
 		}
-		return m
+		return v
 	})
+	if long {
+		return s
+	}
+	return out
 }
 
 // split cuts a script into the words of its simple commands.
