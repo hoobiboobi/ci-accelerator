@@ -731,6 +731,40 @@ func TestAdminsByID(t *testing.T) {
 
 func mustCookie(c *http.Cookie, _ string) *http.Cookie { return c }
 
+// A fleet hub's operators and owners (Elevate) are admins at their next
+// request; the admins of the configuration are listed with their GitLab.
+func TestElevate(t *testing.T) {
+	e := setup(t)
+	alice := mustCookie(e.signIn(t, "alice", "/"))
+	if v := e.load(t, alice); v.Admin {
+		t.Fatal("alice is an admin before any role")
+	}
+	host := strings.TrimPrefix(e.gl.srv.URL, "http://")
+	var asked []string
+	role := map[uint64]bool{}
+	e.a.Elevate = func(h string, id uint64) bool {
+		asked = append(asked, fmt.Sprintf("%s/%d", h, id))
+		return role[id]
+	}
+	if v := e.load(t, alice); v.Admin {
+		t.Error("elevated without a role")
+	}
+	role[7] = true
+	if v := e.load(t, alice); !v.Admin {
+		t.Error("not elevated with a role")
+	}
+	delete(role, 7)
+	if v := e.load(t, alice); v.Admin {
+		t.Error("still elevated after the role was taken")
+	}
+	if len(asked) == 0 || asked[0] != host+"/7" {
+		t.Errorf("asked %v", asked)
+	}
+	if ad := e.a.Admins(); len(ad) != 1 || ad[0].UserID != 1 || ad[0].Host != host {
+		t.Errorf("admins %+v", ad)
+	}
+}
+
 func TestConfig(t *testing.T) {
 	st, _ := store.Open(context.Background(), t.TempDir(), store.Options{})
 	defer st.Close()

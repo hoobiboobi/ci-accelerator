@@ -43,6 +43,7 @@ type Client struct {
 	log    *slog.Logger
 	cfg    Config
 	known  map[string]bool
+	member bool
 
 	hub store.Changes
 
@@ -89,12 +90,50 @@ type ClientOptions struct {
 	// Token gives the bearer token of every call; nil: none (tests).
 	Token func() (string, error)
 	Log   *slog.Logger
+	// Member: the controller is a fleet member's, reached over its link by
+	// the hub, which trusts it less than its own. The hub signs people in
+	// itself, so no call carries the session of the page it serves (a hub
+	// credential the member has no use for); nothing is written into the
+	// member's store (the member settles its builds itself).
+	Member bool
+}
+
+// MaxMemberAnswer bounds one answer of a controller (the configuration or
+// one call's results), a member's or the box's own: the hub must not hold
+// whatever a member sends until a deadline ends the read.
+const MaxMemberAnswer = 64 << 20
+
+// errTooLarge: an answer went past MaxMemberAnswer.
+var errTooLarge = fmt.Errorf("the answer is larger than %d MiB", MaxMemberAnswer>>20)
+
+// capped reads at most n bytes of r, then fails.
+type capped struct {
+	r io.Reader
+	n int64
+}
+
+func (c *capped) Read(p []byte) (int, error) {
+	if c.n <= 0 {
+		return 0, errTooLarge
+	}
+	if int64(len(p)) > c.n {
+		p = p[:c.n]
+	}
+	n, err := c.r.Read(p)
+	c.n -= int64(n)
+	return n, err
+}
+
+// answer is the body of res as the client may read it: at most
+// MaxMemberAnswer bytes, whoever answers.
+func (c *Client) answer(res *http.Response) io.Reader {
+	return &capped{r: res.Body, n: MaxMemberAnswer}
 }
 
 // Dial reads the controller's configuration, trying again until it
 // answers or ctx ends.
 func Dial(ctx context.Context, o ClientOptions) (*Client, error) {
-	c := &Client{base: strings.TrimRight(o.URL, "/"), http: o.HTTP, token: o.Token, log: o.Log, reads: map[string]readAnswer{}}
+	c := &Client{base: strings.TrimRight(o.URL, "/"), http: o.HTTP, token: o.Token, log: o.Log, member: o.Member, reads: map[string]readAnswer{}}
 	if c.http == nil {
 		c.http = http.DefaultClient
 	}
@@ -106,8 +145,10 @@ func Dial(ctx context.Context, o ClientOptions) (*Client, error) {
 		c.log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	delay := 500 * time.Millisecond
+	var setup string
 	for {
-		err := c.get(ctx, "/internal/v1/config", &c.cfg)
+		var err error
+		setup, err = c.config(ctx)
 		if err == nil {
 			break
 		}
@@ -119,7 +160,13 @@ func Dial(ctx context.Context, o ClientOptions) (*Client, error) {
 		}
 		delay = min(delay*2, 5*time.Second)
 	}
-	c.setup = c.cfg.Setup()
+	// The setup is the controller's own digest of it: one computed here
+	// would differ from it whenever the two sides know other Config
+	// fields (another release), and every call would be refused.
+	c.setup = setup
+	if c.setup == "" {
+		c.setup = c.cfg.Setup()
+	}
 	c.known = map[string]bool{}
 	for _, k := range c.cfg.Known {
 		c.known[k] = true
@@ -142,7 +189,7 @@ func (c *Client) request(ctx context.Context, method, path string, body io.Reade
 		}
 		req.Header.Set("Authorization", "Bearer "+t)
 	}
-	if raw := auth.CookieFrom(ctx); raw != "" {
+	if raw := auth.CookieFrom(ctx); raw != "" && !c.member {
 		req.Header.Set(SessionHeader, raw)
 	}
 	if c.setup != "" {
@@ -151,26 +198,42 @@ func (c *Client) request(ctx context.Context, method, path string, body io.Reade
 	return req, nil
 }
 
-func (c *Client) get(ctx context.Context, path string, out any) error {
-	req, err := c.request(ctx, http.MethodGet, path, nil)
+// config reads the controller's Config into c.cfg and returns the setup
+// digest the controller states ("" from a controller that states none).
+func (c *Client) config(ctx context.Context) (setup string, err error) {
+	if c.member {
+		defer func() { err = cleanErr(err) }() // a member's text reaches the pages
+	}
+	req, err := c.request(ctx, http.MethodGet, "/internal/v1/config", nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 512))
-		return fmt.Errorf("%s: %s", res.Status, strings.TrimSpace(string(b)))
+		return "", fmt.Errorf("%s: %s", res.Status, strings.TrimSpace(string(b)))
 	}
-	return json.NewDecoder(res.Body).Decode(out)
+	if err := json.NewDecoder(c.answer(res)).Decode(&c.cfg); err != nil {
+		return "", err
+	}
+	if c.member {
+		cleanStrings(&c.cfg)
+	}
+	return res.Header.Get(SetupHeader), nil
 }
 
 // call calls method with args and decodes its results into outs. Results
 // are decoded even when the method also returned an error.
-func (c *Client) call(ctx context.Context, method string, args []any, outs ...any) error {
+func (c *Client) call(ctx context.Context, method string, args []any, outs ...any) (err error) {
+	if c.member {
+		// A member's messages, failing bodies and what the decoder quotes
+		// of its answer (map keys) are shown on the hub's pages.
+		defer func() { err = cleanErr(err) }()
+	}
 	if args == nil {
 		args = []any{}
 	}
@@ -194,6 +257,9 @@ func (c *Client) call(ctx context.Context, method string, args []any, outs ...an
 	if res.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(res.Body, 512))
 		err := fmt.Errorf("controller: %s: %s", res.Status, strings.TrimSpace(string(msg)))
+		if res.StatusCode == http.StatusNotFound {
+			err = fmt.Errorf("controller: %s: the controller has no method %s (another version?)", res.Status, method)
+		}
 		if res.StatusCode == http.StatusConflict {
 			c.setupChanged()
 		}
@@ -203,14 +269,20 @@ func (c *Client) call(ctx context.Context, method string, args []any, outs ...an
 		return err
 	}
 	var ans answer
-	if err := json.NewDecoder(res.Body).Decode(&ans); err != nil {
+	if err := json.NewDecoder(c.answer(res)).Decode(&ans); err != nil {
 		return fmt.Errorf("%w: %s: %v", ErrUnavailable, method, err)
 	}
 	if len(ans.R) != len(outs) {
 		return fmt.Errorf("controller: %s gave %d results, not %d (another version?)", method, len(ans.R), len(outs))
 	}
 	for i, r := range ans.R {
-		if err := json.Unmarshal(r, outs[i]); err != nil {
+		err := json.Unmarshal(r, outs[i])
+		if c.member {
+			// A result filled in part before a type error is cleaned too:
+			// callers may show what they got next to the error.
+			cleanStrings(outs[i])
+		}
+		if err != nil {
 			return fmt.Errorf("controller: %s result %d: %v", method, i+1, err)
 		}
 	}
@@ -272,7 +344,10 @@ func (c *Client) Run(ctx context.Context) {
 	}
 }
 
-func (c *Client) follow(ctx context.Context) error {
+func (c *Client) follow(ctx context.Context) (err error) {
+	if c.member {
+		defer func() { err = cleanErr(err) }()
+	}
 	req, err := c.request(ctx, http.MethodGet, "/internal/v1/events", nil)
 	if err != nil {
 		return err
@@ -455,10 +530,16 @@ func (c *Client) ComparedMarked(ctx context.Context, p store.ProjectKey, from, t
 }
 
 func (c *Client) SaveCompare(ctx context.Context, p store.ProjectKey, from, to string, files []string, complete bool) error {
+	if c.member {
+		return nil
+	}
 	return c.call(ctx, "SaveCompare", []any{p, from, to, files, complete})
 }
 
 func (c *Client) SettleElsewhere(ctx context.Context, settled []store.Settled) error {
+	if c.member {
+		return nil
+	}
 	return c.call(ctx, "SettleElsewhere", []any{settled})
 }
 

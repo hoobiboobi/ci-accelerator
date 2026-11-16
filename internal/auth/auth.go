@@ -28,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +117,35 @@ type Auth struct {
 
 	locks sync.Map // session id (hex) -> *renewal: one refresh at a time
 	cache access
+
+	// Elevate, when set, makes more people admins than the configuration
+	// names: a fleet hub's operators and owners, from its own store. It is
+	// asked whenever a session is loaded, so a role given or taken there
+	// counts at the person's next request.
+	Elevate func(host string, userID uint64) bool
+}
+
+// Admin is an admin named in the configuration.
+type Admin struct {
+	Host   string
+	UserID uint64
+}
+
+// Admins are the admins the configuration names, by GitLab.
+func (a *Auth) Admins() []Admin {
+	var out []Admin
+	for _, p := range a.order {
+		in := a.insts[p]
+		ids := make([]uint64, 0, len(in.adminIDs))
+		for id := range in.adminIDs {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		for _, id := range ids {
+			out = append(out, Admin{Host: in.host, UserID: id})
+		}
+	}
+	return out
 }
 
 // renewal is a session's token renewal: one at a time, and the last
@@ -339,10 +369,17 @@ type pending struct {
 var loginAD = []byte("login")
 
 // SafePath keeps a return address inside the console: a local path, never
-// another site.
+// another site. It refuses control characters anywhere (url.Parse checks
+// them only before the fragment) and the bidi controls that make a shown
+// address read differently from what it is.
 func SafePath(to string) string {
-	if to == "" || to[0] != '/' || strings.HasPrefix(to, "//") || strings.ContainsAny(to, "\\\r\n\t") || strings.HasPrefix(to, "/auth/") {
+	if to == "" || to[0] != '/' || strings.HasPrefix(to, "//") || strings.Contains(to, "\\") || strings.HasPrefix(to, "/auth/") {
 		return "/"
+	}
+	for _, r := range to {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) {
+			return "/"
+		}
 	}
 	u, err := url.Parse(to)
 	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
@@ -574,8 +611,9 @@ func (a *Auth) LoadCookie(ctx context.Context, raw string) (v *Viewer, touched b
 		}
 		touched = true
 	}
+	admin := in.adminIDs[x.UserID] || (a.Elevate != nil && a.Elevate(in.host, x.UserID))
 	return &Viewer{Instance: x.Instance, Host: in.host, UserID: x.UserID, Username: x.Username, Name: x.Name,
-		Admin: in.adminIDs[x.UserID], a: a, id: id}, touched, nil
+		Admin: admin, a: a, id: id}, touched, nil
 }
 
 // SignOut ends the session on r: the cookie cleared, the session deleted

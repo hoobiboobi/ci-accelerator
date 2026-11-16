@@ -34,7 +34,9 @@ import (
 //
 // Calls carry the caller's identity (Authorization: Bearer, checked by
 // Authorize) and, for a page a person signed in to, their session cookie
-// (X-CI-Session): GitLab is read with that person's token.
+// (X-CI-Session): GitLab is read with that person's token. A fleet hub
+// (RoleHub) reads what the web reads, without a session and without the
+// web's writes.
 
 // SessionHeader carries the session cookie of the page a call serves.
 const SessionHeader = "X-CI-Session"
@@ -44,10 +46,18 @@ const SessionHeader = "X-CI-Session"
 // 409: the web must start again, never serve pages under an old setup.
 const SetupHeader = "X-CI-Setup"
 
+// APIVersion is the version of this API's shapes, raised when a call, a
+// result or Config changes in a way the other side cannot read. A fleet
+// hub, which reads members of other releases, compares it with its own.
+const APIVersion = 1
+
 // Config is what the web needs to know about the controller's setup.
 type Config struct {
 	Version string
 	Release string
+	// API is the controller's APIVersion (0: a controller from before it
+	// was stated).
+	API int `json:",omitempty"`
 	// GitLab: the console can read GitLab's API at all; InstallToken: with
 	// a token of the installation (no sign-in).
 	GitLab       bool
@@ -67,7 +77,7 @@ type Config struct {
 // version: a web and a controller of two releases still speak.
 func (c Config) Setup() string {
 	cp := c
-	cp.Version = ""
+	cp.Version, cp.API = "", 0
 	b, _ := json.Marshal(cp)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
@@ -102,8 +112,8 @@ func (s *Server) Stop() {
 }
 
 // The methods the web may call, by receiver. Nothing else is reachable:
-// none of the store's writes but SettleElsewhere (a settled reason the
-// pages work out with GitLab).
+// none of the store's writes but SettleElsewhere and SaveCompare (a
+// settled reason and the comparison the pages work out with GitLab).
 var (
 	backendMethods = []string{"Projects", "Builds", "Branches", "Targets", "TargetImages", "StepCounts", "ImageDays", "PipelineList",
 		"JobsOf", "BuildsOf", "PipelineInfo", "PipelineProject", "PipelineJobs", "Job", "JobBuilds", "BuildPage", "Refs",
@@ -111,7 +121,21 @@ var (
 		"Recent", "BuildHints", "BuildOrder", "Ping", "Daemons", "LiveBuild"}
 	gitlabMethods = []string{"Ensure", "JobLogPart", "Changed", "Status"}
 	authMethods   = []string{"BeginWith", "FinishWith", "LoadCookie", "EndCookie"}
+	// notForHub are the methods a hub may not call over the link: the
+	// store's writes, and the sign-in of this console (the hub signs
+	// people in itself).
+	notForHub = map[string]bool{"SettleElsewhere": true, "SaveCompare": true,
+		"BeginWith": true, "FinishWith": true, "LoadCookie": true, "EndCookie": true, "CanReadAs": true}
 )
+
+type roleKey struct{}
+
+// roleOf is the role Authorize gave the caller of ctx's request; "" when
+// nothing checks callers (tests).
+func roleOf(ctx context.Context) Role {
+	r, _ := ctx.Value(roleKey{}).(Role)
+	return r
+}
 
 // sessions answers what the person a call is for may read.
 type sessions struct{ a *auth.Auth }
@@ -175,6 +199,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /internal/v1/events", s.authorized(RoleWeb, http.HandlerFunc(s.events)))
 	mux.Handle("GET /internal/v1/config", s.authorized(RoleWeb, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(SetupHeader, s.Config.Setup())
 		json.NewEncoder(w).Encode(s.Config)
 	})))
 	if s.Routes != nil {
@@ -188,6 +213,9 @@ func (s *Server) authorized(want Role, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.Authorize != nil {
 			role, err := s.Authorize(r)
+			if err == nil {
+				r = r.WithContext(context.WithValue(r.Context(), roleKey{}, role))
+			}
 			if err == nil && !role.may(want) {
 				err = fmt.Errorf("%w: a %s may not call %s", ErrForbidden, role, r.URL.Path)
 			}
@@ -268,6 +296,11 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such method", http.StatusNotFound)
 		return
 	}
+	hub := roleOf(r.Context()) == RoleHub
+	if hub && notForHub[r.PathValue("method")] {
+		http.Error(w, "a hub may not call "+r.PathValue("method"), http.StatusForbidden)
+		return
+	}
 	start := time.Now()
 	defer func() {
 		s.Log.Debug("api call", "method", r.PathValue("method"), "dur_ms", time.Since(start).Milliseconds())
@@ -278,7 +311,7 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if c := r.Header.Get(SessionHeader); c != "" {
+	if c := r.Header.Get(SessionHeader); c != "" && !hub {
 		ctx = auth.WithCookie(ctx, c)
 	}
 	t := m.Type()
@@ -357,7 +390,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 // ConfigFor describes a controller with these parts; gl and a may be nil.
 func ConfigFor(version, release string, gl *LocalGitLab, a *auth.Auth) Config {
-	c := Config{Version: version, Release: release}
+	c := Config{Version: version, Release: release, API: APIVersion}
 	if gl != nil {
 		c.GitLab = true
 		c.InstallToken = gl.Token != nil && a == nil
