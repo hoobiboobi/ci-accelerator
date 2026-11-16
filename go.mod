@@ -8,8 +8,10 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.43.8
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.2
 	github.com/aws/smithy-go v1.27.10
+	github.com/coder/websocket v1.8.15
 	github.com/containerd/containerd/v2 v2.3.6
 	github.com/getkin/kin-openapi v0.152.0
+	github.com/hashicorp/yamux v0.1.2
 	github.com/klauspost/compress v1.20.2
 	github.com/moby/buildkit v0.33.1
 	github.com/moby/patternmatcher v0.6.1
