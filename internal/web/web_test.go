@@ -105,6 +105,19 @@ func consoleBuild(t *testing.T, options func(*store.Store) testOpts, start func(
 	// what a Dockerfile author wrote.
 	last := bs[len(bs)-1]
 	last.Steps[len(last.Steps)-1].Name = "RUN echo '" + evil + "'"
+	// The build of its image before it ran that step as a long line: the
+	// compare page shows the earlier text whole (a 1400 px screen must
+	// still hold the page).
+	for i := len(bs) - 2; i >= 0; i-- {
+		if bs[i].Target == last.Target {
+			for j := range bs[i].Steps {
+				if s := &bs[i].Steps[j]; s.Key == last.Steps[len(last.Steps)-1].Key {
+					s.Name = "RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -X main.version=0.0.0-dev' -o /out/bin/app ./cmd/app && ./scripts/check-binary.sh /out/bin/app"
+				}
+			}
+			break
+		}
+	}
 	// It also breaks one of BuildKit's build checks (on line 1).
 	last.Warnings = []history.Warning{{Rule: "JSONArgsRecommended", Message: "JSON arguments recommended for CMD " + evil,
 		Detail: "signals", URL: "https://docs.docker.com/go/dockerfile/rule/json-args-recommended/", File: "Dockerfile", Line: 1, EndLine: 1}}
