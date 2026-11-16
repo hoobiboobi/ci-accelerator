@@ -1,13 +1,15 @@
 # Findings in the third-party images the charts run by default (the
 # daemons' moby/buildkit, the box's gitlab-runner), accepted for a while:
-# there is no release with the fix to move to (BuildKit v0.34.2 is its
-# latest; its CNI plugins are built with Go 1.25.7, unused by the daemons'
-# host network mode), or the release that
+# there was no release with the fix to move to when they were listed
+# (BuildKit v0.34.2 was its latest; its CNI plugins are built with Go
+# 1.25.7, unused by the daemons' host network mode), or the release that
 # has it waits for the two-week rule (Renovate opens it). Not analysed for
 # reachability. Each entry expires: the weekly scan (make third-party-scan)
 # fails on it again, and it is looked at again then. Listed 2026-11-01 with
 # trivy 0.75.0; BuildKit v0.34.2 and libexpat added 2026-11-03, openssh,
-# libexpat and x/net 2026-11-09.
+# libexpat and x/net 2026-11-09. BuildKit v0.35.0 came out on 2026-11-11
+# (two weeks old on 2026-11-25), not yet scanned: which of these it fixes
+# is decided with it, before the entries expire, not by extending them.
 vulnerabilities:
   - id: CVE-2026-111943
     statement: "moby/buildkit v0.34.2 (buildkitd, its CNI plugins): no BuildKit release with the fix"
