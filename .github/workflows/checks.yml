@@ -133,17 +133,19 @@ jobs:
 
   # GitLab itself reads the component: CI lint and pipeline simulation of
   # includes with every kind of input, and inputs it must refuse. A GitLab
-  # boots for minutes, so only when the component's own files changed.
+  # boots for minutes, so only when the component's own files changed
+  # (component, with the charts' jobs; a change of the Go code that reads
+  # GitLab sets component for the e2e group alone).
   component-gitlab:
     name: GitLab CI component in GitLab ${{ matrix.gitlab }}
     needs: changes
-    if: needs.changes.outputs.component == 'true'
+    if: needs.changes.outputs.component == 'true' && needs.changes.outputs.charts == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        # The oldest GitLab the component claims (17.9) and the runner's minor.
+        # The oldest GitLab the component claims (17.9) and a current one (19.4).
         gitlab: [min, current]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

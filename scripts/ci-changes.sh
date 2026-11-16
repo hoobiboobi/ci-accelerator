@@ -9,12 +9,16 @@
 #                       (box, upgrade)
 #   component=true|false
 #                       the GitLab CI component in a real GitLab (CE booted
-#                       in Docker: lint at two versions, the e2e group
-#                       component); only for a change under ci/gitlab/ (or
-#                       no list at all), since each GitLab takes minutes
+#                       in Docker): the e2e group component, and with
+#                       charts=true the lint at two versions; for a change
+#                       under ci/gitlab/, of the code that explains builds
+#                       with GitLab's data (internal/gitlab,
+#                       internal/history, internal/collector), or no list
+#                       at all, since each GitLab takes minutes
 #   renovate=true|false Renovate's configs validated and every pin found
 #                       (make renovate-check), the pinned checksums against
-#                       upstream (make pins-check)
+#                       upstream (make pins-check); also for a change of a
+#                       file Renovate reads pins from
 #   docs=true|false     the release gate on copies of the tree
 #                       (test/release-check.sh, which lint runs too): it
 #                       reads the README, the changelog and the docs
@@ -25,7 +29,7 @@
 # runs everything: skipping is only for what is certainly untouched.
 # Documentation alone (Markdown outside the charts and the CI component,
 # docs/, Artifact Hub metadata) runs only the release gate. A real GitLab
-# runs only for the component's own files.
+# runs only for the component's own files and the code that reads GitLab.
 set -eu
 
 charts=false
@@ -38,7 +42,17 @@ any=false
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   any=true
-  case "$f" in ci/gitlab/*) component=true ;; esac
+  # The e2e group component is the one check of the explanations with a
+  # real GitLab's jobs and commits.
+  case "$f" in ci/gitlab/* | internal/gitlab/* | internal/history/* | internal/collector/*) component=true ;; esac
+  # Files with pins and sums (renovate.json5's managerFilePatterns, the
+  # Dockerfiles): an annotation lost or a sum typed by hand shows there.
+  case "$f" in
+    scripts/quickstart.sh | scripts/build-image.sh | test/e2e/run.sh | test/e2e/cert-manager-values.yaml | \
+      test/quickstart/run.sh | test/quickstart/offline.sh | charts/*/Chart.yaml | charts/*/values.yaml | \
+      ci/gitlab/build.yml | examples/kind/kind-config.yaml | integrations/gitlab-runner/values.yaml | \
+      ci/showcase/test.Dockerfile | cmd/ci-accelerator/Dockerfile) renovate=true ;;
+  esac
   case "$f" in
     # Generated from values (checked by lint) or checked by the component's
     # tests: before the Markdown rule.
@@ -66,7 +80,8 @@ while IFS= read -r f; do
     # (internal/fleet), and rendered by validate.
     charts/ci-accelerator/tests/values/fleet-member.yaml) charts=true; go=true ;;
     cmd/* | internal/* | go.mod | go.sum | test/ui/* | .govulncheck-allow | .trivyignore.yaml | .golangci.yml) go=true ;;
-    charts/* | integrations/* | examples/* | scripts/*.sh | test/e2e/* | test/quickstart/* | test/*.sh) charts=true ;;
+    # test/verify: lint runs the job-log check's own test.
+    charts/* | integrations/* | examples/* | scripts/*.sh | test/e2e/* | test/quickstart/* | test/*.sh | test/verify/*) charts=true ;;
     *) all=true ;;
   esac
 done

@@ -64,6 +64,14 @@
       groupName: "Go modules",
     },
     {
+      description: "Indirect Go modules (Renovate leaves them alone by default): minor and patch together in one PR, so x/net, x/crypto and the like do not wait for someone to remember them.",
+      matchManagers: ["gomod"],
+      matchDepTypes: ["indirect"],
+      matchUpdateTypes: ["minor", "patch"],
+      enabled: true,
+      groupName: "Go modules (indirect)",
+    },
+    {
       description: "The go directive (the minimum Go) stays by hand: it is a compatibility promise.",
       matchManagers: ["gomod"],
       matchDepTypes: ["golang"],
@@ -87,7 +95,7 @@
       groupName: "GitHub runners",
     },
     {
-      description: "BuildKit: the chart's appVersion and default digest, the CI component's client image, the quickstart test's. The component's integrity and the chart's list of earlier defaults follow.",
+      description: "BuildKit: the chart's appVersion and default digest, the CI component's client image, the quickstart test's, the release image build's. The component's integrity and the chart's list of earlier defaults follow.",
       matchPackageNames: ["moby/buildkit", "docker.io/moby/buildkit"],
       groupName: "BuildKit",
       // Once the branch has every BuildKit pin bumped: the previous default
@@ -102,10 +110,10 @@
       ],
     },
     {
-      description: "The gitlab-runner chart and the runner image it runs, together (a chart minor goes with a runner minor); the chart archive's sum follows.",
+      description: "The gitlab-runner chart and the runner image it runs, together (a chart minor goes with a runner minor), in the box and in the fragment for a runner of one's own; the chart archive's sum and the versions the docs name follow.",
       matchPackageNames: ["gitlab-runner", "registry.gitlab.com/gitlab-org/gitlab-runner"],
       groupName: "gitlab-runner",
-      postUpgradeTasks: { commands: ["scripts/update-pins.sh gitlab-runner"], fileFilters: ["Makefile", "test/e2e/run.sh", "charts/ci-accelerator/tests/**"], executionMode: "branch" },
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh gitlab-runner"], fileFilters: ["Makefile", "test/e2e/run.sh", "charts/ci-accelerator/tests/**", "charts/ci-accelerator/README.md", "integrations/gitlab-runner/**", "docs/install-existing-cluster.md"], executionMode: "branch" },
       prBodyNotes: ["Check: the chart's default runner version against the image tag (one minor), `make validate` (the fragment renders with the chart), the e2e runner and box scenarios."],
     },
     {
@@ -119,7 +127,7 @@
       groupName: "cert-manager",
       postUpgradeTasks: {
         commands: ["scripts/update-pins.sh cert-manager"],
-        fileFilters: ["test/e2e/**", "scripts/quickstart.sh", "README.md", "docs/gitops.md", "charts/buildkit/templates/_validate.tpl", "charts/buildkit/tests/**"],
+        fileFilters: ["test/e2e/**", "scripts/quickstart.sh", "README.md", "docs/gitops.md", "docs/quickstart.md", "charts/buildkit/templates/_validate.tpl", "charts/buildkit/tests/**"],
         executionMode: "branch",
       },
       prBodyNotes: ["Check: the Kubernetes versions this cert-manager is tested on include the quickstart's k3s and the e2e's kind; the e2e certmanager scenario; the error message in charts/buildkit names the install command."],
@@ -128,14 +136,14 @@
       description: "k3s for the quickstart: the stable channel, as the quickstart chose it; its sums follow.",
       matchPackageNames: ["k3s"],
       groupName: "k3s",
-      postUpgradeTasks: { commands: ["scripts/update-pins.sh k3s"], fileFilters: ["scripts/quickstart.sh", "README.md"], executionMode: "branch" },
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh k3s"], fileFilters: ["scripts/quickstart.sh", "README.md", "docs/quickstart.md"], executionMode: "branch" },
       prBodyNotes: ["Check: cert-manager's tested Kubernetes range includes this k3s; the quickstart workflow."],
     },
     {
       description: "Helm 4 (CI, the quickstart, the release's packaging); the Makefile's keyed sums are renamed. Helm 3 stays by hand until its end of life.",
       matchPackageNames: ["helm/helm"],
       groupName: "Helm",
-      postUpgradeTasks: { commands: ["scripts/update-pins.sh helm"], fileFilters: ["Makefile", "scripts/quickstart.sh", "README.md"], executionMode: "branch" },
+      postUpgradeTasks: { commands: ["scripts/update-pins.sh helm"], fileFilters: ["Makefile", "scripts/quickstart.sh", "README.md", "docs/quickstart.md"], executionMode: "branch" },
       prBodyNotes: ["Check: `make lint unittest` on both Helm lines; the release's reproducible packaging (the release workflow packages with this Helm). scripts/update-pins.sh moved the sums and the README's Helm path."],
     },
     {

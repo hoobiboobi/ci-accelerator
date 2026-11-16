@@ -44,17 +44,44 @@ jobs:
         id: version
         run: echo "version=$(scripts/check-release-version.sh "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
 
-      # Only a commit of main (or of a release-0.N branch, for a patch
-      # release) is released: reviewed and checked there. A tag on any other
-      # commit, pushed by anyone who may create tags, stops here, before
-      # anything is built, pushed or signed.
+      # Only a commit of main (or of a release-<major>.<minor> branch, for a
+      # patch release) is released: reviewed and checked there. A tag on any
+      # other commit, pushed by anyone who may create tags, stops here,
+      # before anything is built, pushed or signed. Other names that start
+      # with release- (release-x) are not release branches.
       - name: The tagged commit is on main or a release branch
         run: |
           for b in $(git for-each-ref --format='%(refname)' refs/remotes/origin/main 'refs/remotes/origin/release-*'); do
-            if git merge-base --is-ancestor "$GITHUB_SHA" "$b"; then echo "$GITHUB_REF_NAME is on ${b#refs/remotes/origin/}"; exit 0; fi
+            name=${b#refs/remotes/origin/}
+            [ "$name" = main ] || [[ $name =~ ^release-[0-9]+\.[0-9]+$ ]] || continue
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$b"; then echo "$GITHUB_REF_NAME is on $name"; exit 0; fi
           done
-          echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is on neither main nor a release-* branch"
+          echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is on neither main nor a release-<major>.<minor> branch"
           exit 1
+
+      # A version is published once. A re-run of this workflow for a tag
+      # already released would push the image under its tag again with
+      # another digest (the provenance records the run) than the one the
+      # release notes and the charts' released-image lists name. A failed
+      # release is retried as it is only before it pushed the image; after
+      # that, the image tag is removed by hand first, or a new version
+      # released.
+      - name: Not released yet
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tags=$(gh release list --limit 200 --json tagName -q '.[].tagName')
+          if printf '%s\n' "$tags" | grep -x "$GITHUB_REF_NAME" >/dev/null; then
+            echo "::error::the GitHub release $GITHUB_REF_NAME exists: this version is published, and nothing is pushed again"
+            exit 1
+          fi
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ci-accelerator:v$VERSION"
+          if docker buildx imagetools inspect "$image" >/dev/null 2>&1; then
+            echo "::error::$image exists in the registry: this version was pushed by an earlier run; remove it there before a retry, or release a new version"
+            exit 1
+          fi
 
       - name: Install helm, kind, kubectl
         run: |
@@ -68,20 +95,31 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: make deps lint unittest validate
 
+      # The previous release, with the token in this step only: the tests
+      # below run the tree's code and need no token.
+      - name: The previous release
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          prev=$(gh release list --exclude-drafts --exclude-pre-releases --limit 50 --json tagName -q '.[].tagName' | grep -v "^$GITHUB_REF_NAME\$" | head -1 || true)
+          echo "tag=$prev" >> "$GITHUB_OUTPUT"
+
       # The GitLab CI component as the release notes publish it: the file at
       # this tag on GitHub is the one whose integrity they print, and when it
       # changed since the previous release, a real GitLab (the oldest the
-      # component claims and the runner's minor) reads it from there. 0.3.1
+      # component claims and a current one) reads it from there. 0.3.1
       # shipped a component GitLab refused; a refusal stops here.
       - name: The GitLab CI component
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMPONENT_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/ci/gitlab/build.yml
+          PREVIOUS: ${{ steps.previous.outputs.tag }}
         run: |
           make component-test
           curl -fsSL "$COMPONENT_URL" -o "$RUNNER_TEMP/published.yml"
           cmp "$RUNNER_TEMP/published.yml" ci/gitlab/build.yml
-          prev=$(gh release list --exclude-drafts --exclude-pre-releases --limit 50 --json tagName -q '.[].tagName' | grep -v "^$GITHUB_REF_NAME\$" | head -1 || true)
+          prev=$PREVIOUS
           if [ -n "$prev" ] && curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$prev/ci/gitlab/build.yml" -o "$RUNNER_TEMP/previous.yml" \
               && cmp -s "$RUNNER_TEMP/previous.yml" ci/gitlab/build.yml; then
             echo "the component is the same file as in $prev, which a real GitLab read before its release"

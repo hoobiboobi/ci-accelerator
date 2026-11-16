@@ -8,9 +8,10 @@ and makes the job pods thin clients. It is the same runner configuration
 the box gives its own runner (`make validate` checks that both stay
 identical).
 
-Tested with chart 0.93.0 and gitlab-runner 19.4.2: `make validate` renders
-the chart with the fragment, and `make e2e` (scenario `runner`) runs the real
-runner end to end. See "What the e2e proves" below.
+Tested with chart 0.94.1 and gitlab-runner 19.5.1, the versions the box
+installs: `make validate` renders the chart with the fragment, and `make e2e`
+(scenario `runner`) runs the real runner end to end. See "What the e2e
+proves" below.
 
 ## Two ways to use it
 
@@ -107,9 +108,12 @@ that for you.
 
    ```sh
    helm upgrade --install gitlab-runner gitlab-runner \
-     --repo https://charts.gitlab.io --version 0.93.0 \
-     -n ci-accelerator -f integrations/gitlab-runner/values.yaml
+     --repo https://charts.gitlab.io --version 0.94.1 \
+     -n ci-accelerator -f values.yaml
    ```
+
+   (`values.yaml` is the fragment downloaded in step 3; from a checkout of
+   this repository, `integrations/gitlab-runner/values.yaml`.)
 
 ## Use it with charts/buildkit alone
 
@@ -189,6 +193,13 @@ successfully`.
   If you already have a `runners.config`, copy these lines into it and keep
   the `namespace = ...` line, the pod label and the annotations: the router
   and the console find the jobs by them.
+- **Keep the job's annotations the runner's.** Leave the runner's
+  `pod_annotations_overwrite_allowed` unset, or make sure its pattern
+  matches no `job.runner.gitlab.com/`, `project.runner.gitlab.com/` or
+  `ci-accelerator.io/` key. An allowed overwrite lets a job replace the
+  annotations the router and the console read its job and project from,
+  so its builds and route decisions would be recorded under another
+  project.
 - **Job variables win.** A job's `variables:` replace `BUILDKIT_REMOTE_ADDR`
   and `BUILDKIT_TLS_DIR`. With the router on, the box's NetworkPolicy
   admits only the routers and the controller to the daemons, so a job that
@@ -199,10 +210,10 @@ successfully`.
 - **Set the architecture.** Without `kubernetes.io/arch` in the node selector
   the Kubernetes executor assumes amd64 for its helper image. On arm64 build
   nodes jobs then fail to pull it.
-- **Use 19.4.2.** 19.4.0 lists pod events on every poll and overloaded API
-  servers; 19.4.1 fixed that, and 19.4.2 is the same line rebuilt with Go
-  1.26.10 for its security fixes. The fragment pins the 19.4.2 image; chart
-  0.93.0 alone would run 19.4.0.
+- **Use 19.4.1 or newer.** 19.4.0 lists pod events on every poll and
+  overloaded API servers; 19.4.1 fixed that. The fragment pins the image the
+  box runs (19.5.1); with an older chart keep that pin, since chart 0.93.0
+  alone would run 19.4.0.
 - **Kubernetes versions.** GitLab publishes no support matrix. The charts
   need Kubernetes 1.34 or newer; our checks run on 1.34 and 1.37.
 

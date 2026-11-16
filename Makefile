@@ -1,6 +1,12 @@
 # One-command targets for every check; CI is meant to run the same targets.
 # Works with GNU Make 3.81 (macOS) and 4.x (Linux), Helm 3 and Helm 4.
 
+# Recipes run in bash with pipefail: in `helm template | kubeconform` a
+# failing render must fail the check (kubeconform passes on empty input).
+# Make 3.81 ignores .SHELLFLAGS: the recipes with such pipelines set it too.
+SHELL := /bin/bash
+.SHELLFLAGS := -o pipefail -c
+
 HELM   ?= helm
 CHARTS := charts/buildkit
 # The control-plane chart needs its own required values.
@@ -350,8 +356,13 @@ lint: $(SHELLCHECK) deps chart-docs-check workflows-lint ## helm lint --strict (
 	@test/release-check.sh
 	@echo "==> images the weekly scan covers"
 	@test/default-images.sh
+	@echo "==> pins that must agree"
+	@scripts/pins-agree.sh
+	@echo "==> the scripts' own tests (quickstart, certificates, pins, job logs)"
+	@for t in scripts/test/*.sh; do $$t || exit 1; done
+	@python3 test/verify/joblogs_test.py
 	@echo "==> shellcheck"
-	@$(SHELLCHECK) -S warning test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/check-sbom.sh scripts/api-check.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/third-party-images.sh scripts/update-pins.sh test/renovate-check.sh test/hints/managers.sh
+	@$(SHELLCHECK) -S warning scripts/pins-agree.sh scripts/test/*.sh test/e2e/run.sh scripts/buildkit-certs.sh scripts/check-release-version.sh scripts/changelog-section.sh test/runner-config-parity.sh test/e2e-matrix.sh scripts/build-image.sh scripts/check-sbom.sh scripts/api-check.sh scripts/quickstart.sh test/quickstart/run.sh test/quickstart/offline.sh scripts/vulncheck.sh scripts/ci-changes.sh scripts/ci-changed-paths.sh test/ci-changes.sh test/released-images.sh ci/gitlab/test/run.sh ci/gitlab/test/gitlab.sh test/release-check.sh scripts/default-images.sh test/default-images.sh scripts/third-party-images.sh scripts/update-pins.sh test/renovate-check.sh test/hints/managers.sh test/history/generate.sh
 
 .PHONY: unittest
 unittest: $(HELM_PLUGINS)/.unittest-$(HELM_UNITTEST_VERSION) deps ## Run helm-unittest suites
@@ -404,9 +415,10 @@ console-dev: ## The console on its fixtures at CONSOLE_DEV (127.0.0.1:8095), pag
 	@CONSOLE_DEV=$${CONSOLE_DEV:-127.0.0.1:8095} $(GO_RUN) test -count=1 -v -run '^TestDevServer$$' -timeout 0 ./internal/web/
 
 .PHONY: go-test
-go-test: ## Go: gofmt, go vet and the tests with the race detector (the pages twice: with the controller in the process, and through its API)
+go-test: ## Go: gofmt, go mod tidy, go vet and the tests with the race detector (the pages twice: with the controller in the process, and through its API)
 	@out=$$("$$($(GO_RUN) env GOROOT)/bin/gofmt" -l internal cmd); \
 		if [ -n "$$out" ]; then echo "not gofmt-formatted: $$out" >&2; exit 1; fi
+	@$(GO_RUN) mod tidy -diff >/dev/null || { echo "go.mod and go.sum are not tidy (go mod tidy):" >&2; $(GO_RUN) mod tidy -diff >&2; exit 1; }
 	@$(GO_RUN) vet ./...
 	@$(GO_RUN) test -race -count=1 ./...
 	@WEB_TEST_SPLIT=1 $(GO_RUN) test -count=1 ./internal/web/
@@ -437,7 +449,7 @@ quick: lint unittest go-test go-lint ## The checks to run before every push (val
 
 .PHONY: validate
 validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (our charts, gitlab-runner + fragment) against Kubernetes schemas
-	@for c in $(CHARTS); do \
+	@set -o pipefail; for c in $(CHARTS); do \
 		for k in $(KUBE_VERSIONS); do \
 			for v in "" $(CHART_VALUES); do \
 				echo "==> kubeconform $$c k8s $$k $${v:+-f $$v}"; \
@@ -449,7 +461,7 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 				| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 		done; \
 	done
-	@for k in $(KUBE_VERSIONS); do \
+	@set -o pipefail; for k in $(KUBE_VERSIONS); do \
 		echo "==> kubeconform $(CONTROL_PLANE) k8s $$k"; \
 		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n ci-accelerator $(CONTROL_PLANE_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
@@ -466,7 +478,7 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n ci-accelerator $(CONTROL_PLANE_CERT_MANAGER_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 	done
-	@for k in $(KUBE_VERSIONS); do \
+	@set -o pipefail; for k in $(KUBE_VERSIONS); do \
 		echo "==> kubeconform gitlab-runner $(RUNNER_CHART_VERSION) + integrations/gitlab-runner k8s $$k"; \
 		$(HELM) template gitlab-runner $(RUNNER_CHART) --kube-version $$k -n ci-accelerator \
 			-f integrations/gitlab-runner/values.yaml \
@@ -505,7 +517,7 @@ template: deps ## Render every chart with default values (plus the required ones
 
 .PHONY: kind-up
 kind-up: ## Create the kind cluster (if missing) and taint its build nodes
-	@kind get clusters 2>/dev/null | grep -qx '$(KIND_CLUSTER)' || \
+	@kind get clusters 2>/dev/null | grep -x '$(KIND_CLUSTER)' >/dev/null || \
 		kind create cluster --name $(KIND_CLUSTER) --config $(KIND_CONFIG) $(if $(KIND_IMAGE),--image $(KIND_IMAGE))
 	@kubectl --context $(KUBE_CONTEXT) taint nodes -l ci-accelerator.io/node-role=build \
 		ci-accelerator.io/node-role=build:NoSchedule --overwrite >/dev/null

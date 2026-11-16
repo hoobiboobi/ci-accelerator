@@ -68,7 +68,10 @@ spec:
       type: boolean
       default: true
     provenance:
-      description: Attach a provenance attestation (SLSA, mode=min) to the image.
+      description: >-
+        Attach a provenance attestation (SLSA, mode=min) to the image. Whoever
+        can pull the image reads it: the job's trace id (pipeline and job
+        ids) and the context folder are in it.
       type: boolean
       default: false
     interruptible:
@@ -80,12 +83,23 @@ spec:
       type: boolean
       default: false
     timeout-minutes:
-      description: Stop the build after this many minutes (the connection to the daemon has no keepalive of its own).
+      description: >-
+        Stop the build after this many minutes, at least 1 (the connection to
+        the daemon has no keepalive of its own). The build stops earlier when
+        the job's own timeout comes first.
       type: number
       default: 60
     buildctl-args:
       description: More arguments for buildctl build, one per line (e.g. --no-cache).
       default: ""
+    output-prefix:
+      description: >-
+        Prefix of the names the job hands to later jobs (IMAGE, IMAGE_DIGEST,
+        IMAGE_REF), e.g. API_ for API_IMAGE_REF. Give each component job of a
+        pipeline its own: later jobs get the dotenv reports of all of them,
+        and names that repeat keep the value of one only.
+      default: ""
+      regex: ^([A-Za-z_][A-Za-z0-9_]*)?$
     buildkit-image:
       description: Image with buildctl for the job; keep it at the daemons' BuildKit release.
       # renovate: datasource=docker depName=moby/buildkit
@@ -128,6 +142,7 @@ spec:
     CIA_PROVENANCE: "$[[ inputs.provenance ]]"
     CIA_TIMEOUT_MINUTES: "$[[ inputs.timeout-minutes ]]"
     CIA_BUILDCTL_ARGS: $[[ inputs.buildctl-args ]]
+    CIA_OUTPUT_PREFIX: $[[ inputs.output-prefix ]]
   script:
     - |
       set -eu
@@ -286,11 +301,20 @@ spec:
         set -- "$@" --output "type=image,\"name=$names\",push=true"
       fi
       while IFS= read -r line; do
+        # Without the blanks around it, as the other lists; spaces inside
+        # stay (an --opt value).
+        line=${line#"${line%%[![:space:]]*}"}
+        line=${line%"${line##*[![:space:]]}"}
         [ -n "$line" ] || continue
         set -- "$@" "$line"
       done <<EOF
       $CIA_BUILDCTL_ARGS
       EOF
+      case "$CIA_OUTPUT_PREFIX" in
+        "" | [A-Za-z_]*) case "$CIA_OUTPUT_PREFIX" in *[!A-Za-z0-9_]*) bad=1 ;; *) bad="" ;; esac ;;
+        *) bad=1 ;;
+      esac
+      [ -z "$bad" ] || { echo "output-prefix must be letters, digits and _ (not first a digit), not $CIA_OUTPUT_PREFIX" >&2; exit 1; }
 
       if [ "$CIA_CONTEXT_SOURCE" = git ]; then
         say "context $CIA_CONTEXT from git, commit $CI_COMMIT_SHA, fetched by the build node; Dockerfile $dockerfile"
@@ -315,20 +339,47 @@ spec:
       # buildctl has no keepalive: a build node that vanishes without a
       # reset would leave the job waiting for the job timeout. On SIGTERM
       # buildctl cancels the build and exits 1, so the time tells a timeout
-      # from a failure; one that does not stop in a minute is killed. (The
-      # seconds variables are for the script's own test.)
+      # from a failure; one that does not stop in a minute is killed.
       case "$CIA_TIMEOUT_MINUTES" in "" | *[!0-9]*)
-        echo "timeout-minutes must be a whole number of minutes, not $CIA_TIMEOUT_MINUTES" >&2
+        echo "timeout-minutes must be a whole number of minutes, at least 1, not $CIA_TIMEOUT_MINUTES" >&2
         exit 1 ;;
       esac
-      limit=${CIA_TIMEOUT_SECONDS:-$((CIA_TIMEOUT_MINUTES * 60))}
+      minutes=${CIA_TIMEOUT_MINUTES#"${CIA_TIMEOUT_MINUTES%%[!0]*}"}   # 010 is ten, not octal
+      case "$minutes" in "" | ???????*)
+        echo "timeout-minutes must be a whole number of minutes, at least 1 and below a million, not $CIA_TIMEOUT_MINUTES" >&2
+        exit 1 ;;
+      esac
+      grace=60
+      limit=$((minutes * 60))
       start=$(date +%s)
-      if timeout -k "${CIA_TIMEOUT_GRACE_SECONDS:-60}" -s TERM "$limit" \
+      why="in $minutes minutes (timeout-minutes)"
+      # GitLab ends the job at its own timeout (CI_JOB_TIMEOUT seconds after
+      # the job started) without letting buildctl cancel the build: the build
+      # stops before that, with the grace period and the artifacts' upload
+      # still in the job's time.
+      case "${CI_JOB_TIMEOUT:-}" in "" | *[!0-9]*) ;; *)
+        began=""
+        [ -z "${CI_JOB_STARTED_AT:-}" ] ||
+          began=$(date -u -d "$(printf '%s' "$CI_JOB_STARTED_AT" | sed 's/T/ /; s/Z$//')" +%s 2>/dev/null || true)
+        case "$began" in "" | *[!0-9]*) began=$start ;; esac
+        [ "$began" -le "$start" ] || began=$start
+        left=$((CI_JOB_TIMEOUT - (start - began) - grace - 30))
+        if [ "$left" -lt "$limit" ]; then
+          limit=$((left > 1 ? left : 1))
+          why="before the job's timeout ($((CI_JOB_TIMEOUT / 60)) minutes; raise the job's or the project's timeout, or lower timeout-minutes)"
+        fi ;;
+      esac
+      if timeout -k "$grace" -s TERM "$limit" \
         buildctl --addr "$BUILDKIT_REMOTE_ADDR" --tlsdir "$BUILDKIT_TLS_DIR" \
         build "$@" --metadata-file build-metadata.json 2>&1 | tee "$log"; then :; else
         status=$?
-        if [ "$status" = 143 ] || [ "$status" = 137 ] || [ $(($(date +%s) - start)) -ge "$limit" ]; then
-          echo "the build did not finish in $CIA_TIMEOUT_MINUTES minutes (timeout-minutes)" >&2
+        took=$(($(date +%s) - start))
+        if [ "$took" -ge "$limit" ]; then
+          echo "the build did not finish $why" >&2
+        elif [ "$status" = 137 ]; then
+          echo "buildctl was killed (SIGKILL) after ${took}s, before any timeout: out of memory in the job pod? (buildctl exit status 137)" >&2
+        elif [ "$status" = 143 ]; then
+          echo "buildctl was stopped (SIGTERM) after ${took}s, before any timeout: the job was cancelled or its pod stopped (buildctl exit status 143)" >&2
         else
           echo "the build failed (buildctl exit status $status)" >&2
         fi
@@ -367,16 +418,18 @@ spec:
       digest=""
       [ ! -f build-metadata.json ] || digest=$(sed -n '/"containerimage.digest"/{s/.*"containerimage.digest": *"\([^"]*\)".*/\1/p;q;}' build-metadata.json)
       say "Dockerfile steps: $cached from cache, $built run; context sent: ${context:-unknown}"
-      # Only an image this job pushed is named.
+      # Only an image this job pushed is named; a job that pushed nothing
+      # hands nothing on (an empty IMAGE would override a later job's own).
       first=""
       [ "$CIA_PUSH" != true ] || first=${names%%,*}
       repo=$first
       case "${first##*/}" in *:*) repo=${first%:*} ;; esac   # drop the tag, not a registry port
-      {
-        echo "IMAGE=${first}"
-        echo "IMAGE_DIGEST=${digest}"
-        [ -z "$digest" ] || [ -z "$first" ] || echo "IMAGE_REF=${repo}@${digest}"
-      } >build.env
+      p=$CIA_OUTPUT_PREFIX
+      if [ -n "$first" ]; then
+        echo "${p}IMAGE=${first}"
+        [ -z "$digest" ] || echo "${p}IMAGE_DIGEST=${digest}"
+        [ -z "$digest" ] || echo "${p}IMAGE_REF=${repo}@${digest}"
+      fi >build.env
       [ -z "$digest" ] || say "digest $digest"
   artifacts:
     when: always

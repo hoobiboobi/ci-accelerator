@@ -26,6 +26,7 @@ ALL="$CP,$CHART_GROUPS"
 EVERY="charts=true go=true component=false renovate=true docs=false e2e_matrix=[$ALL]"
 CHARTS="charts=true go=false component=false renovate=false docs=false e2e_matrix=[$ALL]"
 COMPONENT="charts=true go=false component=true renovate=false docs=false e2e_matrix=[$ALL,$COMP]"
+CHARTS_PINS="charts=true go=false component=false renovate=true docs=false e2e_matrix=[$ALL]"
 GO="charts=false go=true component=false renovate=false docs=false e2e_matrix=[$CP]"
 NONE='charts=false go=false component=false renovate=false docs=false e2e_matrix=[]'
 DOCS='charts=false go=false component=false renovate=false docs=true e2e_matrix=[]'
@@ -35,17 +36,18 @@ want "the license (lint compares the charts' copies with it)" "$CHARTS" LICENSE
 want "go code" "$GO" internal/web/nodes.go cmd/ci-accelerator/main.go go.sum
 want "the browser checks" "$GO" test/ui/ui.mjs
 want "the Go linters' config" "$GO" .golangci.yml
-want "a chart" "$CHARTS" charts/buildkit/values.yaml
+want "a chart's values (pins: Renovate's check too)" "$CHARTS_PINS" charts/buildkit/values.yaml
+want "a chart's template" "$CHARTS" charts/buildkit/templates/daemonset.yaml
 want "a chart README (generated)" "$CHARTS" charts/buildkit/README.md
-want "the CI component: a real GitLab too" "$COMPONENT" ci/gitlab/build.yml
+want "the CI component: a real GitLab too (its pins: Renovate's check too)" "charts=true go=false component=true renovate=true docs=false e2e_matrix=[$ALL,$COMP]" ci/gitlab/build.yml
 want "the CI component's README (checked by its tests)" "$COMPONENT" ci/gitlab/README.md
 want "the component's GitLab tests" "$COMPONENT" ci/gitlab/test/lint.rb
-want "the e2e (no GitLab unless the component changed)" "$CHARTS" test/e2e/run.sh
-want "the quickstart" "$CHARTS" scripts/quickstart.sh test/quickstart/run.sh
+want "the e2e (no GitLab unless the component changed; its pins: Renovate's check too)" "$CHARTS_PINS" test/e2e/run.sh
+want "the quickstart (its pins: Renovate's check too)" "$CHARTS_PINS" scripts/quickstart.sh test/quickstart/run.sh
 want "go and docs" "charts=false go=true component=false renovate=false docs=true e2e_matrix=[$CP]" docs/troubleshooting.md internal/store/write.go
 want "the Makefile (everything but a real GitLab)" "$EVERY" Makefile
 want "a workflow" "$EVERY" .github/workflows/checks.yml
-want "the mirror's pipeline (GitLab runs it)" "$NONE" .gitlab-ci.yml ci/showcase/test.Dockerfile ci/showcase/test.Dockerfile.dockerignore
+want "the mirror's pipeline (GitLab runs it; the test Dockerfile's pins: Renovate's check)" "charts=false go=false component=false renovate=true docs=false e2e_matrix=[]" .gitlab-ci.yml ci/showcase/test.Dockerfile ci/showcase/test.Dockerfile.dockerignore
 want "the image recipe" "$EVERY" cmd/ci-accelerator/Dockerfile
 want "the image build's context" "$EVERY" .dockerignore
 want "the cache-mount hints' check on real builds (Go helper, shellchecked script)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" test/hints/managers.sh test/hints/cases/npm/Dockerfile
@@ -55,11 +57,11 @@ want "the API contract (its test and api-check in the Go job)" "$GO" docs/api/op
 want "the API contract's check (run by the Go job, shellchecked by lint)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" scripts/api-check.sh
 want "the release gate (lint runs it on copies of the tree)" "$CHARTS" scripts/check-release-version.sh scripts/changelog-section.sh
 want "nothing known: everything, a real GitLab too" "charts=true go=true component=true renovate=true docs=false e2e_matrix=[$ALL,$COMP]"
-want "go and a chart" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" internal/web/nodes.go charts/control-plane/values.yaml
+want "go and a chart" "charts=true go=true component=false renovate=true docs=false e2e_matrix=[$ALL]" internal/web/nodes.go charts/control-plane/values.yaml
 want "Renovate's config (its check alone)" "charts=false go=false component=false renovate=true docs=false e2e_matrix=[]" renovate.json5 .github/renovate-global.js test/renovate-deps.txt
 want "Renovate's workflow (its check alone, not every job)" "charts=false go=false component=false renovate=true docs=false e2e_matrix=[]" .github/workflows/renovate.yml
 want "the pins script (shellchecked by lint, run by the Renovate check)" "charts=true go=false component=false renovate=true docs=false e2e_matrix=[$ALL]" scripts/update-pins.sh test/renovate-check.sh
-want "go and the component" "charts=true go=true component=true renovate=false docs=false e2e_matrix=[$ALL,$COMP]" internal/web/nodes.go ci/gitlab/build.yml
+want "go and the component" "charts=true go=true component=true renovate=true docs=false e2e_matrix=[$ALL,$COMP]" internal/web/nodes.go ci/gitlab/build.yml
 
 # The list a pull request gets (scripts/ci-changed-paths.sh, as the changes
 # workflow runs it): moving the component's README into docs/ must still

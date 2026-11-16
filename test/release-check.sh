@@ -12,7 +12,7 @@ trap 'rm -rf "$work"' EXIT
 fail=0
 fresh() {
   rm -rf "$work/tree" && mkdir "$work/tree"
-  cp -R README.md CHANGELOG.md charts ci docs integrations scripts "$work/tree/"
+  cp -R README.md CHANGELOG.md SECURITY.md charts ci docs integrations scripts "$work/tree/"
   sed -i.bak "s/default \"v[0-9][^\"]*\" \$img\.tag/default \"v$version\" \$img.tag/" "$work/tree/charts/buildkit/templates/_helpers.tpl"
 }
 # expect <description> pass|fail [<sed script> <file>]: runs the check on a
@@ -43,4 +43,5 @@ expect "a guide installs another chart version" fail "1s/^/helm install buildkit
 /" docs/troubleshooting.md
 expect "the disk probe runs an unreleased image" fail 's/default "v[0-9][^"]*" \$img\.tag/default "v9.9.9" $img.tag/' charts/buildkit/templates/_helpers.tpl
 expect "the changelog entry has no upgrade notes" fail '/^### Upgrade notes/d' CHANGELOG.md
+expect "SECURITY.md supports another line" fail "s/^| ${version%.*}.x | yes |/| 0.0.x | yes |/" SECURITY.md
 exit $fail
