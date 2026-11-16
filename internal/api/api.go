@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -94,19 +94,27 @@ type Reason struct {
 	By    string             `json:"by,omitempty"`
 }
 
-// Handler returns the API's routes.
-func Handler(s Store) http.Handler {
+// Handler returns the API's routes. They log through the role's logger
+// when one is given, else through slog's default.
+func Handler(s Store, logger ...*slog.Logger) http.Handler {
+	log := slog.Default()
+	if len(logger) > 0 && logger[0] != nil {
+		log = logger[0]
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.Ping(r.Context()); err != nil {
 			// The cause goes to the console's log, not to whoever asks.
-			log.Printf("health check: store: %v", err)
+			log.Error("health check: store", "err", err)
 			http.Error(w, "store unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("GET /api/v1/builds", func(w http.ResponseWriter, r *http.Request) {
+		// The answer is per person with sign-in (admins only): no cache
+		// keeps it, an error answer included.
+		w.Header().Set("Cache-Control", "no-store")
 		limit := 50
 		if v := r.URL.Query().Get("limit"); v != "" {
 			n, err := strconv.Atoi(v)
@@ -118,33 +126,39 @@ func Handler(s Store) http.Handler {
 		}
 		stored, err := s.Recent(r.Context(), limit)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			// As for the health check: the cause (SQL, the controller's
+			// address) goes to the log.
+			log.Error("api: builds", "err", err)
+			http.Error(w, "the console's store could not be read", http.StatusInternalServerError)
 			return
 		}
 		ids := make([]int64, 0, len(stored))
 		for _, st := range stored {
 			ids = append(ids, st.ID)
 		}
-		hs, err := s.BuildHints(r.Context(), ids)
-		hintsNote := ""
-		if err != nil {
-			// The builds still answer, saying their hints could not be read;
-			// the cause goes to the log.
-			log.Printf("api: hints: %v", err)
-			hs, hintsNote = nil, "unavailable"
-		} else if len(ids) > store.MaxHintBuilds {
+		// The builds still answer when their hints or order hints cannot
+		// be read, each note saying so; the cause goes to the log. Both
+		// are read for the newest store.MaxHintBuilds builds only.
+		hintsNote, orderNote := "", ""
+		if len(ids) > store.MaxHintBuilds {
 			hintsNote = fmt.Sprintf("hints for the newest %d builds only", store.MaxHintBuilds)
+			orderNote = fmt.Sprintf("order for the newest %d builds only", store.MaxHintBuilds)
+		}
+		hs, err := s.BuildHints(r.Context(), ids)
+		if err != nil {
+			log.Error("api: hints", "err", err)
+			hs, hintsNote = nil, "unavailable"
 		}
 		order, err := s.BuildOrder(r.Context(), ids)
 		if err != nil {
-			log.Printf("api: order: %v", err)
-			order, hintsNote = nil, "unavailable"
+			log.Error("api: order", "err", err)
+			order, orderNote = nil, "unavailable"
 		}
 		out := make([]Build, 0, len(stored))
 		for _, st := range stored {
 			v := view(st)
 			for _, h := range hs[st.ID] {
-				x := Hint{Step: h.Key, Name: h.Name, Managers: h.Hints, Fragment: h.Fragment, Runs: h.Runs,
+				x := Hint{Step: h.Key, Name: h.Name, Managers: managers(h.Hints), Fragment: h.Fragment, Runs: h.Runs,
 					RunTime: h.RunTime.Seconds(), Median: h.Median.Seconds(), Since: h.Since}
 				if len(h.Lines) > 0 {
 					x.Line = h.Lines[0].Start
@@ -152,7 +166,7 @@ func Handler(s Store) http.Handler {
 				v.Hints = append(v.Hints, x)
 			}
 			for _, o := range order[st.ID] {
-				x := Order{Step: o.Key, Name: o.Name, Copy: o.CopyName, Managers: o.Managers, Files: o.Files, Others: o.Others,
+				x := Order{Step: o.Key, Name: o.Name, Copy: o.CopyName, Managers: list(o.Managers), Files: list(o.Files), Others: o.Others,
 					Took: o.Took.Seconds(), Fragment: o.Fragment, Runs: o.Runs, RunTime: o.RunTime.Seconds(), Since: o.Since}
 				if len(o.Lines) > 0 {
 					x.Line = o.Lines[0].Start
@@ -169,6 +183,9 @@ func Handler(s Store) http.Handler {
 		if hintsNote != "" {
 			body["hintsNote"] = hintsNote
 		}
+		if orderNote != "" {
+			body["orderNote"] = orderNote
+		}
 		json.NewEncoder(w).Encode(body)
 	})
 	return mux
@@ -179,7 +196,7 @@ func view(st *store.Stored) Build {
 	v := Build{
 		ID: st.ID, Ref: b.Ref, Daemon: b.Daemon, Target: b.Target, Instance: b.Attribution.Instance,
 		Pipeline: b.Attribution.Pipeline, Job: b.Attribution.Job, Started: b.Started, Error: b.Error,
-		Steps: map[string]int{}, Images: b.Images, BuildArgs: b.BuildArgs,
+		Steps: map[string]int{}, Images: history.ImageNames(b.Images), BuildArgs: b.BuildArgs,
 	}
 	if !b.Completed.IsZero() {
 		c := b.Completed
@@ -203,4 +220,26 @@ func view(st *store.Stored) Build {
 		v.Reason = &Reason{Kind: r.Kind, Step: r.Step.Key, Old: r.Old, New: r.New, Arg: r.Arg, Paths: r.Paths, By: r.By}
 	}
 	return v
+}
+
+// list is a list the contract requires: empty, never null (an install of
+// named packages reads no project file, for one).
+func list(l []string) []string {
+	if l == nil {
+		return []string{}
+	}
+	return l
+}
+
+// managers are a hint's managers with the lists the contract requires
+// never null.
+func managers(hs []hints.Hint) []hints.Hint {
+	out := make([]hints.Hint, 0, len(hs))
+	for _, h := range hs {
+		if h.Problems == nil {
+			h.Problems = []hints.Problem{}
+		}
+		out = append(out, h)
+	}
+	return out
 }
