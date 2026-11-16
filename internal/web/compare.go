@@ -59,8 +59,13 @@ type CmpStep struct {
 	A, B             string // state labels; "" when the build did not report the step
 	StateA, StateB   string
 	DA, DB           string
-	Delta            string
-	Slower, Changed  bool
+	// Delta is the later build's time minus the earlier one's, signed
+	// ("+2.1 s", "−1.3 s"), shown from 0.1 s; Pct is it as a share of the
+	// earlier build's time ("17 %"; "" when that took 0 s). Big marks a
+	// large one: at least 1 s and 20 %, or at least 30 s.
+	Delta, Pct  string
+	Slower, Big bool
+	Changed     bool
 }
 
 // CmpPick is another build of the image to compare with.
@@ -351,8 +356,8 @@ func compareSteps(a, b []StepView) []CmpStep {
 				c.NameA, c.Changed = sa.Name, true
 			}
 		}
-		if sa != nil && sb != nil && (sa.D >= 100*time.Millisecond || sb.D >= 100*time.Millisecond) {
-			c.Delta, c.Slower = delta(sb.D, sa.D)
+		if sa != nil && sb != nil {
+			c.Delta, c.Pct, c.Slower, c.Big = stepDelta(sb.D, sa.D)
 		}
 		out = append(out, c)
 	}
@@ -371,6 +376,45 @@ func compareSteps(a, b []StepView) []CmpStep {
 		}
 	}
 	return out
+}
+
+// stepDelta is how much longer (or shorter) a step took in the later
+// build than in the earlier one, for every difference of at least 0.1 s
+// (the feed's delta hides the usual noise; a comparison shows it all).
+// The figures are those the page shows: both times and the difference
+// rounded the way duration writes them, the share of the earlier time
+// cut down to a whole percent, so "20 %" is never below the mark. big:
+// at least 1 s and 20 % of the earlier time, or at least 30 s.
+func stepDelta(later, earlier time.Duration) (text, pct string, slower, big bool) {
+	diff := shownTime(max(later, 0)) - shownTime(max(earlier, 0))
+	abs := shownTime(max(diff, -diff))
+	if abs < 100*time.Millisecond {
+		return "", "", false, false
+	}
+	e := shownTime(max(earlier, 0))
+	big = abs >= 30*time.Second || (abs >= time.Second && abs*5 >= e)
+	if e > 0 {
+		pct = "<1\u00a0%"
+		if p := int64(abs) * 100 / int64(e); p >= 1 {
+			pct = strconv.FormatInt(p, 10) + "\u00a0%"
+		}
+	}
+	if diff > 0 {
+		return "+" + duration(abs), pct, true, big
+	}
+	return "−" + duration(abs), pct, false, big
+}
+
+// shownTime is a time rounded the way duration writes it.
+func shownTime(d time.Duration) time.Duration {
+	switch {
+	case d.Round(100*time.Millisecond) < 10*time.Second:
+		return d.Round(100 * time.Millisecond)
+	case d.Round(time.Second) < time.Hour:
+		return d.Round(time.Second)
+	default:
+		return d.Round(time.Minute)
+	}
 }
 
 // lineDiff is a unified diff of two texts by lines (longest common
