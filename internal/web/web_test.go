@@ -1519,8 +1519,10 @@ func TestPipelinesPage(t *testing.T) {
 	if p.status != 200 || strings.Count(p.body, `<article class="pcard">`) != min(len(keys), pipePage) {
 		t.Fatalf("pipelines page: %d, %d cards for %d pipelines", p.status, strings.Count(p.body, `<article class="pcard">`), len(keys))
 	}
-	if !strings.Contains(p.body, "waiting for a runner: usually <b>4.0 s</b>") || !strings.Contains(p.body, `class="q r0"`) {
-		t.Error("no runner waits from GitLab on the cards")
+	// The cards draw the waits (hatched); the figures are the pipeline
+	// page's.
+	if strings.Contains(p.body, "waiting for a runner: usually <b>4.0 s</b>") || !strings.Contains(p.body, `class="q r0"`) {
+		t.Error("no runner waits from GitLab drawn on the cards, or their figures repeated on each card")
 	}
 	if !strings.Contains(p.body, `class="pg-lane`) || !strings.Contains(p.body, ">build</span>") || !strings.Contains(p.body, "Passed") {
 		t.Error("no lanes by stage, or no pipeline status")
@@ -1538,7 +1540,7 @@ func TestPipelinesPage(t *testing.T) {
 	}
 	mu.Unlock()
 	pp := get(t, ts, "/pipelines/"+keys[0])
-	if !strings.Contains(pp.body, "waited 4.0 s") || !strings.Contains(pp.body, `class="pstate ps-passed"`) {
+	if !strings.Contains(pp.body, "waited 4.0 s") || !strings.Contains(pp.body, "waiting for a runner: usually <b>4.0 s</b>") || !strings.Contains(pp.body, `class="pstate ps-passed"`) {
 		t.Error("the pipeline page does not show the runner wait or the pipeline's status")
 	}
 }

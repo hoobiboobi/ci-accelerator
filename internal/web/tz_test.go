@@ -79,7 +79,7 @@ func TestPagesShowTheReadersZone(t *testing.T) {
 	ts, st, _ := console(t)
 	keys, _ := pipelines(t, st)
 	path := "/pipelines/" + keys[0]
-	stamp := regexp.MustCompile(`<span title="(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC)">([^<]*)</span></div></header>`)
+	stamp := regexp.MustCompile(`<span title="(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC)">([^<]*)</span>(?:<span class="pjobs">.*?)?</div></header>`)
 	for _, tz := range []string{"", "Asia/Tokyo"} {
 		req, _ := http.NewRequest("GET", ts.URL+path, nil)
 		if tz != "" {

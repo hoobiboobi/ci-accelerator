@@ -633,6 +633,40 @@ async function pipelinesPage(s) {
       first: (document.querySelector(".pcard .pc-head") || { getAttribute: () => "" }).getAttribute("href") })`);
     check("search: Enter finds a pipeline by its number", found.url === "/pipelines?q=" + id && found.first === st.href, JSON.stringify(found));
   }
+  // Not by colour alone: a failed job is a dashed bar, the current page
+  // in the sidebar carries a bar of its own.
+  await s.go("/pipelines");
+  const cue = await s.eval(`(() => { const f = document.querySelector(".pg-tr .j.jw-failed, .pg-tr .j.st-failed"), k = document.querySelector(".pg-key i.jw-failed");
+    const cur = document.querySelector('.nav a[aria-current="page"]');
+    return { failed: f ? getComputedStyle(f).backgroundImage : "none", key: k ? getComputedStyle(k).backgroundImage : "",
+      canceledKey: !!document.querySelector(".pg-key i.jw-canceled"), current: cur ? getComputedStyle(cur).boxShadow : "" }; })()`);
+  check("pipelines: a failed job's bar is dashed, the legend's too", /repeating-linear-gradient/.test(cue.key) &&
+    (cue.failed === "none" || /repeating-linear-gradient/.test(cue.failed)) && cue.canceledKey, JSON.stringify(cue));
+  check("the current page in the sidebar is marked by more than colour", !!cue.current && cue.current !== "none", JSON.stringify(cue));
+  // A stage with more than three jobs side by side is one bar: a link to
+  // the pipeline, a row high, named with its jobs counted.
+  const agg = await s.eval(`(() => { const a = document.querySelector(".pg-lane.agg a.pg-agg");
+    if (!a) return null; a.id = "aggme"; const b = a.getBoundingClientRect();
+    return { h: Math.round(b.height), href: a.getAttribute("href"), name: a.textContent.replace(/\\s+/g, " ").trim() }; })()`);
+  if (agg) {
+    check("pipelines: an aggregated stage is one link a row high, its jobs counted", agg.h === 24 && /^\/pipelines\//.test(agg.href) && /\d+ jobs/.test(agg.name), JSON.stringify(agg));
+    const reach = await s.eval(`(() => { const a = document.getElementById("aggme"); a.focus(); return document.activeElement === a && a.tabIndex >= 0; })()`);
+    check("pipelines: an aggregated stage is reached by the keyboard", reach);
+  }
+  // Failed only: a GET filter, kept in the address and on the checkbox;
+  // every card shown failed; the checkbox is reached by Tab.
+  await s.go("/pipelines?status=failed");
+  const fo = await s.eval(`(() => { const c = document.getElementById("pFailed");
+    return { checked: !!c && c.checked, tab: !!c && c.tabIndex >= 0 && !c.disabled, cards: document.querySelectorAll(".pcard").length,
+      failed: [...document.querySelectorAll(".pcard .pstate")].every(p => p.classList.contains("ps-failed")),
+      empty: !!document.querySelector(".pcard") || /No failed pipeline|among failed pipelines/.test(document.body.innerText),
+      more: [...document.querySelectorAll("nav.pager a")].every(a => /status=failed/.test(a.getAttribute("href"))) }; })()`);
+  check("pipelines: Failed only shows only failed pipelines and keeps itself on its links", fo.checked && fo.tab && fo.failed && fo.empty && fo.more, JSON.stringify(fo));
+  await s.size(390, 844);
+  await s.go("/pipelines?status=failed");
+  const wide = await s.eval(`document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth`);
+  check("390px: Failed only is no wider than the screen", wide <= 1, String(wide));
+  await s.size(1400, 900);
   check("pipelines: no errors", s.take().length === 0);
 }
 
@@ -682,6 +716,20 @@ async function comparePick(s) {
     tinted: !!document.querySelector("table.cmp.self-a, table.cmp.self-b"), cur: !!document.querySelector('.picks li.cur a[aria-current="true"]') })`);
   check("compare: the second pick opens the comparison, this build marked", /^\/builds\/\d+\/compare$/.test(cmp.path) && /^\?with=\d+$/.test(cmp.search) &&
     cmp.self >= 2 && cmp.tinted && cmp.cur, JSON.stringify(cmp));
+  // Every step's time difference: the column says what its share is of; a
+  // large one is bold and says so in words too (not by colour alone), a
+  // small one is muted; the column's figures align right.
+  const dt = await s.eval(`(() => { const t = document.querySelector("table.cmp.steps");
+    const cells = t ? [...t.querySelectorAll("td.dt")].filter(c => c.textContent.trim()) : [];
+    const head = t ? [...t.querySelectorAll("thead th")].pop() : null;
+    return { head: head ? head.textContent : "", cells: cells.length,
+      big: cells.filter(c => c.querySelector("b")).every(c => { const b = c.querySelector("b"), n = b.nextElementSibling;
+        return /^(slow|fast)$/.test(b.className) && !!n && n.classList.contains("sr") && /large/.test(n.textContent); }),
+      small: cells.filter(c => !c.querySelector("b")).every(c => !!c.querySelector(".muted")),
+      signed: cells.every(c => /^[+−-]/.test(c.textContent.trim())),
+      right: cells.every(c => getComputedStyle(c).textAlign === "right") }; })()`);
+  check("compare: the steps' time differences say their share of the earlier time, large ones in words too",
+    /\(of earlier\)/.test(dt.head) && dt.big && dt.small && dt.signed && dt.right, JSON.stringify(dt));
   const build = cmp.path.replace("/compare", "");
   await s.go(build);
   await s.key("x", { wait: 1200 });
@@ -900,7 +948,7 @@ async function liveBuild(s) {
   const a = await state();
   check(`${args["live-job"]} a running build: its running step alone is open, the page asks for itself every 2 s`,
     a.every === "2" && a.running.length === 1 && a.open.length === 1 && a.open[0] === a.running[0] && /modules/.test(a.running[0]) &&
-    /done in about/.test(a.sentence) && a.tiles === 4 && /snd-soc-wm8907/.test(a.tail), JSON.stringify(a));
+    /about .* left, from \d+ of \d+ remaining step/.test(a.sentence) && a.tiles === 4 && /snd-soc-wm8907/.test(a.tail), JSON.stringify(a));
   await s.eval(`[...document.querySelectorAll("details.lstep > summary")].find(x => /vmlinux/.test(x.textContent)).id = "liveVm"`);
   await s.click("#liveVm", 200);
   await hook("/line");
