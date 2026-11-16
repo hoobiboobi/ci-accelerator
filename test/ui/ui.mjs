@@ -214,7 +214,27 @@ async function page(port, { width = 1400, height = 900 } = {}) {
 const audit = `(() => {
   const out = [];
   const se = document.scrollingElement;
-  if (se.scrollWidth > se.clientWidth + 1) out.push("wider than the screen: " + se.scrollWidth + " > " + se.clientWidth);
+  if (se.scrollWidth > se.clientWidth + 1) {
+    // Names the innermost elements past the right edge that no scrolling
+    // box clips (an absolute one escapes the boxes below its containing
+    // block): what to fix.
+    const cw = se.clientWidth, root = document.documentElement;
+    const clipped = e => {
+      for (let c = e; c; ) {
+        const pos = getComputedStyle(c).position;
+        const p = pos === "fixed" ? null : pos === "absolute" ? c.offsetParent : c.parentElement;
+        if (!p || p === document.body || p === root) return false;
+        if (getComputedStyle(p).overflowX !== "visible" && p.getBoundingClientRect().right + scrollX <= cw + 1) return true;
+        c = p;
+      }
+      return false;
+    };
+    const past = [...document.body.querySelectorAll("*")].filter(e => e.getBoundingClientRect().right + scrollX > cw + 1 && !clipped(e));
+    const name = e => e.tagName.toLowerCase() + (typeof e.className === "string" && e.className.trim() ? "." + e.className.trim().split(/\\s+/).join(".") : "") +
+      "@" + Math.round(e.getBoundingClientRect().right + scrollX);
+    const inner = past.filter(e => !past.some(o => o !== e && e.contains(o))).slice(0, 3).map(name);
+    out.push("wider than the screen: " + se.scrollWidth + " > " + se.clientWidth + (inner.length ? " (" + inner.join(", ") + ")" : ""));
+  }
   const text = document.body.innerText;
   for (const re of [/\\bNaN\\b/, /\\bundefined\\b/, /<no value>/, /%!/, /0001-01-01/, /\\bInfinity\\b/, /\\[object /, /ZgotmplZ/,
     /(^|\\s)-\\d+(\\.\\d+)? ?(ms|s|min|h)\\b/]) {
