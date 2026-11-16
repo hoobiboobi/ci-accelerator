@@ -23,11 +23,12 @@ import (
 
 const contract = "../../docs/api/openapi.yaml"
 
-// The responses are what docs/api/openapi.yaml says, field by field: every
-// object there refuses properties it does not list, so a field added here
-// without the contract fails this test, and every field of the contract
-// must show up in the responses below (a contract this test never fills
-// would prove nothing).
+// The responses are what docs/api/openapi.yaml says, field by field: the
+// test makes every object there refuse properties it does not list (the
+// published file lets them through, for the fields a later v1 adds), so a
+// field added here without the contract fails this test, and every field
+// of the contract must show up in the responses below (a contract this
+// test never fills would prove nothing).
 func TestResponsesMatchTheContract(t *testing.T) {
 	ctx := context.Background()
 	doc, err := openapi3.NewLoader().LoadFromFile(contract)
@@ -37,6 +38,12 @@ func TestResponsesMatchTheContract(t *testing.T) {
 	if err := doc.Validate(ctx); err != nil {
 		t.Fatalf("%s is not a valid OpenAPI document: %v", contract, err)
 	}
+	no := false
+	walk(doc.Components.Schemas["BuildList"].Value, "BuildList", map[*openapi3.Schema]bool{}, func(s *openapi3.Schema, _ string) {
+		if s.Type.Is("object") && s.AdditionalProperties.Has == nil && s.AdditionalProperties.Schema == nil {
+			s.AdditionalProperties.Has = &no
+		}
+	})
 	path := "/api/v1/builds"
 	item := doc.Paths.Find(path)
 	if item == nil || item.Get == nil {
@@ -92,9 +99,9 @@ func TestResponsesMatchTheContract(t *testing.T) {
 		return body
 	}
 	body := check("builds", "?limit=10", http.StatusOK)
-	f.hintsErr = errors.New("store closed")
+	f.hintsErr, f.orderErr = errors.New("store closed"), errors.New("store closed")
 	unavailable := check("builds without hints", "", http.StatusOK)
-	f.hintsErr = nil
+	f.hintsErr, f.orderErr = nil, nil
 	check("a limit out of range", "?limit=0", http.StatusBadRequest)
 
 	// Every field of the contract appears in the responses above.

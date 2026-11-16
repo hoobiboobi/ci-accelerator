@@ -12,7 +12,8 @@ info:
 
     Within v1 no field is removed or renamed, no type changes and no
     parameter gets stricter; new fields and new values may appear, and a
-    client should ignore what it does not know. The project's CI checks
+    client should ignore what it does not know (the schemas below do not
+    refuse unknown properties for that reason). The project's CI checks
     this file against the last release's with oasdiff, and the console's
     responses against this file.
 
@@ -39,14 +40,27 @@ paths:
       operationId: listBuilds
       summary: The newest image builds, newest first
       description: |
-        Every image build the console stored, newest first, with why its
-        first rebuilt step ran and its cache-mount hints. A build of a
+        The newest image builds the console stored (at most `limit`, up
+        to 1000), newest first, with why its first rebuilt step ran and
+        its cache-mount hints. There is no paging; query parameters other
+        than `limit` are ignored. A build of a
         project the console has no job for is listed too (without
-        `pipeline` and `job`).
+        `pipeline` and `job`). Answers carry `Cache-Control: no-store`.
+
+        With sign-in, the console's session cookie of an admin is the only
+        credential this path takes: there is no API token for the box's
+        console, so a script reaches it with sign-in only through such a
+        cookie. Besides the answers below, the console itself may answer
+        421 (a `Host` other than the console's configured address), 404
+        and 405 (with `Allow`) in text/plain, as any path of it.
       parameters:
         - name: limit
           in: query
-          description: How many builds, from 1 to 1000.
+          description: |
+            How many builds, from 1 to 1000. An empty value means the
+            default; given twice, the first value counts. Hints and order
+            hints come for the newest 100 builds only (see `hintsNote` and
+            `orderNote`).
           required: false
           schema:
             type: integer
@@ -66,8 +80,20 @@ paths:
             text/plain:
               schema:
                 type: string
+        "401":
+          description: Sign-in is on and the request carries no signed-in session.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "403":
+          description: Sign-in is on and the signed-in person is not an admin of the console.
+          content:
+            text/plain:
+              schema:
+                type: string
         "500":
-          description: The console's store could not be read.
+          description: The console's store could not be read (the cause goes to the console's log).
           content:
             text/plain:
               schema:
@@ -749,7 +775,6 @@ components:
         revoked_at: { type: string, format: date-time }
     BuildList:
       type: object
-      additionalProperties: false
       required: [builds]
       properties:
         builds:
@@ -759,12 +784,18 @@ components:
         hintsNote:
           type: string
           description: |
-            Set when the hints are not complete: "unavailable" when they
-            could not be read (the builds are still listed, without hints),
-            or a note that only the newest builds carry them.
+            Set when the cache-mount hints (`hints`) are not complete:
+            "unavailable" when they could not be read (the builds are still
+            listed, without hints), or a note that only the newest builds
+            carry them.
+        orderNote:
+          type: string
+          description: |
+            The same for the order hints (`order`): "unavailable" when they
+            could not be read, or a note that only the newest builds carry
+            them.
     Build:
       type: object
-      additionalProperties: false
       required: [id, ref, daemon, target, started, steps]
       properties:
         id:
@@ -816,7 +847,7 @@ components:
           type: array
           items:
             type: string
-          description: The image names the build pushed or exported.
+          description: The image names the build pushed or exported, one name per item.
         buildArgs:
           type: object
           additionalProperties:
@@ -837,7 +868,6 @@ components:
             GitLab's comparison of the commits proved.
     Order:
       type: object
-      additionalProperties: false
       required: [step, name, copy, managers, files, tookSeconds, runs, runSeconds, since]
       description: One step that installed dependencies again only because of the Dockerfile's order.
       properties:
@@ -888,7 +918,6 @@ components:
           format: date-time
     Reason:
       type: object
-      additionalProperties: false
       required: [kind, step]
       description: Why the build's first rebuilt step ran.
       properties:
@@ -928,7 +957,6 @@ components:
           description: The build of the same pipeline that settled the reason.
     Hint:
       type: object
-      additionalProperties: false
       required: [step, name, managers, runs, runSeconds, medianSeconds, since]
       description: One step's cache-mount hint.
       properties:
@@ -962,7 +990,6 @@ components:
           format: date-time
     Manager:
       type: object
-      additionalProperties: false
       required: [manager, problems, caches]
       description: One package manager the step runs, and what is wrong with its cache.
       properties:
@@ -1005,7 +1032,6 @@ components:
           description: The mount option that lets the step's user write ("uid=1000,gid=1000").
     Problem:
       type: object
-      additionalProperties: false
       required: [kind]
       properties:
         kind:
@@ -1022,7 +1048,6 @@ components:
           description: The cache folder's label.
     Cache:
       type: object
-      additionalProperties: false
       required: [label]
       properties:
         label:
@@ -1036,7 +1061,6 @@ components:
           description: The cache mount id to use when the path depends on the step.
     Insert:
       type: object
-      additionalProperties: false
       required: [after, add]
       properties:
         after:

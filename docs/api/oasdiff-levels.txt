@@ -1,2 +1,5 @@
 response-optional-property-removed ERR
 response-property-enum-value-added INFO
+api-operation-id-removed ERR
+request-parameter-default-value-changed ERR
+request-parameter-default-value-removed ERR
