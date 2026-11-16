@@ -17,21 +17,36 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     go build -trimpath -ldflags="-s -w -buildid= -X main.version=$VERSION -X main.commit=$COMMIT" -o /out/ci-accelerator ./cmd/ci-accelerator
 # The licences and notices of every module linked into the binary (the
 # Apache-2.0 ones ask for their NOTICE files to go with it), under
-# /licenses/<module path>/, and the project's own; /licenses/README lists
-# the modules, their versions and where their source is (MPL-2.0 asks
-# that its recipients are told), naming the MPL-2.0 ones.
+# /licenses/<module path>/: the module's own and those of the folders on
+# the way from each linked package up to the module's root (forked or
+# vendored code keeps its licence there), at the same relative paths; Go's
+# own (the standard library and runtime are in every Go binary) under
+# /licenses/go/; and the project's own. /licenses/README lists the
+# modules, their versions and where their source is (MPL-2.0 asks that its
+# recipients are told), naming the MPL-2.0 ones.
 COPY LICENSE /out/licenses/ci-accelerator/LICENSE
 RUN --mount=type=cache,target=/go/pkg/mod \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Dir}}{{end}}{{end}}' ./cmd/ci-accelerator \
-    | sort -u > /tmp/modules && while read -r path version dir; do \
-        mkdir -p "/out/licenses/$path"; \
-        for f in "$dir"/LICENSE* "$dir"/LICENCE* "$dir"/COPYING* "$dir"/NOTICE*; do [ ! -f "$f" ] || cp "$f" "/out/licenses/$path/"; done; \
-        [ -n "$(ls "/out/licenses/$path")" ] || { echo "no licence file in $path ($dir)" >&2; exit 1; }; \
+    | sort -u > /tmp/modules \
+    && GOOS=$TARGETOS GOARCH=$TARGETARCH go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Dir}} {{$.Dir}}{{end}}{{end}}' ./cmd/ci-accelerator \
+    | sort -u > /tmp/packages \
+    && while read -r path moddir dir; do \
+        while :; do \
+            for f in "$dir"/LICENSE* "$dir"/LICENCE* "$dir"/COPYING* "$dir"/NOTICE* "$dir"/*-LICENSE*; do \
+                [ ! -f "$f" ] || { to="/out/licenses/$path${dir#"$moddir"}"; mkdir -p "$to"; cp "$f" "$to/"; }; \
+            done; \
+            case "$dir" in "$moddir"/*) dir=$(dirname "$dir") ;; *) break ;; esac; \
+        done; \
+    done < /tmp/packages \
+    && while read -r path version dir; do \
+        [ -n "$(find "/out/licenses/$path" -maxdepth 1 -type f 2>/dev/null)" ] || { echo "no licence file in $path ($dir)" >&2; exit 1; }; \
     done < /tmp/modules \
+    && mkdir -p /out/licenses/go && cp "$(go env GOROOT)/LICENSE" /out/licenses/go/LICENSE \
     && { echo "/ci-accelerator is Apache-2.0 (ci-accelerator/LICENSE). It links the Go modules below, unmodified;"; \
          echo "each one's licence and notices are in the directory of its path. The source of each, at the"; \
          echo "version listed, is published by the Go module proxy: https://proxy.golang.org/<path>/@v/<version>.zip"; \
          echo "(also: go mod download <path>@<version>)."; \
+         echo "It also links the Go standard library and runtime of $(go env GOVERSION): its licence is go/LICENSE."; \
          mpl=$(grep -rlE --include=LICENSE --include=LICENSE.txt --include=LICENSE.md 'Mozilla Public License,? [Vv]ersion 2\.0' /out/licenses | sed -e 's|^/out/licenses/||' -e 's|/[^/]*$||' | sort -u); \
          [ -z "$mpl" ] || { echo; echo "Under MPL-2.0 (its source as above):"; for m in $mpl; do grep "^$m " /tmp/modules | cut -d' ' -f1,2; done; }; \
          echo; echo "Modules (path version):"; cut -d' ' -f1,2 /tmp/modules; } > /out/licenses/README

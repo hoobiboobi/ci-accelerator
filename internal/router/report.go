@@ -28,6 +28,8 @@ type Reporter struct {
 	base    int
 	kick    chan struct{}
 	dropped int
+	// failing: the last send failed (warned once, until one succeeds).
+	failing bool
 }
 
 func (r *Reporter) init() {
@@ -66,7 +68,7 @@ func (r *Reporter) Pending() int {
 	return len(r.pending)
 }
 
-// Run sends until ctx ends, then once more.
+// Run sends until ctx ends, then what is left, for up to 5 s.
 func (r *Reporter) Run(ctx context.Context) {
 	r.mu.Lock()
 	r.init()
@@ -81,7 +83,11 @@ func (r *Reporter) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			fctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			r.flush(fctx)
+			for r.flush(fctx) {
+				if fctx.Err() != nil {
+					break
+				}
+			}
 			cancel()
 			return
 		case <-t.C:
@@ -91,7 +97,9 @@ func (r *Reporter) Run(ctx context.Context) {
 	}
 }
 
-func (r *Reporter) flush(ctx context.Context) {
+// flush sends the oldest batch of up to 1000 decisions; true when it was
+// sent and more are pending.
+func (r *Reporter) flush(ctx context.Context) bool {
 	r.mu.Lock()
 	batch := r.pending
 	if len(batch) > 1000 {
@@ -106,13 +114,19 @@ func (r *Reporter) flush(ctx context.Context) {
 		r.Log.Warn("decisions dropped while the controller was away", "dropped", dropped)
 	}
 	if len(batch) == 0 {
-		return
+		return false
 	}
 	if err := r.Send(ctx, batch); err != nil {
-		if r.Log != nil {
-			r.Log.Warn("decisions not reported", "pending", r.Pending(), "err", err)
+		r.mu.Lock()
+		warn := !r.failing
+		r.failing = true
+		pending := len(r.pending)
+		r.mu.Unlock()
+		// Once, not at every try: the controller may be away for long.
+		if warn && r.Log != nil {
+			r.Log.Warn("decisions not reported: kept until the controller answers", "pending", pending, "err", err)
 		}
-		return
+		return false
 	}
 	r.mu.Lock()
 	// Remove what was sent and is still queued: Add may have dropped some
@@ -121,7 +135,14 @@ func (r *Reporter) flush(ctx context.Context) {
 		r.pending = r.pending[n:]
 		r.base += n
 	}
+	recovered := r.failing
+	r.failing = false
+	pending := len(r.pending)
 	r.mu.Unlock()
+	if recovered && r.Log != nil {
+		r.Log.Info("decisions reported again", "pending", pending)
+	}
+	return pending > 0
 }
 
 // FollowWarm reads the controller's view every interval until ctx ends.
@@ -142,6 +163,8 @@ func FollowWarm(ctx context.Context, c *control.RouterClient, view *Cluster, eve
 			failing = false
 			if changed {
 				view.SetWarm(w, time.Now())
+			} else {
+				view.Heard(time.Now())
 			}
 		}
 		select {

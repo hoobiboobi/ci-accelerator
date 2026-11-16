@@ -976,7 +976,7 @@ func hubMain(args []string) error {
 	// streams end then, short requests had their time.
 	base, endRequests := context.WithCancel(context.Background())
 	defer endRequests()
-	srv := &http.Server{Handler: top, ReadHeaderTimeout: 10 * time.Second, ErrorLog: logging.ErrorLog(log),
+	srv := &http.Server{Handler: top, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: idleTimeout, ErrorLog: logging.ErrorLog(log),
 		BaseContext: func(net.Listener) context.Context { return base }}
 	srv.RegisterOnShutdown(func() {
 		// The listener is closed now: members do not come back meanwhile.

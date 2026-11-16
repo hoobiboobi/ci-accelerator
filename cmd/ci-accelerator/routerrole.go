@@ -20,6 +20,9 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
+// warmForEnv carries the chart's warm window to the router.
+const warmForEnv = "CI_ACCELERATOR_WARM_FOR"
+
 // routerMain proxies the CI jobs' connections to the build daemon where
 // their project's cache is.
 func routerMain(args []string) error {
@@ -44,6 +47,19 @@ func routerMain(args []string) error {
 	zones := fs.Bool("zones", true, "keep jobs in their zone (topology.kubernetes.io/zone of the daemons' nodes); false: all daemons are one zone")
 	overload := fs.Int("overload", 0, "skip a daemon running this many builds when another is free (0: never)")
 	drain := fs.Duration("drain", 300*time.Second, "how long open connections may finish after SIGTERM")
+	// The warm window comes from an environment variable as well: a router
+	// image older than the chart would stop on an unknown flag.
+	warmDefault := 7 * 24 * time.Hour
+	if v := os.Getenv(warmForEnv); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("$%s: %q is not a positive duration", warmForEnv, v)
+		}
+		warmDefault = d
+	}
+	warmFor := fs.Duration("warm-for", warmDefault, "how long a build keeps its project warm on its node (default $"+warmForEnv+", else 7 days)")
+	maxConns := fs.Int("max-conns", router.DefaultMaxConns, "connections open at once; more are refused")
+	maxPerSource := fs.Int("max-conns-per-source", router.DefaultMaxPerSource, "connections open at once from one address; more are refused")
 	fs.Parse(args)
 	if *showVersion {
 		fmt.Println("ci-accelerator " + versionString())
@@ -67,6 +83,10 @@ func routerMain(args []string) error {
 		return errors.New("give -jobs-namespace")
 	case len(urls) == 0:
 		return errors.New("give at least one -gitlab-url (or $GITLAB_URLS)")
+	case *warmFor <= 0:
+		return errors.New("-warm-for must be positive")
+	case *maxConns <= 0 || *maxPerSource <= 0:
+		return errors.New("-max-conns and -max-conns-per-source must be positive")
 	}
 	log, err := roleLog(lf, "router")
 	if err != nil {
@@ -74,7 +94,7 @@ func routerMain(args []string) error {
 	}
 	started(log, "listen", *listen, "health", *health, "node", *node, "daemons", *namespace+"/"+*service, "jobs_namespace", *jobs,
 		"gitlab", hosts(urls), "controller", *controller, "zones", *zones, "cross_zone", *crossZone, "overload", *overload,
-		"drain", drain.String(), "log_level", lf.Level)
+		"warm_for", warmFor.String(), "max_conns", *maxConns, "max_conns_per_source", *maxPerSource, "drain", drain.String(), "log_level", lf.Level)
 	kube, err := kubeClient(config{})
 	if err != nil {
 		return err
@@ -96,8 +116,11 @@ func routerMain(args []string) error {
 	defer cancelWatch()
 	go func() { watchErr <- view.Watch(wctx, kube, *namespace, *service, *jobs) }()
 
+	// Without a controller nothing else ages the router's own decisions.
+	go view.ExpireEvery(ctx, *warmFor, 10*time.Minute)
 	r := &router.Router{View: view, Node: *node, Port: *port, Log: log, IgnoreZones: !*zones,
-		Policy: route.Policy{CrossZone: *crossZone, Overload: *overload}}
+		MaxConns: *maxConns, MaxPerSource: *maxPerSource,
+		Policy: route.Policy{CrossZone: *crossZone, Overload: *overload, WarmFor: *warmFor}}
 	var rep *router.Reporter
 	repDone := make(chan struct{})
 	cancelReport := func() {}
@@ -142,7 +165,7 @@ func routerMain(args []string) error {
 		}
 		fmt.Fprint(w, "ok")
 	})
-	hs := &http.Server{Addr: *health, Handler: mux, ReadHeaderTimeout: 10 * time.Second, ErrorLog: logging.ErrorLog(log)}
+	hs := &http.Server{Addr: *health, Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: idleTimeout, ErrorLog: logging.ErrorLog(log)}
 	go func() {
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("health", "err", err)

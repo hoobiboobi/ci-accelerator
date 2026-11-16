@@ -85,7 +85,10 @@ func (l Lister) client() *s3.Client {
 	}
 	hc := l.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		// A redirect is taken as the store's answer, never followed: a
+		// store does not redirect a signed request, and the keys' signature
+		// would go along to the other address.
+		hc = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	return s3.New(s3.Options{
 		Region:       l.Store.Region,
@@ -143,6 +146,12 @@ func (l Lister) Scan(ctx context.Context, now time.Time) (Scan, error) {
 		if err != nil {
 			return out, fmt.Errorf("listing %s: %w", l.Store.ID(), err)
 		}
+		// An S3 listing names its bucket and counts its keys: an answer
+		// with neither and no key (a web page, an empty body) is no
+		// listing, not an empty folder.
+		if aws.ToString(page.Name) == "" && page.KeyCount == nil && len(page.Contents) == 0 {
+			return out, fmt.Errorf("listing %s: the answer is no S3 listing (is the server address the S3 API's?)", l.Store.ID())
+		}
 		for _, o := range page.Contents {
 			m := cacheKey.FindStringSubmatch(strings.TrimPrefix(aws.ToString(o.Key), prefix))
 			if m == nil {
@@ -161,6 +170,9 @@ func (l Lister) Scan(ctx context.Context, now time.Time) (Scan, error) {
 	lc, err := c.GetBucketLifecycleConfiguration(ctx, &s3.GetBucketLifecycleConfigurationInput{Bucket: aws.String(l.Store.Bucket)})
 	var api smithy.APIError
 	switch {
+	case err == nil && len(lc.Rules) == 0:
+		// S3 answers a bucket without rules with NoSuchLifecycleConfiguration:
+		// an answer without rules says nothing.
 	case err == nil:
 		has := false
 		for _, r := range lc.Rules {

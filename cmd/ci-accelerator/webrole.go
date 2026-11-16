@@ -72,8 +72,9 @@ func webMain(args []string) error {
 		http.Error(w, "The console is starting: its controller has not answered yet.", http.StatusServiceUnavailable)
 	}))
 	handler.Store(&starting)
-	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second, ErrorLog: logging.ErrorLog(log),
-		Handler: web.AccessLog(log, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { (*handler.Load()).ServeHTTP(w, r) }))}
+	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second, IdleTimeout: idleTimeout, ErrorLog: logging.ErrorLog(log)}
+	srv.Handler = endStreamsOnShutdown(srv,
+		web.AccessLog(log, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { (*handler.Load()).ServeHTTP(w, r) })))
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
 		return err
@@ -123,7 +124,7 @@ func webMain(args []string) error {
 	ok := func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /livez", ok)
-	mux.Handle("GET /api/", api.Handler(client))
+	mux.Handle("GET /api/", web.Heavy(api.Handler(client, log)))
 	pages.Register(mux)
 	ready := web.Secure(web.Compress(pages.Gate(mux)))
 	handler.Store(&ready)

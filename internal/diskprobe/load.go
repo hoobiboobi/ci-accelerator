@@ -85,10 +85,15 @@ type Reader struct {
 	Cgroup string
 }
 
+// cpuFields are the /proc/stat fields read: user nice system idle iowait
+// irq softirq steal. guest and guest_nice after them are already counted
+// in user and nice.
+const cpuFields = 8
+
 // counters is one raw reading, for the deltas between two.
 type counters struct {
 	at                  time.Time
-	cpuBusy, cpuTotal   uint64 // /proc/stat jiffies
+	cpu                 [cpuFields]uint64 // /proc/stat jiffies, user to steal
 	cores               int
 	memTotal, memAvail  uint64
 	podKnown            bool
@@ -115,20 +120,15 @@ func (r Reader) read(now time.Time) (counters, error) {
 			c.cores++
 			continue
 		}
-		// user nice system idle iowait irq softirq steal: idle and
-		// iowait are the time nothing ran.
-		for i, s := range fields[1:] {
+		for i, s := range fields[1:min(len(fields), 1+cpuFields)] {
 			n, err := strconv.ParseUint(s, 10, 64)
 			if err != nil {
 				return c, fmt.Errorf("/proc/stat: %w", err)
 			}
-			c.cpuTotal += n
-			if i != 3 && i != 4 {
-				c.cpuBusy += n
-			}
+			c.cpu[i] = n
 		}
 	}
-	if c.cpuTotal == 0 {
+	if c.cpu == ([cpuFields]uint64{}) {
 		return c, errors.New("/proc/stat: no cpu line")
 	}
 	mem, err := os.Open(filepath.Join(r.Proc, "meminfo"))
@@ -321,12 +321,12 @@ func (s *Sampler) Tick() error {
 		return err
 	}
 	s.err = nil
-	if s.hasLast && c.at.After(s.last.at) {
+	// A reading whose CPU counters went back is no sample: its interval
+	// is unknown. It is the base of the next one.
+	if cpu, ok := nodeCPU(s.last.cpu, c.cpu, c.cores); s.hasLast && c.at.After(s.last.at) && ok {
 		var p Sample
 		p.At = c.at.Unix()
-		if dt := c.cpuTotal - s.last.cpuTotal; dt > 0 && c.cpuTotal >= s.last.cpuTotal {
-			p.NodeCPU = float64(c.cpuBusy-s.last.cpuBusy) / float64(dt) * float64(c.cores)
-		}
+		p.NodeCPU = cpu
 		if c.podKnown && s.last.podKnown && c.podCPU >= s.last.podCPU {
 			p.PodCPU = float64(c.podCPU-s.last.podCPU) / 1e6 / c.at.Sub(s.last.at).Seconds()
 		}
@@ -350,6 +350,28 @@ func (s *Sampler) Tick() error {
 	}
 	s.last, s.hasLast = c, true
 	return nil
+}
+
+// nodeCPU is the cores busy between two /proc/stat readings: the time
+// outside idle and iowait over all the time; false when a counter went
+// back (steal after a live migration, iowait, which the kernel says may
+// decrease): the interval is then unknown.
+func nodeCPU(was, now [cpuFields]uint64, cores int) (float64, bool) {
+	var busy, total uint64
+	for i := range now {
+		if now[i] < was[i] {
+			return 0, false
+		}
+		d := now[i] - was[i]
+		total += d
+		if i != 3 && i != 4 {
+			busy += d
+		}
+	}
+	if total == 0 {
+		return 0, true
+	}
+	return float64(busy) / float64(total) * float64(cores), true
 }
 
 // Load is the latest reading with the hour's series; an error before the

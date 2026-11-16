@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hoobiboobi/ci-accelerator/internal/logging"
 	"github.com/hoobiboobi/ci-accelerator/internal/route"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
@@ -68,10 +69,22 @@ type Router struct {
 	// address about when its container starts, and a job may connect at
 	// once (default 3 s; negative: not at all).
 	IdentityWait time.Duration
+	// MaxConns bounds the connections open at once and MaxPerSource the
+	// ones from one address: a connection above either is closed at once
+	// (0: DefaultMaxConns, DefaultMaxPerSource). Every open connection
+	// costs memory, and a router killed for memory cuts every build
+	// through it.
+	MaxConns, MaxPerSource int
+	// FirstByte is how long a new connection may stay silent: a TLS client
+	// speaks first, so one that sends nothing is closed before a daemon is
+	// dialed for it (0: 10 s).
+	FirstByte time.Duration
 
-	wg    sync.WaitGroup
-	mu    sync.Mutex
-	conns map[net.Conn]struct{}
+	wg        sync.WaitGroup
+	mu        sync.Mutex
+	conns     map[net.Conn]struct{}
+	perSource map[string]int
+	refused   logging.Every
 	// down holds daemons a dial failed to reach lately, and when: a node
 	// lost without notice stays Ready in its EndpointSlice for ~40 s.
 	down map[string]time.Time
@@ -82,6 +95,13 @@ type Router struct {
 const (
 	downFor     = 30 * time.Second
 	dialTimeout = 3 * time.Second
+)
+
+// The default bounds on open connections: about 100 MiB of the router's
+// memory at most, far above what one node's builds open.
+const (
+	DefaultMaxConns     = 4096
+	DefaultMaxPerSource = 256
 )
 
 // skipped returns the daemons to pass over now: the ones not reached lately.
@@ -170,12 +190,20 @@ func (r *Router) Serve(ctx context.Context, ln net.Listener, drain time.Duration
 			continue
 		}
 		backoff = 0
-		r.track(c, true)
+		ip := sourceOf(c)
+		if !r.track(c, ip, true) {
+			if r.refused.Period == 0 {
+				r.refused.Period = time.Minute
+			}
+			r.refused.Warn(r.Log, "", "connection refused: too many connections open", "from", ip, "open", r.Open())
+			c.Close()
+			continue
+		}
 		r.wg.Add(1)
 		go func() {
 			defer r.wg.Done()
-			defer r.track(c, false)
-			r.handle(conns, c)
+			defer r.track(c, ip, false)
+			r.handle(conns, c, ip)
 		}()
 	}
 	done := make(chan struct{})
@@ -198,17 +226,42 @@ func (r *Router) Serve(ctx context.Context, ln net.Listener, drain time.Duration
 	return nil
 }
 
-func (r *Router) track(c net.Conn, open bool) {
+// sourceOf is the address a connection comes from.
+func sourceOf(c net.Conn) string {
+	ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+	return ip
+}
+
+// track takes a connection from ip in (open) or out; false when taking it
+// in would pass MaxConns or MaxPerSource.
+func (r *Router) track(c net.Conn, ip string, open bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.conns == nil {
-		r.conns = map[net.Conn]struct{}{}
+		r.conns, r.perSource = map[net.Conn]struct{}{}, map[string]int{}
 	}
-	if open {
-		r.conns[c] = struct{}{}
-	} else {
-		delete(r.conns, c)
+	if !open {
+		if _, ok := r.conns[c]; ok {
+			delete(r.conns, c)
+			if r.perSource[ip]--; r.perSource[ip] <= 0 {
+				delete(r.perSource, ip)
+			}
+		}
+		return true
 	}
+	maxConns, maxPer := r.MaxConns, r.MaxPerSource
+	if maxConns <= 0 {
+		maxConns = DefaultMaxConns
+	}
+	if maxPer <= 0 {
+		maxPer = DefaultMaxPerSource
+	}
+	if len(r.conns) >= maxConns || r.perSource[ip] >= maxPer {
+		return false
+	}
+	r.conns[c] = struct{}{}
+	r.perSource[ip]++
+	return true
 }
 
 // Open is the number of connections being served.
@@ -255,9 +308,20 @@ func (r *Router) Decide(ip string, skip ...map[string]bool) (route.Decision, sto
 	return d, rec, err
 }
 
-func (r *Router) handle(ctx context.Context, c net.Conn) {
+func (r *Router) handle(ctx context.Context, c net.Conn, ip string) {
 	defer c.Close()
-	ip, _, _ := net.SplitHostPort(c.RemoteAddr().String())
+	// Nothing is dialed for a connection that says nothing.
+	wait := r.FirstByte
+	if wait <= 0 {
+		wait = 10 * time.Second
+	}
+	first := make([]byte, 1)
+	c.SetReadDeadline(time.Now().Add(wait))
+	if _, err := io.ReadFull(c, first); err != nil {
+		r.Log.Debug("closed before its first byte", "from", ip, "err", err)
+		return
+	}
+	c.SetReadDeadline(time.Time{})
 	r.awaitJob(ctx, ip)
 	// A daemon that is listed but cannot be reached (its node lost, its
 	// listener closed before the endpoint went) is passed over: the job
@@ -298,6 +362,10 @@ func (r *Router) handle(ctx context.Context, c net.Conn) {
 		}
 	}
 	defer up.Close()
+	if _, err := up.Write(first); err != nil {
+		r.Log.Warn("daemon not reached", "daemon", d.Daemon.Name, "from", ip, "err", err)
+		return
+	}
 	if r.Report != nil && rec.Reason != route.UnknownLocal && rec.Reason != route.UnknownHash {
 		r.Report(rec)
 	}
@@ -310,7 +378,7 @@ func (r *Router) handle(ctx context.Context, c net.Conn) {
 	start := r.now()
 	in, out := pipe(c, up)
 	r.Log.Debug("closed", "from", ip, "job", rec.JobID, "daemon", d.Daemon.Name, "dur_ms", r.now().Sub(start).Milliseconds(),
-		"bytes_in", in, "bytes_out", out)
+		"bytes_in", in+1, "bytes_out", out)
 }
 
 // awaitJob waits up to IdentityWait for the pod with address ip to be
