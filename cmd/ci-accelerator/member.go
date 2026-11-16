@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/hkdf"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -329,10 +330,16 @@ func joinHub(ctx context.Context, c config, outer *tls.Config, key crypto.Signer
 	return err
 }
 
-// storeID names a store without saying anything about its key.
+// storeID names a store without saying anything about its key: six bytes
+// derived from the store's random key with HKDF, as a key derivation
+// should be, not a plain hash of the secret.
 func storeID(st *store.Store) string {
-	sum := sha256.Sum256(append([]byte("ci-accelerator store id\n"), st.SecretKey()...))
-	return hex.EncodeToString(sum[:6])
+	id, err := hkdf.Key(sha256.New, st.SecretKey(), nil, "ci-accelerator store id", 6)
+	if err != nil {
+		// Only for a length HKDF cannot give; six bytes always fit.
+		panic(err)
+	}
+	return hex.EncodeToString(id)
 }
 
 // fleetKeygen writes a key pair for a fleet member or hub. It never
