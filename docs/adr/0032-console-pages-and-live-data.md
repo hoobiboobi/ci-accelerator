@@ -28,3 +28,5 @@ Sign-in through GitLab, where each user's token reads the API, is not built yet.
 - With a token, the console calls GitLab only while people look at pipelines. GitLab.com's free-plan burst limit (100 requests) is far away.
 - A browser without `style-src-attr` (older than Chrome 75, Firefox 108, Safari 15.4) shows the pages without bars.
 - The build-nodes view shows what BuildKit counts. Disk free and cache per project stay open.
+
+Later: GitLab's commits are compared in the background too ([ADR-0038](0038-files-or-node-from-gitlab.md)), and a daemon whose address leaves the Service is read until it closes its stream ([ADR-0061](0061-drain-before-sigterm.md)).

@@ -46,3 +46,5 @@ it coming.
   they are numbers about the disk the builds already write to.
 - Without `--reset-then-reuse-values` an upgraded box keeps its old values
   and the probe stays off.
+
+Later: the note is in the buildkit chart's own install notes, which Helm prints only when that chart is installed alone; the box's notes do not repeat it.

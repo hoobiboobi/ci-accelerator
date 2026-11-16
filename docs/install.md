@@ -33,6 +33,14 @@ You need these. Each line has the check and what it must show.
 | The Maintainer role on a GitLab project | the project's Settings menu | it has a CI/CD entry |
 | Outbound access from the nodes | | to `ghcr.io`, `quay.io`, `registry.gitlab.com`, `docker.io` and your GitLab |
 
+On Cilium, NetworkPolicy `ipBlock` rules do not match pod or node
+addresses unless `policyCIDRMatchMode` includes them. The box's policies
+do not depend on it for in-cluster services (they also admit pods by
+namespace selector, unless `buildkit.networkPolicy.egress.clusterCIDRs`
+is set). An `ipBlock` you add yourself, for example node addresses in
+`control-plane.networkPolicy.extraFrom` for a host-network Ingress
+controller, needs `policyCIDRMatchMode=nodes`.
+
 Without a default StorageClass, the console's controller cannot get its
 volume and the install waits until it times out: pick a class from
 `kubectl get storageclass` whose provisioner gives block volumes (a

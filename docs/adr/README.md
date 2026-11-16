@@ -5,7 +5,7 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | ADR | Decision |
 |---|---|
 | [0001](0001-umbrella-and-standalone-charts.md) | An umbrella chart over standalone subcharts |
-| [0002](0002-helm-and-gitops.md) | Helm 3 and 4, schemas, GitOps-friendly |
+| [0002](0002-helm-and-gitops.md) | Helm 3 and 4, schemas, GitOps-friendly (Flux runs the checks) |
 | [0003](0003-runner-integration-contract.md) | The runner integration is a contract |
 | [0004](0004-shared-values.md) | Shared contracts live in global values |
 | [0005](0005-build-node-label.md) | Build nodes are marked with our own label and taint |
@@ -17,7 +17,7 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0011](0011-routing.md) | Same-node routing with fallback |
 | [0012](0012-probes.md) | Probes with an empty environment and tolerant timings |
 | [0013](0013-stable-pod-template.md) | A pod template that chart releases do not change |
-| [0014](0014-termination.md) | Draining builds on shutdown |
+| [0014](0014-termination.md) | Draining builds on shutdown (amended by 0061) |
 | [0015](0015-pinning.md) | Everything pinned and verified |
 | [0016](0016-mutual-tls.md) | Mutual TLS is mandatory |
 | [0017](0017-cert-manager-prerequisite.md) | cert-manager is a prerequisite, never a subchart |
@@ -33,11 +33,11 @@ Short records of the decisions that shape the charts: context, decision, consequ
 | [0027](0027-upgrades-and-branches.md) | In-place upgrades, short-lived branches, releases when they matter |
 | [0028](0028-one-trace-per-job.md) | One trace per job (supersedes the trace-id layout of 0026) |
 | [0029](0029-console-gitlab-and-build-data.md) | Console: GitLab sign-in, job data from pods, Dockerfiles and logs kept |
-| [0030](0030-console-store.md) | Console store: SQLite, a content-addressed step graph, daily output files |
+| [0030](0030-console-store.md) | Console store: SQLite, a content-addressed step graph, daily output files (amended by 0037 and 0044) |
 | [0031](0031-console-packaging.md) | Console packaging: one pod, its own certificate, the runner's URL once |
-| [0032](0032-console-pages-and-live-data.md) | Console pages: the agreed design, live data, a GitLab token for now |
+| [0032](0032-console-pages-and-live-data.md) | Console pages: the agreed design, live data, a GitLab token for now (amended by 0038 and 0061) |
 | [0033](0033-console-jobs-without-builds.md) | Console: GitLab says how jobs went; pipelines without builds (superseded by 0037) |
-| [0034](0034-console-sign-in.md) | Console: sign-in through GitLab, inside the console |
+| [0034](0034-console-sign-in.md) | Console: sign-in through GitLab, inside the console (admins by user id since) |
 | [0035](0035-runner-cache-and-tiers.md) | Runner cache in S3, and runner tiers rendered by the box |
 | [0036](0036-infrastructure-runs-in-the-console.md) | Terraform, OpenTofu and Terragrunt runs in the console (superseded by 0037) |
 | [0037](0037-console-builds-only.md) | Console v2: image builds only, five sections, five outcomes |

@@ -51,7 +51,8 @@ routers run with the same PriorityClass: they carry the daemons' builds.
    that implements `PreferSameNode`. The router knows the job by its pod's
    address (it waits up to 3 s for a pod that has just started) and picks
    the daemon ([ADR-0045](adr/0045-build-router.md)):
-   1. the daemon on the job's own node, if the project is warm there;
+   1. the daemon on the job's own node, if the project was warm there most
+      recently;
    2. else the ready daemon of the job's zone where the project was warm
       most recently;
    3. else the project's daemon by a rendezvous hash over the zone's ready
@@ -80,12 +81,20 @@ routers run with the same PriorityClass: they carry the daemons' builds.
 
    `control-plane.router.overloadBuilds` (0, off, by default) skips a
    daemon running that many builds when another one is free. A connection
-   from a pod that is no CI job goes to the daemon on the router's node
-   (by hash when that one is not ready).
+   from a pod that is no CI job goes to the daemon on the router's node,
+   unless that one is overloaded and another is free; when the node has no
+   ready daemon, to a daemon of its zone by a hash of the node (refused
+   when its zone has none and `crossZone` is off).
+
+   A project warm on several nodes (a job sent elsewhere while its node's
+   daemon restarted, or was overloaded) goes back to the one it used most
+   recently, so its parallel jobs meet on one daemon again.
 
    The controller keeps the facts behind warmth; each router asks it for
    them every 5 s and keeps routing on its last view, plus its own
-   decisions, while the controller does not answer. Each decision for a
+   decisions, while the controller does not answer: it ages that warmth
+   itself (`warmDays`), and stops counting running builds from a view
+   older than a minute. Each decision for a
    CI job is reported back: the build page says why its node was chosen,
    and each daemon's page (`/nodes/<daemon>`) counts the last 24 hours'
    decisions by reason.
@@ -123,18 +132,23 @@ The box renders these (a CNI that enforces NetworkPolicy is needed):
 
 | Pods | Admit (ingress) | Egress |
 |---|---|---|
-| Daemons | The routers' and the controller's pods, on the TLS port and the disk probe's port. Without the router: the jobs namespace instead | DNS to kube-dns, and anywhere except cloud metadata (`169.254.169.254`, `fd00:ec2::254`) and the CIDRs in `buildkit.networkPolicy.egress.clusterCIDRs` |
+| Daemons | The routers' and the controller's pods, on the TLS port and the disk probe's port. Without the router: the jobs namespace instead | DNS to kube-dns, and anywhere except cloud metadata (`buildkit.networkPolicy.egress.blockedCIDRs`: `169.254.169.254`, `168.63.129.16`, `100.100.100.200`, `fd00:ec2::254`, `fd20:ce::254`) and the CIDRs in `buildkit.networkPolicy.egress.clusterCIDRs`; while `clusterCIDRs` is empty, every pod of the cluster by namespace selector too |
 | Routers | The jobs namespace (`control-plane.router.clientNamespaces`) | Not limited |
 | Controller | The web's and the routers' pods, on the API port | Not limited |
-| Web | Every namespace except the box's own and the jobs namespace; in the box namespace, every pod except the daemons | Not limited |
+| Web | Every namespace except the box's own, the jobs namespace, `control-plane.router.clientNamespaces` and the daemons' namespace; in the box namespace, every pod except the daemons and pods labelled `ci-accelerator.io/component: ci-job` (`control-plane.networkPolicy.deniedComponents`) | Not limited |
+| CI job pods (jobs namespace) | Nothing | Every pod of the cluster, and anywhere except the cloud metadata addresses above |
+| Main runner and each runner tier | Nothing, or a scraper on :9252 (`gitlab-runner.metrics.from`, a tier's `metricsFrom`) | Not limited |
 
 A daemon that builds from a git context must reach the GitLab it fetches
 from: with GitLab inside `clusterCIDRs`, add a rule for it in
 `buildkit.networkPolicy.egress.extraRules`.
 
 CI jobs therefore reach a daemon only through a router, and neither CI
-jobs nor `RUN` steps can reach the controller's API or the console's
-pages. `kubectl port-forward` still works.
+jobs nor `RUN` steps can connect to the controller's or the web's pods
+directly. A console published through an Ingress is reachable by them
+through it (the web sees the Ingress controller's pod), so such a console
+needs sign-in or the Ingress's own authentication. `kubectl port-forward`
+still works.
 
 ### Which daemon served a job
 
@@ -147,13 +161,14 @@ pages. `kubectl port-forward` still works.
 
   | Reason | Meaning |
   |---|---|
-  | `local-warm` | The job's own node, where the project is warm |
+  | `local-warm` | The job's own node, where the project was warm most recently |
   | `zone-warm` | The node of the zone where the project was warm most recently |
   | `zone-hash` | Nowhere warm in the zone: the project's node by hash |
   | `cross-zone` | No ready daemon in the job's zone |
 
   A connection from a pod the router does not know as a CI job goes to
-  the daemon on its own node (by hash when that node has none ready); it
+  the daemon on its own node (by a hash of its node over its zone's
+  daemons when that node has none ready); it
   is logged as such, with its daemon, and not recorded.
 
 - **From the job:**
@@ -193,9 +208,8 @@ pages. `kubectl port-forward` still works.
 - **Deduplication.** Identical steps of concurrent builds on the same daemon
   run once, so parallel jobs of one pipeline share their common steps when
   they land on one daemon. The router sends a project's parallel jobs to
-  the same daemon while the project is warm on one node of the zone, or
-  nowhere yet (the hash); once it is warm on several nodes, a job on one
-  of them stays on its own node.
+  the same daemon: the node of the zone where the project was warm most
+  recently, or, when it is warm nowhere yet, the one the hash names.
 - **Garbage collection** runs after builds (at most once a minute) and at
   start, not on a timer. The chart always renders the full policy set
   ([ADR-0009](adr/0009-gc-policies.md)):
@@ -230,7 +244,10 @@ pages. `kubectl port-forward` still works.
   - the controller API's server certificate (`<release>-controller-tls`),
     for server authentication only.
 
-  They last a year and are renewed after two thirds. The router has no
+  They last a year and are renewed after two thirds, except the jobs'
+  client certificate, which the box issues for 72 hours
+  (`buildkit.tls.client.duration`): a job can copy the certificate it
+  mounts, and a copy then expires soon. The router has no
   certificate: TLS passes through it. Without cert-manager,
   `scripts/buildkit-certs.sh` makes them from a CA of your own
   (`--router <release>` adds the router's names, `--controller <release>`
@@ -323,7 +340,10 @@ only chooses where a connection goes.
 What the controller does:
 
 - **Build history from the daemons.** It finds the daemons through the
-  headless Service and reads each one's build history over the daemons'
+  headless Service, and the stopping ones through the BuildKit chart's
+  Service of every daemon pod, ready or not (`<release>-buildkit-all`,
+  `control-plane.daemons.discoverAll`), so a controller that restarts
+  while a daemon drains still reads it. It reads each one's build history over the daemons'
   TLS port (1234), with its client certificate. The daemons' NetworkPolicy
   admits pods labelled `ci-accelerator.io/component: controller` (never
   the web's).
@@ -379,8 +399,14 @@ What the controller does:
 - **Its store** is SQLite on a ReadWriteOnce volume
   (`<release>-controller-data`). Builds are kept in full for 30 days
   (`retention.days`); each image's daily figures (builds by outcome, build
-  times) for a year; step output for 7 days. The volume is kept when the
-  release is removed.
+  times) for a year; step output for 7 days (`retention.outputDays`). The
+  controller keeps its database within `retention.storeShare` percent of
+  `controller.persistence.size` (default 70; 0: no bound). Above it the
+  oldest builds go before `retention.days` end, oldest first, never
+  today's builds or those of a day not yet summed up; the images' daily
+  figures of those days stay as they were summed. The controller logs a
+  warning (`retention`) whenever it does this, or when the bound cannot be
+  kept. The volume is kept when the release is removed.
 
 ### Logs
 
@@ -418,10 +444,18 @@ control plane's values restarts its pods, never the daemons.
   since the state directory is locked);
 - each new daemon must stay ready for 10 s before the next node.
 
-**How a daemon stops:**
-1. `preStop` keeps it serving for 5 s while the endpoint is withdrawn;
-2. on SIGTERM it stops accepting connections and lets running builds
-   finish, up to `terminationGracePeriodSeconds` (300 s by default).
+**How a daemon stops** ([ADR-0061](adr/0061-drain-before-sigterm.md)):
+1. `preStop` sleeps `preStopSleepSeconds` (5 s) while the endpoint is
+   withdrawn; the daemon keeps serving everything;
+2. it then waits while `buildctl debug histories` lists a running build
+   (checked every 5 s), and 15 s more, so the controller reads the last
+   records;
+3. only then does buildkitd get SIGTERM, with nothing left to drain.
+
+All of it counts against `terminationGracePeriodSeconds` (300 s by
+default): builds still running when it ends are killed.
+`preStopSleepSeconds: 0` removes only the first sleep. The controller
+follows a stopping daemon for at most 35 minutes.
 
 New jobs go to another daemon in the meantime: the router leaves out a
 daemon that is not ready (without the router, the Service sends them to
@@ -448,8 +482,9 @@ rollout on the first node; the other daemons keep serving. Roll back with
 ## Install-time checks
 
 The charts refuse installs that would end with nothing working. Checks that
-need the live cluster are skipped when rendering offline (Argo CD, Flux,
-`helm template`).
+need the live cluster are skipped when rendering offline (Argo CD,
+`helm template`); Flux runs Helm's install and upgrade against the
+cluster, so they run there ([gitops.md](gitops.md)).
 
 | Check | Fails when |
 |---|---|

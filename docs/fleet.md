@@ -465,7 +465,7 @@ back at your own runner Secret, then delete them.
 - Lists are per cluster: there is no merged list of builds or pipelines
   across clusters, and Insights and Nodes are per cluster.
 - A box that joins a fleet has no web of its own, and the hub does not
-  serve the box's read-only JSON API (`/api/v1/builds` and the others) per
+  serve the box's read-only JSON API (`/api/v1/builds`, its one operation) per
   cluster: scripts that read a box's API stop working when it joins.
 - The settings list is short on purpose (one row and its test per new
   setting); everything else is set in the values by hand.

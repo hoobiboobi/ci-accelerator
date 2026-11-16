@@ -17,3 +17,5 @@ Helm 4 was released in November 2025; Helm 3 gets security fixes until November 
 
 - Values that cannot be generated (the runner token) must be created by the user.
 - Some install-time checks do not run under GitOps tools; NOTES and docs say so.
+
+Later: Flux's helm-controller runs Helm's install and upgrade against the cluster, so the `lookup` checks run there; only Argo CD and `helm template` render offline ([gitops.md](../gitops.md)).

@@ -26,6 +26,7 @@ On a branch `release/v<v>`:
    - when `HELM_VERSION=` in `scripts/quickstart.sh` changed: the Helm path in `docs/upgrading.md` (the README's one-node command is checked, this one is not);
    - the box's `helm install ... --version <v>` in `integrations/gitlab-runner/README.md` (the check refuses an install of another version anywhere in the README, `docs/`, `integrations/` or `ci/`);
    - the Flux `version:` and the Argo CD `targetRevision:` in `docs/gitops.md`;
+   - for a minor: the supported line in the table of `SECURITY.md`;
    - the ci-accelerator image tag in `artifacthub.io/images` of `charts/control-plane/Chart.yaml` and `charts/ci-accelerator/Chart.yaml`, and the release's `artifacthub.io/changes` in the umbrella's `Chart.yaml` (Artifact Hub shows them on the version page).
 
    Then run `make chart-docs`: it regenerates the charts' READMEs, whose install commands take the chart's version (the packaged README is what Artifact Hub shows; `make lint` fails when they are stale).
@@ -33,7 +34,7 @@ On a branch `release/v<v>`:
    Leave the disk probe's image tag alone (the default in `charts/buildkit/templates/_helpers.tpl`) unless the probe program or its image changed: moving it restarts every daemon on upgrade. A Go or base image bump that fixes an advisory in the probe's image counts as a change: the weekly security run scans the probe's image while it lags behind (`scripts/default-images.sh`), so a finding there means the tag moves. If it moves, set `UPGRADE_ROLLOUT_EXPECTED=1` in `test/e2e/run.sh` and say so in the upgrade notes.
 2. In `CHANGELOG.md`:
    - rename `## Unreleased` to `## <v> - <yyyy-mm-dd>`;
-   - read its **Upgrade notes** as a user would, and make sure they say what to do;
+   - read its **Upgrade notes** as a user would, and make sure they say what to do and what restarts (the image tag follows the version, so the controller, the web and the routers restart on every release; the daemons, their disk probe and the main runner only when their pod template changed);
    - start a new `## Unreleased` above it with `### Upgrade notes` and `None.`.
 3. Run `scripts/check-release-version.sh v<v>`. It checks the versions and the changelog entry, and prints the version.
 4. Run `make vulncheck` and look at `.govulncheck-allow` and `.trivyignore.yaml`: a release should not ship with a grace period that a bump can end.
@@ -41,7 +42,7 @@ On a branch `release/v<v>`:
 
 ## 3. Optional: a release candidate
 
-To rehearse a minor exactly as users will get it, tag the merged commit `v<v>-rc.1` and push the tag (see step 4). The workflow publishes a pre-release. Install it from the registry on a test cluster. Release candidates use the `<v>` changelog entry.
+To rehearse a minor exactly as users will get it, publish a candidate before the release pull request. The workflow compares the tag's whole version, the `-rc.1` included, with the charts and the files of step 2.1, so a tag `v<v>-rc.1` on a commit that says `<v>` is refused. The candidate therefore gets a pull request of its own that sets `<v>-rc.1` everywhere step 2.1 lists (and runs `make chart-docs`); once it is merged, tag that commit `v<v>-rc.1` and push the tag (see step 4). The workflow publishes a pre-release. Install it from the registry on a test cluster. Release candidates use the `<v>` changelog entry, then `Unreleased`, when they have none of their own. The release pull request then sets `<v>`.
 
 ## 4. Tag
 
@@ -54,10 +55,20 @@ git push origin v<v>
 Tags `v*` cannot be moved or deleted once pushed. Two settings of the
 repository close what the workflow cannot: the tag ruleset also restricts
 **creating** `v*` tags (to the maintainers), and **immutable releases** are
-on, so a published release's files cannot be replaced. The workflow:
-- stops unless the tagged commit is on `main` (or a `release-0.N` branch,
-  for a patch): a tag on any other commit builds and signs nothing;
-- runs the checks again, checks that the GitLab CI component at the tag on GitHub is the file whose integrity the notes print and, when it changed since the previous release, has a real GitLab (CE at the oldest version the component claims and at the runner's minor) read it from there (`make component-gitlab-test` with `COMPONENT_URL`); a GitLab that refuses it stops the release;
+on, so a published release's files cannot be replaced. Release branches
+need the same branch ruleset as `main` (a pull request and the required
+checks): the workflow trusts a commit on them. The workflow:
+- stops unless the tagged commit is on `main` (or a `release-<major>.<minor>`
+  branch such as `release-0.6`, for a patch; other names that start with
+  `release-` do not count): a tag on any other commit builds and signs
+  nothing;
+- stops when the version is published already: its GitHub release, or the
+  image `ghcr.io/<owner>/ci-accelerator:v<v>`, exists. A re-run would push
+  the image again under another digest than the notes and the charts name.
+  A failed release is retried as it is only before it pushed the image;
+  after that, delete the image tag in the registry first, or release a new
+  version;
+- runs the checks again, checks that the GitLab CI component at the tag on GitHub is the file whose integrity the notes print and, when it changed since the previous release, has a real GitLab (CE at the oldest version the component claims and at a current one) read it from there (`make component-gitlab-test` with `COMPONENT_URL`); a GitLab that refuses it stops the release;
 - packages the three charts (ci-accelerator, buildkit, control-plane) reproducibly (Helm 4, `SOURCE_DATE_EPOCH` = the commit's time);
 - builds the ci-accelerator image (every role: controller, web, router, disk probe) for amd64 and arm64 (`scripts/build-image.sh`, the same build the checks run on pull requests that touch the Go code or the image's recipe) and pushes it as `ghcr.io/hoobiboobi/ci-accelerator:v<v>`;
 - pushes the charts to `oci://ghcr.io/hoobiboobi/charts` and signs all four artifacts with cosign right after, and `SHA256SUMS` (the quickstart script and the chart archives) as a blob, into `SHA256SUMS.sigstore.json`;

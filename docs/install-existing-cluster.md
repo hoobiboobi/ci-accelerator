@@ -20,16 +20,21 @@ Outside its own namespace the install creates, by default:
 | ClusterRole and ClusterRoleBinding for the controller's TokenReviews | `ci-accelerator-ci-accelerator-controller-tokenreview` | none: they cannot be pre-created or switched off |
 | The CA of this installation, in cert-manager's namespace: an Issuer, a Certificate and its Secret | `ci-accelerator-ci-accelerator-buildkit-ca` (the Issuer: `...-buildkit-ca-selfsigned`) | a dedicated issuer of your own: [below](#cert-manager-is-already-installed) |
 | ClusterIssuer that signs the daemons' and the jobs' certificates | `ci-accelerator-ci-accelerator-buildkit-ca` | the same |
+| In the jobs namespace: three Roles and their RoleBindings (the runner's, the controller's and the router's reads of job pods), the jobs' client Certificate and the NetworkPolicy | `ci-accelerator-gitlab-runner`, `ci-accelerator-controller-jobs`, `ci-accelerator-router-jobs`; `ci-accelerator-buildkit-client`; `ci-accelerator-jobs` | in a namespace you created too ([below](#the-jobs-namespace-is-created-by-the-platform-team)) |
 
-(The names are `<namespace>-<release>-...`; the table shows them for the
-namespace and release name `ci-accelerator`.)
+(The cluster-scoped names are `<namespace>-<release>-...`, the jobs
+namespace's `<release>-...`; the table shows them for the namespace and
+release name `ci-accelerator`.)
 
 So the account that runs `helm install` needs: `create` on ClusterRoles,
 ClusterRoleBindings, PriorityClasses, ClusterIssuers and Namespaces;
-`create` on Issuers, Certificates and Secrets in cert-manager's
-namespace; and, for the chart's checks before the install, `list` on
-Nodes and `get` on the box namespace, on the jobs namespace and on the
-box namespace's Secrets. An account without the Node and Secret rights
+`create` on Issuers and Certificates in cert-manager's namespace
+(cert-manager writes the CA's Secret itself); `create` on Roles,
+RoleBindings, Certificates and NetworkPolicies in the jobs namespace;
+and, for the chart's checks, `list` on Nodes, `get` on the box
+namespace, on the jobs namespace, on the box namespace's Secrets and
+Deployments (the checks for an older release and for a fleet read them by
+name, with no switch) and, on an upgrade, on the daemons' PriorityClass. An account without the Node and Secret rights
 can switch those checks off (`buildkit.preflight.buildNodes`,
 `buildkit.preflight.podSecurity`, `preflight.runnerSecret`); the read of
 the jobs namespace has no switch. An account without the ClusterRole
@@ -184,8 +189,9 @@ jobsNamespace:
 
 The name must stay `ci-accelerator-jobs` (or change `global.jobs.namespace`
 and `gitlab-runner.runners.jobNamespace` together); the box still issues
-the jobs' client certificate into it and still writes its NetworkPolicy
-there. `helm uninstall` then leaves the namespace alone.
+the jobs' client certificate into it and still writes its NetworkPolicy,
+the three Roles and their RoleBindings there (the installing account
+needs those rights in it). `helm uninstall` then leaves the namespace alone.
 
 ## The other nodes belong to everyone
 
@@ -265,7 +271,7 @@ Either way:
 
    ```sh
    helm upgrade --install ci-accelerator-runner gitlab-runner \
-     --repo https://charts.gitlab.io --version 0.93.0 \
+     --repo https://charts.gitlab.io --version 0.94.1 \
      -n gitlab-runner --create-namespace -f values.yaml
    ```
 
@@ -284,7 +290,7 @@ Either way:
    `image`, polling and resource settings can stay. Then upgrade the
    release with `-f mine.yaml`, its own name, namespace and chart
    version (0.93.0 or newer with the runner image 19.4.1 or newer; the
-   box ships chart 0.94.1 with 19.5.1, the fragment pins 19.4.2).
+   box and the fragment run chart 0.94.1 with 19.5.1).
 4. **RBAC across namespaces.** The runner's ServiceAccount needs the
    fragment's Role in the jobs namespace. The fragment's `rbac.create:
    true` makes it there; with `rbac.create: false` in your release,

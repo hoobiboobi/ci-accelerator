@@ -61,6 +61,13 @@ machine means [quickstart.sh](#one-machine-installs-quickstartsh); a
    changed: the open-files limit and the drain before SIGTERM), so
    pick a quiet moment; the control plane and the runner pod restart
    too; the store and a `hostPath` cache stay.
+4. **Keep `gitlabUrl` as it is spelled.** The console identifies a
+   GitLab by the exact text of `gitlabUrl` (the runners derive the same
+   identifier). Changing its spelling, even adding a trailing slash or
+   going from http to https, starts a new GitLab for the console: earlier
+   builds stay under the old one (visible to admins only with sign-in)
+   and the next builds of each image compare with nothing. The OAuth
+   application's redirect URI changes too.
 
 ## Helm installs
 

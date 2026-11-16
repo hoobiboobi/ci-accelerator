@@ -19,8 +19,17 @@ only the runner may decide is in [renovate-global.js](../.github/renovate-global
 One pull request per subject, not per file: the Go toolchain is one PR
 (go.mod's `toolchain`, the image's `golang` base, the Makefile's download
 with its sums); BuildKit is one (the chart's `appVersion` and default
-digest, the CI component's client image, the quickstart test's); the
-gitlab-runner chart comes with the runner image it runs. The groups are
+digest, the CI component's client image, the quickstart test's, the
+release image build's); the gitlab-runner chart comes with the runner
+image it runs, and the runner fragment (`integrations/gitlab-runner`) is
+in the same group. Indirect Go modules (`// indirect` in go.mod: x/net,
+x/crypto, the OpenTelemetry SDK, ...) come in one PR of their own, "Go
+modules (indirect)"; the Go module of BuildKit (`github.com/moby/buildkit`,
+the console's client library) is in "Go modules", not in the BuildKit
+group: it follows its own tested minor, not the daemons' release.
+`make lint` (`scripts/pins-agree.sh`) checks that the image build's
+BuildKit, the showcase's Go base and the fragment's runner match their
+counterparts. The groups are
 the `packageRules` of renovate.json5, each with a note in the PR body
 saying what to check.
 
@@ -54,13 +63,17 @@ moves. Nothing is merged by Renovate.
 - **`KUBE_VERSIONS`** in the Makefile (the Kubernetes versions the
   manifests are validated against): the chart's minimum is a promise, the
   newest is what the e2e tests.
-- **Helm 3** in the checks' matrix and the Makefile: pinned by hand until
-  its end of life (security fixes end 2026-11-11); Helm 4 is Renovate's.
+- **Helm 3** in the checks' matrix and the Makefile: pinned by hand
+  (3.22.1). Its security fixes ended on 2026-11-11; it stays in the checks
+  while the README names Helm 3.19 as a minimum. Helm 4 is Renovate's.
 - **The `go` directive** of go.mod (the minimum Go): a compatibility
   promise. The `toolchain` line is bumped.
 - **This project's own images and charts** (`ghcr.io/hoobiboobi/...`,
   the e2e's `UPGRADE_FROM`, the chart's list of released images): the
   release workflow's.
+- **The GitLab CE images of the component's GitLab test**
+  (`ci/gitlab/test/gitlab.sh`): the oldest the component claims and a
+  current one, by hand.
 - **The runners' Ubuntu** (`runs-on`): a PR of its own, decided with the
   tools' versions on it.
 

@@ -16,11 +16,116 @@ workflow copies them into the GitHub release.
   emptied while the box runs stops its GitLab reads at once. An empty
   token file at start still starts the box with a warning, as in 0.6.0.
 - A box that joins a fleet as a member stops serving its own web and
-  read-only JSON API (`/api/v1/builds` and the others); the hub shows its
+  read-only JSON API (`/api/v1/builds`); the hub shows its
   pages under `/m/<name>/` but not the JSON API, and the sessions of its
   own sign-in end at its first start as a member. Upgrade a fleet's hub
   before its members: a member newer than its hub is refused until the
   hub is upgraded.
+- The controller, the web and the routers restart once for the new
+  image, and the main runner's pod once for its new pod security context
+  (RuntimeDefault seccomp); the daemons and their disk probe stay, and so
+  do the store and the cache. A router restart lets its open builds finish
+  for `control-plane.router.drainSeconds` (300 s) and then cuts them.
+- The controller's API now refuses a TokenReview that does not confirm
+  its audience: a cluster whose token authenticator does not report
+  audiences refuses the web and the routers after the upgrade.
+  Kubernetes' own ServiceAccount authenticator reports them.
+- The store records the last day its daily figures were summed (a row in
+  its meta table) and when the runners' S3 cache was last listed (a
+  column); a rollback to 0.6.0 ignores both. A step whose stored operation
+  holds a secret may once show a different reason after the upgrade.
+- A controller started without sign-in (and not in a fleet) deletes the
+  sessions and sealed GitLab tokens an earlier sign-in left. The grants
+  stay valid at GitLab until they expire: revoke them there.
+- If you scrape the main runner's metrics, list the scraper in
+  `gitlab-runner.metrics.from`: the runner's pod now has a NetworkPolicy
+  that admits nothing else.
+- `GET /api/v1/builds` lists one image name per `images` item. A client
+  that split the items on commas keeps working; one that matched an item
+  against the joined string must match single names now.
+- GitLab CI component: a later job that read `IMAGE` or `IMAGE_DIGEST`
+  from a `push: false` job got empty values; it now gets none.
+  `timeout-minutes: 0` now fails the job instead of cancelling the build
+  at once. The include's integrity changes (the release notes print the
+  new one).
+- quickstart.sh: `--runner-token-file` now wins over `RUNNER_TOKEN` when
+  both are given (as its help always said); a `--build-dir` that is not
+  an absolute path without spaces is refused.
+- integrations/gitlab-runner: the fragment now runs gitlab-runner
+  alpine-v19.5.1; install it with chart 0.94.1.
+- control-plane: the new value `retention.storeShare` (default 70) bounds
+  the controller's database to that percent of
+  `controller.persistence.size`. A store already above it loses its
+  oldest builds at the first hourly retention after the upgrade (the
+  images' daily figures stay); set `retention.storeShare: 0` to keep the
+  old behaviour.
+
+### Security
+
+- With sign-in and several GitLabs, a person's GitLab token is only ever
+  sent to the GitLab that issued it. Before, opening a build or a job of
+  another GitLab (including a link printed in a job log) could send it
+  there, and an admin's pages of another GitLab did too; those pages now
+  show the stored data, and no token is renewed because of the other
+  GitLab's refusal.
+- The controller's API checks that Kubernetes confirmed its audience in
+  each TokenReview, and bounds the reviews of unknown tokens per caller
+  address and overall (a 503 asking to try again past the bound); refused
+  calls are logged once a minute per route.
+- A job the console has no record of redirects to its build only for
+  someone who may see that build.
+- The sign-in check judges `/static/` and `/auth/` addresses as sent, so
+  an encoded slash no longer reaches the not-found page without sign-in.
+  A sign-in return address with a dot segment ending under `/auth/` is
+  refused.
+- Sign-in: the login cookie answers one callback only; a replayed
+  callback is refused without asking GitLab's token endpoint.
+- With sign-in at an https, non-loopback address, the console sends
+  `Strict-Transport-Security` (one year).
+- With sign-in, the Nodes pages show running targets, cache-mount names
+  and base-image names to admins only.
+- Secret masking covers more formats: Authorization headers of any
+  scheme, `PRIVATE-TOKEN`/`JOB-TOKEN` headers, options and assignments
+  named like a secret, secret query parameters, JWTs, registry JSON
+  credentials, npm, PyPI, Stripe, Google and Vault tokens, runner
+  registration tokens and Slack webhooks; secret build arguments also
+  URL-encoded, base64 and JSON-escaped. A long log or line cut where
+  masking shortened it no longer shows the remainder of a secret.
+- Build-argument values are masked for known token formats and passwords
+  in URLs whatever the argument's name, when a build is stored and when it
+  is read. A token in a value, or a secret argument's value repeated in
+  another argument, no longer stops the console from naming that argument
+  as the change between two builds.
+- Stored build operations and the build context option no longer keep
+  secret values in clear (keyed hashes, as for secret-named variables);
+  "fetched from the network" paths hide secret build arguments.
+- Order hint: the fragment and the "the step also runs" text are built
+  from the step name, which is masked, not from the raw command (a token
+  in an installer's RUN line appeared in clear there and in
+  `/api/v1/builds` `order[].fragment` and `order[].others`).
+- The console's database and step-output files are created readable by
+  their owner only (0600), and existing ones are tightened on start.
+- The build router refuses connections above 4096 open in all or 256
+  from one address (`-max-conns`, `-max-conns-per-source`) and closes a
+  connection that sends nothing within 10 s before dialing a daemon: a CI
+  job can no longer exhaust the router's memory.
+- The daemons' NetworkPolicy and the jobs namespace's also block
+  `168.63.129.16` (Azure WireServer), `100.100.100.200` (Alibaba) and
+  `fd20:ce::254` (GCP IPv6) by default
+  (`buildkit.networkPolicy.egress.blockedCIDRs`).
+- The console's NetworkPolicy also keeps out `router.clientNamespaces`,
+  the daemons' namespace and pods labelled
+  `ci-accelerator.io/component=ci-job`
+  (`control-plane.networkPolicy.deniedComponents`, default
+  `[buildkit, ci-job]`).
+- The box issues the jobs' client certificate for 72 hours
+  (`buildkit.tls.client.duration`, new); the daemons' certificate keeps
+  8760h. A copied job certificate stops working sooner.
+- The main runner's pod gets a NetworkPolicy (nothing reaches it;
+  `gitlab-runner.metrics.from` lets a scraper reach :9252: its listener
+  also serves the URL of every job it runs) and RuntimeDefault seccomp.
+- golang.org/x/net v0.62.0 (CVE-2026-78661 in x/net/html; govulncheck
+  found no call path).
 
 ### Added
 
@@ -69,10 +174,37 @@ workflow copies them into the GitHub release.
   A later rebuild whose dependencies came from the cache says the order
   was fixed, with the time before and after. Insights lists their time;
   `GET /api/v1/builds` returns them as `order`.
+- The controller also reads daemons that are not ready (a stopping
+  daemon) through a third Service of the buildkit chart,
+  `<fullname>-all` (headless, every daemon pod, ready or not): a
+  controller that restarts while a daemon drains still stores the builds
+  that daemon finishes. The control-plane chart's new value
+  `daemons.discoverAll` names it (derived from `daemons.discover` when
+  that names a `-headless` Service) and passes it as
+  `CI_ACCELERATOR_DISCOVER_ALL` (`-discover-all`). Without that Service,
+  the ready daemons are read as before; no daemon restarts for it.
+- buildkit chart: `networkPolicy.ingress.controller` admits the
+  controller's pods; the box sets it, so a `networkPolicy.ingress.extraFrom`
+  of your own no longer removes the controller.
+- GitLab CI component: new input `output-prefix` (e.g. `API_` gives
+  `API_IMAGE_REF`) for pipelines with several component jobs.
+- The controller warns once when a CI job pod's URL starts with none of
+  the configured GitLab URLs (its builds then get no job), and logs
+  `reading record` with the record's ref before it reads a build's history
+  blobs (Info for a build new to the console), so a record whose reading
+  ends the process can be identified from the log.
 
 ### Changed
 
 - The upgrade test starts from 0.6.0. Nothing changes for a user.
+- Controller: new value `retention.storeShare` (default 70 % of
+  `controller.persistence.size`, passed as `CI_ACCELERATOR_MAX_STORE_MIB`
+  or `-max-store-mib`): above it the oldest builds are deleted before
+  their retention ends, oldest first, and a `retention` warning is
+  logged; the images' daily figures are kept. A size given other than in
+  whole Mi, Gi or Ti, or an existing claim, sets no bound.
+- Charts: `caches.stores` that list one folder (server, bucket, path) for
+  two GitLabs fail the render, as the controller refuses them at start.
 - The controller reads the installation's GitLab token from its file at
   every use: a changed token Secret counts without a restart, and an
   emptied or unreadable one stops GitLab reads (job times, logs, commit
@@ -80,6 +212,271 @@ workflow copies them into the GitHub release.
 - Console: with sign-in every page is sent with `Cache-Control: no-store`
   (Back after signing out no longer shows a page from the browser's
   cache). A time axis over more than a day has at most 13 ticks.
+- Routing: a project that the router sent elsewhere once (a daemon
+  restarting, a failed connection, an overloaded node) no longer stays
+  split across nodes: its jobs go back to the node it used most recently,
+  so parallel jobs meet on one daemon again. Connections of jobs the
+  router does not know honour `crossZone: false` and `overloadBuilds`, and
+  spread by node instead of all going to one daemon.
+- The routers age warmth themselves (`CI_ACCELERATOR_WARM_FOR`, from
+  `router.warmDays`): projects stop being warm after `warmDays` even while
+  the controller is away, their own decisions are forgotten after that,
+  and running-build counts older than a minute no longer make a router
+  pass a daemon over. A stopping router sends all the routing decisions it
+  still holds, not only the first 1000, and warns once (not every 2 s)
+  while the controller is away.
+- Console: one signed-in person can hold at most 16 live-update streams.
+  Each event must reach the browser within a minute, or the stream ends.
+  A page whose live connection ended reconnects (after 5 s, doubling to a
+  minute) and catches up; a failed update says "Not updating"; a big page
+  refreshes at most every 5 s. At most 16 GitLab pipeline reads run at
+  once.
+- Console: at most four build pages, step pages and comparisons are
+  prepared at once per process; the others wait.
+- Console: the Resources tab says that its cores over time add up each
+  step's average.
+- Console: the project switcher works beside a narrow or collapsed
+  sidebar and from a phone's header (which also offers signing out);
+  projects and Sign out are in search (Ctrl K). Keyboard: a build's tabs
+  move with the arrow keys, Home and End; live updates keep the keyboard
+  focus and the scroll of the timeline and tables; Esc on a step opened
+  from a pipeline's timeline returns to its row; a filter changed with the
+  keyboard applies on Enter or when leaving it, not at every arrow key;
+  the search and shortcuts dialogs keep focus and keys to themselves;
+  single-key shortcuts can be turned off from search. Screen readers: a
+  main landmark and a skip link, timeline rows with their level, the live
+  clock no longer announced every update, named icons and copy buttons, an
+  h1 on a step's page. A node's Load rows are one line again; quiet rows
+  keep full contrast; the bottom bar fits 340 px screens; a print layout.
+  Wording: the project banner says something changed (not "new builds"),
+  the timeline filter "Received" is "From another job", an image's year
+  view no longer suggests a longer window or claims a 30-day retention.
+- The console API (`GET /api/v1/builds`): `images` lists one image name
+  per item (a build the CI component pushed with a commit tag and
+  `latest` used to answer both names joined with a comma in one item);
+  required lists (`order[].files`, `order[].managers`,
+  `hints[].managers`, `managers[].problems`) answer `[]`, never `null`; a
+  new `orderNote` says when the order hints could not be read or cover
+  only the newest 100 builds, and `hintsNote` speaks of the cache-mount
+  hints only; answers carry `Cache-Control: no-store`, and a store failure
+  answers a fixed text, the cause going to the console's JSON log. The
+  published contract no longer refuses unknown properties (new fields may
+  appear within v1) and lists 401 and 403. The sign-in gate's 403 for the
+  API is no longer cacheable.
+- `make api-check` fails when no release tag is visible instead of
+  passing without comparing (fetch the tags, or set
+  `API_CHECK_BASE=<ref>`); it also refuses an operationId removed or a
+  parameter default changed.
+- The controller refuses a caches list that names one folder (server,
+  bucket, path) for two GitLabs. A changed GitLab URL file that the
+  controller would refuse at start (a second URL next to `gitlab.token`,
+  or a sign-in entry that does not fit the URLs) no longer ends the
+  running controller: it keeps the old URLs and logs a warning.
+- The console, controller API, web, router health and fleet hub servers
+  close kept-alive connections idle for 2 minutes. The disk probe serves
+  at most 32 connections at once; more wait.
+- A panic while reading a step for hints is logged (with its stack, at
+  most 10 per process) instead of only dropping the hint.
+- Chart render refuses: a system namespace (`kube-system`, `kube-public`,
+  `kube-node-lease`, `default`, cert-manager's) as `global.jobs.namespace`;
+  fleet values without `fleet.role`; a `signIn.gitlab` entry without `url`
+  next to several `gitlab.urls`; `extraConfig` that sets buildkitd's debug
+  address; `openFilesLimit` above 1073741816. The daemons' NetworkPolicy
+  admits in-cluster pods by a namespace selector while
+  `buildkit.networkPolicy.egress.clusterCIDRs` is empty (Cilium did not
+  apply its ipBlock to pod addresses, cutting builds off from in-cluster
+  registries, GitLab, S3 and OTLP).
+- integrations/gitlab-runner: chart 0.94.1 and runner 19.5.1, the
+  versions the box runs (was 0.93.0 and 19.4.2). The docs say to leave
+  the runner's `pod_annotations_overwrite_allowed` unset, or not matching
+  the job, project and `ci-accelerator.io` annotations: an allowed
+  overwrite lets a job pass for another project.
+- quickstart.sh: a k3s install that failed after the binary was placed
+  is retried on the next run, and `--uninstall` removes it; k3s that does
+  not come up stops with a pointer to `journalctl -u k3s`. The closing
+  note and the printed `helm upgrade` keep a GitLab token added on a
+  second run; the install notes printed at the end name kubectl as `sudo
+  k3s kubectl`. `--build-dir` is checked (absolute, no spaces) before
+  anything is installed. An option without a value, an empty or
+  unreadable token file and a token with spaces inside are named; a byte
+  order mark and blanks around a token are dropped. `--version` accepts
+  `v0.7.0`. The uninstall command printed at the end works as printed
+  (`sudo bash <path> --uninstall`). A stop at the checks leaves no
+  `/var/lib/ci-accelerator` behind.
+- GitLab CI component: a job with `push: false` no longer writes empty
+  `IMAGE` and `IMAGE_DIGEST` into its dotenv report. The build stops
+  before the job's own timeout when that comes first, and a buildctl
+  killed early (out of memory, a cancelled job) is no longer reported as
+  a timeout. `timeout-minutes` 0 is refused, and 010 means ten minutes.
+  Blanks around `buildctl-args` lines are dropped. The README says what a
+  provenance attestation records and that CI/CD variables named `CIA_*`
+  outrank the inputs.
+- scripts/buildkit-certs.sh stops instead of creating a new CA when
+  `ca.crt` is there and `ca.key` is not; for `--client controller` it
+  prints the box namespace and `control-plane.tls.existingSecret`;
+  printed paths are quoted.
+- The image's `/licenses` carries the licence files of forked or vendored
+  code inside modules, and Go's own licence.
+- Documentation: the release candidate procedure (a pull request that
+  sets `<v>-rc.1`), the release workflow's guards, the supported versions
+  in SECURITY.md (0.6.x), the image pinning there and for the runner, the
+  network policies of the jobs namespace and the runners, how a daemon
+  stops (ADR-0061), taking a build node out for maintenance
+  (docs/production.md), the controller's memory, what a job can read from
+  its daemon, and the limitations the fixes above leave.
+
+### Fixed
+
+- Sign-in: an open live page checks the session without renewing it, so
+  the next page you open renews the session cookie again (before, a
+  console tab left visible was signed out seven days after sign-in, and
+  its session never ran out of idle time). A session that ends because it
+  was idle or too old has its GitLab token revoked, as a sign-out does.
+- The web reads large answers of its own controller again (`GET
+  /api/v1/builds` with a high limit); the 64 MiB bound applies to fleet
+  members only. After a controller restart the web reconnects its change
+  stream within a second, however often the controller restarted before.
+  The controller logs when it cannot read its renewed TLS certificate (it
+  keeps serving the old one).
+- Collector: one daemon that stops answering in the middle of a record no
+  longer stops the console from storing every other daemon's builds:
+  blobs are read outside the collector's lock, and a read that gets
+  nothing for 2 minutes is given up. Callers with a deadline (job
+  comparison) stop waiting when it passes.
+- A build that could not be stored (a short store error, a daemon read
+  failure) is tried again every 30 seconds while its daemon's stream
+  lasts, up to 5 times; a failed save of another build no longer leaves
+  the arriving one skipped. A build whose trace is larger than 64 MiB is
+  stored without its job instead of not at all. A record that makes the
+  collector panic is logged and skipped instead of restarting the
+  controller.
+- The controller no longer crashes on a build-check warning whose line
+  range has no start or end, and it bounds what it keeps of a build's
+  record (at most 2000 steps, step names 4 KiB, errors 16 KiB, the
+  Dockerfile 1 MiB, the progress stream's vertices and warnings); a build
+  beyond a bound reads as truncated.
+- A daemon that was unready for a moment is no longer disconnected,
+  forgotten and read again 35 minutes later. A build whose start event
+  comes after its end no longer shows as running. A daemon with a very
+  large cache (over about 80,000 records) is inspected again; when its
+  cache cannot be listed, its disk and load are still read, so the disk
+  warnings keep working. At most 8 running builds naming one CI job are
+  followed live at once, so builds naming one job cannot take every live
+  view of the box.
+- A job pod's URL now matches its GitLab whatever the case of the host
+  name and with or without the default port; of two GitLab URLs on one
+  host, the longest that matches wins.
+- Verdicts: a change to a file that a glob COPY source reads (`COPY
+  package*.json`, without a COPY of the whole context) now counts as your
+  change. A rebuild of the same commit whose step also downloads something
+  without a checksum stays unclear, also with
+  `reasons.trustGitComparison`. An edited `.dockerignore` of the context
+  keeps a rebuild unclear instead of "no change in what it copies". A
+  change found in a comparison GitLab cut short is marked "cut short".
+- Verdicts: one GitLab comparison that keeps failing (a diff timeout, a
+  403) no longer holds back the project's other rebuilds; a 403 to the
+  installation's token is asked again later instead of being stored as
+  unresolved.
+- Verdicts: a step rebuilt because its source changed (a context, a git
+  repository or an image below an unchanged Dockerfile line) names the
+  source instead of "this step changed" with the same text. A "files
+  changed" verdict made from a sibling job is reconsidered when that job
+  is decided otherwise. A cache hit on a daemon where another pipeline had
+  just built the step no longer proves "other node": the "cache
+  elsewhere" settling also looks at the project's other pipelines that
+  ran at the same time on the same daemons (a merge request's pipeline
+  and its branch's, of one commit).
+- The build page no longer says that no cache held the project's layers
+  when the router passed over a warm node that was not ready or busy.
+- A pipeline read only from GitLab's API (its job pods never seen) now
+  gets its commit, so its rebuilds can be settled.
+- Order hint: the build page's "order fixed" verdict appears only when
+  an install of the project's dependency files by the same package
+  manager came from the cache; a tool installed before the copy (`pip
+  install poetry`) neither counts as a fix nor hides the order hint of the
+  install after the copy. `poetry install --only-root` no longer counts as
+  an install of the dependencies.
+- Order hint: an editable install (`pip install -e .`, `uv pip install -e
+  .`) gets an early install without `-e`, and `-rrequirements.txt` is
+  rewritten too. A change to a requirement file that another one includes
+  (`requirements/base.txt`), a gemspec, `patches/` or `.yarn/` counts as a
+  dependency change. The "Replace lines" fragment is not offered when
+  ENV, ARG, USER or LABEL lines lie between the COPY and the install. The
+  hint is not shown for a rebuild that GitLab's comparison cut short.
+- Order and cache-mount hint figures ("installed again N times", "ran N
+  times", median) count only the image's own builds: several images of a
+  project built without `--target` are no longer mixed. A build whose
+  reason changed after GitLab's comparison no longer counts in the order
+  figures and Insights. The API's hints answer shares one time window for
+  all builds.
+- Cache-mount and order hints: reading a RUN step's script is bounded (a
+  few hundred bytes of `A=$A$A` lines could take gigabytes of memory in
+  the console and the controller).
+- Cache-mount hint: no fragment for a here-document RUN (it showed
+  BuildKit's one-line summary as the command); commands that only empty
+  the cache (`apt-get clean`, `rm -rf /var/lib/apt/lists/*`, `dnf clean
+  all`) are left out of the fragment and named in a caveat; dnf's
+  `keepcache` option goes to every dnf command; a cache-off flag is
+  dropped only from its manager's command (uv's `-n` no longer turns
+  `head -n 5` into `head 5`); a cache mount with `sharing=private` is no
+  longer reported as not locked; the Next.js fragment has no fixed
+  `id=next-cache`, and its caveat says what an id does.
+- Store: retention on a full controller volume deletes expired
+  step-output files first, deletes builds of days already summed even
+  when the daily figures cannot be written, cuts the write-ahead log back
+  to 64 MiB after checkpoints, and starts on a full volume; the hourly
+  `retention` log line says when the volume is nearly full. Retention
+  deletes in pauses, so the collector is not held off for seconds after a
+  long outage; it keeps a job while a build of it is kept, and forgets
+  projects of which nothing is kept (they leave the project menu).
+- Store: a record that reuses a stored build's id no longer replaces that
+  build, and once a pipeline's project is known a build of another
+  project or of no known job no longer settles its builds' reasons. Daily
+  figures no longer skip days when a rebuild was settled before the
+  hourly rollup after days of downtime. Reading a step's output at the
+  moment its day file expires says "no output kept" instead of failing.
+  Ids no GitLab issues (2^63 and above) read as nothing instead of failing
+  a cache scan or a page.
+- Console: the build list's Older pages no longer skip builds that
+  started in the same millisecond, and the pipelines list offers "Older"
+  only when older pipelines exist. Pipeline search ignores case in any
+  script, not only ASCII; non-ASCII project initials and searches are cut
+  by whole letters.
+- Console: a pipeline page and the project's change banner no longer
+  refresh on GitLab re-reads that change nothing. The runner cache card's
+  time is the last successful listing.
+- Console: while the controller does not answer, the Nodes pages say so
+  instead of stating that no daemon is reached or that a daemon was
+  replaced; a node's page answers 503 and updates when the controller is
+  back. The Nodes page is dated by its oldest daemon reading, and a daemon
+  whose cache cannot be listed shows when its cache figures are from. It
+  says when GC limits differ per node; a full cache at the GC floor no
+  longer counts as "needs attention"; disk shares are rounded down.
+- Console: failed and canceled steps count as "steps run" everywhere,
+  and canceled builds are said as canceled in Insights and pipeline
+  sentences. Durations are rounded once ("1 min 0 s", never "60 s"), and
+  negative ones show as 0. Chart dots and bars stay inside their box with
+  skewed clocks; the live page's label of an early, long step sits at the
+  right edge. Wording: "1 step was built", "N more reasons"; the memory
+  line names the step by its command; a preview of a windowed page keeps
+  the window.
+- Console: static files are kept for a year only under their current
+  version (during an upgrade a browser could keep an old script), and
+  `Vary` keeps `Accept-Encoding` with sign-in. The web pod's per-project
+  figures are bounded (stale ones dropped, at most 100 000 builds kept).
+- Runner caches: a store address that answers with something other than
+  an S3 listing is an error, not an empty cache; a lifecycle answer
+  without rules is "unknown"; redirects are not followed.
+- Disk probe: node CPU no longer jumps to absurd values when a
+  `/proc/stat` counter goes back, and guest time is no longer counted
+  twice (takes effect with the next disk-probe image).
+- Role `all` stops at once with a live page open and no longer exits
+  with an error; the web role ends live pages at shutdown instead of
+  waiting 5 s.
+- Install notes print the right OAuth redirect URI without the runner's
+  `gitlabUrl` and the right runner Deployment name for long release
+  names; the control-plane notes warn about a GitLab nobody can sign in
+  with.
 
 ## 0.6.0 - 2026-11-13
 
