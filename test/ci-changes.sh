@@ -49,6 +49,7 @@ want "the mirror's pipeline (GitLab runs it)" "$NONE" .gitlab-ci.yml ci/showcase
 want "the image recipe" "$EVERY" cmd/ci-accelerator/Dockerfile
 want "the image build's context" "$EVERY" .dockerignore
 want "the cache-mount hints' check on real builds (Go helper, shellchecked script)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" test/hints/managers.sh test/hints/cases/npm/Dockerfile
+want "the generated member values (compared with the hub's generator by the Go tests, rendered by validate)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" charts/ci-accelerator/tests/values/fleet-member.yaml
 want "the vulnerability gate (run by the Go job, shellchecked by lint)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" scripts/vulncheck.sh
 want "the API contract (its test and api-check in the Go job)" "$GO" docs/api/openapi.yaml
 want "the API contract's check (run by the Go job, shellchecked by lint)" "charts=true go=true component=false renovate=false docs=false e2e_matrix=[$ALL]" scripts/api-check.sh

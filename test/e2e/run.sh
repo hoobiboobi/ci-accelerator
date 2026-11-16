@@ -63,6 +63,12 @@ OTEL_REL=$REL-otel
 # Not "box": a manual install of that name may share the cluster, and
 # cleanup deletes CA Secrets by release label.
 BOX_REL=e2e-box
+# The fleet scenario's hub: a release of the control-plane chart in its own
+# namespace, next to the box. FLEET_TMP: the scenario's private directory
+# for keys and tokens (kept out of $LOGS, which CI uploads).
+HUB_NS=$NS-fleet
+HUB_REL=e2e-hub
+FLEET_TMP=""
 # The component scenario: a real GitLab (a container on kind's Docker
 # network, reached by name from the pods) and a box whose runner it feeds.
 COMP_NS=$NS-component
@@ -313,10 +319,22 @@ create_state() {
   for node in $BUILD_NODES; do docker exec "$node" mkdir -p "$HOST_PATH" || die "mkdir $HOST_PATH on $node"; done
 }
 
+# The fleet hub and its namespace: its store and Secrets go with it, so a
+# run never starts on an earlier run's hub.
+remove_hub() {
+  if hc status "$HUB_REL" -n "$HUB_NS" >/dev/null 2>&1; then
+    hc uninstall "$HUB_REL" -n "$HUB_NS" --wait --timeout 3m >/dev/null 2>&1 || true
+  fi
+  if [ "$(kc get namespace "$HUB_NS" -o jsonpath="{.metadata.labels.ci-accelerator\.io/e2e}" 2>/dev/null)" = true ]; then
+    kc delete namespace "$HUB_NS" --wait=true --timeout=180s >/dev/null 2>&1 || true
+  fi
+}
+
 # Uninstall a previous run and wait until its daemons are gone, so their
 # state dir is not deleted under running processes.
 remove_release() {
   local r
+  remove_hub
   if hc status gitlab-runner -n "$NS" >/dev/null 2>&1; then
     hc uninstall gitlab-runner -n "$NS" --wait --timeout 3m >/dev/null 2>&1 || true
   fi
@@ -401,12 +419,13 @@ cleanup() {
   local pid
   for pid in $BG_PIDS; do kill "$pid" 2>/dev/null; done
   for pid in $BG_PIDS; do wait "$pid" 2>/dev/null; done
+  [ -z "$FLEET_TMP" ] || rm -rf "$FLEET_TMP"
   if [ "$FAILED" != 0 ] || [ "$SETUP_FAILED" != 0 ]; then
     collect_diagnostics
     echo "logs and diagnostics: $LOGS (rerun with KEEP=1 to keep the cluster state)"
   fi
   if [ "$KEEP" = "1" ]; then
-    echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS, $OTHER_NS, $OBS_NS, $PSA_NS, $BOX_NS, $BOX_JOBS_NS, $COMP_NS, $COMP_JOBS_NS, $UPG_NS, $UPG_JOBS_NS (those that exist), the container $COMP_GL and $STATE_DIR on the nodes (make e2e-clean removes them)"
+    echo; echo "KEEP=1: leaving namespaces $NS, $JOBS_NS, $OTHER_NS, $OBS_NS, $PSA_NS, $BOX_NS, $BOX_JOBS_NS, $HUB_NS, $COMP_NS, $COMP_JOBS_NS, $UPG_NS, $UPG_JOBS_NS (those that exist), the container $COMP_GL and $STATE_DIR on the nodes (make e2e-clean removes them)"
     return
   fi
   # Only the run that started GitLab (or make e2e-clean) removes it: another
@@ -1343,6 +1362,7 @@ PY
   box_ui
   box_cache
   box_signin
+  box_fleet
   hc uninstall "$BOX_REL" -n "$BOX_NS" --wait --timeout 5m >/dev/null 2>&1 || fail "uninstall the box"
   kc -n "$BOX_NS" delete secret e2e-console-oauth e2e-console-session --ignore-not-found >/dev/null 2>&1
   check "uninstall removes the jobs namespace" \
@@ -1350,6 +1370,257 @@ PY
   check "uninstall keeps the controller's store" quiet kc -n "$BOX_NS" get pvc "$BOX_REL-controller-data"
   kc -n "$BOX_NS" delete pvc "$BOX_REL-controller-data" --ignore-not-found >/dev/null 2>&1
   kc -n "$CM_NS" delete secret -l "app.kubernetes.io/instance=$BOX_REL,ci-accelerator.io/component=buildkit" --ignore-not-found >/dev/null 2>&1
+}
+
+# box_fleet: the box joins a fleet hub installed next to it (charts/
+# control-plane with fleet.role hub, in its own namespace). The member's
+# controller dials the hub; the hub serves the box's pages under /m/e2e/,
+# finds the job by the address a job log prints, and refuses a key it does
+# not know. A backup leaves the hub's pod and is restored as docs/fleet.md
+# shows. Leaving the fleet brings the box's web back.
+box_fleet() {
+  local port=${E2E_FLEET_PORT:-18941} d=$LOGS/fleet s pf="" inst job hpod
+  mkdir -p "$d"
+  # Keys and tokens stay out of $LOGS (CI uploads it): a private directory,
+  # removed at the end, and by cleanup after an interrupt.
+  s=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/ci-accelerator-fleet.XXXXXX") || { fail "a private directory for the fleet's keys"; return; }
+  FLEET_TMP=$s
+  # fleet_end: what every return of this scenario runs.
+  fleet_end() {
+    kill "$pf" 2>/dev/null
+    rm -rf "$s"
+    FLEET_TMP=""
+    unset -f hub hub_forward member_up no_web hub_job hub_sign_in bob_api stranger_refused values_by_key delivered recorded audited \
+      granted files_up voided gone
+  }
+  # A port-forward in the background calls kubectl itself, not kc (see kc).
+  hub_forward() {
+    kill "$pf" 2>/dev/null
+    kubectl --context "$CTX" -n "$HUB_NS" port-forward "svc/$HUB_REL-web" "$port:8080" >>"$d/pf.log" 2>&1 &
+    pf=$!
+    BG_PIDS="$BG_PIDS $pf"
+    eventually 30 quiet curl -fsS -m 5 "http://127.0.0.1:$port/healthz"
+  }
+  remove_hub
+  ensure_ns "$HUB_NS" restricted
+  openssl genpkey -algorithm ed25519 -out "$s/hub.key" 2>/dev/null && openssl pkey -in "$s/hub.key" -pubout -out "$s/hub.pub" 2>/dev/null
+  openssl genpkey -algorithm ed25519 -out "$s/member.key" 2>/dev/null && openssl pkey -in "$s/member.key" -pubout -out "$s/member.pub" 2>/dev/null
+  openssl genpkey -algorithm ed25519 -out "$s/stranger.key" 2>/dev/null && openssl pkey -in "$s/stranger.key" -pubout -out "$s/stranger.pub" 2>/dev/null
+  openssl rand -hex 24 >"$s/token"
+  openssl rand -base64 32 >"$s/secrets.key"
+  kc -n "$HUB_NS" create secret generic hub-key --from-file=key="$s/hub.key" >/dev/null
+  kc -n "$HUB_NS" create secret generic hub-token --from-file=token="$s/token" >/dev/null
+  kc -n "$HUB_NS" create secret generic hub-secrets --from-file=key="$s/secrets.key" >/dev/null
+  # Sign-in at the hub through the stand-in GitLab: alice (id 7) is an
+  # owner, bob is not.
+  kc -n "$HUB_NS" create secret generic hub-oauth --from-literal=client-id=e2e-console --from-literal=client-secret=e2e-console-secret >/dev/null
+  kc -n "$HUB_NS" create secret generic hub-session --from-literal=key="$(head -c 32 /dev/urandom | base64)" >/dev/null
+  # The member's Secrets of an interrupted run.
+  kc -n "$BOX_NS" delete secret fleet-key fleet-join fleet-runner-token fleet-gitlab-token fleet-s3-cache "$BOX_REL-controller-fleet-key" \
+    --ignore-not-found >/dev/null
+  kc -n "$BOX_NS" create secret generic fleet-key --from-file=key="$s/member.key" >/dev/null
+  local url="http://localhost:$port"
+  hc upgrade --install "$HUB_REL" "$ROOT/charts/control-plane" -n "$HUB_NS" --set fleet.role=hub \
+    --set fleet.key.existingSecret=hub-key --set fleet.apiToken.existingSecret=hub-token --set fleet.secretsKey.existingSecret=hub-secrets \
+    --set "gitlab.urls[0]=http://fake-gitlab.$NS.svc/" --set signIn.enabled=true --set "signIn.url=$url" \
+    --set signIn.sessionKey.existingSecret=hub-session \
+    --set-json 'signIn.gitlab=[{"existingSecret":"hub-oauth","owners":["id:7"]}]' \
+    --set image.repository=ci-accelerator --set "image.tag=$IMG_TAG" --set image.digest= --set image.pullPolicy=Never \
+    --set controller.persistence.size=1Gi \
+    --set 'controller.tolerations[0].key=node-role.kubernetes.io/control-plane' --set 'controller.tolerations[0].operator=Exists' \
+    --set 'controller.tolerations[0].effect=NoSchedule' --wait --timeout 4m >"$d/hub-install.log" 2>&1 \
+    || { fail "install a fleet hub (see $d/hub-install.log)"; fleet_end; return; }
+  check "a fleet hub installs as one Deployment, without controller, web or router" \
+    test "$(kc -n "$HUB_NS" get deploy -o name | tr '\n' ' ')" = "deployment.apps/$HUB_REL-web "
+  hub() { curl -fsS -m 20 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$s/token")") -H 'Content-Type: application/json' "$@"; }
+  hub_forward || { fail "the hub answers through a port-forward"; fleet_end; return; }
+  python3 -c 'import json,sys; print(json.dumps({"name": "e2e", "public_key": open(sys.argv[1]).read()}))' "$s/member.pub" >"$d/add.json"
+  check "the hub's API registers a member by name and public key" \
+    quiet hub -X POST --data @"$d/add.json" "http://127.0.0.1:$port/api/v1/fleet/members"
+  check "the hub's API refuses a request without its token" \
+    eval '[ "$(curl -s -o /dev/null -w %{http_code} -m 10 http://127.0.0.1:'"$port"'/api/v1/fleet/members)" = 401 ]'
+  local arch
+  arch=$(kc get node "$BUILD_NODE" -o jsonpath='{.metadata.labels.kubernetes\.io/arch}')
+  local base=(-f "$ROOT/test/e2e/box-values.yaml" -f "$ROOT/test/e2e/box-control-plane-values.yaml" -f "$ROOT/test/e2e/box-disk-probe-values.yaml" "${IMG_TAG_SET[@]}"
+    --set "gitlab-runner.gitlabUrl=http://fake-gitlab.$NS.svc/" --set gitlab-runner.runners.secret=gitlab-runner-token
+    --set "global.jobs.namespace=$BOX_JOBS_NS" --set "gitlab-runner.runners.jobNamespace=$BOX_JOBS_NS" --set "global.jobs.architecture=$arch")
+  hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" "${base[@]}" \
+    --set control-plane.fleet.role=member --set control-plane.fleet.name=e2e --set control-plane.fleet.key.existingSecret=fleet-key \
+    --set "control-plane.fleet.hub.url=http://$HUB_REL-web.$HUB_NS.svc:8080" --set-file control-plane.fleet.hub.publicKeys="$s/hub.pub" \
+    --wait --timeout 6m >"$d/member-upgrade.log" 2>&1 || { fail "the box joins the fleet (see $d/member-upgrade.log)"; fleet_end; return; }
+  member_up() { hub "http://127.0.0.1:$port/api/v1/fleet/members/e2e" | jv 'v["status"]["connected"] and v["store"] != ""' | grep -qx True; }
+  check "the member's controller dials the hub and proves its key" eventually 90 member_up
+  # The listing must work: an error of kubectl is no proof.
+  no_web() {
+    local all
+    all=$(kc -n "$BOX_NS" get deploy -o name) && printf '%s\n' "$all" | grep -qx "deployment.apps/$BOX_REL-controller" &&
+      ! printf '%s\n' "$all" | grep -qx "deployment.apps/$BOX_REL-web"
+  }
+  check "a member has no web of its own" no_web
+  inst=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 778 "$(job_id box)" | cut -d- -f2 | cut -c3-8)
+  job=$(job_id box)
+  local sinst alice bob
+  sinst=$(expected_traceparent "http://fake-gitlab.$NS.svc/" 1 1 | cut -c6-11)
+  hub_sign_in() {
+    local h login state
+    h=$(curl -s -m 20 -o /dev/null -D - "$url/auth/sign-in/$sinst?to=/" | tr -d '\r')
+    login=$(printf '%s\n' "$h" | sed -n 's/^[Ss]et-[Cc]ookie: \(__Host-ci-login=[^;]*\).*/\1/p')
+    state=$(printf '%s\n' "$h" | sed -n 's/^[Ll]ocation: .*[?&]state=\([^&]*\).*/\1/p')
+    curl -s -m 20 -o /dev/null -D - -H "Cookie: $login" "$url/auth/callback/$sinst?code=$1&state=$state" | tr -d '\r' \
+      | sed -n 's/^[Ss]et-[Cc]ookie: \(__Host-ci-session=[^;]*\).*/\1/p'
+  }
+  check "with sign-in, the hub sends a page to sign in" \
+    test "$(curl -s -m 20 -o /dev/null -w '%{http_code} %{redirect_url}' "$url/m/e2e/")" = "302 $url/auth/sign-in?to=%2Fm%2Fe2e%2F"
+  alice=$(hub_sign_in alice)
+  bob=$(hub_sign_in bob)
+  check "people sign in at the hub through GitLab" test -n "$alice" -a -n "$bob"
+  hub_job() {
+    curl -fsS -m 20 -L -H "Cookie: $alice" -w '%{url_effective}' -o "$d/job-page.html" "$url/jobs/$inst/$job" >"$d/job-page.url" &&
+      grep -q 'First build of <code>' "$d/job-page.html" && grep -q 'data-base="/m/e2e"' "$d/job-page.html"
+  }
+  check "the job address a job log prints opens the member's page for it at the hub" eventually 60 quiet hub_job
+  check "an owner signed in may manage the fleet through the API" \
+    test "$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "Cookie: $alice" "$url/api/v1/fleet/members")" = 200
+  # bob is signed in: the API's own role check answers him, in JSON.
+  bob_api() {
+    local out
+    out=$(curl -s -m 20 -w '\n%{http_code}' -H "Cookie: $bob" "$url/api/v1/fleet/members") &&
+      [ "${out##*$'\n'}" = 403 ] && printf '%s' "${out%$'\n'*}" | jv 'v["error"]["code"]' | grep -qx forbidden
+  }
+  check "someone signed in without a role may not manage the fleet: the hub's roles refuse him" bob_api
+  check "nor open the hub's Access page" \
+    test "$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "Cookie: $bob" "$url/access")" = 403
+  check "at the hub bob sees none of the member's projects, as on the box" \
+    eval 'curl -s -m 20 -H "Cookie: $bob" "$url/m/e2e/" | grep -q "No project you can read builds here"'
+  check "the hub's Members page lists the member as connected" \
+    eval 'curl -fsS -m 20 -H "Cookie: $alice" "$url/" | grep -q ">connected<"'
+  # A key the hub does not know is refused: a second controller of the
+  # member with another key never gets a link.
+  kc -n "$BOX_NS" delete secret fleet-key >/dev/null
+  kc -n "$BOX_NS" create secret generic fleet-key --from-file=key="$s/stranger.key" >/dev/null
+  kc -n "$BOX_NS" rollout restart "deploy/$BOX_REL-controller" >/dev/null
+  kc -n "$BOX_NS" rollout status "deploy/$BOX_REL-controller" --timeout 3m >/dev/null 2>&1
+  stranger_refused() {
+    kc -n "$HUB_NS" logs "deploy/$HUB_REL-web" --tail=-1 2>/dev/null | grep -q 'fleet: a member was refused' &&
+      hub "http://127.0.0.1:$port/api/v1/fleet/members/e2e" | jv 'v["status"]["connected"]' | grep -qx False
+  }
+  check "a member with a key the hub does not know is refused" eventually 60 stranger_refused
+  check "while the member is away, the hub shows the page alice saw before, dated" \
+    eval 'curl -s -m 20 -H "Cookie: $alice" "$(cat "$d/job-page.url")" | grep -q "e2e is not connected now"'
+  kc -n "$BOX_NS" delete secret fleet-key >/dev/null
+  kc -n "$BOX_NS" create secret generic fleet-key --from-file=key="$s/member.key" >/dev/null
+  kc -n "$BOX_NS" rollout restart "deploy/$BOX_REL-controller" >/dev/null
+  check "with its own key back the member reconnects" eventually 120 member_up
+  # Settings with a secret: the hub keeps it sealed and delivers it over
+  # the link; the member writes it into the Secret its values name.
+  printf 'glrt-e2e-fleet-%s' "$(openssl rand -hex 12)" >"$s/runner-token"
+  python3 -c 'import json,sys; print(json.dumps({"values": {"gitlab_url": "https://gitlab.example.com/", "storage": "emptyDir",
+    "runner_token": open(sys.argv[1]).read()}}))' "$s/runner-token" >"$s/settings.json"
+  check "the hub's API takes a cluster's settings with a secret" \
+    quiet hub -X PUT --data @"$s/settings.json" "http://127.0.0.1:$port/api/v1/fleet/members/e2e/settings"
+  values_by_key() {
+    hub "http://127.0.0.1:$port/api/v1/fleet/members/e2e/values" >"$d/e2e.values.yaml" &&
+      grep -q 'existingSecret: "fleet-key"' "$d/e2e.values.yaml" && ! grep -q fleet-join "$d/e2e.values.yaml"
+  }
+  check "the values the hub generates for a cluster registered by key name its key's Secret" values_by_key
+  delivered() {
+    [ "$(kc -n "$BOX_NS" get secret fleet-runner-token -o jsonpath='{.data.runner-token}' 2>/dev/null | base64 -d)" = "$(cat "$s/runner-token")" ]
+  }
+  check "the member writes the secret the hub delivered into fleet-runner-token" eventually 60 delivered
+  # The hub records a delivery once the member answered it: not at once.
+  recorded() {
+    hub "http://127.0.0.1:$port/api/v1/fleet/members/e2e/settings" >"$d/settings-back.json" &&
+      jv 'v["secrets"][0]["param"] == "runner_token" and "delivered_at" in v["secrets"][0]' <"$d/settings-back.json" | grep -qx True &&
+      ! grep -qF "$(cat "$s/runner-token")" "$d/settings-back.json"
+  }
+  check "the hub records the delivery, and shows no secret back" eventually 30 recorded
+  audited() {
+    hub "http://127.0.0.1:$port/api/v1/fleet/audit?target=e2e" >"$d/audit.json" && grep -q secrets.deliver "$d/audit.json" &&
+      ! grep -qF "$(cat "$s/runner-token")" "$d/audit.json"
+  }
+  check "the delivery is in the audit without the secret" audited
+  # The hub's commands run in its pod by their path; a file leaves and
+  # enters the pod through a debug container that mounts the hub's volume
+  # as the hub's user (the image has no shell or tar), as docs/fleet.md
+  # shows.
+  hpod=$(kc -n "$HUB_NS" get pod -l "app.kubernetes.io/instance=$HUB_REL,app.kubernetes.io/component=hub" -o jsonpath='{.items[0].metadata.name}')
+  granted() { hub "http://127.0.0.1:$port/api/v1/fleet/role-bindings/gitlab/fake-gitlab.$NS.svc/9" | jv 'v["role"]' | grep -qx operator; }
+  kc -n "$HUB_NS" exec "$hpod" -c hub -- /ci-accelerator hub grant operator "gitlab:fake-gitlab.$NS.svc/9" >"$d/grant.log" 2>&1
+  check "hub grant, run in the hub's pod by its path, gives a role the running hub sees" eventually 15 granted
+  # A token issued before the backup: the restore voids it.
+  hub -X POST --data '{"name":"e2e-restore","role":"viewer","expires_in_days":1}' "http://127.0.0.1:$port/api/v1/fleet/tokens" \
+    | jv 'v["secret"]' >"$s/viewer-token" 2>/dev/null
+  printf '%s\n' '{"securityContext": {"runAsNonRoot": true, "runAsUser": 65532, "runAsGroup": 65532, "allowPrivilegeEscalation": false,' \
+    '"capabilities": {"drop": ["ALL"]}, "seccompProfile": {"type": "RuntimeDefault"}}, "volumeMounts": [{"name": "data", "mountPath": "/data"}]}' \
+    >"$d/files.json"
+  kc -n "$HUB_NS" exec "$hpod" -c hub -- /ci-accelerator hub backup /data/e2e-backup.db >"$d/backup.log" 2>&1
+  kc -n "$HUB_NS" debug "$hpod" -c files --image="$PYTHON_IMAGE" --profile=restricted --custom="$d/files.json" -- sleep 900 >"$d/debug.log" 2>&1
+  files_up() {
+    kc -n "$HUB_NS" get pod "$hpod" -o jsonpath='{.status.ephemeralContainerStatuses[?(@.name=="files")].state.running.startedAt}' | grep -q .
+  }
+  eventually 60 files_up
+  kc -n "$HUB_NS" cp -c files "$hpod:/data/e2e-backup.db" "$s/hub-backup.db" >"$d/cp.log" 2>&1
+  check "a backup taken in the hub's pod leaves it through a debug container" \
+    eval '[ "$(head -c 15 "$s/hub-backup.db" 2>/dev/null)" = "SQLite format 3" ]'
+  kc -n "$HUB_NS" cp -c files "$s/hub-backup.db" "$hpod:/data/e2e-restore.db" >>"$d/cp.log" 2>&1
+  check "hub restore stages the backup copied into the hub's pod" \
+    quiet kc -n "$HUB_NS" exec "$hpod" -c hub -- /ci-accelerator hub restore /data/e2e-restore.db
+  quiet kc -n "$HUB_NS" exec "$hpod" -c files -- rm -f /data/e2e-backup.db /data/e2e-restore.db
+  kc -n "$HUB_NS" rollout restart "deploy/$HUB_REL-web" >/dev/null
+  kc -n "$HUB_NS" rollout status "deploy/$HUB_REL-web" --timeout 3m >/dev/null 2>&1
+  hub_forward || { fail "the hub answers after its restart"; fleet_end; return; }
+  voided() { hub "http://127.0.0.1:$port/api/v1/fleet/audit?target=hub" | grep -q 'a backup was restored'; }
+  check "the hub applies the restore at its start (the bootstrap token still works)" eventually 15 voided
+  check "a token issued before the backup is void after the restore" \
+    test "$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(cat "$s/viewer-token")" "http://127.0.0.1:$port/api/v1/fleet/version")" = 401
+  check "after the hub's restart the member connects again" eventually 120 member_up
+  check "and its job's page opens at the hub again" eventually 60 quiet hub_job
+  # Removed: its link is closed at once, its pages go, its settings too.
+  hub -X DELETE "http://127.0.0.1:$port/api/v1/fleet/members/e2e" >/dev/null
+  gone() { [ "$(curl -s -o /dev/null -w '%{http_code}' -m 10 -H "Cookie: $alice" "$url/m/e2e/")" = 410 ]; }
+  check "a removed member's link is closed and its pages answer 410 Gone" eventually 30 gone
+  check "the page alice saw before is not kept for a removed member" \
+    test "$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "Cookie: $alice" "$(cat "$d/job-page.url")")" = 410
+  check "removing a cluster forgets its settings and kept secrets" \
+    test "$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$s/token")") \
+      "http://127.0.0.1:$port/api/v1/fleet/members/e2e/settings")" = 404
+  # Joining with a join token: no key handed over; the controller makes
+  # its key, keeps it in its Secret, then trades the token.
+  hub -X POST --data '{"expires_in_minutes":30}' "http://127.0.0.1:$port/api/v1/fleet/members/e2e/join-tokens" \
+    | jv 'v["secret"]' >"$s/join-token" 2>/dev/null
+  check "the hub's API issues a join token for the name" grep -q '^cia_join_' "$s/join-token"
+  kc -n "$BOX_NS" delete secret fleet-key fleet-join "$BOX_REL-controller-fleet-key" --ignore-not-found >/dev/null
+  kc -n "$BOX_NS" create secret generic fleet-join --from-file=token="$s/join-token" >/dev/null
+  hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" "${base[@]}" \
+    --set control-plane.fleet.role=member --set control-plane.fleet.name=e2e --set control-plane.fleet.join.existingSecret=fleet-join \
+    --set "control-plane.fleet.hub.url=http://$HUB_REL-web.$HUB_NS.svc:8080" --set-file control-plane.fleet.hub.publicKeys="$s/hub.pub" \
+    --wait --timeout 6m >"$d/join-upgrade.log" 2>&1 || { fail "the box joins with a join token (see $d/join-upgrade.log)"; fleet_end; return; }
+  # The chart creates the key's Secret empty: only a key in it counts.
+  check "a box with a join token joins: it made and kept its key" eventually 120 eval \
+    'member_up && [ -n "$(kc -n "$BOX_NS" get secret "$BOX_REL-controller-fleet-key" -o jsonpath="{.data.key}")" ]'
+  local fp
+  fp=$(hub "http://127.0.0.1:$port/api/v1/fleet/members/e2e" | jv 'v["fingerprint"] + " " + v["origin"]')
+  check "the hub registered it by the join" test "${fp#* }" = join
+  kc -n "$BOX_NS" rollout restart "deploy/$BOX_REL-controller" >/dev/null
+  kc -n "$BOX_NS" rollout status "deploy/$BOX_REL-controller" --timeout 3m >/dev/null 2>&1
+  check "after a restart it comes back with the key it kept" eventually 120 eval \
+    'member_up && [ "$(hub "http://127.0.0.1:'"$port"'/api/v1/fleet/members/e2e" | jv "v[\"fingerprint\"]")" = "${fp% *}" ]'
+  check "the join token was traded once" eval '[ "$(hub "http://127.0.0.1:'"$port"'/api/v1/fleet/audit?target=e2e" | jv "sum(1 for e in v[\"events\"] if e[\"action\"] == \"member.join\")")" = 1 ]'
+  python3 -c 'import json,sys; print(json.dumps({"name": "e2e", "token": open(sys.argv[1]).read().strip(), "public_key": open(sys.argv[2]).read()}))' \
+    "$s/join-token" "$s/stranger.pub" >"$s/join-again.json"
+  check "a used join token is refused to another key" \
+    test "$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' --data @"$s/join-again.json" "http://127.0.0.1:$port/fleet/v1/join")" = 403
+  kill "$pf" 2>/dev/null
+  # Leaving the fleet brings the box's web back.
+  hc upgrade "$BOX_REL" "$ROOT/charts/ci-accelerator" -n "$BOX_NS" "${base[@]}" --wait --timeout 6m >"$d/leave.log" 2>&1 \
+    || fail "the box leaves the fleet (see $d/leave.log)"
+  check "a box that leaves the fleet gets its web back" quiet kc -n "$BOX_NS" get deploy "$BOX_REL-web"
+  remove_hub
+  # The chart keeps the member's Secrets when the box leaves (they hold
+  # its key and the delivered tokens).
+  kc -n "$BOX_NS" delete secret fleet-key fleet-join fleet-runner-token fleet-gitlab-token fleet-s3-cache "$BOX_REL-controller-fleet-key" \
+    --ignore-not-found >/dev/null
+  fleet_end
 }
 
 # gl <method> <path> [json body]: the component scenario's GitLab API as its

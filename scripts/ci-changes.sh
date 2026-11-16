@@ -62,6 +62,9 @@ while IFS= read -r f; do
     # The cache-mount hints' check on real builds: its helper is Go, and
     # lint checks its script; its projects are read by that script only.
     test/hints/*) charts=true; go=true ;;
+    # Written by the Go test that compares it with the hub's generator
+    # (internal/fleet), and rendered by validate.
+    charts/ci-accelerator/tests/values/fleet-member.yaml) charts=true; go=true ;;
     cmd/* | internal/* | go.mod | go.sum | test/ui/* | .govulncheck-allow | .trivyignore.yaml | .golangci.yml) go=true ;;
     charts/* | integrations/* | examples/* | scripts/*.sh | test/e2e/* | test/quickstart/* | test/*.sh) charts=true ;;
     *) all=true ;;

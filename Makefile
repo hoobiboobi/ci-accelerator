@@ -7,6 +7,9 @@ CHARTS := charts/buildkit
 CONTROL_PLANE := charts/control-plane
 CONTROL_PLANE_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set tls.existingSecret=lint-client --set controller.api.tls.existingSecret=lint-api --set jobs.namespace=ci-jobs
 CONTROL_PLANE_SIGN_IN_SET := --set router.enabled=true --set signIn.enabled=true --set signIn.url=https://ci.example.com --set signIn.sessionKey.existingSecret=lint-session --set-json 'signIn.gitlab=[{"url":"https://gitlab.example.com/","existingSecret":"lint-oauth","admins":["id:1"]}]'
+# A fleet hub needs none of the box's values; a member needs them and its own.
+CONTROL_PLANE_HUB_SET := -f $(CONTROL_PLANE)/tests/values/fleet-hub.yaml
+CONTROL_PLANE_MEMBER_SET := -f $(CONTROL_PLANE)/tests/values/fleet-member.yaml
 CONTROL_PLANE_CERT_MANAGER_SET := --set 'gitlab.urls={https://gitlab.example.com/}' --set daemons.discover=buildkit-headless.ci-accelerator.svc:1234 --set global.tls.issuerRef.name=lint-ca --api-versions cert-manager.io/v1 --set jobs.namespace=ci-jobs --set router.enabled=true --set networkPolicy.enabled=true
 # Extra values files every chart check also renders with.
 CHART_VALUES := examples/kind/values.yaml test/e2e/values.yaml
@@ -335,6 +338,8 @@ lint: $(SHELLCHECK) deps chart-docs-check workflows-lint ## helm lint --strict (
 	@cmp -s LICENSE $(CONTROL_PLANE)/LICENSE || { echo "$(CONTROL_PLANE)/LICENSE differs from LICENSE"; exit 1; }
 	@$(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET) >/dev/null || { $(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET); exit 1; }
 	@$(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET) $(CONTROL_PLANE_SIGN_IN_SET) >/dev/null || { $(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET) $(CONTROL_PLANE_SIGN_IN_SET); exit 1; }
+	@$(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_HUB_SET) >/dev/null || { $(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_HUB_SET); exit 1; }
+	@$(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET) $(CONTROL_PLANE_MEMBER_SET) >/dev/null || { $(HELM) lint --strict $(CONTROL_PLANE) $(CONTROL_PLANE_SET) $(CONTROL_PLANE_MEMBER_SET); exit 1; }
 	@echo "==> lint $(UMBRELLA)"
 	@cmp -s LICENSE $(UMBRELLA)/LICENSE || { echo "$(UMBRELLA)/LICENSE differs from LICENSE"; exit 1; }
 	@$(HELM) lint --strict $(UMBRELLA) -f $(UMBRELLA)/tests/values/lint.yaml >/dev/null \
@@ -451,6 +456,12 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		echo "==> kubeconform $(CONTROL_PLANE) k8s $$k sign-in"; \
 		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n ci-accelerator $(CONTROL_PLANE_SET) $(CONTROL_PLANE_SIGN_IN_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
+		echo "==> kubeconform $(CONTROL_PLANE) k8s $$k fleet hub"; \
+		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n fleet $(CONTROL_PLANE_HUB_SET) \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
+		echo "==> kubeconform $(CONTROL_PLANE) k8s $$k fleet member"; \
+		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n ci-accelerator $(CONTROL_PLANE_SET) $(CONTROL_PLANE_MEMBER_SET) \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k || exit 1; \
 		echo "==> kubeconform $(CONTROL_PLANE) k8s $$k cert-manager"; \
 		$(HELM) template test $(CONTROL_PLANE) --kube-version $$k -n ci-accelerator $(CONTROL_PLANE_CERT_MANAGER_SET) \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
@@ -471,6 +482,10 @@ validate: $(KUBECONFORM) $(RUNNER_CHART) deps ## Validate rendered manifests (ou
 		echo "==> kubeconform $(UMBRELLA) k8s $$k control plane"; \
 		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
 			-f $(UMBRELLA)/tests/values/required.yaml -f $(UMBRELLA)/tests/values/control-plane.yaml \
+			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
+		echo "==> kubeconform $(UMBRELLA) k8s $$k a fleet member as a hub generates it"; \
+		$(HELM) template ci-accelerator $(UMBRELLA) --kube-version $$k -n ci-accelerator --api-versions cert-manager.io/v1 \
+			-f $(UMBRELLA)/tests/values/fleet-member.yaml \
 			| $(KUBECONFORM) -strict -summary -kubernetes-version $$k -skip $(CERT_MANAGER_KINDS) || exit 1; \
 	done
 	@test/runner-config-parity.sh $(HELM) $(RUNNER_CHART)
