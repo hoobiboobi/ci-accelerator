@@ -33,6 +33,9 @@ type unavailable struct{}
 func (unavailable) Error() string     { return "the console's controller is not reachable" }
 func (unavailable) Unavailable() bool { return true }
 
+// errNoMethod: the controller has no such method (another version).
+var errNoMethod = errors.New("the controller has no method")
+
 // Client is the web's view of the controller: the pages' backend, GitLab
 // reader and sign-in, all served by the controller's API.
 type Client struct {
@@ -98,9 +101,11 @@ type ClientOptions struct {
 	Member bool
 }
 
-// MaxMemberAnswer bounds one answer of a controller (the configuration or
-// one call's results), a member's or the box's own: the hub must not hold
-// whatever a member sends until a deadline ends the read.
+// MaxMemberAnswer bounds one answer of a fleet member's controller (the
+// configuration or one call's results): the hub must not hold whatever a
+// member sends until a deadline ends the read. The box's own controller is
+// not bounded: it answers what its own store holds (a thousand builds of
+// a long Dockerfile through the API), as it always did.
 const MaxMemberAnswer = 64 << 20
 
 // errTooLarge: an answer went past MaxMemberAnswer.
@@ -125,8 +130,11 @@ func (c *capped) Read(p []byte) (int, error) {
 }
 
 // answer is the body of res as the client may read it: at most
-// MaxMemberAnswer bytes, whoever answers.
+// MaxMemberAnswer bytes of a member's.
 func (c *Client) answer(res *http.Response) io.Reader {
+	if !c.member {
+		return res.Body
+	}
 	return &capped{r: res.Body, n: MaxMemberAnswer}
 }
 
@@ -258,7 +266,7 @@ func (c *Client) call(ctx context.Context, method string, args []any, outs ...an
 		msg, _ := io.ReadAll(io.LimitReader(res.Body, 512))
 		err := fmt.Errorf("controller: %s: %s", res.Status, strings.TrimSpace(string(msg)))
 		if res.StatusCode == http.StatusNotFound {
-			err = fmt.Errorf("controller: %s: the controller has no method %s (another version?)", res.Status, method)
+			err = fmt.Errorf("controller: %s: %w %s (another version?)", res.Status, errNoMethod, method)
 		}
 		if res.StatusCode == http.StatusConflict {
 			c.setupChanged()
@@ -330,11 +338,16 @@ func fromWire(e *wireErr) error {
 func (c *Client) Run(ctx context.Context) {
 	delay := time.Second
 	for ctx.Err() == nil {
-		err := c.follow(ctx)
+		connected, err := c.follow(ctx)
 		if ctx.Err() != nil {
 			return
 		}
 		c.log.Warn("the controller's change stream ended", "err", err)
+		if connected {
+			// The stream worked: a restart of the controller, not one
+			// that keeps failing, so the next try is soon.
+			delay = time.Second
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -344,25 +357,28 @@ func (c *Client) Run(ctx context.Context) {
 	}
 }
 
-func (c *Client) follow(ctx context.Context) (err error) {
+// follow reads the change stream until it ends; connected says the
+// controller had accepted it.
+func (c *Client) follow(ctx context.Context) (connected bool, err error) {
 	if c.member {
 		defer func() { err = cleanErr(err) }()
 	}
 	req, err := c.request(ctx, http.MethodGet, "/internal/v1/events", nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	res, err := c.stream.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusConflict {
 		c.setupChanged()
 	}
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("events: %s", res.Status)
+		return false, fmt.Errorf("events: %s", res.Status)
 	}
+	connected = true
 	c.markLive()
 	c.hub.Announce("*", "")
 	sc := bufio.NewScanner(res.Body)
@@ -385,9 +401,9 @@ func (c *Client) follow(ctx context.Context) (err error) {
 		c.hub.Announce(keys...)
 	}
 	if err := sc.Err(); err != nil {
-		return err
+		return true, err
 	}
-	return io.ErrUnexpectedEOF
+	return true, io.ErrUnexpectedEOF
 }
 
 func (c *Client) markLive() {
@@ -565,13 +581,22 @@ func (c *Client) Ping(ctx context.Context) error { return c.call(ctx, "Ping", ni
 const liveFor = 2 * time.Second
 
 // Daemons is the collector's view of the daemons, as the controller has
-// it; empty while the controller does not answer.
+// it; empty while the controller does not answer (DaemonsKnown tells the
+// two apart).
 func (c *Client) Daemons() []collector.DaemonState {
+	out, _ := c.DaemonsKnown()
+	return out
+}
+
+// DaemonsKnown is Daemons, and whether they are known: false while the
+// controller does not answer, when no daemon listed means "not known
+// now", not "none".
+func (c *Client) DaemonsKnown() ([]collector.DaemonState, bool) {
 	c.liveMu.Lock()
 	if !c.liveOld && time.Since(c.liveAt) < liveFor {
 		out := c.live
 		c.liveMu.Unlock()
-		return out
+		return out, true
 	}
 	c.liveMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -579,12 +604,12 @@ func (c *Client) Daemons() []collector.DaemonState {
 	var out []collector.DaemonState
 	if err := c.call(ctx, "Daemons", nil, &out); err != nil {
 		c.log.Warn("daemons from the controller", "err", err)
-		return nil
+		return nil, false
 	}
 	c.liveMu.Lock()
 	c.live, c.liveAt, c.liveOld = out, time.Now(), false
 	c.liveMu.Unlock()
-	return out
+	return out, true
 }
 
 // LiveBuild is a running build of daemon as its page shows it.
@@ -683,6 +708,27 @@ func (c *Client) Load(w http.ResponseWriter, r *http.Request) (*auth.Viewer, err
 	}
 	if touched {
 		auth.SetSessionCookie(w, ck.Value, c.cfg.Idle)
+	}
+	return v, nil
+}
+
+// Check is Load for a request that cannot renew the browser's cookie (an
+// open event stream): the controller does not write the session's last
+// use. A controller without CheckCookie (an older one, while the two roles
+// are upgraded) is asked LoadCookie instead.
+func (c *Client) Check(r *http.Request) (*auth.Viewer, error) {
+	ck, err := r.Cookie(auth.SessionCookie)
+	if err != nil {
+		return nil, nil
+	}
+	var v *auth.Viewer
+	err = c.call(r.Context(), "CheckCookie", []any{ck.Value}, &v)
+	if errors.Is(err, errNoMethod) {
+		var touched bool
+		err = c.call(r.Context(), "LoadCookie", []any{ck.Value}, &v, &touched)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return v, nil
 }

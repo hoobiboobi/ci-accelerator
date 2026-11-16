@@ -35,6 +35,16 @@ var projA = &Project{Instance: "0123456789ab", ID: 7}
 func TestDecide(t *testing.T) {
 	cold, _ := hash(projA.Key(), daemons("n1/a", "n2/a", "n3/a"))
 	spread, _ := hash(projA.Key(), daemons("n1/a", "n2/a", "n3/b"))
+	// A project that the hash would send to n1 of n1 and n2: only the
+	// warmest node may be among the warm ones for it to go to n2.
+	projN1 := &Project{Instance: "0123456789ab"}
+	for id := uint64(1); ; id++ {
+		projN1.ID = id
+		if d, _ := hash(projN1.Key(), daemons("n1/a", "n2/a")); d.Node == "n1" {
+			break
+		}
+	}
+	unknownAll, _ := hash("node/n9", daemons("n1/a", "n2/a", "n3/b"))
 	for _, tc := range []struct {
 		name    string
 		req     Request
@@ -46,7 +56,9 @@ func TestDecide(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "local warm", req: Request{Project: projA, Node: "n1", Zone: "a"}, ds: daemons("n1/a", "n2/a"),
-			warm: []Activity{ago("n1", time.Hour), ago("n2", time.Minute)}, node: "n1", reason: LocalWarm},
+			warm: []Activity{ago("n1", time.Minute), ago("n2", time.Hour)}, node: "n1", reason: LocalWarm},
+		{name: "local warm, but used later elsewhere in the zone", req: Request{Project: projA, Node: "n1", Zone: "a"}, ds: daemons("n1/a", "n2/a"),
+			warm: []Activity{ago("n1", time.Hour), ago("n2", time.Minute)}, node: "n2", reason: ZoneWarm},
 		{name: "warm elsewhere in the zone beats a cold local daemon", req: Request{Project: projA, Node: "n1", Zone: "a"},
 			ds: daemons("n1/a", "n2/a", "n3/a"), warm: []Activity{ago("n3", time.Hour)}, node: "n3", reason: ZoneWarm},
 		{name: "the warmest of several", req: Request{Project: projA, Node: "n1", Zone: "a"}, ds: daemons("n1/a", "n2/a", "n3/a"),
@@ -81,6 +93,17 @@ func TestDecide(t *testing.T) {
 		{name: "every daemon overloaded: still the warm one", req: Request{Project: projA, Node: "n1", Zone: "a"},
 			ds: func() []Daemon { d := daemons("n1/a", "n2/a"); d[0].Active, d[1].Active = 5, 5; return d }(), pol: Policy{Overload: 4},
 			warm: []Activity{ago("n2", time.Minute)}, node: "n2", reason: ZoneWarm},
+		{name: "overload bound is inclusive: a daemon at the bound is skipped", req: Request{Project: projA, Node: "n1", Zone: "a"},
+			ds: func() []Daemon { d := daemons("n1/a", "n2/a"); d[0].Active = 4; return d }(), pol: Policy{Overload: 4},
+			warm: []Activity{ago("n1", time.Minute), ago("n2", time.Hour)}, node: "n2", reason: ZoneWarm},
+		{name: "only the most recent warm node counts as warm", req: Request{Project: projN1, Node: "n3", Zone: "a"},
+			ds: daemons("n1/a", "n2/a", "n3/a"), warm: []Activity{ago("n1", 2*time.Hour), ago("n2", time.Hour)}, node: "n2", reason: ZoneWarm},
+		{name: "a daemon without a zone label belongs to every zone", req: Request{Project: projA, Node: "n9", Zone: "a"},
+			ds: daemons("n1", "!n2/a", "n3/b"), pol: Policy{CrossZone: true}, node: "n1", reason: ZoneHash},
+		{name: "unknown job of a zone without daemons: refused without crossing zones", req: Request{Node: "n9", Zone: "z9"},
+			ds: daemons("n1/a", "n2/a", "n3/b"), wantErr: true},
+		{name: "unknown job of a zone without daemons: its node's hash over every daemon", req: Request{Node: "n9", Zone: "z9"},
+			ds: daemons("n1/a", "n2/a", "n3/b"), pol: Policy{CrossZone: true}, node: unknownAll.Node, reason: UnknownHash},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := Decide(tc.req, tc.ds, tc.warm, tc.pol, now)

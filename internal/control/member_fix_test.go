@@ -230,8 +230,8 @@ func TestAPIVersionKeepsTheSetup(t *testing.T) {
 	}
 }
 
-// Every client bounds what it reads, also one dialled without Member: the
-// configuration at dial and a call's results.
+// A member's client bounds what it reads: the configuration at dial and
+// a call's results (the box's own client reads its controller whole).
 func TestEveryAnswerIsBounded(t *testing.T) {
 	endless := func(w http.ResponseWriter, prefix string) {
 		w.Write([]byte(prefix))
@@ -250,7 +250,7 @@ func TestEveryAnswerIsBounded(t *testing.T) {
 		endless(w, `{"r":["`)
 	}))
 	defer ts.Close()
-	c, err := Dial(ctx, ClientOptions{URL: ts.URL})
+	c, err := Dial(ctx, ClientOptions{URL: ts.URL, Member: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestEveryAnswerIsBounded(t *testing.T) {
 		endless(w, `{"Release":"`)
 	}))
 	defer cfg.Close()
-	plain := &Client{base: cfg.URL, http: http.DefaultClient}
+	plain := &Client{base: cfg.URL, http: http.DefaultClient, member: true}
 	if _, err := plain.config(ctx); err == nil || !strings.Contains(err.Error(), "larger than 64 MiB") {
 		t.Fatalf("an endless configuration: %v", err)
 	}

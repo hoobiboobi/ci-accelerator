@@ -167,10 +167,10 @@ func TestTokenReview(t *testing.T) {
 			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, Audiences: []string{Audience},
 				User: authnv1.UserInfo{Username: "system:serviceaccount:box:box-router"}}
 		case "other-token":
-			tr.Status = authnv1.TokenReviewStatus{Authenticated: true,
+			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, Audiences: []string{Audience},
 				User: authnv1.UserInfo{Username: "system:serviceaccount:box:default"}}
 		case "user-token":
-			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, User: authnv1.UserInfo{Username: "alice"}}
+			tr.Status = authnv1.TokenReviewStatus{Authenticated: true, Audiences: []string{Audience}, User: authnv1.UserInfo{Username: "alice"}}
 		}
 		return true, tr, nil
 	})
@@ -321,9 +321,15 @@ func TestEventsAndReconnect(t *testing.T) {
 	ts.Close()
 	time.Sleep(200 * time.Millisecond)
 	ts2 := httptest.NewUnstartedServer(srv.Handler())
+	// The address may stay busy for a moment after the close; the test
+	// must run, not skip.
 	ln, err := netListen(addr)
+	for try := 0; err != nil && try < 50; try++ {
+		time.Sleep(100 * time.Millisecond)
+		ln, err = netListen(addr)
+	}
 	if err != nil {
-		t.Skipf("address not free again: %v", err)
+		t.Fatalf("address not free again after 5 s: %v", err)
 	}
 	ts2.Listener = ln
 	ts2.Start()

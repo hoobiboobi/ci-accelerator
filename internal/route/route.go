@@ -3,8 +3,12 @@
 // A daemon's cache lives on its node (hostPath), so a project's builds are
 // fast where it built before. The policy, in order:
 //
-//  1. the daemon on the job's own node, if the project is warm there;
-//  2. the warmest ready daemon of the job's zone;
+//  1. the daemon on the job's own node, if the project was warm there most
+//     recently (no ready daemon of the zone used it later);
+//  2. the warmest ready daemon of the job's zone: where the project was
+//     warm most recently. A project warm on several nodes (a job sent
+//     elsewhere while its daemon restarted) so comes back to one, and its
+//     parallel jobs meet there again;
 //  3. no warm daemon in the zone: a rendezvous hash of the project over the
 //     zone's ready daemons. Every router computes the same answer, so the
 //     parallel jobs of a new project meet on one daemon and BuildKit
@@ -16,7 +20,9 @@
 // seen there) has every daemon as its zone.
 //
 // A connection whose job is unknown goes to the daemon on its own node, as
-// a plain Service with PreferSameNode would send it. Decide is a pure
+// a plain Service with PreferSameNode would send it (unless that one is
+// overloaded); without one there, to a daemon of its zone by a hash of its
+// node, so such connections spread like their nodes. Decide is a pure
 // function: the router feeds it what it watches.
 package route
 
@@ -120,11 +126,18 @@ func Decide(r Request, daemons []Daemon, warm []Activity, p Policy, now time.Tim
 			break
 		}
 	}
+	zone := inZone(ready, r.Zone)
 	if r.Project == nil {
-		if local != nil {
+		if local != nil && (!busy(*local, p) || !anyFree(zone, p)) {
 			return Decision{Daemon: *local, Reason: UnknownLocal, Candidates: 1}, nil
 		}
-		d, n := hash("", free(inZone(ready, r.Zone, true), p))
+		if len(zone) == 0 {
+			if !p.CrossZone {
+				return Decision{}, ErrNoDaemon
+			}
+			zone = ready
+		}
+		d, n := hash("node/"+r.Node, free(zone, p))
 		return Decision{Daemon: d, Reason: UnknownHash, Candidates: n}, nil
 	}
 	key := r.Project.Key()
@@ -134,23 +147,22 @@ func Decide(r Request, daemons []Daemon, warm []Activity, p Policy, now time.Tim
 			last[a.Node] = a.At
 		}
 	}
-	if local != nil && !last[local.Node].IsZero() && !busy(*local, p) {
+	var warmest []Daemon
+	var at time.Time
+	for _, d := range free(zone, p) {
+		t := last[d.Node]
+		switch {
+		case t.IsZero() || t.Before(at):
+		case t.After(at):
+			warmest, at = []Daemon{d}, t
+		default:
+			warmest = append(warmest, d)
+		}
+	}
+	if local != nil && !last[local.Node].IsZero() && !last[local.Node].Before(at) && !busy(*local, p) {
 		return Decision{Daemon: *local, Reason: LocalWarm, Candidates: 1}, nil
 	}
-	zone := inZone(ready, r.Zone, false)
 	if len(zone) > 0 {
-		var warmest []Daemon
-		var at time.Time
-		for _, d := range free(zone, p) {
-			t := last[d.Node]
-			switch {
-			case t.IsZero() || t.Before(at):
-			case t.After(at):
-				warmest, at = []Daemon{d}, t
-			default:
-				warmest = append(warmest, d)
-			}
-		}
 		if len(warmest) > 0 {
 			d, _ := hash(key, warmest)
 			return Decision{Daemon: d, Reason: ZoneWarm, Candidates: len(zone)}, nil
@@ -166,8 +178,7 @@ func Decide(r Request, daemons []Daemon, warm []Activity, p Policy, now time.Tim
 }
 
 // inZone keeps the daemons of zone; an unknown zone ("") is every daemon's.
-// all: an empty result falls back to every daemon.
-func inZone(ds []Daemon, zone string, all bool) []Daemon {
+func inZone(ds []Daemon, zone string) []Daemon {
 	if zone == "" {
 		return ds
 	}
@@ -177,13 +188,20 @@ func inZone(ds []Daemon, zone string, all bool) []Daemon {
 			out = append(out, d)
 		}
 	}
-	if len(out) == 0 && all {
-		return ds
-	}
 	return out
 }
 
 func busy(d Daemon, p Policy) bool { return p.Overload > 0 && d.Active >= p.Overload }
+
+// anyFree says whether a daemon of ds is not overloaded.
+func anyFree(ds []Daemon, p Policy) bool {
+	for _, d := range ds {
+		if !busy(d, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // free drops the overloaded daemons, unless that would drop them all.
 func free(ds []Daemon, p Policy) []Daemon {

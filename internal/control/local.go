@@ -41,6 +41,9 @@ func (l *Local) Daemons() []collector.DaemonState {
 	return l.Live.Daemons()
 }
 
+// DaemonsKnown is Daemons; in this process they are always known.
+func (l *Local) DaemonsKnown() ([]collector.DaemonState, bool) { return l.Daemons(), true }
+
 // LiveFollower follows running builds' progress (the collector does).
 type LiveFollower interface {
 	LiveBuild(ctx context.Context, daemon, ref string) (*collector.LiveBuild, error)
@@ -93,16 +96,29 @@ func (g *LocalGitLab) Credential(ctx context.Context) gitlab.Credential {
 // Knows says whether instance is one of the console's GitLabs.
 func (g *LocalGitLab) Knows(instance string) bool { return g.Fetcher.Client.Knows(instance) }
 
+// credentialFor is Credential for a read of instance: a person's token
+// goes only to the GitLab that issued it (ok false for another).
+func (g *LocalGitLab) credentialFor(ctx context.Context, instance string) (cred gitlab.Credential, ok bool) {
+	cred = g.Credential(ctx)
+	if v, isViewer := cred.(*auth.Viewer); isViewer && v.Instance != instance {
+		return nil, false
+	}
+	return cred, true
+}
+
 // Ensure reads a pipeline's jobs when that is due.
 func (g *LocalGitLab) Ensure(ctx context.Context, instance string, project, pipeline uint64, status string, read time.Time, wait time.Duration) {
-	if cred := g.Credential(ctx); cred != nil {
+	if cred, ok := g.credentialFor(ctx, instance); ok && cred != nil {
 		g.Fetcher.Ensure(cred, instance, project, pipeline, status, read, wait)
 	}
 }
 
 // JobLogPart reads part of a job's log.
 func (g *LocalGitLab) JobLogPart(ctx context.Context, instance string, project, job uint64, q gitlab.LogQuery) (gitlab.LogPart, error) {
-	cred := g.Credential(ctx)
+	cred, ok := g.credentialFor(ctx, instance)
+	if !ok {
+		return gitlab.LogPart{}, gitlab.ErrOtherGitLab
+	}
 	if cred == nil {
 		return gitlab.LogPart{}, ErrNoToken
 	}
@@ -111,7 +127,10 @@ func (g *LocalGitLab) JobLogPart(ctx context.Context, instance string, project, 
 
 // Changed lists the files changed between two commits.
 func (g *LocalGitLab) Changed(ctx context.Context, instance string, project uint64, from, to string) ([]string, bool, error) {
-	cred := g.Credential(ctx)
+	cred, ok := g.credentialFor(ctx, instance)
+	if !ok {
+		return nil, false, gitlab.ErrOtherGitLab
+	}
 	if cred == nil {
 		return nil, false, ErrNoToken
 	}
