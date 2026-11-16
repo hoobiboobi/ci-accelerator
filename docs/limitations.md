@@ -200,3 +200,38 @@ vulnerability: [SECURITY.md](../SECURITY.md).)
   Controller) is planned.
 - **The CI component is for GitLab only**; GitHub Actions is planned with
   the GitHub support above.
+
+**A fleet hub** (experimental, [fleet.md](fleet.md)):
+- The hub keeps no copy of a cluster's builds: while a cluster is away the
+  hub shows only the pages each person opened before (dated) and says the
+  cluster is not connected for the rest.
+- GitLab is read by each cluster with its own token; a person's token at
+  the hub decides only which projects that person sees.
+- Lists, Insights and comparisons stay per cluster; a pipeline whose jobs
+  ran in several clusters is shown grouped by cluster.
+- The hub is one process with SQLite: when it restarts, the console is
+  away for the restart and every member reconnects (seconds in the lab).
+- Its values, management API (`/api/v1/fleet/`) and protocol may change
+  between releases without the usual deprecation cycle.
+- "Add a cluster" offers a short list of settings; the rest is set in the
+  box's values by hand. Roles go to people one by one (no GitLab groups).
+- The hub keeps the runner tokens, GitLab tokens and S3 keys entered in
+  it: whoever holds its secrets key and a backup holds those credentials.
+  Its secrets key cannot be changed in place: kept secrets then must be
+  entered again.
+- A member trusts its hub like its own web: the hub reads that cluster's
+  builds and asks GitLab with the member's token for any project the
+  token reads, and writes its runner, GitLab and S3 Secrets
+  ([fleet.md](fleet.md)).
+- A fleet member runs in Kubernetes (it writes the Secrets its hub
+  delivers there); a box run as a plain process cannot join.
+- A box in a fleet does not serve its read-only JSON API
+  (`/api/v1/...`): the hub shows its pages only.
+- The pages the hub shows for an absent cluster live in the hub's memory
+  (at most a day old, 2000 pages, 64 MiB) and are gone after a hub
+  restart.
+- The hub's image has no shell or `tar`: backups leave and enter its pod
+  through a debug container ([fleet.md](fleet.md), section 6).
+- Keys are replaced by hand: the hub's in three steps over every member,
+  a member's by removing and adding it again ([fleet.md](fleet.md),
+  section 7).

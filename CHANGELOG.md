@@ -9,10 +9,55 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
-None. The console's store gains a column (`builds.order_ms`) on its first
-start; a rollback to 0.6.0 keeps working on the same store.
+- The console's store gains a column (`builds.order_ms`) on its first
+  start; a rollback to 0.6.0 keeps working on the same store. A box that
+  does not set `fleet.role` renders as before.
+- A box's GitLab token is now read from its Secret at every use; a Secret
+  emptied while the box runs stops its GitLab reads at once. An empty
+  token file at start still starts the box with a warning, as in 0.6.0.
+- A box that joins a fleet as a member stops serving its own web and
+  read-only JSON API (`/api/v1/builds` and the others); the hub shows its
+  pages under `/m/<name>/` but not the JSON API, and the sessions of its
+  own sign-in end at its first start as a member. Upgrade a fleet's hub
+  before its members: a member newer than its hub is refused until the
+  hub is upgraded.
 
 ### Added
+
+- A fleet (experimental: its values, API and protocol may change between
+  releases): several boxes under one console. A hub is a release of the
+  control-plane chart with `fleet.role: hub`; a box joins it with
+  `fleet.role: member`, its controller keeping one outgoing connection to
+  the hub's console address (no inbound address, works behind NAT), keys
+  pinned both ways. The hub shows each cluster's console under
+  `/m/<name>/` with a cluster switcher, lists the clusters on Members,
+  opens a pipeline whose jobs ran in several clusters grouped by cluster,
+  and sends the job links printed in job logs to the cluster that ran the
+  job. While a cluster is away the hub shows the pages each person opened
+  before, dated (for at most a day). Clusters join by name and public key
+  or with a join token, through the console or the hub's management API
+  (`/api/v1/fleet/`). The hub never sends a person's session to a member,
+  bounds a member's answers to 64 MiB, and writes nothing into a member's
+  history; the controller API states its version (`Config.API`) and its
+  setup digest. docs/fleet.md, ADR-0063.
+- Fleet administration (experimental): roles viewer / operator / owner kept
+  in the hub (the values' `signIn.gitlab[].owners` are locked owners), API
+  tokens with an expiry chosen at issue, the Access and Audit pages; "Add a
+  cluster" in the console with a short list of settings, generated values
+  and install commands and a one-time join token (`fleet.join`); the
+  runner's token and S3 keys sealed at the hub (`fleet.secretsKey`) and
+  delivered to the cluster over its link; `ci-accelerator hub backup`,
+  `hub restore` (voids every API and join token it holds) and `hub grant`
+  in the hub's pod. docs/fleet.md, ADR-0064.
+- A fleet member trades its join token again until the hub answers (no
+  restart needed), sends it only over https (http to localhost or a
+  cluster Service), follows no redirect with it, and starts without
+  waiting for the hub; `fleet-keygen` refuses to write over an existing
+  file; a delivery sets only the keys the hub keeps.
+- The image's `/licenses/README` lists the linked Go modules with their
+  versions and where their source is; `github.com/hashicorp/yamux`
+  (MPL-2.0, unmodified) is new with the fleet link, and the image's
+  license label reads `Apache-2.0 AND MPL-2.0`.
 
 - The console says when a rebuild installed dependencies again only
   because a `COPY` of the whole build context comes before the install,
@@ -28,6 +73,13 @@ start; a rollback to 0.6.0 keeps working on the same store.
 ### Changed
 
 - The upgrade test starts from 0.6.0. Nothing changes for a user.
+- The controller reads the installation's GitLab token from its file at
+  every use: a changed token Secret counts without a restart, and an
+  emptied or unreadable one stops GitLab reads (job times, logs, commit
+  comparisons) until it is fixed.
+- Console: with sign-in every page is sent with `Cache-Control: no-store`
+  (Back after signing out no longer shows a page from the browser's
+  cache). A time axis over more than a day has at most 13 ticks.
 
 ## 0.6.0 - 2026-11-13
 

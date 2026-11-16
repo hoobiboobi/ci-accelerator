@@ -68,6 +68,13 @@ Registries that publish no release dates (ghcr.io, quay.io, gcr.io,
 registry.gitlab.com) cannot be held to the two weeks: such a PR carries
 the label `age-unverified`, and the reviewer checks the date.
 
+The Go modules linked into the `ci-accelerator` binary ship with their
+licences and notices in the image under `/licenses/`, and
+`/licenses/README` lists them with their versions and where their source
+is. `github.com/hashicorp/yamux` (the fleet link's multiplexer) is
+MPL-2.0: it is linked unmodified, and its source is the module's own at
+the listed version.
+
 The [Dependency Dashboard](https://github.com/hoobiboobi/ci-accelerator/issues?q=is%3Aissue+Dependencies)
 issue lists what Renovate holds back (too new, or waiting for a slot) and
 what it skipped.

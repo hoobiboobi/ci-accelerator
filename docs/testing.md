@@ -24,6 +24,13 @@ make renovate-check pins-check # Renovate sees every pin (docker); every pinned 
   - the NetworkPolicy;
   - OTLP export;
   - the whole box, with the console;
+  - a fleet: a hub next to the box, which joins it by key and then with a
+    join token (sign-in at the hub, roles, the job links, a refused key,
+    a secret delivered over the link, removal, a backup taken out of the
+    hub's pod and restored, `hub grant`, leaving). It runs on one kind
+    cluster through a port-forward: no Ingress or TLS in front of the hub,
+    and the box is upgraded with hand-written values, not the generated
+    ones;
   - an in-place upgrade from the last published release, and a rollback.
 
   On GitHub it runs in four parallel groups, each on its own kind cluster.
