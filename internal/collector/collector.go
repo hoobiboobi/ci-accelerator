@@ -5,10 +5,12 @@ package collector
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -39,13 +41,17 @@ type Source interface {
 }
 
 // Collector turns records into stored builds. It is safe for concurrent
-// use: records are processed one at a time.
+// use: records are linked and stored one at a time; their blobs are read
+// from the daemons concurrently, outside that order.
 type Collector struct {
 	store *store.Store
 	cfg   history.Config
 	log   *slog.Logger
 
-	mu      sync.Mutex
+	// sem is the lock of daemons and of linking and storing: a channel, so
+	// that a caller with a deadline stops waiting when it passes.
+	semOnce sync.Once
+	sem     chan struct{}
 	daemons map[string]*window
 
 	live  live
@@ -62,6 +68,30 @@ func New(s *store.Store, instances map[string]bool, log *slog.Logger) *Collector
 		daemons: map[string]*window{},
 		live:    live{instances: instances},
 	}
+}
+
+// lock takes the collector's lock, or gives up when ctx ends.
+func (c *Collector) lock(ctx context.Context) error {
+	c.semOnce.Do(func() { c.sem = make(chan struct{}, 1) })
+	select {
+	case c.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Collector) unlock() { <-c.sem }
+
+// windowOf returns daemon name's window, made when missing. The lock is
+// held.
+func (c *Collector) windowOf(name string) *window {
+	w := c.daemons[name]
+	if w == nil {
+		w = &window{builds: map[string]*history.Build{}, gens: map[string]int64{}, replayed: map[string]map[int]string{}}
+		c.daemons[name] = w
+	}
+	return w
 }
 
 // window holds a daemon's recent builds and the record generation each was
@@ -121,6 +151,20 @@ func (c *Collector) run(ctx context.Context, src Source) (uint64, error) {
 		defer cancel()
 		go c.inspect(ictx, name, in)
 	}
+	// Records that could not be stored are tried again while the stream
+	// lasts: BuildKit sends a completed record again only when it changes.
+	failed := &retries{m: map[string]*pending{}}
+	rctx, stop := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.retry(rctx, src, failed)
+	}()
+	defer func() {
+		stop()
+		wg.Wait()
+	}()
 	return stream, src.Listen(ctx, func(t controlapi.BuildHistoryEventType, rec *controlapi.BuildHistoryRecord) error {
 		if t != controlapi.BuildHistoryEventType_COMPLETE {
 			c.live.event(name, t, rec)
@@ -130,12 +174,117 @@ func (c *Collector) run(ctx context.Context, src Source) (uint64, error) {
 		// stored: its job's page goes from the build in progress straight
 		// to the stored build.
 		defer c.live.event(name, t, rec)
-		if err := c.Record(ctx, src, rec); err != nil {
+		if err := c.record(ctx, src, rec); err != nil {
 			// One bad record must not stop the daemon's stream.
 			c.log.Warn("record not stored", "daemon", src.Name(), "ref", rec.Ref, "err", err)
+			if ctx.Err() == nil {
+				failed.add(rec)
+			}
+		} else {
+			failed.drop(rec)
 		}
 		return nil
 	})
+}
+
+// Variables for the tests: how often records that could not be stored
+// are tried again, and how many times.
+var (
+	retryEvery = 30 * time.Second
+	retryTries = 5
+)
+
+// maxRetries bounds the records of one stream waiting to be tried again.
+const maxRetries = 1000
+
+// retries are a stream's records that could not be stored, by ref.
+type retries struct {
+	mu sync.Mutex
+	m  map[string]*pending
+}
+
+type pending struct {
+	rec   *controlapi.BuildHistoryRecord
+	tries int
+}
+
+func (r *retries) add(rec *controlapi.BuildHistoryRecord) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p := r.m[rec.Ref]; p != nil {
+		if rec.Generation >= p.rec.Generation {
+			p.rec = rec
+		}
+		return
+	}
+	if len(r.m) < maxRetries {
+		r.m[rec.Ref] = &pending{rec: rec}
+	}
+}
+
+// drop forgets a record stored now, unless a newer generation waits.
+func (r *retries) drop(rec *controlapi.BuildHistoryRecord) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p := r.m[rec.Ref]; p != nil && p.rec.Generation <= rec.Generation {
+		delete(r.m, rec.Ref)
+	}
+}
+
+func (r *retries) list() []*pending {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*pending, 0, len(r.m))
+	for _, p := range r.m {
+		out = append(out, p)
+	}
+	return out
+}
+
+// retry tries the records in failed again every retryEvery until ctx ends;
+// one that fails retryTries times more is given up (the stream read again
+// after a reconnect or restart brings it back).
+func (c *Collector) retry(ctx context.Context, src Source, failed *retries) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryEvery):
+		}
+		for _, p := range failed.list() {
+			err := c.record(ctx, src, p.rec)
+			if ctx.Err() != nil {
+				return
+			}
+			if err == nil {
+				failed.drop(p.rec)
+				continue
+			}
+			failed.mu.Lock()
+			p.tries++
+			over := p.tries >= retryTries
+			if over && failed.m[p.rec.Ref] == p {
+				delete(failed.m, p.rec.Ref)
+			}
+			failed.mu.Unlock()
+			if over {
+				c.log.Warn("record not stored, given up", "daemon", src.Name(), "ref", p.rec.Ref, "tries", p.tries+1, "err", err)
+			}
+		}
+	}
+}
+
+// record is Record for a stream: a panic while one record is read or
+// stored is that record's error, not the end of the controller (the
+// daemon would send the same record again after the restart).
+func (c *Collector) record(ctx context.Context, src Source, rec *controlapi.BuildHistoryRecord) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.log.Error("record panicked", "daemon", src.Name(), "ref", rec.GetRef(), "panic", r, "stack", string(debug.Stack()))
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return c.Record(ctx, src, rec)
 }
 
 // gone forgets a daemon whose pod is gone, unless a newer stream than
@@ -145,47 +294,77 @@ func (c *Collector) gone(name string, stream uint64) {
 	if !c.live.forget(name, stream) {
 		return
 	}
-	c.mu.Lock()
+	_ = c.lock(context.Background())
 	delete(c.daemons, name)
-	c.mu.Unlock()
+	c.unlock()
 }
 
 // Record stores one completed record and whatever its arrival changes:
 // builds of the same daemon linked to it, and the reasons of its pipeline.
-func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.BuildHistoryRecord) error {
+// The record's blobs are read from the daemon without the collector's
+// lock, so a daemon that stalls holds up only its own records.
+func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.BuildHistoryRecord) (err error) {
 	if rec.CompletedAt == nil {
 		return nil
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	w := c.daemons[src.Name()]
-	if w == nil {
-		w = &window{builds: map[string]*history.Build{}, gens: map[string]int64{}, replayed: map[string]map[int]string{}}
-		c.daemons[src.Name()] = w
-	}
 	gen := int64(rec.Generation)
-	if old, ok := w.gens[rec.Ref]; ok && old >= gen {
-		return nil
-	}
-	// A record stored already belongs to the daemon pod that sent it
-	// first: a pod that replaced another on the same hostPath sends the old
-	// pod's records again, and reasons compare the daemons builds ran on.
-	under, storedGen, err := c.store.StoredUnder(ctx, rec.Ref)
-	if err != nil {
-		return err
-	}
 	// A stream read again replays the history in the order of the record
 	// ids, not in time order. A stored record older than the window has
 	// nothing new to tell, and the builds it was linked with have left
 	// memory: read again, it would be stored without its links.
-	replay := under != "" && storedGen >= gen
-	if replay && rec.GetCreatedAt().AsTime().Before(w.newest.Add(-Window)) {
+	stale := func(newest time.Time, under string, storedGen int64) bool {
+		return under != "" && storedGen >= gen && rec.GetCreatedAt().AsTime().Before(newest.Add(-Window))
+	}
+	if err := c.lock(ctx); err != nil {
+		return err
+	}
+	w := c.windowOf(src.Name())
+	if old, ok := w.gens[rec.Ref]; ok && old >= gen {
+		c.unlock()
 		return nil
 	}
-	b, err := c.read(ctx, src, rec)
+	newest := w.newest
+	c.unlock()
+	under, storedGen, err := c.store.StoredUnder(ctx, rec.Ref)
 	if err != nil {
 		return err
 	}
+	if stale(newest, under, storedGen) {
+		return nil
+	}
+	// Said before the read: a record whose reading ends the process (out
+	// of memory) is then named by the last line its log has. A record read
+	// again is debug, as its "stored again" line.
+	level := slog.LevelDebug
+	if under == "" {
+		level = slog.LevelInfo
+	}
+	c.log.Log(ctx, level, "reading record", "daemon", src.Name(), "ref", rec.Ref, "logs_bytes", rec.GetLogs().GetSize())
+	b, err := c.readRecord(ctx, src, rec)
+	if err != nil {
+		return err
+	}
+
+	if err := c.lock(ctx); err != nil {
+		return err
+	}
+	defer c.unlock()
+	w = c.windowOf(src.Name())
+	if old, ok := w.gens[rec.Ref]; ok && old >= gen {
+		return nil // another stream of the daemon took it meanwhile
+	}
+	// A record stored already belongs to the daemon pod that sent it
+	// first: a pod that replaced another on the same hostPath sends the old
+	// pod's records again, and reasons compare the daemons builds ran on.
+	// Asked again under the lock: another stream may have stored it.
+	under, storedGen, err = c.store.StoredUnder(ctx, rec.Ref)
+	if err != nil {
+		return err
+	}
+	if stale(w.newest, under, storedGen) {
+		return nil
+	}
+	replay := under != "" && storedGen >= gen
 	if replay {
 		links, err := c.store.ReceivedFrom(ctx, b.Ref)
 		if err != nil {
@@ -212,6 +391,14 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 		gotJob = old.Attribution.State != history.Attributed && b.Attribution.State == history.Attributed
 	}
 	w.builds[b.Ref], w.gens[b.Ref] = b, gen
+	// Not stored: the record is read again when it comes again (or is
+	// tried again), whichever build's save failed.
+	saved := false
+	defer func() {
+		if err != nil && !saved {
+			w.forget(b.Ref)
+		}
+	}()
 	if b.Started.After(w.newest) {
 		w.newest = b.Started
 	}
@@ -258,11 +445,10 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 		}
 		r, err := c.save(ctx, x, w.gens[x.Ref])
 		if err != nil {
-			if x == b {
-				// Not stored: the record is read again when it comes again.
-				w.forget(b.Ref)
-			}
 			return err
+		}
+		if x == b {
+			saved = true
 		}
 		// Stored with all its links: linking does not take links away.
 		delete(w.replayed, x.Ref)
@@ -292,8 +478,10 @@ func (c *Collector) Record(ctx context.Context, src Source, rec *controlapi.Buil
 // JobKnown computes the reasons of a job's builds again once its project is
 // known (the job's pod was seen after its builds were stored).
 func (c *Collector) JobKnown(ctx context.Context, instance string, job uint64) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	if err := c.lock(ctx); err != nil {
+		return err
+	}
+	defer c.unlock()
 	ids, err := c.store.JobBuilds(ctx, instance, job)
 	if err != nil {
 		return err
@@ -472,7 +660,11 @@ func (c *Collector) reason(ctx context.Context, b *history.Build) (history.Reaso
 }
 
 // settle decides the "cache elsewhere" reasons of a pipeline with its
-// other builds and stores the ones that change.
+// other builds and stores the ones that change. The project's builds of
+// other pipelines that ran meanwhile on the same daemons go with them (a
+// merge request's pipeline and its branch's, of one commit): a step one of
+// them executed on a witness's daemon makes that witness's cache hit no
+// proof. Only this pipeline's reasons are written.
 func (c *Collector) settle(ctx context.Context, instance string, pipeline uint64) error {
 	stored, err := c.store.Pipeline(ctx, instance, pipeline)
 	if err != nil {
@@ -483,7 +675,15 @@ func (c *Collector) settle(ctx context.Context, instance string, pipeline uint64
 	for i, s := range stored {
 		builds[i], reasons[i] = s.Build, s.Reason
 	}
-	for i, r := range history.Settle(builds, reasons) {
+	others, err := c.overlapping(ctx, instance, pipeline, stored)
+	if err != nil {
+		return err
+	}
+	all := append(append(make([]*history.Build, 0, len(builds)+len(others)), builds...), others...)
+	// The others' own reasons settle nothing here: they are left zero.
+	allReasons := append(append(make([]history.Reason, 0, len(all)), reasons...), make([]history.Reason, len(others))...)
+	settled := history.Settle(all, allReasons)
+	for i, r := range settled[:len(builds)] {
 		if r.Kind != reasons[i].Kind || r.By != reasons[i].By {
 			if err := c.store.SetReason(ctx, builds[i].Ref, builds[i].Daemon, r); err != nil {
 				return err
@@ -493,10 +693,192 @@ func (c *Collector) settle(ctx context.Context, instance string, pipeline uint64
 	return nil
 }
 
+// overlapMargin widens the time a pipeline's builds ran, backwards, for
+// the builds of other pipelines read with them: one that started a little
+// earlier may have executed a step on a daemon while they ran.
+const overlapMargin = 10 * time.Minute
+
+// maxOverlapping bounds the other pipelines' builds read for one settle.
+const maxOverlapping = 200
+
+// unchangedUntil returns when the earliest previous build that one of the
+// pipeline's open reasons (cache elsewhere, or files changed by a sibling,
+// which Settle may reopen) compares with started: a build of another
+// pipeline that started then or earlier ran before every such change, so
+// a step it executed is the cache a witness legitimately finds (the
+// previous pipeline built the step on the witness's node), not the
+// change's product. Zero when no open reason has a previous build.
+func (c *Collector) unchangedUntil(ctx context.Context, stored []*store.Stored) time.Time {
+	var at time.Time
+	for _, s := range stored {
+		r := s.Reason
+		if r.Kind != history.CacheElsewhere && (r.Kind != history.FilesChanged || r.By == "") {
+			continue
+		}
+		started, ok, err := c.store.PreviousStarted(ctx, s.Build)
+		if err != nil {
+			// Without the boundary every other pipeline's execution counts:
+			// a witness proves less, never more.
+			c.log.Warn("previous build not readable", "ref", s.Build.Ref, "err", err)
+			return time.Time{}
+		}
+		if !ok {
+			return time.Time{}
+		}
+		if at.IsZero() || started.Before(at) {
+			at = started
+		}
+	}
+	return at
+}
+
+// overlapping returns the stored builds of the pipeline's project, of
+// other pipelines, that started from overlapMargin before its first build
+// to the end of its last one on a daemon one of its builds ran on. None
+// when the pipeline's project is not known.
+func (c *Collector) overlapping(ctx context.Context, instance string, pipeline uint64, stored []*store.Stored) ([]*history.Build, error) {
+	if len(stored) == 0 {
+		return nil, nil
+	}
+	project, err := c.store.PipelineProject(ctx, instance, pipeline)
+	if err != nil || project == 0 {
+		return nil, err
+	}
+	daemons := map[string]bool{}
+	mine := map[string]bool{}
+	from, to := stored[0].Build.Started, stored[0].Build.Started
+	for _, s := range stored {
+		b := s.Build
+		daemons[b.Daemon], mine[b.Ref] = true, true
+		if b.Started.Before(from) {
+			from = b.Started
+		}
+		end := b.Completed
+		if end.IsZero() {
+			end = b.Started
+		}
+		if end.After(to) {
+			to = end
+		}
+	}
+	rows, err := c.store.Builds(ctx, store.BuildQuery{Project: store.ProjectKey{Instance: instance, ID: project},
+		Since: from.Add(-overlapMargin), Before: to.Add(time.Millisecond), Limit: maxOverlapping, Light: true})
+	if err != nil {
+		return nil, err
+	}
+	before := c.unchangedUntil(ctx, stored)
+	want := map[int64]bool{}
+	var pipelines []uint64
+	seen := map[uint64]bool{}
+	for _, r := range rows {
+		if r.Pipeline == pipeline || r.Daemon == "" || !daemons[r.Daemon] {
+			continue
+		}
+		if !before.IsZero() && !r.Started.After(before) {
+			continue // ran before the change: its cache is what a witness may find
+		}
+		want[r.ID] = true
+		if r.Pipeline != 0 && !seen[r.Pipeline] {
+			seen[r.Pipeline] = true
+			pipelines = append(pipelines, r.Pipeline)
+		}
+	}
+	var out []*history.Build
+	add := func(s *store.Stored) {
+		if want[s.ID] && !mine[s.Build.Ref] {
+			out = append(out, s.Build)
+		}
+		delete(want, s.ID)
+	}
+	// One read per pipeline (steps, no graphs: enough for Settle).
+	for _, p := range pipelines {
+		sts, err := c.store.Pipeline(ctx, instance, p)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range sts {
+			if want[s.ID] {
+				add(s)
+			}
+		}
+	}
+	ids := make([]int64, 0, len(want))
+	for id := range want {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		s, err := c.store.Load(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue // pruned meanwhile
+		}
+		if err != nil {
+			return nil, err
+		}
+		add(s)
+	}
+	return out, nil
+}
+
 // maxBlob bounds a record's provenance, trace and error blobs, which are
 // read whole. BuildKit bounds none of them, and any build can add spans to
-// its trace.
-const maxBlob = 64 << 20
+// its trace. A variable for the tests.
+var maxBlob = 64 << 20
+
+// errTooLarge: a blob is larger than maxBlob.
+var errTooLarge = errors.New("larger than the collector reads")
+
+// readIdle is how long a record's blobs may make no progress before their
+// reading is given up (the daemon is asked for each piece). A variable for
+// the tests.
+var readIdle = 2 * time.Minute
+
+// errStalled ends the reading of a record whose daemon sent nothing for
+// readIdle.
+var errStalled = errors.New("collector: the daemon sent nothing for too long")
+
+// readRecord is read with a deadline that moves with every piece read: a
+// daemon that stops answering mid-blob fails the record instead of holding
+// its stream for good.
+func (c *Collector) readRecord(ctx context.Context, src Source, rec *controlapi.BuildHistoryRecord) (*history.Build, error) {
+	rctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	t := time.AfterFunc(readIdle, func() { cancel(errStalled) })
+	defer t.Stop()
+	b, err := c.read(rctx, idleSource{Source: src, t: t}, rec)
+	if err != nil && errors.Is(context.Cause(rctx), errStalled) {
+		return nil, fmt.Errorf("%w (%s): %v", errStalled, readIdle, err)
+	}
+	return b, err
+}
+
+// idleSource moves its timer on with every piece of a blob read.
+type idleSource struct {
+	Source
+	t *time.Timer
+}
+
+func (s idleSource) Open(ctx context.Context, d *controlapi.Descriptor) (io.ReadCloser, error) {
+	r, err := s.Source.Open(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	s.t.Reset(readIdle)
+	return idleReader{ReadCloser: r, t: s.t}, nil
+}
+
+type idleReader struct {
+	io.ReadCloser
+	t *time.Timer
+}
+
+func (r idleReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.t.Reset(readIdle)
+	}
+	return n, err
+}
 
 // read fetches a record's blobs and assembles the build. The progress blob
 // is read as it streams: BuildKit does not bound it, and only the head and
@@ -511,9 +893,9 @@ func (c *Collector) read(ctx context.Context, src Source, rec *controlapi.BuildH
 			return nil, err
 		}
 		defer r.Close()
-		b, err := io.ReadAll(io.LimitReader(r, maxBlob+1))
+		b, err := io.ReadAll(io.LimitReader(r, int64(maxBlob)+1))
 		if err == nil && len(b) > maxBlob {
-			err = fmt.Errorf("%s is larger than %d MiB", d.Digest, maxBlob>>20)
+			err = fmt.Errorf("%s is %w (%d MiB)", d.Digest, errTooLarge, maxBlob>>20)
 		}
 		return b, err
 	}
@@ -538,6 +920,12 @@ func (c *Collector) read(ctx context.Context, src Source, rec *controlapi.BuildH
 		prov = append(prov, p)
 	}
 	trace, err := blob(rec.Trace)
+	if errors.Is(err, errTooLarge) {
+		// Any build can add spans to a trace: a trace too large to read
+		// leaves the build without its job, not out of the store.
+		c.log.Warn("trace too large: build stored without its job", "ref", rec.Ref, "err", err)
+		trace, err = nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("trace: %w", err)
 	}

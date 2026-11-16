@@ -36,8 +36,52 @@ type Supervisor struct {
 // following is one daemon's stream: cancel ends it, leaving is closed when
 // its address left the Service.
 type following struct {
-	cancel  context.CancelCauseFunc
+	cancel context.CancelCauseFunc
+
+	mu      sync.Mutex
 	leaving chan struct{}
+	timer   *time.Timer // ends the stream Drain after the address left
+}
+
+func newFollowing(cancel context.CancelCauseFunc) *following {
+	return &following{cancel: cancel, leaving: make(chan struct{})}
+}
+
+// left is closed when the address left the Service.
+func (f *following) left() <-chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.leaving
+}
+
+func (f *following) isLeaving() bool {
+	select {
+	case <-f.left():
+		return true
+	default:
+		return false
+	}
+}
+
+// leave marks the address gone and ends the stream drain later.
+func (f *following) leave(drain time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	close(f.leaving)
+	f.timer = time.AfterFunc(drain, func() { f.cancel(ErrGone) })
+}
+
+// back takes a leaving address back (it was unready for a moment) and
+// reports whether its stream goes on as before; false: Drain had ended it.
+func (f *following) back() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.timer != nil && !f.timer.Stop() {
+		return false
+	}
+	f.timer = nil
+	f.leaving = make(chan struct{})
+	return true
 }
 
 // Run supervises until ctx ends.
@@ -76,36 +120,41 @@ func (s *Supervisor) Run(ctx context.Context) {
 			mu.Lock()
 			for _, a := range addrs {
 				seen[a] = true
-				if running[a] == nil {
-					added = append(added, a)
-					actx, cancel := context.WithCancelCause(ctx)
-					f := &following{cancel: cancel, leaving: make(chan struct{})}
-					running[a] = f
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						s.stream(actx, a, f)
-						mu.Lock()
-						if running[a] == f {
-							delete(running, a)
-						}
-						mu.Unlock()
-					}()
+				if f := running[a]; f != nil {
+					// Listed again while leaving: the daemon was unready
+					// for a moment, its stream goes on.
+					if f.isLeaving() && f.back() {
+						added = append(added, a)
+					}
+					continue
 				}
+				added = append(added, a)
+				actx, cancel := context.WithCancelCause(ctx)
+				f := newFollowing(cancel)
+				running[a] = f
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					s.stream(actx, a, f)
+					mu.Lock()
+					if running[a] == f {
+						delete(running, a)
+					}
+					mu.Unlock()
+				}()
 			}
+			total := 0 // the leaving ones are read on, not counted
 			for a, f := range running {
-				select {
-				case <-f.leaving:
-					continue // already leaving
-				default:
+				if f.isLeaving() {
+					continue
 				}
 				if !seen[a] {
-					close(f.leaving)
-					time.AfterFunc(drain, func() { f.cancel(ErrGone) })
+					f.leave(drain)
 					removed = append(removed, a)
+					continue
 				}
+				total++
 			}
-			total := len(running) - len(removed) // the leaving ones are read on, not counted
 			mu.Unlock()
 			if len(added)+len(removed) > 0 {
 				sort.Strings(removed)
@@ -145,7 +194,7 @@ func (s *Supervisor) stream(ctx context.Context, addr string, f *following) {
 	delay := time.Second
 	for ctx.Err() == nil {
 		select {
-		case <-f.leaving:
+		case <-f.left():
 			// The address left and the stream ended (the stopping daemon
 			// closed it after its last build) or was down: forget it.
 			s.Log.Info("daemon gone, its history read to the end", "addr", addr)
