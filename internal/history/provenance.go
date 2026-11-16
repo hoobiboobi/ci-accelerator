@@ -276,8 +276,59 @@ func ParseProvenance(data []byte, key []byte) (*Provenance, error) {
 			return nil, err
 		}
 	}
+	// The identities are those of the normalised operations, as the
+	// console has always computed them; what is kept of each operation also
+	// hides the secrets elsewhere in it.
+	args := map[string]string{}
+	for k, v := range p.Args {
+		if name, ok := strings.CutPrefix(k, "build-arg:"); ok {
+			args[name] = v
+		}
+	}
+	values := secretValues(args)
+	for id, st := range p.Steps {
+		st.Op = maskOp(st.Op, key, values)
+		p.Steps[id] = st
+	}
 	return p, nil
 }
+
+// maskOp replaces, in every text of a normalised operation (environment,
+// command line, source address and attributes), the values of the build's
+// secret arguments and the known secret formats by keyed hashes, as
+// normalizeOp does for a secret-named variable: a changed secret still
+// changes the operation as kept, but its value is not kept.
+func maskOp(op json.RawMessage, key []byte, values []string) json.RawMessage {
+	var v any
+	if err := json.Unmarshal(op, &v); err != nil {
+		return op
+	}
+	keyed := func(secret string) string { return keyedMask(key, secret) }
+	var walk func(x any) any
+	walk = func(x any) any {
+		switch t := x.(type) {
+		case string:
+			return maskWith(t, values, keyed)
+		case []any:
+			for i := range t {
+				t[i] = walk(t[i])
+			}
+		case map[string]any:
+			for k := range t {
+				t[k] = walk(t[k])
+			}
+		}
+		return x
+	}
+	out, err := json.Marshal(walk(v))
+	if err != nil {
+		return op
+	}
+	return out
+}
+
+// keyedMasked matches what keyedMask makes of a secret, to show as Masked.
+var keyedMasked = regexp.MustCompile(`\[masked:[0-9a-f]{16}\]`)
 
 // mergeProvenance joins the provenances of a build's results into one. A
 // build for several platforms has one per platform, each numbering its
@@ -294,6 +345,12 @@ func mergeProvenance(ps []*Provenance) *Provenance {
 	m := *ps[0]
 	m.Steps, m.DigestMapping, m.Identity = maps.Clone(m.Steps), maps.Clone(m.DigestMapping), maps.Clone(m.Identity)
 	m.Lines, m.Ranges, m.Usage = maps.Clone(m.Lines), maps.Clone(m.Ranges), maps.Clone(m.Usage)
+	// A provenance without a build definition has no digest mapping (the
+	// other maps are always made): a later platform's is merged into an
+	// empty one.
+	if m.DigestMapping == nil {
+		m.DigestMapping = map[string]string{}
+	}
 	byIdentity := map[string]string{}
 	for id, v := range m.Identity {
 		byIdentity[v] = id
@@ -379,8 +436,9 @@ type gitContext struct{ ID, Commit string }
 // attributes, with the git context's commit (see Provenance.ContextCommit)
 // replaced by gitContextMark, and with the value
 // of every environment variable whose name says it is a secret replaced by
-// a keyed hash: a changed secret still changes the operation, but the
-// value is not kept. Like a local context's files, the commit a git
+// a keyed hash: a changed secret still changes the operation (and its
+// identity), but the value is not kept (maskOp hides the other secrets of
+// what is kept). Like a local context's files, the commit a git
 // context was fetched from changes with every pipeline while the steps
 // stay the same; what it changed is found by comparing the commits. It is
 // idempotent.
@@ -661,8 +719,10 @@ func (p *Provenance) walkCone(id string, seen map[string]bool, sources map[strin
 // remoteSources lists what a step and its ancestors fetch from the network
 // without a checksum: http(s) sources without one, git sources by branch
 // or tag (a commit id pins them). Their content can change while every
-// definition stays the same. Credentials and queries are left out.
-func (p *Provenance) remoteSources(id string) []string {
+// definition stays the same. Credentials and queries are left out, and
+// secrets in the rest (a secret build argument's value in the path, a
+// webhook's address) are masked as in the step's name.
+func (p *Provenance) remoteSources(id string, args map[string]string) []string {
 	cone := map[string]bool{}
 	p.walkCone(id, cone, map[string]bool{})
 	set := map[string]bool{}
@@ -674,7 +734,7 @@ func (p *Provenance) remoteSources(id string) []string {
 		switch {
 		case strings.HasPrefix(src.Identifier, "https://") || strings.HasPrefix(src.Identifier, "http://"):
 			if src.Attrs["http.checksum"] == "" {
-				set[safeURL(src.Identifier)] = true
+				set[mask(safeURL(src.Identifier), args)] = true
 			}
 		case strings.HasPrefix(src.Identifier, "git://"):
 			ref, _, _ := strings.Cut(src.Identifier[strings.LastIndex(src.Identifier, "#")+1:], ":")
@@ -682,7 +742,7 @@ func (p *Provenance) remoteSources(id string) []string {
 				ref = ""
 			}
 			if src.Attrs["git.checksum"] == "" && !commitID.MatchString(ref) {
-				set[safeURL(src.Identifier)] = true
+				set[mask(safeURL(src.Identifier), args)] = true
 			}
 		}
 	}
@@ -697,12 +757,32 @@ func (p *Provenance) remoteSources(id string) []string {
 var commitID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // safeURL is a source's address without its user information and query,
-// which may carry credentials.
+// which may carry credentials. An address that does not parse keeps its
+// scheme and the host after its user information, without a query.
 func safeURL(s string) string {
 	u, err := url.Parse(s)
 	if err != nil {
-		if i := strings.IndexAny(s, "@?"); i >= 0 {
-			return s[:i] + "…"
+		cut := false
+		if i := strings.IndexAny(s, "?#"); i >= 0 {
+			s, cut = s[:i], true
+		}
+		scheme, rest, ok := strings.Cut(s, "://")
+		if !ok {
+			scheme, rest = "", s
+		}
+		authority, path, slash := strings.Cut(rest, "/")
+		if i := strings.LastIndexByte(authority, '@'); i >= 0 {
+			authority = authority[i+1:]
+		}
+		s = authority
+		if slash {
+			s += "/" + path
+		}
+		if ok {
+			s = scheme + "://" + s
+		}
+		if cut {
+			s += "…"
 		}
 		return s
 	}

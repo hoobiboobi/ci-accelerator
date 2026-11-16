@@ -10,10 +10,12 @@ import (
 // the step's name as BuildKit shows it ("RUN --mount=... npm ci"), with
 // secrets already masked; the step's other options (secret mounts,
 // network) and the mounts that are right stay as they are. "" when the
-// step is not a RUN.
+// step is not a RUN, or is a here-document ("RUN <<EOF"): BuildKit names
+// such a step by its first line, not its script, so the step cannot be
+// written out again from its name.
 func Fragment(name string, hs []Hint) string {
 	rest, ok := strings.CutPrefix(name, "RUN ")
-	if !ok || len(hs) == 0 {
+	if !ok || len(hs) == 0 || strings.Contains(rest, "<<") {
 		return ""
 	}
 	var flags []string
@@ -89,15 +91,7 @@ func Fragment(name string, hs []Hint) string {
 			kept = append(kept, c.Path)
 		}
 	}
-	cmd := rest
-	for _, h := range hs {
-		for _, d := range h.Drop {
-			cmd = dropWord(cmd, d)
-		}
-		for _, in := range h.Insert {
-			cmd = insertAfter(cmd, in.After, in.Add)
-		}
-	}
+	cmd := edit(rest, hs)
 	parts := append(others, mounts...)
 	var b strings.Builder
 	for _, l := range before {
@@ -177,6 +171,110 @@ func locked(flag string) string {
 	return "--mount=" + strings.Join(append(out, "sharing=locked"), ",")
 }
 
+// edit makes the command's own changes: what empties a manager's cache
+// goes, its flags that switch the cache off are dropped and its options
+// inserted, each in that manager's commands only. A script that is more
+// than "a && b" is not cut into commands: a flag is dropped wherever it
+// is, except a one-letter one (uv's -n is head's -n too), and nothing is
+// taken out.
+func edit(cmd string, hs []Hint) string {
+	spans, plain := andSpans(cmd)
+	if !plain {
+		for _, h := range hs {
+			for _, d := range h.Drop {
+				if len(d) > 2 {
+					cmd = dropWord(cmd, d)
+				}
+			}
+			for _, in := range h.Insert {
+				cmd = insertAfter(cmd, in.After, in.Add)
+			}
+		}
+		return cmd
+	}
+	parts := make([]string, len(spans))
+	gone := make([]bool, len(spans))
+	left := len(spans)
+	for i, sp := range spans {
+		p := cmd[sp[0]:sp[1]]
+		cs := parse(p, nil, "/")
+		for _, h := range hs {
+			m := managerNamed(h.Manager)
+			if m == nil {
+				continue
+			}
+			if len(cs) == 1 && empties(m, cs[0]) && !gone[i] && left > 1 {
+				gone[i] = true
+				left--
+			}
+			if !runsManager(m, cs) {
+				continue
+			}
+			for _, d := range h.Drop {
+				p = dropWord(p, d)
+			}
+			for _, in := range h.Insert {
+				p = insertAfter(p, in.After, in.Add)
+			}
+		}
+		parts[i] = p
+	}
+	var kept []string
+	for i, p := range parts {
+		if !gone[i] {
+			kept = append(kept, p)
+		}
+	}
+	out := strings.Join(kept, "&&")
+	if left < len(spans) {
+		// A part taken from either end leaves its line continuation.
+		out = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(out), "\\"))
+	}
+	return out
+}
+
+func managerNamed(name string) *manager {
+	for _, m := range managers {
+		if m.name == name {
+			return m
+		}
+	}
+	return nil
+}
+
+func runsManager(m *manager, cs []command) bool {
+	for _, c := range cs {
+		if m.match(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// empties reports whether a command does nothing but empty the manager's
+// cache ("apt-get clean", "rm -rf /var/lib/apt/lists/*"): with a cache
+// mount, that only throws the cache away. An rm that removes anything
+// else too stays.
+func empties(m *manager, c command) bool {
+	if m.wipes == nil || m.wipes(c) == "" {
+		return false
+	}
+	if c.prog != "rm" {
+		return true
+	}
+	n := 0
+	for _, a := range c.args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		n++
+		if m.wipes(command{prog: "rm", args: []string{a}, cwd: c.cwd}) == "" {
+			return false
+		}
+	}
+	return n > 0
+}
+
 // dropWord removes a word (a flag, or VAR=value for a variable name) from
 // a command.
 func dropWord(cmd, w string) string {
@@ -215,7 +313,8 @@ func tokens(s string) [][2]int {
 	return out
 }
 
-// insertAfter puts an option after the first word that is prog.
+// insertAfter puts an option after the first word that is prog (in edit:
+// of each command of the manager).
 func insertAfter(cmd, prog, add string) string {
 	if strings.Contains(cmd, add) {
 		return cmd

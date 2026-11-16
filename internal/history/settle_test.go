@@ -100,7 +100,7 @@ func TestSettle(t *testing.T) {
 	// A FilesChanged that Settle made is not a witness: two builds would
 	// settle each other and leave the queue that GitLab answers.
 	a, b := build("a", "node-b", 7, built(common)), build("b", "node-c", 7, built(common))
-	if got := Settle([]*Build{a, b}, []Reason{elsewhere, {Kind: FilesChanged, Step: built(common), Paths: []string{"common"}, By: "a"}}); got[0].Kind != CacheElsewhere {
+	if got := Settle([]*Build{a, b}, []Reason{elsewhere, {Kind: FilesChanged, Step: built(common), Old: "node-a", New: "node-c", Paths: []string{"common"}, By: "a"}}); got[0].Kind != CacheElsewhere {
 		t.Errorf("own FilesChanged as a witness: %s by %q", got[0].Kind, got[0].By)
 	}
 

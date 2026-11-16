@@ -1,7 +1,10 @@
 package history
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -21,27 +24,71 @@ const Masked = "[masked]"
 // The prefixed ones need no word boundary before them: a token may follow
 // a letter, as after a printf's literal \n, and prefix and length are
 // distinctive enough on their own.
-var secretPatterns = []*regexp.Regexp{
-	// GitLab tokens, by their documented prefixes.
-	regexp.MustCompile(`(?:glpat|gloas|gldt|glrtr|glrt|glcbt|glptt|glft|glimt|glagent|glwt|glsoat|glffct)-[0-9A-Za-z_.\-]{16,}`),
-	regexp.MustCompile(`_gitlab_session=[0-9A-Za-z]+`),
+var secretPatterns = []secretPattern{
+	// GitLab tokens, by their documented prefixes, and runner registration
+	// tokens.
+	pat(`(?:glpat|gloas|gldt|glrtr|glrt|glcbt|glptt|glft|glimt|glagent|glwt|glsoat|glffct)-[0-9A-Za-z_.\-]{16,}`, "glpat", "gloas", "gldt", "glrt", "glcbt", "glptt", "glft", "glimt", "glagent", "glwt", "glsoat", "glffct"),
+	pat(`GR1348941[0-9A-Za-z_\-]{20,}`, "gr1348941"),
+	pat(`_gitlab_session=[0-9A-Za-z]+`, "_gitlab_session="),
 	// GitHub tokens.
-	regexp.MustCompile(`gh[pousr]_[0-9A-Za-z]{36,}`),
-	regexp.MustCompile(`github_pat_[0-9A-Za-z_]{22,}`),
-	// Slack tokens.
-	regexp.MustCompile(`xox[abposr]-[0-9A-Za-z\-]{10,}`),
+	pat(`gh[pousr]_[0-9A-Za-z]{36,}`, "ghp_", "gho_", "ghu_", "ghs_", "ghr_"),
+	pat(`github_pat_[0-9A-Za-z_]{22,}`, "github_pat_"),
+	// Slack tokens and webhook addresses.
+	pat(`xox[abposr]-[0-9A-Za-z\-]{10,}`, "xox"),
+	pat(`https://hooks\.slack\.com/services/[0-9A-Za-z/_\-]+`, "hooks.slack.com"),
+	// npm, PyPI, Stripe, Google API and Vault tokens.
+	pat(`npm_[0-9A-Za-z]{36,}`, "npm_"),
+	pat(`pypi-AgEIcHlwaS5vcmc[0-9A-Za-z_\-]{16,}`, "pypi-"),
+	pat(`(?:sk|rk)_live_[0-9A-Za-z]{16,}`, "_live_"),
+	pat(`AIza[0-9A-Za-z_\-]{35}`, "aiza"),
+	pat(`hvs\.[0-9A-Za-z_\-]{24,}`, "hvs."),
+	// JSON web tokens: a header and a payload that are base64 JSON.
+	pat(`eyJ[0-9A-Za-z_\-]{8,}\.eyJ[0-9A-Za-z_\-]{8,}\.[0-9A-Za-z_\-]*`, "eyj"),
 	// Private keys, whole blocks.
-	regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----.*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----`),
+	pat(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----.*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----`, "private key"),
 }
 
-// Secrets that keep their context: the password of a URL, a bearer token,
-// an AWS access key id (exactly 20 capitals and digits, which may follow
-// a lower-case letter but not another capital or digit).
-var (
-	awsKeyID    = regexp.MustCompile(`(^|[^0-9A-Z])(?:AKIA|ASIA)[0-9A-Z]{16}\b`)
-	urlPassword = regexp.MustCompile(`(://[^/\s:@]+:)[^/\s@]+@`)
-	bearer      = regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)[^\s"']+`)
-)
+// Secrets that keep their context. Each has three groups: what is kept
+// before the secret, the secret, what is kept after it.
+var contextPatterns = []secretPattern{
+	// An AWS access key id: exactly 20 capitals and digits, which may
+	// follow a lower-case letter but not another capital or digit.
+	pat(`(^|[^0-9A-Z])((?:AKIA|ASIA)[0-9A-Z]{16})\b()`, "akia", "asia"),
+	// The password of a URL, and a token as a URL's only user information.
+	pat(`(://[^/\s:@]+:)([^/\s@]+)(@)`, "://"),
+	pat(`(://)([0-9A-Za-z_.~\-]{20,})(@)`, "://"),
+	// An Authorization header of any scheme.
+	pat(`(?i)(authorization:[ \t]*(?:(?:basic|bearer|token|digest|negotiate|bot|apikey)[ \t]+)?)([^\s"']+)()`, "authorization"),
+	// A registry's credentials in a Docker or similar JSON configuration.
+	pat(`(?i)("(?:auth|password|identitytoken|registrytoken|token|secret)"[ \t]*:[ \t]*")([^"\s]+)(")`, "auth\"", "password\"", "token\"", "secret\""),
+	// A URL's query parameter named like a secret.
+	pat(`(?i)([?&][0-9A-Za-z_.\-]*(?:token|secret|passw|signature|sig|key|auth|credential)[0-9A-Za-z_.\-]*=)([^&\s"'#]+)()`, "token", "secret", "passw", "sig", "key", "auth", "credential"),
+	// An assignment, option or header named like a secret
+	// (AWS_SECRET_ACCESS_KEY=..., --password=..., PRIVATE-TOKEN: ...). A
+	// value that is a variable ($TOKEN) is no secret.
+	pat(`(?i)((?:^|[\s"'(,;&|:/])-{0,2}[0-9A-Za-z_.\-]*(?:password|passwd|secret|token|api[_\-]?key|access[_\-]?key|private[_\-]?key)[0-9A-Za-z_.\-]*[ \t]*[=:][ \t]*)([^\s"'$&;,)][^\s"'&;,)]*)()`, "passw", "secret", "token", "key"),
+}
+
+// secretPattern is a secret's format, with the texts (in lower case) of
+// which a match holds at least one: a text that has none is not searched.
+type secretPattern struct {
+	re    *regexp.Regexp
+	hints []string
+}
+
+func pat(expr string, hints ...string) secretPattern {
+	return secretPattern{re: regexp.MustCompile(expr), hints: hints}
+}
+
+// in reports whether a text, in lower case, may hold a match.
+func (p secretPattern) in(lower string) bool {
+	for _, h := range p.hints {
+		if strings.Contains(lower, h) {
+			return true
+		}
+	}
+	return false
+}
 
 var secretArgName = regexp.MustCompile(`(?i)token|secret|passw|pwd|key|credential|auth|cookie|session`)
 
@@ -79,39 +126,95 @@ func mask(s string, args map[string]string) string { return maskText(s, args, fa
 
 // maskText is mask; keepLines keeps the line breaks of what it masks.
 func maskText(s string, args map[string]string, keepLines bool) string {
-	masked := func(secret string) string {
+	return maskWith(s, secretValues(args), func(secret string) string {
 		if keepLines {
 			return Masked + strings.Repeat("\n", strings.Count(secret, "\n"))
 		}
 		return Masked
-	}
+	})
+}
+
+// secretValues are the values of the secret build arguments, as masking
+// looks for them: each also as it reads URL-encoded, base64-encoded or
+// escaped in JSON, a value of several lines also line by line (a step's
+// live tail sees one line at a time); longest first, so a value containing
+// another is masked whole.
+func secretValues(args map[string]string) []string {
+	seen := map[string]bool{}
 	var values []string
+	add := func(v string) {
+		if len(strings.TrimSpace(v)) >= 4 && !seen[v] {
+			seen[v] = true
+			values = append(values, v)
+		}
+	}
 	for k, v := range args {
 		if !SecretArg(k) || len(v) < 4 {
 			continue
 		}
-		values = append(values, v)
-		// A value of several lines is also masked line by line: a step's
-		// live tail sees one line at a time.
+		add(v)
+		add(url.QueryEscape(v))
+		add(url.PathEscape(v))
+		add(base64.StdEncoding.EncodeToString([]byte(v)))
+		add(base64.RawURLEncoding.EncodeToString([]byte(v)))
+		if j, err := json.Marshal(v); err == nil {
+			j := string(j[1 : len(j)-1])
+			add(j)
+			// Also as an encoder that keeps <, > and & writes it.
+			add(strings.NewReplacer(`\u003c`, "<", `\u003e`, ">", `\u0026`, "&").Replace(j))
+		}
 		if strings.Contains(v, "\n") {
 			for _, l := range strings.Split(v, "\n") {
-				if l = strings.TrimRight(l, "\r"); len(strings.TrimSpace(l)) >= 4 {
-					values = append(values, l)
-				}
+				add(strings.TrimRight(l, "\r"))
 			}
 		}
 	}
-	// Longest first, so a value containing another is masked whole.
 	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
+	return values
+}
+
+// maskWith replaces the given values and the known secret formats by
+// what repl makes of each secret.
+func maskWith(s string, values []string, repl func(secret string) string) string {
 	for _, v := range values {
-		s = strings.ReplaceAll(s, v, masked(v))
+		if strings.Contains(s, v) {
+			s = strings.ReplaceAll(s, v, repl(v))
+		}
 	}
-	for _, re := range secretPatterns {
-		s = re.ReplaceAllStringFunc(s, masked)
+	// What repl puts in holds none of the hints.
+	lower := strings.ToLower(s)
+	for _, p := range secretPatterns {
+		if p.in(lower) {
+			s = p.re.ReplaceAllStringFunc(s, repl)
+		}
 	}
-	s = awsKeyID.ReplaceAllString(s, "${1}"+Masked)
-	s = urlPassword.ReplaceAllString(s, "${1}"+Masked+"@")
-	return bearer.ReplaceAllString(s, "${1}"+Masked)
+	for _, p := range contextPatterns {
+		if !p.in(lower) {
+			continue
+		}
+		s = p.re.ReplaceAllStringFunc(s, func(m string) string {
+			g := p.re.FindStringSubmatch(m)
+			if len(g) != 4 || g[2] == Masked || strings.HasPrefix(g[2], keyedPrefix) {
+				return m
+			}
+			return g[1] + repl(g[2]) + g[3]
+		})
+	}
+	return s
+}
+
+// ansi matches a terminal's control sequences: CSI (colours, cursor
+// movement), OSC (titles, links, ended by BEL or ST) and the other
+// two-byte escapes. Tools that force colour print them into a build's
+// log, where they would show as text.
+var ansi = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])`)
+
+// stripANSI removes a terminal's control sequences from a log's text.
+func stripANSI(s string) string {
+	if !strings.Contains(s, "\x1b") {
+		return s
+	}
+	return ansi.ReplaceAllString(s, "")
 }
 
 // clip keeps the head and the tail of an output longer than MaxStepOutput.
@@ -199,10 +302,11 @@ func (l *logBuffer) trim() {
 	}
 }
 
-// output is the log as a step's output: masked, then clipped.
+// output is the log as a step's output: masked, then clipped. Terminal
+// control sequences are removed first.
 func (l *logBuffer) output(args map[string]string) string {
 	if l.cut == 0 {
-		return clip(mask(string(l.head)+string(l.tail), args))
+		return clip(mask(stripANSI(string(l.head)+string(l.tail)), args))
 	}
 	head, cut := string(l.head), l.cut
 	if len(head) < keptHead {
@@ -212,10 +316,39 @@ func (l *logBuffer) output(args map[string]string) string {
 		n := strings.LastIndexByte(head, '\n') + 1
 		head, cut = head[:n], cut+int64(len(head)-n)
 	}
-	head = keyBegin.ReplaceAllString(mask(head, args), Masked)
-	tail := mask(string(l.tail), args)
+	head = keyBegin.ReplaceAllString(mask(stripANSI(head), args), Masked)
+	tail := keyEnd.ReplaceAllString(mask(stripANSI(string(l.tail)), args), Masked)
 	total := int64(len(head)+len(tail)) + cut
-	head = head[:min(len(head), outputHead)]
-	tail = tail[len(tail)-min(len(tail), MaxStepOutput-outputHead):]
+	// The margins keep the cut ends of the head and the tail out of what
+	// is shown, unless masking shortened them by more than a margin (the
+	// same token on many lines): the part of a secret that a cut leaves,
+	// which masking no longer recognises, is then left out as well.
+	end := min(len(head), outputHead, max(lastBreak(head), len(head)-logMargin))
+	start := max(len(tail)-min(len(tail), MaxStepOutput-outputHead), min(firstBreak(tail), logMargin))
+	head, tail = head[:end], tail[start:]
 	return clipped(head, total-int64(len(head)+len(tail)), tail)
+}
+
+// lastBreak is where the last line of s begins (after its last line
+// break, else after its last space): a secret cut at the end of s lies
+// after it. 0 when s has neither.
+func lastBreak(s string) int {
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		return i + 1
+	}
+	return strings.LastIndexAny(s, " \t\r") + 1
+}
+
+// firstBreak is where the first whole line of s begins (after its first
+// line break, else after its first space): a secret cut at the start of s
+// lies before it. len(s) when s has neither.
+func firstBreak(s string) int {
+	i := strings.IndexByte(s, '\n')
+	if i < 0 {
+		i = strings.IndexAny(s, " \t\r")
+	}
+	if i < 0 {
+		return len(s)
+	}
+	return i + 1
 }

@@ -30,7 +30,7 @@ func TestCachedForeignVertexIsACacheHit(t *testing.T) {
 				Identity:      map[string]string{"step1": "id1"},
 			},
 		}
-		steps, _ := b.steps([]*client.SolveStatus{{Vertexes: order}})
+		steps, _, _ := b.steps([]*client.SolveStatus{{Vertexes: order}})
 		if len(steps) != 1 || steps[0].State != Cached || steps[0].ReceivedFrom != "" {
 			t.Errorf("%s: %+v, want one cached step", name, steps)
 		}
@@ -57,7 +57,7 @@ func TestStepOutputIsMaskedAndClipped(t *testing.T) {
 		Identity:      map[string]string{"step1": "id1"},
 	}
 	long := strings.Repeat("x", 2*MaxStepOutput)
-	steps, _ := b.steps([]*client.SolveStatus{{
+	steps, _, _ := b.steps([]*client.SolveStatus{{
 		Vertexes: []*client.Vertex{foreign, own},
 		Logs: []*client.VertexLog{
 			{Vertex: own.Digest, Data: []byte("using s3cr3t-npm\n")},
@@ -96,7 +96,7 @@ func TestStepsOfAnUnnamedStage(t *testing.T) {
 		{Digest: digest.FromString("bust"), Name: "[3/3] RUN echo bust=$BUST", Started: at(2.5), Completed: at(2.6), Cached: true},
 	}
 	b := &Build{Started: t0, Vertices: map[string]bool{}, vertexStart: map[string]time.Time{}}
-	steps, _ := b.steps([]*client.SolveStatus{{Vertexes: vs}})
+	steps, _, _ := b.steps([]*client.SolveStatus{{Vertexes: vs}})
 	var keys []string
 	for _, s := range steps {
 		keys = append(keys, s.Key+" "+string(s.State))

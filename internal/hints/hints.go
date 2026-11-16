@@ -9,10 +9,14 @@ package hints
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"path"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // Kind is what is wrong with a step's cache.
@@ -32,7 +36,8 @@ const (
 	// cache mount is not part of the image.
 	ImageNeeds Kind = "image-needs"
 	// NotLocked: a system package manager shares its cache with other
-	// builds without sharing=locked, and two at once fail on its lock.
+	// builds (sharing=shared, the default), and two at once fail on its
+	// lock; sharing=private gives each its own copy and is left alone.
 	NotLocked Kind = "not-locked"
 	// NotWritable: the step runs as a user other than root, and the cache
 	// mount has no owner or mode: BuildKit makes it root's, 0755, and the
@@ -83,8 +88,9 @@ type Cache struct {
 	Label  string `json:"label"`
 	Path   string `json:"path,omitempty"`
 	Locked bool   `json:"locked,omitempty"`
-	// ID is the cache mount id to suggest when the path depends on the
-	// step (a project folder), so that every project's builds share it.
+	// ID is a cache mount id for the fragment to give the mount. No
+	// manager's rules set one: without it BuildKit keys a cache mount by
+	// its target, and a fixed id would make every project share it.
 	ID string `json:"id,omitempty"`
 }
 
@@ -92,16 +98,6 @@ type Cache struct {
 type Insert struct {
 	After string `json:"after"`
 	Add   string `json:"add"`
-}
-
-// HasMissing reports whether a hint is about a missing cache mount.
-func (h Hint) HasMissing() bool {
-	for _, p := range h.Problems {
-		if p.Kind == Missing {
-			return true
-		}
-	}
-	return false
 }
 
 // Broken reports whether a hint is about a cache mount that is there but
@@ -128,6 +124,7 @@ type mount struct {
 	dest    string
 	cache   bool
 	locked  bool
+	private bool // sharing=private: each build that runs at once gets its own copy
 	id      string
 	sharing string
 	// owned: the mount is made from a folder the frontend creates with
@@ -159,11 +156,12 @@ type rawOp struct {
 	} `json:"Op"`
 }
 
-// mountType 3 is a cache mount; sharing 2 is "locked" (BuildKit's
-// pb.MountType and pb.CacheSharingOpt).
+// mountType 3 is a cache mount; sharing 1 is "private", 2 "locked"
+// (BuildKit's pb.MountType and pb.CacheSharingOpt).
 const (
-	cacheMount    = 3
-	sharingLocked = 2
+	cacheMount     = 3
+	sharingPrivate = 1
+	sharingLocked  = 2
 )
 
 func readStep(op json.RawMessage) (step, bool) {
@@ -184,6 +182,7 @@ func readStep(op json.RawMessage) (step, bool) {
 			x.sharing = strings.Trim(string(m.CacheOpt.Sharing), `"`)
 			n, err := strconv.Atoi(x.sharing)
 			x.locked = err == nil && n == sharingLocked || strings.EqualFold(x.sharing, "LOCKED")
+			x.private = err == nil && n == sharingPrivate || strings.EqualFold(x.sharing, "PRIVATE")
 		}
 		s.mounts = append(s.mounts, x)
 	}
@@ -198,10 +197,30 @@ func Analyze(op json.RawMessage, ancestors []json.RawMessage) (out []Hint) {
 	// The operation is the build client's to send: a reading this package
 	// gets wrong costs the step its hint, never the page.
 	defer func() {
-		if recover() != nil {
+		if v := recover(); v != nil {
 			out = nil
+			logPanic("Analyze", v)
 		}
 	}()
+	return analyze(op, ancestors)
+}
+
+// maxPanicLogs bounds how many recovered panics a process logs: the same
+// step is read again on every view of its build.
+const maxPanicLogs = 10
+
+var panics atomic.Int64
+
+// logPanic logs a panic Analyze or Installs recovered, with its stack, so
+// that a reading gone wrong is seen rather than only a hint missing.
+func logPanic(where string, v any) {
+	if panics.Add(1) <= maxPanicLogs {
+		slog.Warn("hints: reading a step failed, the step gets no hint", "func", where, "panic", fmt.Sprint(v), "stack", string(debug.Stack()))
+	}
+}
+
+// analyze is Analyze without the recover, for the fuzz tests.
+func analyze(op json.RawMessage, ancestors []json.RawMessage) (out []Hint) {
 	s, ok := readStep(op)
 	if !ok || len(s.args) == 0 {
 		return nil
@@ -346,9 +365,6 @@ func (x *context) check(m *manager, uses []command) (Hint, bool) {
 	anyCovered := false
 	for _, d := range dirs {
 		c := Cache{Label: d.dir.label, Path: d.path, Locked: m.locked}
-		if d.dir.cwd != "" && d.path != "" {
-			c.ID = d.dir.id
-		}
 		h.Caches = append(h.Caches, c)
 		covered := false
 		var near *mount
@@ -364,7 +380,7 @@ func (x *context) check(m *manager, uses []command) (Hint, bool) {
 				// Not known where it writes: a mount that looks like the
 				// manager's cache is taken for it.
 				covered = true
-				if m.locked && !mt.locked {
+				if m.locked && !mt.locked && !mt.private {
 					h.Problems = append(h.Problems, Problem{Kind: NotLocked, Mount: mt.dest})
 				}
 				if h.Owner != "" && !mt.owned {
@@ -403,6 +419,17 @@ func (x *context) check(m *manager, uses []command) (Hint, bool) {
 	}
 	h.Problems = dedupe(h.Problems)
 	h.Caveats = append(h.Caveats, m.caveats...)
+	if m.wipes != nil {
+		var ws []string
+		for _, c := range x.commands {
+			if w := m.wipes(c); w != "" && !contains(ws, w) {
+				ws = append(ws, w)
+			}
+		}
+		for _, w := range ws {
+			h.Caveats = append(h.Caveats, "Take "+w+" out of the step: it empties the cache, and with a cache mount there is nothing of the cache in the image to clean.")
+		}
+	}
 	switch {
 	case h.Owner == "mode=0777":
 		h.Caveats = append(h.Caveats, "The step runs as "+x.step.user+", not root: a cache mount is root's (mode 0755) unless it says otherwise, so the fragment opens it with mode=0777; uid= and gid= with that user's numbers (id -u and id -g in the image) are the stricter choice.")

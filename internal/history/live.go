@@ -78,12 +78,19 @@ type TailLine struct {
 // last lines it printed.
 type Live struct {
 	args     map[string]string
-	vertices map[string]*liveVertex
+	vertices map[string]*liveVertex // the steps' vertices only
 	order    []string
 	tails    map[string]*tail // by step key
 	// ContextBytes is the build context sent so far.
 	ContextBytes int64
+	// steps is what Steps returned last; nil after an update.
+	steps []LiveStep
 }
+
+// maxLiveVertices bounds the vertices a Live keeps of one build, and so
+// the steps its page shows: BuildKit bounds neither, and a build of raw LLB
+// can have hundreds of thousands. The stored build has every step.
+const maxLiveVertices = 4 * maxBuildSteps
 
 type liveVertex struct {
 	key, name          string // key "" for vertices that are not steps
@@ -100,14 +107,18 @@ func NewLive(args map[string]string) *Live {
 
 // Add takes one progress update.
 func (l *Live) Add(st *client.SolveStatus) {
+	l.steps = nil
 	for _, v := range st.Vertexes {
 		d := v.Digest.String()
 		x := l.vertices[d]
 		if x == nil {
-			x = &liveVertex{}
-			if m := stepKey.FindStringSubmatch(v.Name); m != nil && !strings.HasPrefix(v.Name, "[internal]") {
-				x.key, x.name = m[1], m[2]
+			m := stepKey.FindStringSubmatch(v.Name)
+			if m == nil || strings.HasPrefix(v.Name, "[internal]") || len(l.order) >= maxLiveVertices {
+				continue
 			}
+			// Masked once, when the step appears; kept to the bound of a
+			// stored step's name.
+			x = &liveVertex{key: cutText(m[1], maxStepKey), name: cutText(mask(m[2], l.args), maxStepName)}
 			l.vertices[d] = x
 			l.order = append(l.order, d)
 		}
@@ -129,7 +140,7 @@ func (l *Live) Add(st *client.SolveStatus) {
 	}
 	for _, lg := range st.Logs {
 		x := l.vertices[lg.Vertex.String()]
-		if x == nil || x.key == "" {
+		if x == nil {
 			continue
 		}
 		t := l.tails[x.key]
@@ -142,18 +153,23 @@ func (l *Live) Add(st *client.SolveStatus) {
 }
 
 // Steps are the build's steps so far, in the order BuildKit named them.
+// The result is shared until the next update: callers do not change it.
 func (l *Live) Steps() []LiveStep {
+	if l.steps == nil {
+		l.steps = l.makeSteps()
+	}
+	return l.steps
+}
+
+func (l *Live) makeSteps() []LiveStep {
 	byKey := map[string]*LiveStep{}
 	running := map[string]bool{}
 	var keys []string
 	for _, d := range l.order {
 		v := l.vertices[d]
-		if v.key == "" {
-			continue
-		}
 		s := byKey[v.key]
 		if s == nil {
-			s = &LiveStep{Key: v.key, Name: mask(v.name, l.args)}
+			s = &LiveStep{Key: v.key, Name: v.name}
 			byKey[v.key] = s
 			keys = append(keys, v.key)
 		}
@@ -167,7 +183,7 @@ func (l *Live) Steps() []LiveStep {
 			running[v.key] = true
 		}
 		if v.err != "" {
-			s.Error = mask(v.err, l.args)
+			s.Error = cutText(mask(v.err, l.args), maxStepError)
 		}
 		switch {
 		case s.State == "":
@@ -270,7 +286,7 @@ func (t *tail) write(p []byte, at time.Time, args map[string]string) {
 			t.partAt = at
 		}
 		t.add(p[:i])
-		t.line(string(t.partial), t.partAt, args)
+		t.line(string(t.partial), t.partAt, args, t.cut)
 		t.partial, t.cut = t.partial[:0], false
 		p = p[i+1:]
 	}
@@ -278,8 +294,9 @@ func (t *tail) write(p []byte, at time.Time, args map[string]string) {
 
 // line keeps one whole line, masked: a private key printed line by line
 // is masked from its BEGIN line to its END line, even when the tail shows
-// only its middle.
-func (t *tail) line(s string, at time.Time, args map[string]string) {
+// only its middle. cut: the line's last drawing outgrew its bound, so its
+// end may hold the start of a secret masking does not recognise.
+func (t *tail) line(s string, at time.Time, args map[string]string, cut bool) {
 	t.lines++
 	// A progress bar redraws its line: what shows is the last drawing.
 	if i := strings.LastIndexByte(strings.TrimRight(s, "\r"), '\r'); i >= 0 {
@@ -296,7 +313,15 @@ func (t *tail) line(s string, at time.Time, args map[string]string) {
 		t.inKey = true
 		s = Masked
 	default:
-		s = MaskSecrets(mask(s, args))
+		s = MaskSecrets(mask(stripANSI(s), args))
+	}
+	if cut {
+		// The bound keeps the cut end out of what is shown, unless masking
+		// earlier in the line shortened it by more than the margin: the
+		// part of a secret the cut leaves is then left out as well.
+		if n := max(lastBreak(s), len(s)-3*maxTailLine); n < maxTailLine {
+			s = s[:n] + "…"
+		}
 	}
 	if len(s) > maxTailLine {
 		s = strings.ToValidUTF8(s[:maxTailLine], "") + "…"
@@ -320,7 +345,7 @@ func (t *tail) snapshot(started time.Time, args map[string]string) []TailLine {
 		if j := strings.LastIndexByte(draw, '\r'); j >= 0 {
 			draw = draw[j+1:]
 		}
-		if draw = MaskSecrets(mask(draw, args)); len(draw) > maxTailLine {
+		if draw = MaskSecrets(mask(stripANSI(draw), args)); len(draw) > maxTailLine {
 			draw = strings.ToValidUTF8(draw[:maxTailLine], "") + "…"
 		}
 		last = append(append([]tailEntry(nil), last...), tailEntry{t.partAt, strings.ToValidUTF8(draw, "�")})

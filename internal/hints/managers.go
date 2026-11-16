@@ -36,7 +36,6 @@ type cacheDir struct {
 	cwd     string
 	xdg     string
 	home    string
-	id      string // mount id when the folder is project-relative
 	need    func(command) bool
 	markers []string // path endings that make a mount look like this cache
 	// also are folders that hold the cache too in this build (apk's
@@ -700,13 +699,13 @@ var managers = []*manager{
 			return c.prog == "next" && len(c.sub(1)) == 1 && c.sub(1)[0] == "build"
 		},
 		caches: []cacheDir{
-			{label: "build cache", cwd: ".next/cache", id: "next-cache", markers: []string{"/.next/cache"}},
+			{label: "build cache", cwd: ".next/cache", markers: []string{"/.next/cache"}},
 		},
 		pathCommand: "",
 		targets:     []func(*context, command) string{inCwd(".next")},
 		caveats: []string{
 			"Mount only .next/cache: the rest of .next is the built app the image needs.",
-			"The mount needs an id (as in the fragment) when several projects build with the same working folder, or they share one cache.",
+			"Without an id, BuildKit keys a cache mount by its target: projects that build in the same working folder on a daemon share one .next/cache. To keep a project's own, add an id of its own to the mount (id=<project>-next-cache).",
 		},
 	},
 	{

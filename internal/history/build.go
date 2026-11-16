@@ -68,7 +68,44 @@ func (b *Build) Dockerfile() (name, text string) {
 	case b.errSrc != nil:
 		name, text = b.errSrc.Name, b.errSrc.Text
 	}
-	return name, maskText(text, b.BuildArgs, true)
+	name = cutText(name, maxField)
+	if len(text) <= maxDockerfile {
+		return name, maskText(text, b.BuildArgs, true)
+	}
+	// Whole lines, so that the lines kept keep their numbers; a private
+	// key whose END is cut off is masked to the end.
+	text = text[:strings.LastIndexByte(text[:maxDockerfile], '\n')+1]
+	return name, keyBegin.ReplaceAllString(maskText(text, b.BuildArgs, true), Masked)
+}
+
+// The bounds of what a build keeps of its record. Every field comes from
+// the client (a Dockerfile, raw LLB, build options), and BuildKit bounds
+// none of them; the console stores what it keeps. A real Dockerfile's
+// build stays far below each.
+const (
+	// maxBuildSteps bounds the steps of a build; one with more keeps the
+	// first and reads as truncated.
+	maxBuildSteps = 2000
+	// maxStepKey, maxStepName and maxStepError bound a step's key, name
+	// and error (a build's error too), as shown: masked first.
+	maxStepKey   = 256
+	maxStepName  = 4 << 10
+	maxStepError = 16 << 10
+	// maxDockerfile bounds the Dockerfile's text kept, in whole lines.
+	maxDockerfile = 1 << 20
+	// maxField bounds a build's target, context folder, image names and
+	// non-secret build arguments' values; maxListed the count of its
+	// images and build arguments.
+	maxField  = 4 << 10
+	maxListed = 256
+)
+
+// cutText bounds a text already masked, marking the cut.
+func cutText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "") + "…"
 }
 
 // LocalContext is what the client sent of the build's local context; nil
@@ -180,19 +217,36 @@ type Config struct {
 func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus, provenance [][]byte, trace, errBlob []byte, cfg Config) (*Build, error) {
 	b := &Build{
 		Ref:       rec.Ref,
-		Target:    rec.FrontendAttrs["target"],
+		Target:    cutText(rec.FrontendAttrs["target"], maxField),
 		BuildArgs: map[string]string{},
 		Vertices:  map[string]bool{},
 
 		vertexStart: map[string]time.Time{},
 	}
-	for k, v := range rec.FrontendAttrs {
+	var argNames []string
+	for k := range rec.FrontendAttrs {
 		if name, ok := strings.CutPrefix(k, "build-arg:"); ok {
+			argNames = append(argNames, name)
+		}
+	}
+	sort.Strings(argNames)
+	// Secret arguments are kept whole, whatever their number: masking
+	// looks for their values. The store keeps none of their values.
+	for _, name := range argNames {
+		if v := rec.FrontendAttrs["build-arg:"+name]; SecretArg(name) {
 			b.BuildArgs[name] = v
 		}
 	}
+	// Other arguments are kept masked, as the store keeps them, so a build
+	// read now compares with a stored one: a token in a value, or a secret
+	// argument's value repeated in it, reads as in the steps' texts.
+	for _, name := range argNames {
+		if v := rec.FrontendAttrs["build-arg:"+name]; !SecretArg(name) && len(b.BuildArgs) < maxListed && len(name) <= maxField {
+			b.BuildArgs[name] = cutText(MaskSecrets(mask(cutRaw(v, maxField), b.BuildArgs)), maxField)
+		}
+	}
 	if v := rec.FrontendAttrs[ContextOpt]; v != "" {
-		b.Context = cleanContext(v)
+		b.Context = cleanContext(cutText(mask(cutRaw(v, maxField), b.BuildArgs), maxField))
 	}
 	// The Dockerfile frontend reads "no-cache" as every stage when empty,
 	// else as a list of stages.
@@ -209,11 +263,11 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 		b.Completed = rec.CompletedAt.AsTime()
 	}
 	if rec.Error != nil {
-		b.Error = mask(rec.Error.Message, b.BuildArgs)
+		b.Error = cutText(mask(cutRaw(rec.Error.Message, maxRawError), b.BuildArgs), maxStepError)
 	}
 	for _, e := range rec.Exporters {
-		if n := e.Attrs["name"]; n != "" {
-			b.Images = append(b.Images, n)
+		if n := e.Attrs["name"]; n != "" && len(b.Images) < maxListed {
+			b.Images = append(b.Images, cutText(n, maxField))
 		}
 	}
 	var provs []*Provenance
@@ -255,7 +309,8 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 		return nil, err
 	}
 	b.Attribution = att
-	b.Steps, b.ContextBytes = b.steps(progress)
+	var dropped bool
+	b.Steps, b.ContextBytes, dropped = b.steps(progress)
 	for i := range b.Steps {
 		// The work of a step another build ran (or the cache held) is not
 		// this build's: its usage belongs to whoever executed it.
@@ -264,7 +319,7 @@ func NewBuild(rec *controlapi.BuildHistoryRecord, progress []*client.SolveStatus
 		}
 	}
 	b.Warnings = warnings(progress)
-	b.Truncated = !b.complete()
+	b.Truncated = dropped || !b.complete()
 	return b, nil
 }
 
@@ -279,14 +334,19 @@ type vertex struct {
 
 // steps merges the progress updates per vertex and groups the vertices by
 // Dockerfile step. A step with a vertex of another build is Received; the
-// build's own vertex for it then only shows the wait.
-func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
+// build's own vertex for it then only shows the wait. dropped: the
+// progress or the bound of a build's steps left some of them out.
+func (b *Build) steps(progress []*client.SolveStatus) (_ []Step, _ int64, dropped bool) {
 	vs := map[string]*vertex{}
 	logs := map[string]*logBuffer{}
 	var order []string
 	var ctxBytes int64
 	for _, st := range progress {
 		for _, v := range st.Vertexes {
+			if v.Digest == droppedVertices {
+				dropped = true
+				continue
+			}
 			d := v.Digest.String()
 			x, ok := vs[d]
 			if !ok {
@@ -344,12 +404,17 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 		if m == nil || strings.HasPrefix(v.name, "[internal]") {
 			continue
 		}
-		s, ok := steps[m[1]]
+		key := cutText(m[1], maxStepKey)
+		s, ok := steps[key]
 		if !ok {
+			if len(keys) >= maxBuildSteps {
+				dropped = true
+				continue
+			}
 			// BuildKit expands build arguments in a step's name.
-			s = &Step{Key: m[1], Name: mask(m[2], b.BuildArgs)}
-			steps[m[1]] = s
-			keys = append(keys, m[1])
+			s = &Step{Key: key, Name: cutText(mask(m[2], b.BuildArgs), maxStepName)}
+			steps[key] = s
+			keys = append(keys, key)
 		}
 		own := b.prov == nil || b.Vertices[d] || foreign
 		if !own && v.cached {
@@ -392,7 +457,7 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 			s.Line = s.Lines[0].Start
 		}
 		if v.err != "" {
-			s.Error = mask(v.err, b.BuildArgs)
+			s.Error = cutText(mask(cutRaw(v.err, maxRawError), b.BuildArgs), maxStepError)
 		}
 		if s.State == Received {
 			continue
@@ -431,7 +496,7 @@ func (b *Build) steps(progress []*client.SolveStatus) ([]Step, int64) {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return lessStep(out[i], out[j]) })
 	waits(b.Started, out)
-	return out, ctxBytes
+	return out, ctxBytes, dropped
 }
 
 // waits sets the start of each received step to when this build reached

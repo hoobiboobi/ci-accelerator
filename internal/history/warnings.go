@@ -46,19 +46,28 @@ func warnings(progress []*client.SolveStatus) []Warning {
 			if w.SourceInfo != nil {
 				x.File = w.SourceInfo.Filename
 			}
-			for i, r := range w.Range {
-				if r == nil {
+			// A frontend other than the Dockerfile one may send a range
+			// without either end: BuildKit passes it on as it is.
+			first := true
+			for _, r := range w.Range {
+				if r == nil || r.Start == nil {
 					continue
 				}
-				if i == 0 || int(r.Start.Line) < x.Line {
+				if first || int(r.Start.Line) < x.Line {
 					x.Line = int(r.Start.Line)
 				}
-				if int(r.End.Line) > x.EndLine {
-					x.EndLine = int(r.End.Line)
+				first = false
+				end := r.Start.Line
+				if r.End != nil {
+					end = r.End.Line
+				}
+				if int(end) > x.EndLine {
+					x.EndLine = int(end)
 				}
 			}
+			x.Message, x.Detail = cutText(x.Message, maxWarningText), cutText(x.Detail, maxWarningText)
 			key := x.Rule + "\x00" + x.Message + "\x00" + x.File
-			if seen[key] {
+			if seen[key] || len(out) >= maxProgressWarnings {
 				continue
 			}
 			seen[key] = true

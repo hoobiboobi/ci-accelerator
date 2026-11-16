@@ -157,7 +157,7 @@ func TestGitContextIsTheBuildContext(t *testing.T) {
 	if got := strings.Join(a.prov.contextSources("step3"), ","); got != "." {
 		t.Errorf("contextSources = %q, want . (the whole context)", got)
 	}
-	if rs := a.prov.remoteSources("step3"); len(rs) != 0 {
+	if rs := a.prov.remoteSources("step3", nil); len(rs) != 0 {
 		t.Errorf("the pinned context is not a remote source: %v", rs)
 	}
 	// Another repository's ADD is not the context, even pinned.

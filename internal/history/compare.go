@@ -89,7 +89,8 @@ type Reason struct {
 
 // FirstRebuild compares a build with the previous build of the same project
 // and target and explains the first step it executed. ok is false when every
-// step came from cache or another build.
+// step came from cache or another build, or when the comparison proves no
+// reason for the first one it executed.
 func FirstRebuild(prev, cur *Build) (Reason, bool) {
 	if cur.prov == nil || !rebuiltAny(cur) {
 		return Reason{}, false
@@ -173,7 +174,7 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 			crossDaemon := prev.Daemon != "" && cur.Daemon != "" && prev.Daemon != cur.Daemon
 			sameGitContext := cur.ContextCommit != "" && prev.ContextCommit == cur.ContextCommit && !cur.prov.localDependent(s.StepID)
 			fromContext := cur.prov.contextDependent(s.StepID) && !sameGitContext
-			if rs := cur.prov.remoteSources(s.StepID); len(rs) > 0 && !fromContext {
+			if rs := cur.prov.remoteSources(s.StepID, cur.BuildArgs); len(rs) > 0 && !fromContext {
 				// Something fetched from the network feeds the step: its
 				// content can change while the definition does not, and no
 				// comparison of commits can tell. A step the build context
@@ -198,7 +199,7 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 				// A source fetched from the network rides along in Paths
 				// (RemotePath tells it apart): no comparison of commits can
 				// rule it out, so the rebuild never becomes the farm's.
-				r := Reason{Kind: CacheElsewhere, Step: s, Paths: append(cur.prov.contextSources(s.StepID), cur.prov.remoteSources(s.StepID)...)}
+				r := Reason{Kind: CacheElsewhere, Step: s, Paths: append(cur.prov.contextSources(s.StepID), cur.prov.remoteSources(s.StepID, cur.BuildArgs)...)}
 				if crossDaemon {
 					r.Old, r.New = prev.Daemon, cur.Daemon
 				}
@@ -242,6 +243,16 @@ func FirstRebuild(prev, cur *Build) (Reason, bool) {
 		// not have, as the reason of this one.
 		if r, ok := changedAncestor(prev, cur, s, prevSteps); ok {
 			return r, true
+		}
+		if p.Name == cmp.Name {
+			// What differs is no step of the Dockerfile but a source below
+			// it: the build context's (a local context became a git one, a
+			// git context's repository moved) or another one. It is named;
+			// when none is found, no reason is proven.
+			if o, n, ok := sourceChange(prev, cur, p.StepID, cmp.StepID); ok {
+				return Reason{Kind: StepChanged, Step: s, Old: o, New: n}, true
+			}
+			return Reason{}, false
 		}
 		return Reason{Kind: StepChanged, Step: s, Old: p.Name, New: cmp.Name}, true
 	}
@@ -360,6 +371,37 @@ func changedAncestor(prev, cur *Build, s Step, prevSteps prevIndex) (Reason, boo
 		}
 	}
 	return Reason{}, false
+}
+
+// sourceChange names the sources below two steps that only one of them
+// builds on (by identity): what the previous build's step read (old) and
+// what this build's reads instead (new), without credentials, joined by
+// ", ". ok is false when they build on the same sources.
+func sourceChange(prev, cur *Build, prevID, curID string) (string, string, bool) {
+	sources := func(b *Build, id string) map[string]string {
+		cone := map[string]bool{}
+		b.prov.walkCone(id, cone, map[string]bool{})
+		out := map[string]string{}
+		for sid := range cone {
+			if src := viewOf(b.prov.Steps[sid].Op).Op.Source; src != nil {
+				out[b.prov.Identity[sid]] = mask(safeURL(src.Identifier), cur.BuildArgs)
+			}
+		}
+		return out
+	}
+	was, is := sources(prev, prevID), sources(cur, curID)
+	only := func(a, b map[string]string) string {
+		var out []string
+		for id, s := range a {
+			if _, ok := b[id]; !ok && !slices.Contains(out, s) {
+				out = append(out, s)
+			}
+		}
+		sort.Strings(out)
+		return strings.Join(out, ", ")
+	}
+	o, n := only(was, is), only(is, was)
+	return o, n, (o != "" || n != "") && o != n
 }
 
 // noCacheFor says whether the job switched the cache off for the stage of
@@ -580,7 +622,7 @@ func argChange(prev, cur *Build, prevID, curID string) ([]string, string, string
 		return nil, "", "", false
 	}
 	sort.Strings(changed)
-	return changed, pe[changed[0]], ce[changed[0]], true
+	return changed, keyedMasked.ReplaceAllString(pe[changed[0]], Masked), keyedMasked.ReplaceAllString(ce[changed[0]], Masked), true
 }
 
 // envChange explains a RUN step whose text and command are the same as
@@ -622,7 +664,7 @@ func envChange(prev, cur *Build, p, s Step) (string, string, bool) {
 		case SecretArg(k):
 			return "ENV " + k + "=" + Masked
 		}
-		return "ENV " + k + "=" + v
+		return "ENV " + k + "=" + keyedMasked.ReplaceAllString(v, Masked)
 	}
 	return line(pe), line(ce), true
 }
@@ -709,9 +751,33 @@ func Link(builds []*Build) {
 // records cannot tell which. reasons[i] is FirstRebuild's reason for
 // builds[i] (zero when there is none); only builds attributed to the same
 // pipeline are compared. The result is in the same order.
+//
+// builds may also hold builds of other pipelines that ran meanwhile (a
+// merge request's pipeline and its branch's, of one commit): they settle
+// nothing, but one that executed the step on a witness's daemon makes that
+// witness's cache hit no proof (see cachedOnAnotherDaemon).
+//
+// A FilesChanged that Settle made rests on its witness: once the witness
+// is decided otherwise (GitLab's comparison found its files unchanged), it
+// is decided again.
 func Settle(builds []*Build, reasons []Reason) []Reason {
-	out := append([]Reason(nil), reasons...)
+	open := append([]Reason(nil), reasons...)
+	byRef := map[string]int{}
+	for j, b := range builds {
+		if _, ok := byRef[b.Ref]; !ok {
+			byRef[b.Ref] = j
+		}
+	}
 	for i, r := range reasons {
+		if r.Kind != FilesChanged || r.By == "" {
+			continue
+		}
+		if j, ok := byRef[r.By]; ok && (!filesWitness(reasons[j]) || reasons[j].Step.Identity != r.Step.Identity) {
+			open[i].Kind, open[i].By = CacheElsewhere, ""
+		}
+	}
+	out := append([]Reason(nil), open...)
+	for i, r := range open {
 		if r.Kind != CacheElsewhere || r.Step.Identity == "" {
 			continue
 		}
@@ -727,14 +793,8 @@ func Settle(builds []*Build, reasons []Reason) []Reason {
 			out[i].Kind, out[i].By = OtherNode, by
 			continue
 		}
-		for j, o := range reasons {
+		for j, o := range open {
 			if j == i || !samePipeline(builds[i], builds[j]) || o.Step.Identity != r.Step.Identity || !sameContext(builds[i], builds[j]) {
-				continue
-			}
-			// A FilesChanged that Settle made itself is no evidence: two
-			// builds would settle each other in turn and never be asked
-			// about again. Only GitLab's comparison makes one without By.
-			if o.Kind == FilesChanged && o.By != "" {
 				continue
 			}
 			// A sibling that rebuilt the same step although its previous
@@ -743,7 +803,7 @@ func Settle(builds []*Build, reasons []Reason) []Reason {
 			// missed, so the files changed (erring towards the change, as
 			// everywhere: an eviction in the same breath is the rare
 			// alternative).
-			if o.Kind == FilesChanged || (o.Kind == CacheElsewhere && o.Old == "") {
+			if filesWitness(o) {
 				out[i].Kind, out[i].By = FilesChanged, builds[j].Ref
 				break
 			}
@@ -752,18 +812,28 @@ func Settle(builds []*Build, reasons []Reason) []Reason {
 	return out
 }
 
+// filesWitness says whether a sibling's reason shows that the files
+// changed: FilesChanged, or a CacheElsewhere on the daemon of its own
+// previous build. A FilesChanged that Settle made itself is no evidence:
+// two builds would settle each other in turn and never be asked about
+// again. Only GitLab's comparison makes one without By.
+func filesWitness(o Reason) bool {
+	return (o.Kind == FilesChanged && o.By == "") || (o.Kind == CacheElsewhere && o.Old == "")
+}
+
 // cachedOnAnotherDaemon returns a build of builds[i]'s pipeline, on another
 // daemon, that found the step with this identity in its cache. A witness
-// whose daemon also EXECUTED the step in this pipeline proves nothing: its
-// cache hit may be that very execution's product (same commit, written
-// seconds earlier), not a survivor from before the change.
+// whose daemon also EXECUTED the step, in this pipeline or in another one
+// given with it, proves nothing: its cache hit may be that very
+// execution's product (the same commit, written seconds earlier), not a
+// survivor from before the change.
 func cachedOnAnotherDaemon(builds []*Build, i int, identity string) string {
 	for j, o := range builds {
 		if j == i || !samePipeline(builds[i], o) || o.Daemon == "" || o.Daemon == builds[i].Daemon || !sameContext(builds[i], o) {
 			continue
 		}
 		for _, s := range o.Steps {
-			if s.Identity == identity && s.State == Cached && !builtInPipelineOn(builds, builds[i], o.Daemon, identity) {
+			if s.Identity == identity && s.State == Cached && !builtOn(builds, o.Daemon, identity) {
 				return o.Ref
 			}
 		}
@@ -771,11 +841,11 @@ func cachedOnAnotherDaemon(builds []*Build, i int, identity string) string {
 	return ""
 }
 
-// builtInPipelineOn says whether any build of cur's pipeline executed the
-// step with this identity on the given daemon.
-func builtInPipelineOn(builds []*Build, cur *Build, daemon, identity string) bool {
+// builtOn says whether any of the builds executed the step with this
+// identity on the given daemon.
+func builtOn(builds []*Build, daemon, identity string) bool {
 	for _, b := range builds {
-		if b.Daemon != daemon || !samePipeline(cur, b) {
+		if b.Daemon != daemon {
 			continue
 		}
 		for _, s := range b.Steps {
