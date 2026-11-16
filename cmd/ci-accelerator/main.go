@@ -36,6 +36,7 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/collector"
 	"github.com/hoobiboobi/ci-accelerator/internal/control"
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
+	"github.com/hoobiboobi/ci-accelerator/internal/fleet"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
 	"github.com/hoobiboobi/ci-accelerator/internal/history"
 	"github.com/hoobiboobi/ci-accelerator/internal/logging"
@@ -55,12 +56,19 @@ type config struct {
 	jobsNamespace, kubeconfig, kubeContext     string
 	gitlabTokenFile, release, signIn           string
 	logLevel                                   string
-	caches, namespace                          string
-	devAssets                                  string
-	gitlabURLsFile, gitlabURLsWas              string
-	cacheEvery                                 time.Duration
-	daemons, gitlabURLs                        []string
-	keepDays, keepOutputDays                   int
+	// A member of a fleet: the hub's console address, this box's name
+	// there, its key and the hub's public keys (files), and the CA of the
+	// hub's address ("" for the system's).
+	fleetHub, fleetName, fleetKey, fleetHubKeys, fleetHubCA string
+	// A member joining with a join token: the token's file, and the
+	// Secret of its namespace the member keeps the key it makes in.
+	fleetJoin, fleetKeySecret     string
+	caches, namespace             string
+	devAssets                     string
+	gitlabURLsFile, gitlabURLsWas string
+	cacheEvery                    time.Duration
+	daemons, gitlabURLs           []string
+	keepDays, keepOutputDays      int
 
 	// The controller role (split): its API for the web.
 	split                     bool
@@ -107,6 +115,8 @@ func publicURL(log *slog.Logger) string {
 //	ci-accelerator web [flags]          the console's pages, reading the controller
 //	ci-accelerator router [flags]       the proxy that sends each CI job to the daemon where its project is warm
 //	ci-accelerator disk-probe [flags]   the sidecar next to a daemon that reports its cache's free space
+//	ci-accelerator hub [flags]          a fleet hub: one console for the boxes that join it
+//	ci-accelerator fleet-keygen <file>  a key pair for a fleet member or hub (<file> and <file>.pub)
 func main() {
 	role, args := "", os.Args[1:]
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -126,8 +136,12 @@ func main() {
 		err = webMain(args)
 	case "router":
 		err = routerMain(args)
+	case "hub":
+		err = hubMain(args)
+	case "fleet-keygen":
+		err = fleetKeygen(args)
 	default:
-		fmt.Fprintf(os.Stderr, "ci-accelerator: no role %q (all, controller, web, router, disk-probe)\n", role)
+		fmt.Fprintf(os.Stderr, "ci-accelerator: no role %q\n%s", role, rolesUsage)
 		os.Exit(2)
 	}
 	if err != nil {
@@ -135,6 +149,17 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// rolesUsage is the binary's help: its roles (main's comment).
+const rolesUsage = `Usage: ci-accelerator [role] [flags]  (ci-accelerator <role> -h: the role's flags)
+  all           controller and web in one process (the default; development)
+  controller    the store, collector and sessions, and the API the web reads
+  web           the console's pages, reading the controller
+  router        the proxy that sends each CI job to the daemon where its project is warm
+  disk-probe    the sidecar next to a daemon that reports its cache's free space
+  hub           a fleet hub: one console for the boxes that join it (ci-accelerator hub help: its commands)
+  fleet-keygen  <file>: a key pair for a fleet member or hub (<file> and <file>.pub)
+`
 
 // logOut is where the roles log (the tests read it).
 var logOut io.Writer = os.Stderr
@@ -190,6 +215,14 @@ func controllerMain(args []string, splitRole bool) error {
 	var c config
 	var daemons, gitlabURLs, allow, allowRouter list
 	fs := flag.NewFlagSet("controller", flag.ExitOnError)
+	fs.Usage = func() {
+		name := "all"
+		if splitRole {
+			name = "controller"
+		}
+		fmt.Fprintf(fs.Output(), "%s\nFlags of %s:\n", rolesUsage, name)
+		fs.PrintDefaults()
+	}
 	var lf logging.Flags
 	lf.Register(fs)
 	showVersion := fs.Bool("version", false, "print the version and exit")
@@ -219,6 +252,13 @@ func controllerMain(args []string, splitRole bool) error {
 		fs.Var(&allowRouter, "api-allow-router", "a ServiceAccount of the build routers, which may read where projects are warm and report decisions, namespace/name (repeatable)")
 		fs.DurationVar(&c.warmFor, "warm-for", 7*24*time.Hour, "how long a build keeps its project warm on its node, for the build router")
 		fs.StringVar(&c.apiTokenFile, "api-token-file", "", "file with a static token the callers send instead of ServiceAccount tokens (outside a cluster)")
+		fs.StringVar(&c.fleetHub, "fleet-hub", "", "a fleet hub's console address (https://...): this box joins it as a member and serves the hub its API over an outgoing connection")
+		fs.StringVar(&c.fleetName, "fleet-name", "", "this box's name in the fleet")
+		fs.StringVar(&c.fleetKey, "fleet-key-file", "", "this member's private key (PEM, PKCS#8 or SEC1; Ed25519 or ECDSA P-256/P-384)")
+		fs.StringVar(&c.fleetHubKeys, "fleet-hub-keys-file", "", "the hub's public keys this member trusts (PEM, one or more)")
+		fs.StringVar(&c.fleetHubCA, "fleet-hub-ca-file", "", "CA certificates of the hub's address (its Ingress); empty: the system's")
+		fs.StringVar(&c.fleetJoin, "fleet-join-file", "", "a join token issued by the hub: when -fleet-key-file holds no key, the member makes one, keeps it in -fleet-key-secret and trades the token for its registration")
+		fs.StringVar(&c.fleetKeySecret, "fleet-key-secret", "", "the Secret (in -namespace) a member that joins with a token keeps its key in")
 	} else {
 		fs.StringVar(&c.listen, "listen", ":8080", "address of the pages, the API and the health check")
 		fs.StringVar(&c.devAssets, "dev-assets", "", "directory with templates/ and static/ (internal/web) read for every page instead of the built-in ones; for working on the pages")
@@ -269,7 +309,21 @@ func run(c config, log *slog.Logger) error {
 		// Listing a bucket is not free: 0s would list it without pause.
 		return errors.New("-cache-every must be at least 10s")
 	}
-	if c.split && c.apiTokenFile == "" && len(c.apiAllow) == 0 {
+	if c.fleetHub != "" && (c.fleetName == "" || c.fleetKey == "" || c.fleetHubKeys == "") {
+		return errors.New("-fleet-hub needs -fleet-name, -fleet-key-file and -fleet-hub-keys-file")
+	}
+	if c.fleetJoin != "" && c.fleetKeySecret == "" {
+		return errors.New("-fleet-join-file needs -fleet-key-secret: where the member keeps the key it makes")
+	}
+	if c.fleetHub != "" {
+		if err := hubAddress(c.fleetHub, c.fleetJoin != ""); err != nil {
+			return err
+		}
+	}
+	if c.fleetHub != "" && c.namespace == "" {
+		return errors.New("-fleet-hub needs -namespace (or $POD_NAMESPACE): where the member writes the Secrets its hub delivers, and keeps a key it makes")
+	}
+	if c.split && c.apiTokenFile == "" && len(c.apiAllow) == 0 && c.fleetHub == "" {
 		return errors.New("the controller's API needs callers: -api-allow (ServiceAccounts) or -api-token-file")
 	}
 	if c.serverName == "" {
@@ -291,6 +345,9 @@ func run(c config, log *slog.Logger) error {
 	cfg := []any{"data", c.data, "discover", c.discover, "daemons", len(c.daemons), "jobs_namespace", c.jobsNamespace,
 		"gitlab", hosts(c.gitlabURLs), "gitlab_read", gitlabRead, "runner_caches", c.caches != "", "keep_days", c.keepDays,
 		"keep_output_days", c.keepOutputDays, "release", c.release, "log_level", c.logLevel}
+	if c.fleetHub != "" {
+		cfg = append(cfg, "fleet_hub", c.fleetHub, "fleet_name", c.fleetName)
+	}
 	if c.split {
 		cfg = append(cfg, "api_listen", c.apiListen, "api_allow", []string(c.apiAllow), "api_allow_router", []string(c.apiAllowRouter),
 			"warm_for", c.warmFor.String())
@@ -337,8 +394,16 @@ func run(c config, log *slog.Logger) error {
 	}
 	col.OnLiveChange(func() { st.Announce("") })
 	var kube kubernetes.Interface
-	if c.jobsNamespace != "" || c.caches != "" || (c.split && c.apiTokenFile == "") {
+	if c.jobsNamespace != "" || c.caches != "" || (c.split && c.apiTokenFile == "") || c.fleetHub != "" {
 		if kube, err = kubeClient(c); err != nil {
+			if c.fleetHub != "" {
+				return fmt.Errorf("a fleet member runs in Kubernetes (it writes the Secrets its hub delivers there): %w", err)
+			}
+			return err
+		}
+	}
+	if c.fleetHub != "" {
+		if err := endSessions(ctx, st, log); err != nil {
 			return err
 		}
 	}
@@ -376,14 +441,14 @@ func run(c config, log *slog.Logger) error {
 			// jobs would send it there.
 			return errors.New("-gitlab-token-file is a token of one GitLab, but several -gitlab-url are given: it would be sent to each of them; use -sign-in (each person's own token), or one URL")
 		}
-		token, err := os.ReadFile(c.gitlabTokenFile)
+		token, err := gitlabToken(ctx, c, log)
 		if err != nil {
 			return err
 		}
 		client := gitlab.New(c.gitlabURLs)
 		client.Log = log
 		gl = &control.LocalGitLab{Fetcher: &gitlab.Fetcher{Client: client, Store: st, Known: col.JobKnown, Log: log},
-			Token: gitlab.Token(strings.TrimSpace(string(token)))}
+			Token: token}
 	}
 	// "Files or node" is settled without anyone opening a page: with the
 	// installation's token by asking GitLab, with sign-in (no token of its
@@ -405,9 +470,22 @@ func run(c config, log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		api := &control.Server{Local: local, GitLab: gl, Auth: signIn, Log: log, Authorize: authorize,
-			Routes: &control.Routes{Store: st, Live: col, Log: log, Window: c.warmFor},
-			Config: control.ConfigFor(versionString(), c.release, gl, signIn)}
+		api := &control.Server{Local: local, GitLab: gl, Auth: signIn, Log: log,
+			Authorize: overLinkAuthorizer(fleet.Over, authorize),
+			Routes:    &control.Routes{Store: st, Live: col, Log: log, Window: c.warmFor},
+			Config:    control.ConfigFor(versionString(), c.release, gl, signIn)}
+		if c.fleetHub != "" {
+			// The hub reads the controller's API, and delivers the Secrets
+			// the box's values name.
+			served := http.NewServeMux()
+			served.Handle("PUT "+SecretsPath, secretWriter(kube, c.namespace, fleet.Over, log))
+			served.Handle("/", api.Handler())
+			d, outer, err := fleetDialer(c, st, served, log)
+			if err != nil {
+				return err
+			}
+			go runMember(ctx, d, c, kube, outer, log)
+		}
 		srv = &http.Server{Addr: c.apiListen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second, ErrorLog: logging.ErrorLog(log),
 			TLSConfig: &cryptotls.Config{MinVersion: cryptotls.VersionTLS12, GetCertificate: certs}}
 		srv.RegisterOnShutdown(api.Stop)
@@ -465,6 +543,26 @@ func run(c config, log *slog.Logger) error {
 	err = srv.Shutdown(sctx)
 	log.Info("stopped", "dur_ms", time.Since(begin).Milliseconds())
 	return err
+}
+
+// gitlabToken is the installation's GitLab token, read from its file at
+// every use: a fleet hub delivers its member's token after the member
+// started. A box on its own refuses to start without the file, and starts
+// with an empty one (as before fleets: GitLab then refuses the reads).
+func gitlabToken(ctx context.Context, c config, log *slog.Logger) (gitlab.FileToken, error) {
+	token := gitlab.FileToken(c.gitlabTokenFile)
+	_, err := token.Token(ctx)
+	switch {
+	case err == nil:
+	case c.fleetHub != "":
+		log.Info("fleet: no GitLab token yet; read once the hub has delivered it", "file", c.gitlabTokenFile)
+	default:
+		if _, rerr := os.ReadFile(c.gitlabTokenFile); rerr != nil {
+			return "", err
+		}
+		log.Warn("the GitLab token file is empty: GitLab's job times and logs are not read until it holds a token", "file", c.gitlabTokenFile)
+	}
+	return token, nil
 }
 
 // hosts are the GitLab instances' hosts, for the log.
@@ -805,4 +903,18 @@ func loadSignIn(path string, urls []string, st *store.Store, client *gitlab.Clie
 		cfg.Instances = append(cfg.Instances, auth.Instance{URL: g.URL, ClientID: id, Secret: secret, Admins: g.Admins})
 	}
 	return auth.New(cfg, st, client, log)
+}
+
+// overLinkAuthorizer gives the hub's requests their role. They come over
+// the member's own link, proven by the pinned key (over): they may read
+// what the web may, but not the store's writes or this console's sign-in,
+// and a session they carry is not taken (control.RoleHub). Every other
+// request is authorize's.
+func overLinkAuthorizer(over func(context.Context) bool, authorize func(*http.Request) (control.Role, error)) func(*http.Request) (control.Role, error) {
+	return func(r *http.Request) (control.Role, error) {
+		if over(r.Context()) {
+			return control.RoleHub, nil
+		}
+		return authorize(r)
+	}
 }
