@@ -107,7 +107,9 @@ func TestRunningBuildOnItsJobPage(t *testing.T) {
 	for _, want := range []string{
 		`data-refresh-every="2"`,
 		nb("Building now · 13 min 2 s · node-1"),
-		nb(`<code>make -j&#34;32&#34; modules</code> for 1 min 51 s; if the rest goes as last time, done in about 4 min 10 s`),
+		// modules: 270 s then, 111 s so far; install: 48 s then.
+		nb(`<code>make -j&#34;32&#34; modules</code> for 1 min 51 s; if the rest goes as last time, about 3 min 30 s left, from 2 of 2 remaining steps`),
+		"Each step still to run counts as long as it took on",
 		nb("So far <b>1 min 9 s faster</b> than the last build of this image that ran these steps"),
 		nb("took 10 min 32 s against 11 min 41 s"),
 		"31.2 of 32 cores", "daemon 30.4 cores", "22 %",
@@ -157,7 +159,7 @@ func TestRunningBuildOnItsJobPage(t *testing.T) {
 	// BuildKit finished the build: the page says it is being stored.
 	now.Done = true
 	p = get(t, ts, "/jobs/"+inst+"/9700001")
-	if !strings.Contains(p.body, "BuildKit finished this build") || strings.Contains(p.body, "done in about") {
+	if !strings.Contains(p.body, "BuildKit finished this build") || strings.Contains(p.body, "left, from") {
 		t.Error("a finished build")
 	}
 	// A build whose progress cannot be read says so.
@@ -187,32 +189,213 @@ func TestRunningBuildWithoutHistory(t *testing.T) {
 	}
 }
 
+// st is a step at seconds from t0: from < 0 not started, to < 0 not done.
+type st struct {
+	key, name, state string
+	from, to         float64
+}
+
+func liveSteps(t0 time.Time, in ...st) []history.LiveStep {
+	sec := func(s float64) time.Time { return t0.Add(time.Duration(s * float64(time.Second))) }
+	var out []history.LiveStep
+	for _, s := range in {
+		l := history.LiveStep{Key: s.key, Name: s.name, State: s.state}
+		if s.from >= 0 {
+			l.Started = sec(s.from)
+			if s.to >= 0 {
+				l.Completed = sec(s.to)
+			}
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// refBuild is a stored build of these steps (state built or cached).
+func refBuild(t0 time.Time, wall float64, in ...st) *history.Build {
+	b := &history.Build{Started: t0, Completed: t0.Add(time.Duration(wall * float64(time.Second)))}
+	for _, s := range liveSteps(t0, in...) {
+		b.Steps = append(b.Steps, history.Step{Key: s.Key, Name: s.Name, State: history.StepState(s.State), Started: s.Started, Completed: s.Completed})
+	}
+	return b
+}
+
+// The rest of a running build takes what its steps still to run took in
+// the reference, whatever came from the cache then or now.
 func TestPredict(t *testing.T) {
 	t0 := time.Date(2026, 10, 30, 11, 37, 0, 0, time.UTC)
-	ref := &liveRef{wall: 1100 * time.Second, steps: map[string]refStep{
-		liveKey("[a 1/1]", "RUN a"): {off: 0, dur: 100 * time.Second, built: true},
-		liveKey("[b 1/1]", "RUN b"): {off: 100 * time.Second, dur: 300 * time.Second, built: true},
-	}}
-	s := func(key, name, state string, from, to float64) history.LiveStep {
-		st := history.LiveStep{Key: key, Name: name, State: state, Started: t0.Add(time.Duration(from) * time.Second)}
-		if to >= 0 {
-			st.Completed = t0.Add(time.Duration(to) * time.Second)
+	r0 := t0.Add(-48 * time.Hour)
+	sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
+	for _, c := range []struct {
+		name    string
+		ref     *history.Build
+		now     []st
+		at      float64 // now, seconds from the start
+		says    bool
+		left    float64
+		sure    int
+		todo    int
+		unknown []string
+		place   map[float64]float64 // reference start -> likely start now
+		delta   float64             // with known
+		known   bool
+	}{{
+		// Finding: a ran then (10 min), comes from the cache now. The old
+		// figure was the whole reference less 15 s: 14 min 5 s.
+		name: "cached now, built then",
+		ref:  refBuild(r0, 925, st{"[s 1/3]", "RUN a", "built", 0, 600}, st{"[s 2/3]", "RUN b", "built", 600, 900}, st{"[s 3/3]", "RUN c", "built", 900, 920}),
+		now:  []st{{"[s 1/3]", "RUN a", "cached", 0, 0}, {"[s 2/3]", "RUN b", "running", 5, -1}, {"[s 3/3]", "RUN c", "waiting", -1, -1}},
+		at:   15, says: true, left: 290 + 20, sure: 2, todo: 2,
+		place: map[float64]float64{900: 15 + 290},
+	}, {
+		// Finding: a comes from the cache in the reference and runs now:
+		// no time for it, the other three count; 3 of 4 is enough.
+		name: "built now, cached then",
+		ref: refBuild(r0, 335, st{"[s 1/4]", "RUN a", "cached", 0, 0}, st{"[s 2/4]", "RUN b", "built", 0, 300},
+			st{"[s 3/4]", "RUN c", "built", 300, 320}, st{"[s 4/4]", "RUN d", "built", 320, 330}),
+		now: []st{{"[s 1/4]", "RUN a", "running", 0, -1}, {"[s 2/4]", "RUN b", "waiting", -1, -1},
+			{"[s 3/4]", "RUN c", "waiting", -1, -1}, {"[s 4/4]", "RUN d", "waiting", -1, -1}},
+		at: 10, says: true, left: 330, sure: 3, todo: 4, unknown: []string{"[s 1/4]"},
+		place: map[float64]float64{0: 10, 300: 310, 320: 330},
+	}, {
+		name: "too few steps with a time",
+		ref:  refBuild(r0, 335, st{"[s 2/4]", "RUN b", "built", 0, 300}, st{"[s 3/4]", "RUN c", "built", 300, 320}),
+		now: []st{{"[s 1/4]", "RUN a", "running", 0, -1}, {"[s 2/4]", "RUN b", "waiting", -1, -1},
+			{"[s 3/4]", "RUN c", "waiting", -1, -1}, {"[s 4/4]", "RUN e", "waiting", -1, -1}},
+		at: 10, says: false, left: 320, sure: 2, todo: 4, unknown: []string{"[s 1/4]", "[s 4/4]"},
+	}, {
+		name: "side by side then: counted once",
+		ref:  refBuild(r0, 330, st{"[x 1/1]", "RUN x", "built", 0, 100}, st{"[y 1/1]", "RUN y", "built", 0, 300}, st{"[z 1/1]", "RUN z", "built", 300, 320}),
+		now:  []st{{"[x 1/1]", "RUN x", "waiting", -1, -1}, {"[y 1/1]", "RUN y", "waiting", -1, -1}, {"[z 1/1]", "RUN z", "waiting", -1, -1}},
+		at:   0, says: true, left: 320, sure: 3, todo: 3,
+		place: map[float64]float64{0: 0, 300: 300},
+	}, {
+		// Finding 292: a build argument expanded in the text.
+		name: "text changed: by place",
+		ref:  refBuild(r0, 320, st{"[b 2/3]", "RUN make ID=1", "built", 10, 310}),
+		now:  []st{{"[b 2/3]", "RUN make ID=2", "running", 12, -1}},
+		at:   72, says: true, left: 240, sure: 1, todo: 1,
+	}, {
+		name: "another instruction at the place",
+		ref:  refBuild(r0, 320, st{"[b 2/3]", "COPY . .", "built", 10, 310}),
+		now:  []st{{"[b 2/3]", "RUN make ID=2", "running", 12, -1}},
+		at:   72, says: false, left: 0, sure: 0, todo: 1, unknown: []string{"[b 2/3]"},
+	}, {
+		name: "a place two steps share matches nothing",
+		ref:  refBuild(r0, 320, st{"[b 2/3]", "RUN make ID=1", "built", 10, 100}, st{"[b 2/3]", "RUN test ID=1", "built", 100, 310}),
+		now:  []st{{"[b 2/3]", "RUN make ID=2", "running", 12, -1}},
+		at:   72, says: false, sure: 0, todo: 1, unknown: []string{"[b 2/3]"},
+	}, {
+		name: "no key: no place",
+		ref:  refBuild(r0, 320, st{"", "RUN make ID=1", "built", 10, 100}),
+		now:  []st{{"", "RUN make ID=2", "running", 12, -1}},
+		at:   72, says: false, sure: 0, todo: 1, unknown: []string{"make ID=2"},
+	}, {
+		name: "longer than last time: done any moment",
+		ref:  refBuild(r0, 110, st{"[b 1/1]", "RUN b", "built", 0, 100}),
+		now:  []st{{"[b 1/1]", "RUN b", "running", 0, -1}},
+		at:   150, says: true, left: 0, sure: 1, todo: 1,
+	}, {
+		name: "20 s behind after a step both ran",
+		ref:  refBuild(r0, 1100, st{"[a 1/1]", "RUN a", "built", 0, 100}, st{"[b 1/1]", "RUN b", "built", 100, 400}),
+		now:  []st{{"[a 1/1]", "RUN a", "built", 0, 120}, {"[b 1/1]", "RUN b", "running", 120, -1}},
+		at:   200, says: true, left: 220, sure: 1, todo: 1, known: true, delta: 20,
+	}, {
+		name: "every step done: nothing to say",
+		ref:  refBuild(r0, 110, st{"[a 1/1]", "RUN a", "built", 0, 100}),
+		now:  []st{{"[a 1/1]", "RUN a", "cached", 0, 0}},
+		at:   10, says: false,
+	}} {
+		t.Run(c.name, func(t *testing.T) {
+			p := predict(liveSteps(t0, c.now...), t0, t0.Add(sec(c.at)), refOf(c.ref))
+			if p.says != c.says || p.left != sec(c.left) || p.sure != c.sure || p.todo != c.todo || p.total != sec(c.at+c.left) {
+				t.Errorf("says %v left %v sure %d of %d total %v; want %v %v %d of %d", p.says, p.left, p.sure, p.todo, p.total, c.says, sec(c.left), c.sure, c.todo)
+			}
+			if strings.Join(p.unknown, "|") != strings.Join(c.unknown, "|") {
+				t.Errorf("unknown %q, want %q", p.unknown, c.unknown)
+			}
+			if p.known != c.known || c.known && p.delta != sec(c.delta) {
+				t.Errorf("known %v delta %v", p.known, p.delta)
+			}
+			for off, want := range c.place {
+				if got := p.place(sec(off)); got != sec(want) {
+					t.Errorf("place(%v) = %v, want %v", sec(off), got, sec(want))
+				}
+			}
+		})
+	}
+}
+
+// A step whose text changes every pipeline is found by its place in the
+// Dockerfile; another image's build of the project is not a reference
+// once the job's image is known; too few known steps: no figure, and why.
+func TestRunningBuildByPlaceAndImage(t *testing.T) {
+	inst := history.InstancePrefix("https://gitlab.example.com/")
+	const pipe, job = 3_000_000_401, 9_900_001
+	t0 := testNow.Add(-65 * time.Second)
+	steps := liveSteps(t0, st{"[app 1/3]", "RUN npm ci", "cached", 0, 0}, st{"[app 2/3]", "RUN npm run build -- --build-id=48213377", "running", 5, -1},
+		st{"[app 3/3]", "RUN ./gen.sh", "waiting", -1, -1})
+	lb := collector.LiveBuild{Active: collector.Active{Daemon: "box-buildkit-abcde", Ref: "web-now", Started: t0, Instance: inst, Pipeline: pipe, Job: job},
+		Steps: steps, Running: 1}
+	f := following{live: live{{Name: "box-buildkit-abcde", Active: []collector.Active{lb.Active}}}, builds: map[string]*collector.LiveBuild{"web-now": &lb}}
+	ts, sto, _, _ := consoleWith(t, testOpts{Live: f})
+	rf := runningFixture{t, sto, inst}
+	rf.job(pipe, store.Job{JobID: job, Name: "build-web", Stage: "build", StartedAt: t0, PodRunning: t0})
+	save := func(ref, jobName string, pid, jid uint64, ago time.Duration, image string, in ...st) {
+		t.Helper()
+		b := refBuild(testNow.Add(-ago), 700, in...)
+		b.Ref, b.Daemon, b.Images = ref, "box-buildkit-abcde", []string{image}
+		b.Attribution = history.Attribution{State: history.Attributed, Instance: inst, Pipeline: pid, Job: jid}
+		rf.job(pid, store.Job{JobID: jid, Name: jobName, Stage: "build", StartedAt: b.Started})
+		if _, err := sto.SaveBuild(ctx, store.Build{Build: b, Generation: 1}); err != nil {
+			t.Fatal(err)
 		}
-		return st
 	}
-	// 20 s behind after a; b runs.
-	p := predict([]history.LiveStep{s("[a 1/1]", "RUN a", "built", 0, 120), s("[b 1/1]", "RUN b", "running", 120, -1)}, t0, t0.Add(200*time.Second), ref)
-	if !p.known || p.delta != 20*time.Second || p.total != 1120*time.Second || p.remaining != 920*time.Second {
-		t.Errorf("behind: %+v", p)
+	// The job's last build: its image, but the step came from the cache.
+	save("web-prev", "build-web", pipe-100, job-100, time.Hour, "registry.example.com/web:abc",
+		st{"[app 1/3]", "RUN npm ci", "cached", 0, 0}, st{"[app 2/3]", "RUN npm run build -- --build-id=1", "cached", 0, 0})
+	// Another image's build, newer than the right one: not a reference.
+	save("docs", "build-docs", pipe-200, job-200, 2*time.Hour, "registry.example.com/docs:1",
+		st{"[app 2/3]", "RUN npm run build -- --build-id=2", "built", 0, 100}, st{"[app 3/3]", "RUN ./gen.sh", "built", 100, 110})
+	// The same image from another job: the reference, matched by place.
+	save("web-nightly", "nightly-web", pipe-300, job-300, 3*time.Hour, "registry.example.com/web:nightly",
+		st{"[app 1/3]", "RUN npm ci", "built", 0, 600}, st{"[app 2/3]", "RUN npm run build -- --build-id=3", "built", 600, 790},
+		st{"[app 3/3]", "RUN ./gen.sh", "built", 790, 810})
+
+	p := get(t, ts, "/jobs/"+inst+"/9900001")
+	p.safe(t)
+	// 190 s then, 60 s so far; gen.sh 20 s.
+	for _, want := range []string{
+		nb("for 1 min 0 s; if the rest goes as last time, about 2 min 30 s left, from 2 of 2 remaining steps"),
+		nb("last time 3 min 10 s"), ">by place</abbr>",
+		"matched by place in the Dockerfile and instruction: <code>[app 2/3]</code> (RUN)",
+		"from cache (last time built, ",
+	} {
+		if !strings.Contains(p.body, want) {
+			t.Errorf("job page lacks %q", want)
+		}
 	}
-	// b already ran 100 s longer than the last time: the end moves out.
-	p = predict([]history.LiveStep{s("[a 1/1]", "RUN a", "built", 0, 120), s("[b 1/1]", "RUN b", "running", 120, -1)}, t0, t0.Add(520*time.Second), ref)
-	if p.total != 1220*time.Second {
-		t.Errorf("overrun: %+v", p)
+	if strings.Contains(p.body, nb("last time 1 min 40 s")) {
+		t.Error("another image's build is the reference")
 	}
-	// A step from the cache this time says nothing of the pace.
-	p = predict([]history.LiveStep{s("[a 1/1]", "RUN a", "cached", 0, 0)}, t0, t0.Add(10*time.Second), ref)
-	if p.known || p.total != 1100*time.Second {
-		t.Errorf("cached: %+v", p)
+
+	// Two of the three steps to run have no earlier run: no figure.
+	lb.Steps = liveSteps(t0, st{"[app 1/4]", "RUN npm ci", "built", 0, 3}, st{"[app 2/4]", "RUN npm run build -- --build-id=48213377", "running", 5, -1},
+		st{"[app 3/4]", "RUN npx playwright install chromium", "waiting", -1, -1}, st{"[app 4/4]", "RUN ./smoke.sh", "waiting", -1, -1})
+	save("web-4", "build-web", pipe-400, job-400, 4*time.Hour, "registry.example.com/web:4",
+		st{"[app 1/4]", "RUN npm ci", "built", 0, 600}, st{"[app 2/4]", "RUN npm run build -- --build-id=4", "built", 600, 790})
+	p = get(t, ts, "/jobs/"+inst+"/9900001")
+	p.safe(t)
+	for _, want := range []string{
+		"; no time left to say: 2 of the 3 steps still to run have no earlier run",
+		"No earlier run: <code>[app 3/4]</code>, <code>[app 4/4]</code>. The page says a time once at least 3 of every 4 steps still to run ran before.",
+		">no earlier run<",
+	} {
+		if !strings.Contains(p.body, want) {
+			t.Errorf("job page lacks %q", want)
+		}
+	}
+	if strings.Contains(p.body, "left, from") {
+		t.Error("a figure from too few known steps")
 	}
 }
