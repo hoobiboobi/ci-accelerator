@@ -60,6 +60,36 @@ type Credential interface {
 	Who() string
 }
 
+// Issued is a Credential that one GitLab issued (a person's sign-in): it
+// is sent to that GitLab only, never to another the console reads.
+type Issued interface {
+	// IssuedBy is the issuing GitLab's instance (trace-id prefix).
+	IssuedBy() string
+}
+
+// ErrOtherGitLab: the credential was issued by another GitLab than the one
+// a request is for; nothing is sent.
+var ErrOtherGitLab = errors.New("gitlab: the token is of another GitLab")
+
+// Sends says whether a request for instance may carry cred: instance is
+// one of the client's GitLabs and cred is not a token of another one.
+func (c *Client) Sends(cred Credential, instance string) bool {
+	_, err := c.base(cred, instance)
+	return err == nil
+}
+
+// base is instance's API root, when a request there may carry cred.
+func (c *Client) base(cred Credential, instance string) (string, error) {
+	base := c.bases[instance]
+	if base == "" {
+		return "", fmt.Errorf("gitlab: unknown instance %s", instance)
+	}
+	if is, ok := cred.(Issued); ok && is.IssuedBy() != instance {
+		return "", ErrOtherGitLab
+	}
+	return base, nil
+}
+
 // Token is a fixed token: a personal, project or group access token.
 type Token string
 
@@ -199,6 +229,7 @@ type apiJob struct {
 	Pipeline struct {
 		ID        uint64 `json:"id"`
 		ProjectID uint64 `json:"project_id"`
+		SHA       string `json:"sha"`
 		Status    string `json:"status"`
 		WebURL    string `json:"web_url"`
 	} `json:"pipeline"`
@@ -208,9 +239,9 @@ type apiJob struct {
 // earlier tries too: GitLab leaves them out unless asked).
 func (c *Client) Pipeline(ctx context.Context, cred Credential, instance string, project, pipeline uint64) (store.APIPipeline, error) {
 	out := store.APIPipeline{Instance: instance, ID: pipeline, ProjectID: project}
-	base := c.bases[instance]
-	if base == "" {
-		return out, fmt.Errorf("gitlab: unknown instance %s", instance)
+	base, err := c.base(cred, instance)
+	if err != nil {
+		return out, err
 	}
 	for page := 1; page > 0; {
 		u := fmt.Sprintf("%s/projects/%d/pipelines/%d/jobs?per_page=100&include_retried=true&page=%d", base, project, pipeline, page)
@@ -220,6 +251,9 @@ func (c *Client) Pipeline(ctx context.Context, cred Credential, instance string,
 		}
 		for _, j := range jobs {
 			out.Status, out.WebURL = j.Pipeline.Status, j.Pipeline.WebURL
+			if j.Pipeline.SHA != "" {
+				out.SHA = j.Pipeline.SHA
+			}
 			job := store.APIJob{ID: j.ID, Name: j.Name, Stage: j.Stage, Status: j.Status, WebURL: j.WebURL,
 				Queued: when(j.CreatedAt), Started: when(j.StartedAt), Finished: when(j.FinishedAt),
 				Duration: seconds(j.Duration), Waited: seconds(j.QueuedDuration), AllowFailure: j.AllowFailure}
@@ -269,8 +303,8 @@ type LogQuery struct {
 }
 
 // LogPart is a part of a job's log: its whole lines from byte Start to byte
-// End of the log as GitLab stores it (Size bytes when read), cleaned (see
-// CleanLog), not masked. Gap: more lines were added since After than one
+// End of the log as GitLab stores it (Size bytes when read), cleaned as
+// GitLab shows them (cleanPart), not masked. Gap: more lines were added since After than one
 // part holds; Text is their end and Start where it begins.
 type LogPart struct {
 	Text             string
@@ -292,9 +326,9 @@ const (
 // archived log, so only the bytes of the part travel; when it answers with
 // the whole log instead, the part is cut from it here.
 func (c *Client) JobLogPart(ctx context.Context, cred Credential, instance string, project, job uint64, q LogQuery) (LogPart, error) {
-	base := c.bases[instance]
-	if base == "" {
-		return LogPart{}, fmt.Errorf("gitlab: unknown instance %s", instance)
+	base, err := c.base(cred, instance)
+	if err != nil {
+		return LogPart{}, err
 	}
 	if q.Lines <= 0 {
 		q.Lines = 500
@@ -481,8 +515,8 @@ func (r *logReader) read(from, to int64) ([]byte, int64, error) {
 // not: Guests, pipelines visible to members only). 403 and 404 are no;
 // anything else is an error, never a yes.
 func (c *Client) CanReadJobs(ctx context.Context, cred Credential, instance string, project uint64) (bool, error) {
-	base := c.bases[instance]
-	if base == "" || project == 0 {
+	base, err := c.base(cred, instance)
+	if err != nil || project == 0 {
 		return false, nil
 	}
 	u := fmt.Sprintf("%s/projects/%d/jobs?per_page=1", base, project)
@@ -513,9 +547,9 @@ type User struct {
 // User returns the account cred belongs to.
 func (c *Client) User(ctx context.Context, cred Credential, instance string) (User, error) {
 	var u User
-	base := c.bases[instance]
-	if base == "" {
-		return u, fmt.Errorf("gitlab: unknown instance %s", instance)
+	base, err := c.base(cred, instance)
+	if err != nil {
+		return u, err
 	}
 	res, err := c.do(ctx, cred, base+"/user")
 	if err != nil {
@@ -544,23 +578,6 @@ var (
 	logStamp = regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z [0-9a-f]{2}[OE](\+?) ?`)
 )
 
-// CleanLog turns a job log as GitLab stores it into the text it shows.
-func CleanLog(s string) string {
-	s = logSection.ReplaceAllString(s, "")
-	s = logANSI.ReplaceAllString(s, "")
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	var out []string
-	for _, l := range strings.Split(s, "\n") {
-		l, cont := cleanLine(l)
-		// No empty piece around a section marker, no run of empty lines.
-		if l == "" && (cont || (len(out) > 0 && out[len(out)-1] == "")) {
-			continue
-		}
-		out = append(out, l)
-	}
-	return strings.Join(out, "\n")
-}
-
 // cleanLine is one line as shown (markers, colours and what a carriage
 // return overwrote taken out), and whether the runner marked it as the
 // continuation of the line before ("+").
@@ -579,7 +596,7 @@ func cleanLine(l string) (string, bool) {
 }
 
 // cleanPart cleans whole lines of a log (raw ends with a newline, or is
-// empty) exactly as CleanLog cleans them within the whole log: prevEmpty
+// empty) exactly as GitLab shows them within the whole log: prevEmpty
 // says that the last line shown before them is empty (see prevShownEmpty),
 // so parts read one by one join into what the whole log shows.
 func cleanPart(raw string, prevEmpty bool) string {
@@ -724,7 +741,7 @@ func (f *Fetcher) wait(cred Credential, err error) {
 // when one is due, and waits for it at most wait. The read goes on after
 // wait; the store announces the change when it lands.
 func (f *Fetcher) Ensure(cred Credential, instance string, project, pipeline uint64, status string, read time.Time, wait time.Duration) {
-	if f == nil || cred == nil || project == 0 || pipeline == 0 || !f.Client.Knows(instance) {
+	if f == nil || cred == nil || project == 0 || pipeline == 0 || !f.Client.Sends(cred, instance) {
 		return
 	}
 	if store.Finished(status) && !read.IsZero() {
@@ -841,7 +858,7 @@ func (f *Fetcher) read(key string, cred Credential, instance string, project, pi
 // JobLogPart reads a part of a job's log, unless GitLab asked this
 // credential to wait.
 func (f *Fetcher) JobLogPart(ctx context.Context, cred Credential, instance string, project, job uint64, q LogQuery) (LogPart, error) {
-	if f == nil || cred == nil || !f.Client.Knows(instance) || project == 0 {
+	if f == nil || cred == nil || !f.Client.Sends(cred, instance) || project == 0 {
 		return LogPart{}, errors.New("gitlab: no token for this GitLab, or the job's project is not known")
 	}
 	f.mu.Lock()
@@ -890,9 +907,9 @@ func (e *StatusError) Error() string { return fmt.Sprintf("gitlab: %s: %s", e.UR
 // and so does MaxCompare. A submodule whose commit changed is one path
 // with a trailing slash ("third_party/proto/"): everything in it changed.
 func (c *Client) Changed(ctx context.Context, cred Credential, instance string, project uint64, from, to string) ([]string, bool, error) {
-	base := c.bases[instance]
-	if base == "" {
-		return nil, false, fmt.Errorf("gitlab: unknown instance %s", instance)
+	base, err := c.base(cred, instance)
+	if err != nil {
+		return nil, false, err
 	}
 	u := fmt.Sprintf("%s/projects/%d/repository/compare?from=%s&to=%s&straight=true", base, project, url.QueryEscape(from), url.QueryEscape(to))
 	res, err := c.do(ctx, cred, u)
@@ -951,7 +968,7 @@ const gitlinkMode = "160000"
 
 // Changed is Client.Changed, waiting while GitLab asks the console to.
 func (f *Fetcher) Changed(ctx context.Context, cred Credential, instance string, project uint64, from, to string) ([]string, bool, error) {
-	if f == nil || cred == nil || !f.Client.Knows(instance) || project == 0 {
+	if f == nil || cred == nil || !f.Client.Sends(cred, instance) || project == 0 {
 		return nil, false, errors.New("gitlab: no token for this GitLab, or the project is not known")
 	}
 	f.mu.Lock()

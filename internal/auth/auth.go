@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -116,7 +118,11 @@ type Auth struct {
 	order  []string
 
 	locks sync.Map // session id (hex) -> *renewal: one refresh at a time
+	bg    sync.WaitGroup
 	cache access
+
+	usedMu sync.Mutex
+	used   map[string]int64 // state of a login cookie already answered -> its expiry (Unix)
 
 	// Elevate, when set, makes more people admins than the configuration
 	// names: a fleet hub's operators and owners, from its own store. It is
@@ -385,6 +391,11 @@ func SafePath(to string) string {
 	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
 		return "/"
 	}
+	// The redirect cleans the path: "/./auth/..." and "/x/../auth/..."
+	// arrive under /auth/ too.
+	if p := path.Clean(u.Path); p == "/auth" || strings.HasPrefix(p, "/auth/") {
+		return "/"
+	}
 	return to
 }
 
@@ -493,6 +504,10 @@ func (a *Auth) FinishWith(ctx context.Context, instance, login string, q url.Val
 		return p.To, "", fmt.Errorf("%w: it took too long", ErrSignIn)
 	case subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(p.State)) != 1:
 		return p.To, "", ErrOtherSignIn
+	case !a.useLogin(p):
+		// A login cookie answers one callback: a replay never reaches
+		// GitLab's token endpoint.
+		return p.To, "", fmt.Errorf("%w: this sign-in was already answered", ErrSignIn)
 	case q.Get("error") != "":
 		return p.To, "", ErrDenied
 	case q.Get("code") == "":
@@ -530,6 +545,39 @@ func (a *Auth) FinishWith(ctx context.Context, instance, login string, q url.Val
 		a.log.Info("signed in", "gitlab", x.host, "user", u.Username)
 	}
 	return p.To, base64.RawURLEncoding.EncodeToString(cookie), nil
+}
+
+// maxUsed bounds the login cookies remembered as answered. Past it (only
+// a flood of sign-ins started within ten minutes) one is forgotten per new
+// one, which lets at most that one answer a second time.
+const maxUsed = 100000
+
+// useLogin marks the sign-in p as answered; false when it already was.
+func (a *Auth) useLogin(p pending) bool {
+	now := a.cfg.Now().Unix()
+	a.usedMu.Lock()
+	defer a.usedMu.Unlock()
+	if _, ok := a.used[p.State]; ok {
+		return false
+	}
+	if a.used == nil {
+		a.used = map[string]int64{}
+	}
+	if len(a.used) >= maxUsed {
+		for s, x := range a.used {
+			if x < now {
+				delete(a.used, s)
+			}
+		}
+		for s := range a.used {
+			if len(a.used) < maxUsed {
+				break
+			}
+			delete(a.used, s)
+		}
+	}
+	a.used[p.State] = p.Expires
+	return true
 }
 
 // redactErr keeps an OAuth error's code and drops the response body.
@@ -584,6 +632,27 @@ func (a *Auth) Load(w http.ResponseWriter, r *http.Request) (*Viewer, error) {
 // or nil; touched says the session's last use was written and the cookie
 // should be set again (its lifetime starts anew).
 func (a *Auth) LoadCookie(ctx context.Context, raw string) (v *Viewer, touched bool, err error) {
+	return a.loadCookie(ctx, raw, true)
+}
+
+// Check is Load for a request that cannot renew the browser's cookie (an
+// open event stream): it never writes the session's last use, so the next
+// page the person opens does, and gets the cookie set again.
+func (a *Auth) Check(r *http.Request) (*Viewer, error) {
+	c, err := r.Cookie(SessionCookie)
+	if err != nil {
+		return nil, nil
+	}
+	return a.CheckCookie(r.Context(), c.Value)
+}
+
+// CheckCookie is LoadCookie without writing the session's last use.
+func (a *Auth) CheckCookie(ctx context.Context, raw string) (*Viewer, error) {
+	v, _, err := a.loadCookie(ctx, raw, false)
+	return v, err
+}
+
+func (a *Auth) loadCookie(ctx context.Context, raw string, touch bool) (v *Viewer, touched bool, err error) {
 	cookie, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil || len(cookie) != 32 {
 		return nil, false, nil
@@ -598,14 +667,24 @@ func (a *Auth) LoadCookie(ctx context.Context, raw string) (v *Viewer, touched b
 	}
 	now := a.cfg.Now()
 	in := a.insts[x.Instance]
-	if in == nil || now.Sub(x.Seen) > a.cfg.Idle || now.Sub(x.Created) > a.cfg.MaxAge {
+	if in == nil {
+		a.locks.Delete(fmt.Sprintf("%x", id))
 		return nil, false, a.store.DeleteSession(ctx, id)
 	}
-	if _, err := a.openTokens(id, x.Instance, x.Token); err != nil {
-		// Sealed with another key: the key was changed.
+	t, err := a.openTokens(id, x.Instance, x.Token)
+	if err != nil {
+		// Sealed with another key: the key was changed, and the token
+		// cannot be opened to revoke it.
+		a.locks.Delete(fmt.Sprintf("%x", id))
 		return nil, false, a.store.DeleteSession(ctx, id)
 	}
-	if now.Sub(x.Seen) > touchEvery {
+	if now.Sub(x.Seen) > a.cfg.Idle || now.Sub(x.Created) > a.cfg.MaxAge {
+		a.locks.Delete(fmt.Sprintf("%x", id))
+		err := a.store.DeleteSession(ctx, id)
+		a.revokeLater(ctx, in, t.Access)
+		return nil, false, err
+	}
+	if touch && now.Sub(x.Seen) > touchEvery {
 		if err := a.store.TouchSession(ctx, id, now); err != nil {
 			return nil, false, err
 		}
@@ -652,6 +731,7 @@ func (a *Auth) end(ctx context.Context, id []byte) error {
 		return err
 	}
 	deleted := a.store.DeleteSession(ctx, id)
+	a.locks.Delete(fmt.Sprintf("%x", id))
 	revoked := false
 	host := ""
 	if in := a.insts[x.Instance]; in != nil {
@@ -701,9 +781,47 @@ func (a *Auth) revoke(ctx context.Context, in *inst, token string) error {
 	return nil
 }
 
-// Prune ends the sessions idle for longer than the idle time.
+// revokeLater revokes a token at GitLab in the background, best effort:
+// a session that ended by age took the person's request nowhere, and
+// GitLab is not waited for.
+func (a *Auth) revokeLater(ctx context.Context, in *inst, token string) {
+	ctx = context.WithoutCancel(ctx)
+	a.bg.Add(1)
+	go func() {
+		defer a.bg.Done()
+		if err := a.revoke(ctx, in, token); err != nil && a.log != nil {
+			a.log.Warn("token of an ended session not revoked at GitLab", "gitlab", in.host, "err", err)
+		}
+	}()
+}
+
+// Prune ends the sessions idle for longer than the idle time, and
+// forgets the renewal state of sessions that are gone and the answered
+// sign-ins whose login cookie has expired.
 func (a *Auth) Prune(ctx context.Context) (int64, error) {
-	return a.store.DeleteIdleSessions(ctx, a.cfg.Now().Add(-a.cfg.Idle), a.cfg.Now().Add(-a.cfg.MaxAge))
+	now := a.cfg.Now().Unix()
+	a.usedMu.Lock()
+	for s, x := range a.used {
+		if x < now {
+			delete(a.used, s)
+		}
+	}
+	a.usedMu.Unlock()
+	n, err := a.store.DeleteIdleSessions(ctx, a.cfg.Now().Add(-a.cfg.Idle), a.cfg.Now().Add(-a.cfg.MaxAge))
+	if err != nil {
+		return n, err
+	}
+	a.locks.Range(func(k, _ any) bool {
+		id, herr := hex.DecodeString(k.(string))
+		if herr == nil {
+			if _, serr := a.store.Session(ctx, id); !errors.Is(serr, store.ErrNotFound) {
+				return ctx.Err() == nil
+			}
+		}
+		a.locks.Delete(k)
+		return true
+	})
+	return n, nil
 }
 
 // ---- the viewer's token ----
@@ -743,6 +861,10 @@ func (v *Viewer) Usable() bool { return v != nil && v.a != nil }
 
 // Who names the viewer for GitLab's rate limits.
 func (v *Viewer) Who() string { return fmt.Sprintf("%s/%d", v.Instance, v.UserID) }
+
+// IssuedBy is the GitLab that issued the viewer's token: the only one it
+// is sent to (an admin sees another GitLab's projects from the store).
+func (v *Viewer) IssuedBy() string { return v.Instance }
 
 func (a *Auth) tokens(ctx context.Context, v *Viewer) (tokens, error) {
 	x, err := a.store.Session(ctx, v.id)

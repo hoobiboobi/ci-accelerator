@@ -596,7 +596,7 @@ var fzMethods = []fzMethod{
 	{"events", nil, false, func(ctx context.Context, c *Client) ([]any, error) {
 		sub := c.Subscribe()
 		defer c.Unsubscribe(sub)
-		err := c.follow(ctx)
+		_, err := c.follow(ctx)
 		if err == io.ErrUnexpectedEOF {
 			err = nil // the stream's normal end
 		}

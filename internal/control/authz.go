@@ -6,8 +6,10 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +95,74 @@ type TokenReviewer struct {
 
 	mu      sync.Mutex
 	answers map[[32]byte]review
+	// Reviews of tokens without a kept answer, bounded per caller address
+	// and overall: whoever reaches the API cannot make the controller ask
+	// Kubernetes once per request.
+	sources map[string]*bucket
+	all     bucket
+}
+
+// Bounds of the reviews: a caller address may have reviewBurst at once
+// and one more every reviewEvery; every caller together allBurst at once
+// and one more every allEvery. A legitimate caller needs a review when its
+// token is new or its answer is no longer kept (minutes apart).
+const (
+	reviewBurst = 5
+	reviewEvery = time.Second
+	allBurst    = 200
+	allEvery    = 20 * time.Millisecond
+)
+
+// errTooManyReviews: the bounds above were reached; the caller is asked
+// to try again (a 503), and a token confirmed lately is still good.
+var errTooManyReviews = fmt.Errorf("%w: too many tokens to check at once", ErrReviewUnavailable)
+
+// bucket is a token bucket: up to burst at once, one more every every.
+type bucket struct {
+	n  float64
+	at time.Time
+}
+
+func (b *bucket) take(now time.Time, burst int, every time.Duration) bool {
+	if b.at.IsZero() {
+		b.n = float64(burst)
+	} else {
+		b.n = min(float64(burst), b.n+float64(now.Sub(b.at))/float64(every))
+	}
+	b.at = now
+	if b.n < 1 {
+		return false
+	}
+	b.n--
+	return true
+}
+
+// mayReview takes a review for a caller at addr; t.mu is held.
+func (t *TokenReviewer) mayReview(addr string, now time.Time) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if t.sources == nil {
+		t.sources = map[string]*bucket{}
+	}
+	if len(t.sources) > 10000 {
+		// Drop the addresses whose bucket is full again: they lose nothing.
+		for k, b := range t.sources {
+			if now.Sub(b.at) >= reviewBurst*reviewEvery {
+				delete(t.sources, k)
+			}
+		}
+	}
+	b := t.sources[host]
+	if b == nil {
+		b = &bucket{}
+		t.sources[host] = b
+	}
+	if !b.take(now, reviewBurst, reviewEvery) {
+		return false
+	}
+	return t.all.take(now, allBurst, allEvery)
 }
 
 type review struct {
@@ -114,8 +184,13 @@ func (t *TokenReviewer) Authorize(r *http.Request) (Role, error) {
 		t.mu.Unlock()
 		return a.role, a.err
 	}
+	may := t.mayReview(r.RemoteAddr, time.Now())
 	t.mu.Unlock()
-	role, err, keep := t.review(r.Context(), token)
+	var role Role
+	err, keep := errTooManyReviews, false
+	if may {
+		role, err, keep = t.review(r.Context(), token)
+	}
 	now := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -132,13 +207,12 @@ func (t *TokenReviewer) Authorize(r *http.Request) (Role, error) {
 		t.answers = map[[32]byte]review{}
 	}
 	if len(t.answers) > 10000 {
+		// Refusals go before confirmed tokens: only the allowed
+		// ServiceAccounts' tokens are confirmed, a bounded few.
 		for k, a := range t.answers {
-			if !now.Before(a.stale) {
+			if !now.Before(a.stale) || a.err != nil {
 				delete(t.answers, k)
 			}
-		}
-		if len(t.answers) > 10000 {
-			t.answers = map[[32]byte]review{}
 		}
 	}
 	k, g := t.Keep, t.Grace
@@ -167,6 +241,11 @@ func (t *TokenReviewer) review(ctx context.Context, token string) (Role, error, 
 		return "", fmt.Errorf("%w: %v", ErrReviewUnavailable, err), false
 	}
 	if !tr.Status.Authenticated {
+		return "", ErrUnauthenticated, true
+	}
+	// An authenticator that does not know audiences ignores the one asked
+	// for and answers none: such a token is not one for the controller.
+	if !slices.Contains(tr.Status.Audiences, t.Audience) {
 		return "", ErrUnauthenticated, true
 	}
 	ns, name, ok := serviceAccount(tr.Status.User.Username)

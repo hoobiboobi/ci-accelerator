@@ -17,6 +17,7 @@ import (
 
 	"github.com/hoobiboobi/ci-accelerator/internal/auth"
 	"github.com/hoobiboobi/ci-accelerator/internal/gitlab"
+	"github.com/hoobiboobi/ci-accelerator/internal/logging"
 	"github.com/hoobiboobi/ci-accelerator/internal/store"
 )
 
@@ -101,6 +102,7 @@ type Server struct {
 	methods  map[string]reflect.Value
 	stopping chan struct{}
 	stopOnce sync.Once
+	refused  logging.Every // refused calls: a line a minute per path and status
 }
 
 // Stop ends the event streams at once (http.Server.Shutdown waits for
@@ -120,12 +122,12 @@ var (
 		"Previous", "StepHistory", "Output", "DaemonCounts", "ProjectCache", "Elsewhere", "SettleElsewhere", "Compared", "ComparedMarked", "SaveCompare",
 		"Recent", "BuildHints", "BuildOrder", "Ping", "Daemons", "LiveBuild"}
 	gitlabMethods = []string{"Ensure", "JobLogPart", "Changed", "Status"}
-	authMethods   = []string{"BeginWith", "FinishWith", "LoadCookie", "EndCookie"}
+	authMethods   = []string{"BeginWith", "FinishWith", "LoadCookie", "CheckCookie", "EndCookie"}
 	// notForHub are the methods a hub may not call over the link: the
 	// store's writes, and the sign-in of this console (the hub signs
 	// people in itself).
 	notForHub = map[string]bool{"SettleElsewhere": true, "SaveCompare": true,
-		"BeginWith": true, "FinishWith": true, "LoadCookie": true, "EndCookie": true, "CanReadAs": true}
+		"BeginWith": true, "FinishWith": true, "LoadCookie": true, "CheckCookie": true, "EndCookie": true, "CanReadAs": true}
 )
 
 type roleKey struct{}
@@ -156,6 +158,7 @@ func (s *Server) init() {
 	}
 	s.methods = map[string]reflect.Value{}
 	s.stopping = make(chan struct{})
+	s.refused.Period = time.Minute
 	add := func(recv any, names []string) {
 		v := reflect.ValueOf(recv)
 		for _, n := range names {
@@ -230,7 +233,7 @@ func (s *Server) authorized(want Role, h http.Handler) http.Handler {
 					status = http.StatusServiceUnavailable
 					w.Header().Set("Retry-After", "5")
 				}
-				s.Log.Warn("controller API refused a call", "path", r.URL.Path, "err", err)
+				s.refused.Warn(s.Log, fmt.Sprintf("%s %d", r.Pattern, status), "controller API refused a call", "path", r.URL.Path, "err", err)
 				http.Error(w, err.Error(), status)
 				return
 			}
