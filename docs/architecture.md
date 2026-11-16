@@ -421,6 +421,49 @@ Tokens, cookies, query strings, build arguments and step output are never
 logged. Commands and details:
 [troubleshooting, "Reading the logs"](troubleshooting.md#reading-the-logs).
 
+## A fleet: one hub, members that dial out
+
+Experimental: its values, the management API and the link's protocol may
+change between releases ([fleet.md](fleet.md),
+[ADR-0063](adr/0063-fleet-hub.md), [ADR-0064](adr/0064-fleet-administration.md)).
+
+- **The hub** is a release of the control-plane chart with
+  `fleet.role: hub`, in a namespace of its own: one process (the role
+  `hub` of the same image, Deployment and Service `<release>-web`) with
+  the console's pages, sign-in, the members' connections, the management
+  API (`/api/v1/fleet/`) and its own SQLite store for sessions, members,
+  roles, tokens, the audit log and the secrets it seals for its clusters
+  (`fleet.secretsKey`). It runs no daemons, controller, routers or
+  runner, and keeps no builds.
+- **A member** is a box with `fleet.role: member`. Its controller keeps
+  one outgoing WebSocket to the hub's console address (`/fleet/v1/connect`,
+  through the user's Ingress), so the member needs no inbound address.
+  Over it runs one TLS 1.3 session in which each side proves a key the
+  other has pinned (Ed25519 or ECDSA, no CA), and inside it a multiplexer
+  (yamux): the hub opens a stream per request and the controller answers
+  with its own API, as it answers a web. A member's own web is not
+  installed, and its sign-in values are ignored.
+- **Joining:** by name and public key through the management API, or with
+  a one-time join token the hub issues ("Add a cluster"), which the
+  controller trades at `/fleet/v1/join` for its key's registration. The
+  hub can deliver the runner's token, a GitLab token and S3 keys over the
+  link into the member's `fleet-*` Secrets; the controller may change
+  only those Secrets.
+- **Pages:** the hub serves each member's console under
+  `/m/<name>.<mark>/` (the mark names the member's store) from that
+  member's controller, asking it while someone looks; nothing is copied.
+  Job and pipeline addresses printed in job logs name no cluster: the hub
+  asks every member and sends the link to the one that ran the job, and
+  groups a pipeline whose jobs ran in several clusters by cluster.
+  Answers are bounded (64 MiB); pages a person opened are kept in the
+  hub's memory and shown, dated, for at most a day while their cluster is
+  away. The hub never sends a person's session to a member and writes
+  nothing into a member's history; each member reads GitLab with its own
+  token.
+- **Versions:** the controller's API states its version; the hub accepts
+  its link protocol and the one before it, and refuses a member that speaks
+  a newer one, so a fleet upgrades its hub first.
+
 ## Rollouts and restarts
 
 **What restarts the daemons.** The pod template changes, so every daemon

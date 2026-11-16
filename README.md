@@ -19,9 +19,12 @@ hardware you already run.
 > its [GitLab mirror](https://gitlab.com/ci-accelerator/ci-accelerator/-/pipelines).
 > Open a running job to watch its build live.
 
-> **Status:** v0.6.0 is released: signed charts and the ci-accelerator image on
-> ghcr.io, installed as in the [Quickstart](#quickstart). Documentation of
-> the released version: [ci-accelerator.io](https://ci-accelerator.io/docs/).
+> **Status:** v1.0.0-alpha.1 is an alpha pre-release: signed charts and the
+> ci-accelerator image on ghcr.io, installed as in the
+> [Quickstart](#quickstart) below. It brings the fleet hub (experimental)
+> and the fixes of a full audit. v0.6.0 stays the latest stable release
+> (install it with `--version 0.6.0`); its documentation is at
+> [ci-accelerator.io](https://ci-accelerator.io/docs/).
 
 ## Why
 
@@ -108,6 +111,28 @@ a GitLab token, or with sign-in through GitLab:
 [docs/console.md](docs/console.md). Its JSON API is described in
 [docs/api/openapi.yaml](docs/api/openapi.yaml).
 
+### Several clusters: a fleet (experimental)
+
+One box serves one cluster. With several, install a **hub** (a release of
+the control-plane chart with `fleet.role: hub`) and let each box join it
+as a **member**: one console, one address and one sign-in for all of them.
+
+- Each member keeps its builds, daemons, router and controller; the hub
+  asks a member while someone looks at its pages and copies nothing.
+- A member dials **out** to the hub over HTTPS (a WebSocket through your
+  Ingress), so it works behind NAT; both sides pin each other's key.
+- The hub shows each cluster's console under `/m/<name>/` with a cluster
+  switcher, groups a pipeline whose jobs ran in several clusters by
+  cluster, and sends the job links printed in job logs to the cluster
+  that ran the job.
+- Administration lives in the hub: roles (viewer, operator, owner), API
+  tokens, an audit log, and "Add a cluster" with generated values and a
+  one-time join token; the runner's token and S3 keys can be sealed at the
+  hub and delivered over the link.
+
+Its values, its management API (`/api/v1/fleet/`) and its protocol may
+still change between releases: [docs/fleet.md](docs/fleet.md).
+
 ## Quickstart
 
 Two ways to start; each is a step-by-step page with what every command
@@ -119,8 +144,8 @@ One clean Linux machine (Ubuntu 24.04 or Debian 13, 4 CPUs, 8 GB, 40 GB
 of disk) and a runner token from GitLab, in a file:
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.6.0/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.6.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v1.0.0-alpha.1/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v1.0.0-alpha.1/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 sudo bash quickstart.sh --gitlab-url https://gitlab.com/ --runner-token-file ./runner-token
 ```
 
@@ -134,7 +159,7 @@ them with the Helm the script installed:
 
 ```sh
 sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
-  oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
+  oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 1.0.0-alpha.1 \
   -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait --timeout 15m
 ```
 
@@ -156,7 +181,7 @@ kubectl label namespace ci-accelerator pod-security.kubernetes.io/enforce=privil
 # tag ci-accelerator, untagged jobs off (docs/install.md, step 4)
 kubectl -n ci-accelerator create secret generic gitlab-runner-token \
   --from-literal=runner-token=glrt-... --from-literal=runner-registration-token=
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 1.0.0-alpha.1 \
   -n ci-accelerator -f values.yaml --wait --timeout 10m
 ```
 
@@ -187,8 +212,8 @@ hash:
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.6.0/ci/gitlab/build.yml
-    integrity: sha256-Hp1o0lc/x3VdadiYVMbcFywe2DL8YkGSGr2K/KpQ8w8=   # 0.6.0's; the install notes and the release page print it
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v1.0.0-alpha.1/ci/gitlab/build.yml
+    integrity: sha256-mXeWjZPeANlsJA+RGY1aDDuYHHtO083/MJAFEl7XGzE=   # 1.0.0-alpha.1's; the install notes and the release page print it
     inputs:
       runner-tags: [ci-accelerator]   # the tag you gave the runner
 ```
