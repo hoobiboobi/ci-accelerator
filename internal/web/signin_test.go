@@ -110,11 +110,18 @@ func newSignInGitLab(t *testing.T) *signInGitLab {
 // browser signed in as a person ("" for nobody).
 func signedIn(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *signInGitLab, func(user string) *http.Client) {
 	t.Helper()
+	ts, st, ids, g, browser, _ := signedInServer(t)
+	return ts, st, ids, g, browser
+}
+
+// signedInServer is signedIn with the console's pages.
+func signedInServer(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *signInGitLab, func(user string) *http.Client, *Server) {
+	t.Helper()
 	g := newSignInGitLab(t)
 	to, _ := url.Parse(g.srv.URL)
 	via := &http.Client{Transport: rewrite{to}, Timeout: 10 * time.Second}
 	const gl = "https://gitlab.example.com/"
-	ts, st, ids, _ := consoleBuild(t, func(st *store.Store) testOpts {
+	ts, st, ids, srv := consoleBuild(t, func(st *store.Store) testOpts {
 		client := gitlab.New([]string{gl})
 		client.HTTP = via
 		a, err := auth.New(auth.Config{PublicURL: "https://127.0.0.1", Key: make([]byte, 32), HTTP: via, Now: g.now,
@@ -153,7 +160,7 @@ func signedIn(t *testing.T) (*httptest.Server, *store.Store, map[string]int64, *
 		}
 		return c
 	}
-	return ts, st, ids, g, browser
+	return ts, st, ids, g, browser, srv
 }
 
 func fetch(t *testing.T, c *http.Client, ts *httptest.Server, method, path string, h map[string]string) page {

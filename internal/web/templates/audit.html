@@ -1,0 +1,19 @@
+{{define "audit"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs">Fleet</div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">Audit</h1></div>
+    <div class="sub"><span>Who changed what at this hub: people, API tokens, the values, commands in the hub's pod. Kept a year; secrets are recorded without their values.</span></div></header>
+  <form class="filters" method="get" action="/~/audit">
+    <label><span>Who</span><select name="who" id="aWho"><option value="">Anyone</option>{{range .Actors}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+    <label><span>Target</span><select name="target" id="aTarget"><option value="">Anything</option>{{range .Targets}}<option value="{{.Value}}" {{if .On}}selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+    <button class="btn" type="submit">Show</button>
+  </form>
+  <section class="box" aria-labelledby="auT"><div class="boxh"><h2 class="h" id="auT">Records</h2><span class="muted">newest first</span></div>
+    {{if .Rows}}<div class="tbox flat"><table class="ptable"><thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">What</th><th scope="col">Target</th><th scope="col">Detail</th></tr></thead><tbody>
+    {{range .Rows}}<tr><td class="nowrap"><span title="{{.When.Text}} · {{.At.UTC}}">{{.At.Text}}</span></td><td>{{.Actor}}</td><td title="{{.Action}}">{{.What}}</td><td>{{.Target}}</td><td class="muted">{{.Detail}}</td></tr>{{end}}
+    </tbody></table></div>
+    {{with .Older}}<a class="more" href="/~{{.}}">Older records</a>{{end}}
+    {{else}}<p class="pad muted">No record{{if or .Who .Target}} matches{{end}}.</p>{{end}}</section>
+</div>
+{{end}}

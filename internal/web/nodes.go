@@ -226,12 +226,21 @@ func nodeLabel(r NodeRow) string {
 	return r.Short + " on " + r.Node
 }
 
+// nodesHidden says whether the person on a page may not see the build
+// nodes: at a fleet hub, one who may read no project of this cluster.
+// (A box shows its nodes to everyone signed in.)
+func (s *Server) nodesHidden(sh Shell) bool { return s.opt.Fleet != nil && sh.NoProjects }
+
 func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	loc := zone(r)
 	ctx := r.Context()
 	sh, err := s.shell(r, "nodes", "")
 	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	if s.nodesHidden(sh) {
+		s.notFound(w, r, "page")
 		return
 	}
 	sh.LiveNodes = true
@@ -499,6 +508,10 @@ func (s *Server) node(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if s.nodesHidden(sh) {
+		s.notFound(w, r, "build node")
+		return
+	}
 	since := s.now().Add(-24 * time.Hour)
 	counts, err := s.data.DaemonCounts(ctx, since, store.ProjectsIn{All: d != nil})
 	if err != nil {
@@ -574,7 +587,7 @@ func builtFor(built []store.ProjectBuilds, readable []store.Project, current sto
 		if name == "" {
 			name = "project " + strconv.FormatUint(p.ID, 10)
 		}
-		np := NodeProject{Name: name, URL: "/projects/" + p.Instance + "/" + strconv.FormatUint(p.ID, 10) + "?to=/builds", Builds: pb.Builds,
+		np := NodeProject{Name: name, URL: "/projects/" + instSeg(p.Instance) + "/" + strconv.FormatUint(p.ID, 10) + "?to=/builds", Builds: pb.Builds,
 			Current: p.ProjectKey == current}
 		if np.Current {
 			ps = append([]NodeProject{np}, ps...)

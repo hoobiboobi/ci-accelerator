@@ -328,12 +328,12 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, created ti
 	}
 	var wjobs []wfJob
 	for i := len(rows) - 1; i >= 0; i-- {
-		page, err := s.data.BuildPage(ctx, rows[i].ID)
+		page, err := s.buildPage(ctx, rows[i].ID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, "", CritPath{}, 0, err
-		}
-		if page == nil {
-			continue
 		}
 		d, err := s.explain(ctx, page)
 		if err != nil {
@@ -393,11 +393,11 @@ func (s *Server) pipelineWaterfall(ctx context.Context, title string, created ti
 				live++
 				b, views := liveBuild(lbs[0], s.now())
 				wjobs = append(wjobs, wfJob{Name: j.Name, Status: chip, Times: jt, Build: b, Views: views, Live: true,
-					Link: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.ID), Stage: j.Stage})
+					Link: fmt.Sprintf("/jobs/%s/%d", instSeg(j.Instance), j.ID), Stage: j.Stage})
 				continue
 			}
 		}
-		wjobs = append(wjobs, wfJob{Name: j.Name, Status: chip, Times: jt, Note: note, Link: fmt.Sprintf("/jobs/%s/%d", j.Instance, j.ID), Stage: j.Stage})
+		wjobs = append(wjobs, wfJob{Name: j.Name, Status: chip, Times: jt, Note: note, Link: fmt.Sprintf("/jobs/%s/%d", instSeg(j.Instance), j.ID), Stage: j.Stage})
 		if chip == nil { // the grey bars of the jobs that ended
 			drawn++
 		}
@@ -618,7 +618,12 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 		// its own: none is opened as the job's.
 		var pipeline uint64
 		for i, bid := range ids {
-			p, err := s.data.BuildPage(ctx, bid)
+			p, err := s.buildPage(ctx, bid)
+			if errors.Is(err, store.ErrNotFound) {
+				// A build not there to read leaves open which are the job's.
+				ids = nil
+				break
+			}
 			if err != nil {
 				s.fail(w, err)
 				return
@@ -634,7 +639,7 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 		// A job with several builds opens its last; the page lists the others.
 		// The link in a job's log comes here: the page says so. (The build
 		// page checks its own project.)
-		http.Redirect(w, r, fmt.Sprintf("/builds/%d?via=log", ids[len(ids)-1]), http.StatusFound)
+		s.redirect(w, r, fmt.Sprintf("/builds/%d?via=log", ids[len(ids)-1]), http.StatusFound)
 		return
 	}
 	if j == nil {
@@ -668,10 +673,10 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) {
 	}
 	jobFacts(v, j, pipeStatus, inZone(s.now(), zone(r)))
 	if j.PipelineID != 0 {
-		v.PipeURL, v.PipeLabel = "/pipelines/"+store.PipelineKey(instance, j.PipelineID), "#"+strconv.FormatUint(j.PipelineID, 10)
+		v.PipeURL, v.PipeLabel = "/pipelines/"+pipeKey(instance, j.PipelineID), "#"+strconv.FormatUint(j.PipelineID, 10)
 	}
 	if api := s.api(r); api != nil && api.Knows(instance) && j.ProjectID != 0 {
-		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", instance, id)
+		v.LogURL = fmt.Sprintf("/jobs/%s/%d/log", instSeg(instance), id)
 	}
 	if v.Running && j.PipelineID != 0 {
 		nodes := map[string]string{}

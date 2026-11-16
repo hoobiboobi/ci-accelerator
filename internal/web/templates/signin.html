@@ -12,7 +12,8 @@
 <body class="signin-page">
 <main class="signin" aria-labelledby="signinT">
   <div class="signin-brand"><span class="mark"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 11.5 7 4l2.5 5L13 4.5"/></svg></span>ci-accelerator</div>
-  <h1 id="signinT">Sign in to the console</h1>
+  <h1 id="signinT">{{if .Hub}}Sign in to the fleet{{else}}Sign in to the console{{end}}</h1>
+  {{if .NoOwners}}<div class="callout warn" role="status">{{icon "warn" 15 "i"}}<div><b class="k">This hub has no owners yet.</b> Add GitLab user ids to <code>signIn.gitlab[].owners</code> and upgrade the release, or give Terraform a bootstrap token (<code>fleet.apiToken</code>). <a class="link" href="https://github.com/hoobiboobi/ci-accelerator/blob/main/docs/fleet.md">The fleet guide</a> says how.</div></div>{{end}}
   <p>The console reads GitLab with your account. You see the builds and jobs of the projects whose jobs you can read in GitLab.</p>
   {{with .Message}}<div class="callout {{if $.Bad}}warn{{else}}neutral{{end}}" role="status">{{icon "info" 15 "i"}}<div>{{.}}</div></div>{{end}}
   <div class="signin-choices">

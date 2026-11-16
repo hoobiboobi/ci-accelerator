@@ -1,9 +1,10 @@
-{{define "layout"}}<!doctype html>
-<html lang="en"{{with .Zone}} data-tz="{{.}}"{{end}}>
+{{define "layout"}}{{/* $hub: the fleet hub's own pages (Members, Access, Audit), which have
+   none of a cluster's pages. */}}{{$hub := and .Fleet (not .Fleet.Current)}}<!doctype html>
+<html lang="en"{{with .Zone}} data-tz="{{.}}"{{end}}{{if .Posted}} data-posted="true"{{end}}{{with .Base}} data-base="{{.}}"{{end}}{{if $hub}} data-hub="true"{{end}}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>{{with .Title}}{{.}} · {{end}}ci-accelerator</title>
+<title>{{with .Title}}{{.}} · {{end}}{{with .Fleet}}{{with .Current}}{{.}} · {{end}}{{end}}ci-accelerator</title>
 {{template "preview" .}}
 <link rel="icon" href="{{asset "favicon.svg"}}" type="image/svg+xml">
 <link rel="stylesheet" href="{{asset "console.css"}}">
@@ -17,8 +18,21 @@
       <a class="brand" href="/" aria-label="ci-accelerator home"><span class="mark"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 11.5 7 4l2.5 5L13 4.5"/></svg></span><span class="brand-name">ci-accelerator</span></a>
       <button class="iconbtn" id="collapseBtn" type="button" aria-label="Collapse sidebar ([)" aria-expanded="true">{{icon "side" 15}}</button>
     </div>
+    {{with .Fleet}}
+    <button class="sbtn projsw clsw" id="clusterBtn" type="button" aria-expanded="false" aria-controls="clusterMenu">
+      <span class="av" aria-hidden="true">{{if .Current}}{{projInitial .Current}}{{else}}*{{end}}</span>
+      <span class="lbl"><span>{{if .Current}}{{.Current}}{{else}}All clusters{{end}}</span><small>Cluster</small></span>
+      <span class="lbl chevw">{{icon "chevD" 13}}</span>
+    </button>
+    <div class="projmenu clmenu" id="clusterMenu" hidden>
+      <div class="hint">Cluster</div>
+      <a class="sbtn" href="/~/" aria-current="{{if not .Current}}true{{else}}false{{end}}">{{if not .Current}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">All clusters</span></a>
+      {{$cur := .Current}}{{range .Members}}{{if eq .State "connected"}}<a class="sbtn" href="/~/m/{{.Name}}/" aria-current="{{if eq .Name $cur}}true{{else}}false{{end}}">{{if eq .Name $cur}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{.Name}}</span></a>{{else}}<a class="sbtn off" href="/~/m/{{.Name}}/" aria-current="{{if eq .Name $cur}}true{{else}}false{{end}}">{{if eq .Name $cur}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{.Name}}</span><span class="count">not connected</span></a>{{end}}{{end}}
+      <div class="hint">{{.Connected}} of {{len .Members}} connected. The cluster filters every page.</div>
+    </div>
+    {{end}}
     {{if not .NoProjects}}{{with .Project}}{{if .ID}}
-    <button class="sbtn projsw" id="projBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="projMenu">
+    <button class="sbtn projsw" id="projBtn" type="button" aria-expanded="false" aria-controls="projMenu">
       <span class="av" aria-hidden="true">{{projInitial .Path}}</span>
       <span class="lbl"><span>{{projName .Path .ID}}</span><small>{{projNS .Path}}</small></span>
       <span class="lbl chevw">{{icon "chevD" 13}}</span>
@@ -26,17 +40,30 @@
     {{end}}{{end}}{{end}}
     <div class="projmenu" id="projMenu" hidden>
       <div class="hint">Project</div>
-      {{$cur := .Project}}{{range .Projects}}{{$on := and (eq .ID $cur.ID) (eq .Instance $cur.Instance)}}<a class="sbtn" href="/projects/{{.Instance}}/{{.ID}}{{with navPage $.Nav}}?to={{.}}{{end}}" aria-current="{{if $on}}true{{else}}false{{end}}">{{if $on}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span></a>{{end}}
+      {{$cur := .Project}}{{range .Projects}}{{$on := and (eq .ID $cur.ID) (eq .Instance $cur.Instance)}}<a class="sbtn" href="/projects/{{instSeg .Instance}}/{{.ID}}{{with navPage $.Nav}}?to={{.}}{{end}}" aria-current="{{if $on}}true{{else}}false{{end}}">{{if $on}}{{icon "check" 13}}{{else}}<span class="sp13"></span>{{end}}<span class="lbl">{{if .Path}}{{.Path}}{{else}}project {{.ID}}{{end}}</span></a>{{end}}
       <div class="hint">{{if gt (len .Projects) 1}}The project filters every page.{{else}}One project on this box. With more, this filters every page.{{end}}</div>
     </div>
-    <button class="sbtn search" id="searchBtn" type="button" aria-label="Search or jump to (Ctrl+K)">{{icon "search" 15}}<span class="lbl">Search or jump to…</span><kbd id="kbdK">⌘K</kbd></button>
-    <nav class="navgrp nav" aria-label="Main">
-      <a class="sbtn" href="/" {{if eq .Nav "pipelines"}}aria-current="page"{{end}}>{{icon "pipes" 15}}<span class="lbl">Pipelines</span></a>
-      <a class="sbtn" href="/insights" {{if eq .Nav "insights"}}aria-current="page"{{end}}>{{icon "overview" 15}}<span class="lbl">Insights</span></a>
-      <a class="sbtn" href="/builds" {{if eq .Nav "builds"}}aria-current="page"{{end}}>{{icon "builds" 15}}<span class="lbl">Builds</span></a>
-      <a class="sbtn" href="/images" {{if eq .Nav "images"}}aria-current="page"{{end}}>{{icon "images" 15}}<span class="lbl">Images</span></a>
-      <a class="sbtn" href="/nodes" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 15}}<span class="lbl">Nodes</span>{{with .Warn}}<span class="wdot" role="img" aria-label="{{.}}" title="{{.}}"></span>{{end}}</a>
+    {{if not $hub}}<button class="sbtn search" id="searchBtn" type="button" aria-label="Search or jump to (Ctrl+K)">{{icon "search" 15}}<span class="lbl">Search or jump to…</span><kbd id="kbdK">⌘K</kbd></button>{{end}}
+    {{if and .Fleet (not .Fleet.Current)}}
+    <nav class="navgrp nav" aria-label="Fleet">
+      {{if .Fleet.Access.Members}}<a class="sbtn" href="/~/" aria-label="Members" {{if eq .Nav "members"}}aria-current="page"{{end}}>{{icon "fleet" 15}}<span class="lbl">Members</span></a>{{end}}
+      {{if .Fleet.Access.Roles}}<a class="sbtn" href="/~/access" aria-label="Access" {{if eq .Nav "access"}}aria-current="page"{{end}}>{{icon "key" 15}}<span class="lbl">Access</span></a>{{end}}
+      {{if .Fleet.Access.Audit}}<a class="sbtn" href="/~/audit" aria-label="Audit" {{if eq .Nav "audit"}}aria-current="page"{{end}}>{{icon "log" 15}}<span class="lbl">Audit</span></a>{{end}}
     </nav>
+    {{else}}
+    <nav class="navgrp nav" aria-label="Main">
+      <a class="sbtn" href="/" aria-label="Pipelines" {{if eq .Nav "pipelines"}}aria-current="page"{{end}}>{{icon "pipes" 15}}<span class="lbl">Pipelines</span></a>
+      <a class="sbtn" href="/insights" aria-label="Insights" {{if eq .Nav "insights"}}aria-current="page"{{end}}>{{icon "overview" 15}}<span class="lbl">Insights</span></a>
+      <a class="sbtn" href="/builds" aria-label="Builds" {{if eq .Nav "builds"}}aria-current="page"{{end}}>{{icon "builds" 15}}<span class="lbl">Builds</span></a>
+      <a class="sbtn" href="/images" aria-label="Images" {{if eq .Nav "images"}}aria-current="page"{{end}}>{{icon "images" 15}}<span class="lbl">Images</span></a>
+      <a class="sbtn" href="/nodes" aria-label="Nodes{{with .Warn}}: {{.}}{{end}}" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 15}}<span class="lbl">Nodes</span>{{with .Warn}}<span class="wdot" role="img" aria-label="{{.}}" title="{{.}}"></span>{{end}}</a>
+    </nav>
+    {{with .Fleet}}{{if .Access.Members}}<nav class="navgrp nav" aria-label="Fleet"><div class="hint navhint">Fleet</div>
+      <a class="sbtn" href="/~/" aria-label="Members">{{icon "fleet" 15}}<span class="lbl">Members</span></a>
+      {{if .Access.Roles}}<a class="sbtn" href="/~/access" aria-label="Access">{{icon "key" 15}}<span class="lbl">Access</span></a>{{end}}
+      {{if .Access.Audit}}<a class="sbtn" href="/~/audit" aria-label="Audit">{{icon "log" 15}}<span class="lbl">Audit</span></a>{{end}}
+    </nav>{{end}}{{end}}
+    {{end}}
     <div class="side-foot">
       {{/* Rendered in its final state, and its line kept on every page, so
          moving between pages does not make it or the buttons below jump. */}}
@@ -44,8 +71,8 @@
       <button class="sbtn" id="themeBtn" type="button" aria-label="Toggle theme (t)"><span class="th-dark">{{icon "moon" 15}}<span class="lbl">Dark theme</span></span><span class="th-light">{{icon "sun" 15}}<span class="lbl">Light theme</span></span><kbd>t</kbd></button>
       <button class="sbtn" id="helpBtn" type="button" aria-label="Keyboard shortcuts (?)">{{icon "kbd" 15}}<span class="lbl">Shortcuts</span><kbd>?</kbd></button>
       {{with .Viewer}}
-      <div class="who" title="{{if .Name}}{{.Name}} · {{end}}@{{.Username}} on {{.Host}}"><span class="av" aria-hidden="true">{{projInitial .Username}}</span><span class="lbl"><span>{{if .Name}}{{.Name}}{{else}}{{.Username}}{{end}}</span><small>@{{.Username}} · {{.Host}}{{if .Admin}} · admin{{end}}</small></span></div>
-      <form class="signout" method="post" action="/auth/sign-out"><button class="sbtn" type="submit" aria-label="Sign out">{{icon "out" 15}}<span class="lbl">Sign out</span></button></form>
+      <div class="who" title="{{if .Name}}{{.Name}} · {{end}}@{{.Username}} on {{.Host}}"><span class="av" aria-hidden="true">{{projInitial .Username}}</span><span class="lbl"><span>{{if .Name}}{{.Name}}{{else}}{{.Username}}{{end}}</span><small>@{{.Username}} · {{.Host}}{{with $.Fleet}}{{if .Access.Tokens}} · owner{{else if .Access.Members}} · operator{{end}}{{else}}{{if .Admin}} · admin{{end}}{{end}}</small></span></div>
+      <form class="signout" method="post" action="{{if $.Fleet}}/~/auth/sign-out{{else}}/auth/sign-out{{end}}"><button class="sbtn" type="submit" aria-label="Sign out">{{icon "out" 15}}<span class="lbl">Sign out</span></button></form>
       {{else}}
       <div class="side-note">Sign-in is off: everyone who reaches the console sees every project.</div>
       {{end}}
@@ -55,6 +82,19 @@
   <div class="main" id="mainwrap">
     <header class="mhead">
       <a class="brand" href="/" aria-label="ci-accelerator home"><span class="mark"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 11.5 7 4l2.5 5L13 4.5"/></svg></span></a>
+      {{with .Fleet}}<details class="mclu" id="mClu">
+        <summary aria-label="Cluster: {{if .Current}}{{.Current}}{{else}}all clusters{{end}}">{{if .Current}}{{.Current}}{{else}}Fleet{{end}}{{icon "chevD" 13}}</summary>
+        <div class="mclu-menu">
+          <div class="hint">Cluster</div>
+          <a class="sbtn" href="/~/" aria-current="{{if not .Current}}true{{else}}false{{end}}"><span class="lbl">All clusters</span></a>
+          {{$cur := .Current}}{{range .Members}}{{if eq .State "connected"}}<a class="sbtn" href="/~/m/{{.Name}}/" aria-current="{{if eq .Name $cur}}true{{else}}false{{end}}"><span class="lbl">{{.Name}}</span></a>{{else}}<a class="sbtn off" href="/~/m/{{.Name}}/" aria-current="{{if eq .Name $cur}}true{{else}}false{{end}}"><span class="lbl">{{.Name}}</span><span class="count">not connected</span></a>{{end}}{{end}}
+          {{if or .Access.Members .Access.Roles .Access.Audit}}<div class="hint">Fleet</div>{{end}}
+          {{if .Access.Members}}<a class="sbtn" href="/~/"><span class="lbl">Members</span></a>{{end}}
+          {{if .Access.Roles}}<a class="sbtn" href="/~/access"><span class="lbl">Access</span></a>{{end}}
+          {{if .Access.Audit}}<a class="sbtn" href="/~/audit"><span class="lbl">Audit</span></a>{{end}}
+          {{if $.Viewer}}<form method="post" action="/~/auth/sign-out"><button class="sbtn" type="submit"><span class="lbl">Sign out</span></button></form>{{end}}
+        </div>
+      </details>{{end}}
       <span class="proj">{{with .Project}}{{.Path}}{{end}}</span>
       <button class="iconbtn" id="mTheme" type="button" aria-label="Toggle theme">{{icon "moon" 15}}</button>
     </header>
@@ -64,14 +104,18 @@
     </div>
   </div>
 </div>
-<nav class="bbar" id="bbar" aria-label="Main">
+{{if $hub}}{{with .Fleet.Access}}{{if or .Members .Roles .Audit}}<nav class="bbar" id="bbar" aria-label="Fleet">
+  {{if .Members}}<a href="/~/" {{if eq $.Nav "members"}}aria-current="page"{{end}}>{{icon "fleet" 18}}Members</a>{{end}}
+  {{if .Roles}}<a href="/~/access" {{if eq $.Nav "access"}}aria-current="page"{{end}}>{{icon "key" 18}}Access</a>{{end}}
+  {{if .Audit}}<a href="/~/audit" {{if eq $.Nav "audit"}}aria-current="page"{{end}}>{{icon "log" 18}}Audit</a>{{end}}
+</nav>{{end}}{{end}}{{else}}<nav class="bbar" id="bbar" aria-label="Main">
   <a href="/" {{if eq .Nav "pipelines"}}aria-current="page"{{end}}>{{icon "pipes" 18}}Pipelines</a>
   <a href="/insights" {{if eq .Nav "insights"}}aria-current="page"{{end}}>{{icon "overview" 18}}Insights</a>
   <a href="/builds" {{if eq .Nav "builds"}}aria-current="page"{{end}}>{{icon "builds" 18}}Builds</a>
   <a href="/images" {{if eq .Nav "images"}}aria-current="page"{{end}}>{{icon "images" 18}}Images</a>
   <a href="/nodes" {{if eq .Nav "nodes"}}aria-current="page"{{end}}>{{icon "nodes" 18}}Nodes</a>
   <button type="button" id="bSearch" aria-label="Search">{{icon "search" 18}}Search</button>
-</nav>
+</nav>{{end}}
 <div class="scrim" id="scrim" hidden></div>
 <div class="dlg" id="pal" role="dialog" aria-modal="true" aria-label="Search" hidden>
   <div class="pal-in">{{icon "search" 16}}<input id="palQ" type="text" role="combobox" aria-expanded="true" aria-controls="palL" aria-autocomplete="list" aria-label="Search images, pipelines and pages" placeholder="Search images, pipelines, commits, pages…" autocomplete="off" spellcheck="false"><kbd>esc</kbd></div>
@@ -83,10 +127,10 @@
     <h2 id="helpT">Keyboard shortcuts <button class="iconbtn" type="button" data-close-help aria-label="Close">{{icon "x" 14}}</button></h2>
     <h3>Anywhere</h3>
     <dl><dt>Search or jump to</dt><dd><kbd>⌘</kbd> <kbd>K</kbd></dd><dt>Search (alternative)</dt><dd><kbd>/</kbd></dd><dt>This overlay</dt><dd><kbd>?</kbd></dd><dt>Toggle theme</dt><dd><kbd>t</kbd></dd><dt>Collapse sidebar</dt><dd><kbd>[</kbd></dd></dl>
-    <h3>Go to</h3>
+    {{if not $hub}}<h3>Go to</h3>
     <dl><dt>Pipelines</dt><dd><kbd>g</kbd> <kbd>p</kbd></dd><dt>Insights</dt><dd><kbd>g</kbd> <kbd>s</kbd></dd><dt>Builds</dt><dd><kbd>g</kbd> <kbd>b</kbd></dd><dt>Images</dt><dd><kbd>g</kbd> <kbd>i</kbd></dd><dt>Nodes</dt><dd><kbd>g</kbd> <kbd>n</kbd></dd></dl>
     <h3>A build</h3>
-    <dl><dt>Back to its pipeline</dt><dd><kbd>esc</kbd></dd><dt>Expand / fold all stages</dt><dd><kbd>e</kbd></dd><dt>Copy the trace id</dt><dd><kbd>c</kbd></dd><dt>Compare with another build</dt><dd><kbd>x</kbd></dd><dt>Move between Dockerfile lines</dt><dd><kbd>↑</kbd> <kbd>↓</kbd></dd><dt>Open a step's output and history</dt><dd><kbd>↵</kbd></dd></dl>
+    <dl><dt>Back to its pipeline</dt><dd><kbd>esc</kbd></dd><dt>Expand / fold all stages</dt><dd><kbd>e</kbd></dd><dt>Copy the trace id</dt><dd><kbd>c</kbd></dd><dt>Compare with another build</dt><dd><kbd>x</kbd></dd><dt>Move between Dockerfile lines</dt><dd><kbd>↑</kbd> <kbd>↓</kbd></dd><dt>Open a step's output and history</dt><dd><kbd>↵</kbd></dd></dl>{{end}}
   </div>
 </div>
 <div class="pop" id="pop" role="tooltip" hidden></div>

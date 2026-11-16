@@ -101,6 +101,8 @@ var icons = map[string]string{
 	"s_image":    `<rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/>`,
 	"up":         `<path d="M8 13V3.5m0 0L4.5 7M8 3.5 11.5 7"/>`,
 	"clock":      `<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/>`,
+	"fleet":      `<circle cx="8" cy="8" r="1.9"/><circle cx="3.5" cy="3.5" r="1.4"/><circle cx="12.5" cy="3.5" r="1.4"/><circle cx="8" cy="13" r="1.4"/><path d="m6.6 6.6-2-2M9.4 6.6l2-2M8 9.9v1.7"/>`,
+	"key":        `<circle cx="5.5" cy="10.5" r="2.5"/><path d="M7.3 8.7 12.5 3.5M10.5 5.5l1.5 1.5M9 7l1 1"/>`,
 	"tl":         `<path d="M2.5 4h6M4.5 8h7M7 12h6.5"/>`,
 	"steps":      `<path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"/>`,
 	"overview":   `<rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/>`,

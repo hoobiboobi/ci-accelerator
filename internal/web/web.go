@@ -7,6 +7,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -50,6 +51,37 @@ type Options struct {
 	// with templates/ and static/), read again for every page: for working
 	// on the pages without rebuilding the console.
 	Assets fs.FS
+	// Base is the path the pages are served under ("/m/prod-eu" in a
+	// fleet hub; "" at the root). Every address the pages link to, post
+	// to, load or are sent to starts with it.
+	Base string
+	// Fleet, in a fleet hub: the clusters to switch between and the one
+	// these pages show; nil outside a hub.
+	Fleet Fleet
+	// Hub, in a fleet hub: its roles, tokens and audit; nil outside a hub.
+	Hub *Hub
+}
+
+// Fleet is what the pages of a fleet hub need to know about the fleet.
+type Fleet interface {
+	// Members are the clusters in the switcher, in their order.
+	Members() []FleetMember
+	// Current is the name of the cluster these pages show; "" on the
+	// hub's own pages.
+	Current() string
+	// Locate asks every connected cluster for a pipeline (job 0) or a job
+	// of a GitLab: the clusters that know it, with that pipeline's jobs
+	// there. Clusters that did not answer in time are in Silent.
+	Locate(ctx context.Context, instance string, pipeline, job uint64) (hits []FleetHit, silent []string)
+}
+
+// FleetHit is what one cluster knows of a pipeline or a job.
+type FleetHit struct {
+	Member   string
+	Pipeline *store.Pipeline
+	Jobs     []store.JobInfo
+	// Job is the job asked for, when one was.
+	Job *store.JobInfo
 }
 
 // Server renders the pages.
@@ -71,7 +103,10 @@ type Server struct {
 	Heartbeat time.Duration
 	// APIWait is how long a page waits for GitLab's API.
 	APIWait time.Duration
-	now     func() time.Time
+	// SessionCheck: how often an open stream asks again whether its
+	// person is still signed in, with the same role.
+	SessionCheck time.Duration
+	now          func() time.Time
 
 	// Figures computed over a project's recent builds, kept briefly.
 	statsMu sync.Mutex
@@ -91,38 +126,146 @@ const MaxLogReads = 4
 
 // The templates of each page besides the layout and the shared parts.
 var pageFiles = map[string][]string{
-	"insights":  nil,
-	"builds":    nil,
-	"pipelines": nil,
-	"images":    nil,
-	"image":     nil,
-	"build":     {"dockerfile"},
-	"pipeline":  {"waterfall"},
-	"job":       nil,
-	"step":      nil,
-	"steppage":  {"step"},
-	"notfound":  nil,
-	"nodes":     nil,
-	"node":      nil,
-	"compare":   nil,
-	"signin":    nil,
+	"insights":    nil,
+	"builds":      nil,
+	"pipelines":   nil,
+	"images":      nil,
+	"image":       nil,
+	"build":       {"dockerfile"},
+	"pipeline":    {"waterfall"},
+	"job":         nil,
+	"step":        nil,
+	"steppage":    {"step"},
+	"notfound":    nil,
+	"nodes":       nil,
+	"node":        nil,
+	"compare":     nil,
+	"signin":      nil,
+	"members":     nil,
+	"fleetpipe":   nil,
+	"access":      nil,
+	"audit":       nil,
+	"clusterform": nil,
+	"install":     nil,
+	"cluster":     nil,
 }
 
 // New parses the templates; a template that does not parse is a build
 // error, caught by the tests.
 func New(b Backend, log *slog.Logger, opt Options) (*Server, error) {
 	srv := &Server{data: b, opt: opt, log: log, files: files,
-		streams: make(chan struct{}, MaxStreams), logs: make(chan struct{}, MaxLogReads), Heartbeat: 25 * time.Second, APIWait: 700 * time.Millisecond, now: time.Now}
+		streams: make(chan struct{}, MaxStreams), logs: make(chan struct{}, MaxLogReads), Heartbeat: 25 * time.Second, APIWait: 700 * time.Millisecond, SessionCheck: time.Minute, now: time.Now}
 	if opt.Assets != nil {
 		srv.files = opt.Assets
 	}
-	tmpl, assets, err := parsePages(srv.files)
+	var tmpl map[string]*template.Template
+	var assets map[string]string
+	var err error
+	if opt.Assets == nil {
+		tmpl, assets, err = embeddedPages()
+	} else {
+		tmpl, assets, err = parsePages(srv.files)
+	}
 	if err != nil {
 		return nil, err
 	}
 	srv.tmpl, srv.assets = tmpl, assets
 	return srv, nil
 }
+
+// embedded is the built-in pages, parsed once per process and shared by
+// every Server (a hub makes one per cluster): the base path is in the
+// page data, not in the templates.
+var embedded struct {
+	once   sync.Once
+	tmpl   map[string]*template.Template
+	assets map[string]string
+	err    error
+}
+
+func embeddedPages() (map[string]*template.Template, map[string]string, error) {
+	embedded.once.Do(func() { embedded.tmpl, embedded.assets, embedded.err = parsePages(files) })
+	return embedded.tmpl, embedded.assets, embedded.err
+}
+
+// addrAttrs are the attributes that hold the console's own addresses.
+var addrAttrs = []string{"href", "action", "src", "data-url"}
+
+// rebase moves the console's own absolute addresses in a rendered page
+// under base; with hub, a link written "/~/..." (to the fleet hub's own
+// pages) goes to the root instead, and so do the static files (the hub's
+// own, one cached copy for every cluster). Only the values of addrAttrs count, and
+// "//host" is left alone. Text from build data never matches: html/template
+// escapes its quotes.
+func rebase(page []byte, base string, hub bool) []byte {
+	mark := []byte(`="/`)
+	out := make([]byte, 0, len(page)+len(page)/16)
+	rest := page
+	for {
+		i := bytes.Index(rest, mark)
+		if i < 0 {
+			break
+		}
+		// Up to the opening quote; v is the value from its leading "/".
+		out = append(out, rest[:i+2]...)
+		v := rest[i+2:]
+		switch {
+		case !addrAttr(rest[:i]) || bytes.HasPrefix(v, []byte("//")):
+		case hub && bytes.HasPrefix(v, []byte("/~/")):
+			v = v[2:]
+		case hub && bytes.HasPrefix(v, []byte("/static/")):
+		default:
+			out = append(out, base...)
+		}
+		rest = v
+	}
+	return append(out, rest...)
+}
+
+// addrAttr says whether before ends with the name of an address attribute.
+func addrAttr(before []byte) bool {
+	for _, a := range addrAttrs {
+		if n := len(before) - len(a); n > 0 && string(before[n:]) == a {
+			switch before[n-1] {
+			case ' ', '\t', '\n', '\r':
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// based puts the pages' base path in front of an absolute address.
+func (s *Server) based(to string) string {
+	if s.opt.Base == "" || !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") {
+		return to
+	}
+	return s.opt.Base + to
+}
+
+// redirect sends the browser to one of the pages' own addresses.
+func (s *Server) redirect(w http.ResponseWriter, r *http.Request, to string, code int) {
+	http.Redirect(w, r, s.based(to), code)
+}
+
+// instSeg is a GitLab instance as a segment of the pages' addresses. An
+// instance is six hex digits (history.InstancePrefix); at a fleet hub it
+// comes from another cluster, so anything else (a dot segment, a slash)
+// becomes a segment no page accepts instead of one that leaves the base.
+func instSeg(instance string) string {
+	if len(instance) != 6 {
+		return "invalid"
+	}
+	for _, c := range instance {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return "invalid"
+		}
+	}
+	return instance
+}
+
+// pipeKey is a pipeline's key as its page's address carries it.
+func pipeKey(instance string, id uint64) string { return store.PipelineKey(instSeg(instance), id) }
 
 // parsePages parses every page's templates and versions the static files.
 func parsePages(src fs.FS) (map[string]*template.Template, map[string]string, error) {
@@ -160,6 +303,38 @@ func parsePages(src fs.FS) (map[string]*template.Template, map[string]string, er
 func (s *Server) Register(mux *http.ServeMux) {
 	static, _ := fs.Sub(s.files, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheFor(http.FileServerFS(static))))
+	if s.opt.Fleet != nil && s.opt.Fleet.Current() == "" {
+		// The hub's own pages: the clusters, and signing in.
+		mux.HandleFunc("GET /{$}", s.members)
+		// Links printed in job logs and pipelines name no cluster: the hub
+		// finds the one that has it.
+		mux.HandleFunc("GET /jobs/{instance}/{id}", s.fleetJob)
+		mux.HandleFunc("GET /pipelines/{instance}/{id}", s.fleetPipeline)
+		if s.opt.Hub != nil {
+			mux.HandleFunc("GET /access", s.access)
+			mux.HandleFunc("GET /access/tokens", s.access)
+			mux.HandleFunc("POST /access/people", s.grantRole)
+			mux.HandleFunc("POST /access/people/remove", s.revokeRole)
+			mux.HandleFunc("POST /access/tokens", s.issueToken)
+			mux.HandleFunc("POST /access/tokens/revoke", s.revokeToken)
+			mux.HandleFunc("GET /audit", s.audit)
+			mux.HandleFunc("GET /clusters/new", s.newCluster)
+			mux.HandleFunc("POST /clusters", s.createCluster)
+			mux.HandleFunc("GET /clusters/{name}", s.cluster)
+			mux.HandleFunc("GET /clusters/{name}/edit", s.editCluster)
+			mux.HandleFunc("POST /clusters/{name}", s.changeCluster)
+			mux.HandleFunc("POST /clusters/{name}/join", s.newJoin)
+			mux.HandleFunc("POST /clusters/{name}/remove", s.removeCluster)
+		}
+		if s.opt.Auth != nil {
+			mux.HandleFunc("GET /auth/sign-in", s.signIn)
+			mux.HandleFunc("GET /auth/sign-in/{instance}", s.signInWith)
+			mux.HandleFunc("GET /auth/callback/{instance}", s.signInDone)
+			mux.HandleFunc("POST /auth/sign-out", s.signOut)
+		}
+		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) { s.notFound(w, r, "page") })
+		return
+	}
 	// Pipelines are the console's home page; /pipelines stays its address too.
 	mux.HandleFunc("GET /{$}", s.pipelines)
 	mux.HandleFunc("GET /pipelines", s.pipelines)
@@ -178,7 +353,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /projects/{instance}/{id}", s.chooseProject)
 	mux.HandleFunc("GET /search-index", s.index)
 	mux.HandleFunc("GET /events", s.events)
-	if s.opt.Auth != nil {
+	// Under a base (a cluster's pages at a fleet hub) signing in and out is
+	// the hub's, at its root.
+	if s.opt.Auth != nil && s.opt.Base == "" {
 		mux.HandleFunc("GET /auth/sign-in", s.signIn)
 		mux.HandleFunc("GET /auth/sign-in/{instance}", s.signInWith)
 		mux.HandleFunc("GET /auth/callback/{instance}", s.signInDone)
@@ -251,9 +428,21 @@ func (s *Server) render(w http.ResponseWriter, page string, status int, data any
 		http.Error(w, "the console could not render this page", http.StatusInternalServerError)
 		return
 	}
+	out := buf.Bytes()
+	if s.opt.Base != "" || s.opt.Fleet != nil {
+		// The pages and the Go code that builds their links write addresses
+		// from the root; here they move under the base, and links to the
+		// hub's own pages stay at the root.
+		out = rebase(out, s.opt.Base, s.opt.Fleet != nil)
+	}
+	if s.opt.Auth != nil && w.Header().Get("Cache-Control") == "" {
+		// A page shows what one person may see: no copy of it is kept,
+		// not even for Back after signing out.
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	w.Write(buf.Bytes())
+	w.Write(out)
 }
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
@@ -302,6 +491,13 @@ type Shell struct {
 	// Zone is the time zone the page shows times in (theme.js compares it
 	// with the browser's).
 	Zone string
+	// Posted: the page answers a form's post; loading it again would post
+	// again (theme.js then does not reload it for the time zone).
+	Posted bool
+	// Fleet: the clusters of a fleet hub; nil outside a hub.
+	Fleet *FleetShell
+	// Base is the path the pages are served under ("" at the root).
+	Base string
 }
 
 // NotFound is the page for an address with nothing behind it.
@@ -330,7 +526,8 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request, what string) {
 // before, or the most recently built.
 func (s *Server) shell(r *http.Request, nav, live string) (Shell, error) {
 	sh := Shell{Nav: nav, Live: live, Viewer: viewer(r), Version: s.opt.Version, Zone: zone(r).String(),
-		Origin: s.origin(r), Path: r.URL.EscapedPath()}
+		Origin: s.origin(r), Path: s.based(r.URL.EscapedPath()), Posted: r.Method == http.MethodPost, Base: s.opt.Base}
+	sh.Fleet = s.fleetShell(r)
 	ps, err := s.data.Projects(r.Context())
 	if err != nil {
 		return sh, err
@@ -412,7 +609,7 @@ func (s *Server) chooseProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Secure where the console is reached over https: always with sign-in.
-	http.SetCookie(w, &http.Cookie{Name: "project", Value: k.String(), Path: "/", MaxAge: 365 * 24 * 3600,
+	http.SetCookie(w, &http.Cookie{Name: "project", Value: k.String(), Path: s.based("/"), MaxAge: 365 * 24 * 3600,
 		Secure: s.opt.Auth != nil || r.TLS != nil, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	// Back to where the switch was made: one of the sections, or an image's
 	// page. The address is rebuilt from the checked parts (a section's own
@@ -426,7 +623,7 @@ func (s *Server) chooseProject(w http.ResponseWriter, r *http.Request) {
 	if name, ok := strings.CutPrefix(asked, "/images/"); ok && imageSlug.MatchString(name) {
 		to = "/images/" + name
 	}
-	http.Redirect(w, r, to, http.StatusFound)
+	s.redirect(w, r, to, http.StatusFound)
 }
 
 // api returns the GitLab reader for r, which reads with the token of the
@@ -532,6 +729,7 @@ var funcs = template.FuncMap{
 	"join":     strings.Join,
 	"projName": projName,
 	"navPage":  navPage,
+	"instSeg":  instSeg,
 	"statuses": func() []Status {
 		out := make([]Status, len(statusKeys))
 		for i, k := range statusKeys {

@@ -1,0 +1,16 @@
+{{define "install"}}{{template "layout" .}}{{end}}
+{{define "content"}}
+<div class="page">
+  <header class="phead"><div class="crumbs"><a class="link" href="/~/">Members</a> / <a class="link" href="/~/clusters/{{.Name}}">{{.Name}}</a></div>
+    <div class="titlerow"><h1 class="t" tabindex="-1">{{if .Install.Upgrade}}Upgrade {{.Name}}{{else}}Install {{.Name}}{{end}}</h1></div>
+    <div class="sub"><span>{{if .Install.Upgrade}}Run this where the box is installed, with the new values file.{{if .Connected}} Secrets changed here reach the cluster now, over its link.{{end}}{{else}}Run these on the cluster.{{with .Expires.Text}} The join token works once, until {{.}}.{{end}}{{if .Waiting}} It has not joined yet and needs a join token as well: "New join token" on its page issues one (an unused earlier one stops working).{{end}} The cluster appears on Members once it connects.{{end}}</span></div></header>
+  <section class="box" aria-labelledby="inC"><div class="boxh"><h2 class="h" id="inC">Commands</h2><button class="btn sm" type="button" aria-label="Copy the commands" data-copy="{{range $i, $c := .Install.Commands}}{{if $i}}&#10;{{end}}{{$c}}{{end}}">Copy</button></div>
+    <pre class="code pad">{{range $i, $c := .Install.Commands}}{{if $i}}
+{{end}}{{$c}}{{end}}</pre>
+    {{if and (not .Install.Upgrade) (not .Waiting)}}<p class="pad muted sm">The commands show the token this once: the hub keeps only its hash. Lost: issue a new one on the cluster's page.</p>{{end}}</section>
+  <section class="box" aria-labelledby="inV"><div class="boxh"><h2 class="h" id="inV">{{.Install.File}}</h2><button class="btn sm" type="button" aria-label="Copy the values" data-copy="{{.Install.Values}}">Copy</button></div>
+    <p class="pad muted sm">Save the values below as {{.Install.File}} next to where you run the commands.</p>
+    <pre class="code pad">{{.Install.Values}}</pre></section>
+  <p><a class="link" href="/~/clusters/{{.Name}}">The cluster's page</a> · <a class="link" href="/~/">Members</a></p>
+</div>
+{{end}}

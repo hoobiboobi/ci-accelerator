@@ -6,6 +6,11 @@
 // text nodes.
 "use strict";
 (function () {
+  // The path the pages are served under (a cluster in a fleet hub), or "".
+  const BASE = document.documentElement.dataset.base || "";
+  // A fleet hub's own pages (Members, Access, Audit): none of a cluster's
+  // pages, search index or shortcuts exist there.
+  const HUB = document.documentElement.dataset.hub === "true";
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
   const root = document.documentElement;
@@ -52,12 +57,41 @@
   if (mTheme) mTheme.addEventListener("click", toggleTheme);
   const collapseBtn = $("#collapseBtn");
   if (collapseBtn) collapseBtn.addEventListener("click", () => setCollapsed(app.dataset.collapsed !== "true"));
-  const projBtn = $("#projBtn"), projMenu = $("#projMenu");
-  if (projBtn && projMenu) {
-    projBtn.addEventListener("click", () => {
-      projMenu.hidden = !projMenu.hidden;
-      projBtn.setAttribute("aria-expanded", String(!projMenu.hidden));
+  // The project switcher, and in a fleet hub the cluster switcher above it.
+  for (const [b, m] of [["#projBtn", "#projMenu"], ["#clusterBtn", "#clusterMenu"]]) {
+    const btn = $(b), menu = $(m);
+    if (!btn || !menu) continue;
+    btn.addEventListener("click", () => {
+      menu.hidden = !menu.hidden;
+      btn.setAttribute("aria-expanded", String(!menu.hidden));
     });
+  }
+  // Beside a narrow sidebar the cluster menu pops out over the page: a
+  // click elsewhere closes it.
+  {
+    const btn = $("#clusterBtn"), menu = $("#clusterMenu");
+    if (btn && menu) document.addEventListener("click", ev => {
+      if (menu.hidden || btn.contains(ev.target) || menu.contains(ev.target)) return;
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  // ---- a fleet hub's cluster form: settings that apply only when another
+  // has a value (data-when="key=value", "key=*" for any) ----
+  for (const form of document.querySelectorAll("form.cform")) {
+    const deps = form.querySelectorAll("[data-when]");
+    const show = () => {
+      for (const el of deps) {
+        const [k, want] = el.dataset.when.split("=");
+        const c = form.elements[k];
+        const v = c ? c.value.trim() : "";
+        el.hidden = want === "*" ? v === "" : v !== want;
+      }
+    };
+    form.addEventListener("input", show);
+    form.addEventListener("change", show);
+    show();
   }
 
   // ---- copy buttons ----
@@ -328,10 +362,12 @@
   async function openPanel(build, step, tab) {
     if (!drawer) return;
     hidePop();
-    const res = await fetch("/builds/" + build + "/steps/" + step + "?part=panel");
+    let res;
+    try { res = await fetch(BASE + "/builds/" + build + "/steps/" + step + "?part=panel"); } catch (e) { toast("Could not open the step: the console is not reachable"); return; }
     // The session ended: opening the page again leads to sign in.
     if (res.status === 401) { location.reload(); return; }
-    if (!res.ok) return;
+    // 502: the console's controller, or at a fleet hub the cluster, is away.
+    if (!res.ok) { toast(res.status === 502 ? "Could not open the step: its cluster is not connected now" : "Could not open the step (" + res.status + ")"); return; }
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     drawer.replaceChildren(...doc.body.childNodes, dgrip);
     drawer.hidden = false;
@@ -757,9 +793,10 @@
   ];
   // Comparing builds: from anywhere, and this build when one is open.
   function compareCommands() {
-    const out = [{ kind: "Command", label: "Compare two builds", sub: "pick them in the builds list", url: "/builds?pick=1" }];
+    if (HUB) return [];
+    const out = [{ kind: "Command", label: "Compare two builds", sub: "pick them in the builds list", url: BASE + "/builds?pick=1" }];
     const ctx = $("#ctx", main);
-    if (ctx && ctx.dataset.build) out.unshift({ kind: "Command", label: "Compare this build with another", sub: "x", url: "/builds/" + ctx.dataset.build + "/compare" });
+    if (ctx && ctx.dataset.build) out.unshift({ kind: "Command", label: "Compare this build with another", sub: "x", url: BASE + "/builds/" + ctx.dataset.build + "/compare" });
     return out;
   }
   function fuzzy(q, s) {
@@ -799,7 +836,7 @@
     // The index holds recent pipelines only: the pipelines page searches
     // them all.
     const typed = palQ.value.trim();
-    if (typed) results.push({ it: { kind: "Search", label: "Search all pipelines for “" + typed + "”", url: "/pipelines?q=" + encodeURIComponent(typed) }, idx: [], score: 0 });
+    if (typed && !HUB) results.push({ it: { kind: "Search", label: "Search all pipelines for “" + typed + "”", url: BASE + "/pipelines?q=" + encodeURIComponent(typed) }, idx: [], score: 0 });
     sel = 0;
     palL.replaceChildren();
     if (!results.length) {
@@ -856,13 +893,18 @@
     pal.hidden = false;
     scrim.hidden = false;
     palQ.value = "";
+    let failed = false;
+    if (HUB) index = [];
     if (!index) {
+      // A failed index is asked for again the next time.
       try {
-        const res = await fetch("/search-index", { cache: "no-store" });
-        index = res.ok ? (await res.json()).items || [] : [];
-      } catch (e) { index = []; }
+        const res = await fetch(BASE + "/search-index", { cache: "no-store" });
+        if (res.ok) index = (await res.json()).items || [];
+        else failed = res.status;
+      } catch (e) { failed = true; }
     }
     search();
+    if (failed) toast(failed === 502 ? "Search lists only commands: this cluster is not connected now" : "Search lists only commands: the console did not answer");
     palQ.focus();
   }
   function closePal(keep) {
@@ -919,9 +961,9 @@
       return;
     }
     if (typing || ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    if (gPressed && Date.now() - gPressed < 1200) {
+    if (gPressed && Date.now() - gPressed < 1200 && !HUB) {
       gPressed = 0;
-      const to = { p: "/", s: "/insights", b: "/builds", i: "/images", n: "/nodes" }[ev.key];
+      const to = { p: BASE + "/", s: BASE + "/insights", b: BASE + "/builds", i: BASE + "/images", n: BASE + "/nodes" }[ev.key];
       if (to) { location.href = to; return; }
     }
     switch (ev.key) {
@@ -932,7 +974,7 @@
       case "[": setCollapsed(app.dataset.collapsed !== "true"); return;
       case "e": if ($('[data-act="toggleall"]', main)) toggleAll(); return;
       case "c": { const ctx = $("#ctx", main); if (ctx && ctx.dataset.trace) copy(ctx.dataset.trace); return; }
-      case "x": { const ctx = $("#ctx", main); if (ctx && ctx.dataset.build) location.href = "/builds/" + ctx.dataset.build + "/compare"; return; }
+      case "x": { const ctx = $("#ctx", main); if (ctx && ctx.dataset.build) location.href = BASE + "/builds/" + ctx.dataset.build + "/compare"; return; }
     }
   });
 
@@ -1044,7 +1086,8 @@
   let es = null;
   function connect() {
     if (es || signedOut) return;
-    es = new EventSource("/events" + filterQ);
+    const src = new EventSource(BASE + "/events" + filterQ);
+    es = src;
     es.addEventListener("changed", () => {
       if (!notify) { if (!timer) timer = setTimeout(refresh, 1000); return; }
       // A page on a whole project only says something is new, at most
@@ -1055,12 +1098,32 @@
     // The page arrives saying "Live". A stream that drops for a moment
     // (EventSource reconnects by itself, and leaving the page drops it too)
     // says nothing; only one gone for more than 3 seconds does.
-    es.addEventListener("open", () => { clearTimeout(lost); lost = null; say("Live"); });
-    es.addEventListener("error", () => { if (!lost) lost = setTimeout(() => say("Reconnecting…"), 3000); });
+    es.addEventListener("open", () => {
+      clearTimeout(lost);
+      lost = null;
+      again = 5000;
+      say("Live");
+      if (catchUp) { catchUp = false; if (!notify && !timer) timer = setTimeout(refresh, 0); }
+    });
+    es.addEventListener("error", () => {
+      if (!lost) lost = setTimeout(() => say("Reconnecting…"), 3000);
+      // An answer other than a stream (the console restarting, or at a
+      // fleet hub a cluster not connected yet) ends an EventSource for
+      // good: a new one is opened after a while, and the page catches up
+      // once it is.
+      if (src.readyState === EventSource.CLOSED && es === src) {
+        es = null;
+        clearTimeout(reopen);
+        reopen = setTimeout(() => { reopen = null; if (!document.hidden && !es) { catchUp = true; connect(); } }, again);
+        again = Math.min(again * 2, 60000);
+      }
+    });
   }
-  let lost = null;
+  let lost = null, reopen = null, again = 5000, catchUp = false;
   function say(text) { if (status) status.textContent = text; }
   function disconnect() {
+    clearTimeout(reopen);
+    reopen = null;
     if (!es) return;
     es.close();
     es = null;

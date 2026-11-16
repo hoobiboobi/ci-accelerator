@@ -19,10 +19,10 @@ import (
 // person read; admins see everything.
 
 // Gate lets requests through to h. With sign-in: static files, the health
-// checks and the sign-in pages to anyone; the JSON API to admins; the rest
-// to people signed in (pages send others to sign in, streams and data
-// answer 401). Requests that change something must come from the
-// console's own pages.
+// checks and the sign-in pages to anyone; the JSON API to admins (a fleet
+// hub's API decides itself); the rest to people signed in (pages send
+// others to sign in, streams and data answer 401). Requests that change
+// something must come from the console's own pages.
 func (s *Server) Gate(h http.Handler) http.Handler {
 	a := s.opt.Auth
 	if a == nil {
@@ -49,7 +49,7 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 		}
 		w.Header().Set("Vary", "Cookie")
 		if v == nil {
-			if r.Method == http.MethodGet && isPage(p) && navigation(r) {
+			if r.Method == http.MethodGet && isPage(s.pagePath(p)) && navigation(r) {
 				http.Redirect(w, r, "/auth/sign-in?to="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
 				return
 			}
@@ -57,17 +57,32 @@ func (s *Server) Gate(h http.Handler) http.Handler {
 			http.Error(w, "Sign in to the console first.", http.StatusUnauthorized)
 			return
 		}
-		if strings.HasPrefix(p, "/api/") && !v.Admin {
+		if strings.HasPrefix(p, "/api/") && !v.Admin && !(s.opt.Hub != nil && strings.HasPrefix(p, "/api/v1/fleet/")) {
 			http.Error(w, "The console's JSON API answers admins only.", http.StatusForbidden)
 			return
 		}
 		ctx := auth.With(r.Context(), v)
-		if c, err := r.Cookie(auth.SessionCookie); err == nil {
-			// For a backend in another process: it finds the person by it.
+		if c, err := r.Cookie(auth.SessionCookie); err == nil && s.opt.Fleet == nil {
+			// For a backend in another process (the box's controller): it
+			// finds the person by it. A hub never passes it on: its
+			// clusters' controllers are not trusted with a session, and the
+			// hub decides what a person may read itself.
 			ctx = auth.WithCookie(ctx, c.Value)
 		}
 		csrf.Handler(h).ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// pagePath is a path as isPage judges it: at a fleet hub, a cluster's
+// address without its base (/m/<name>).
+func (s *Server) pagePath(p string) string {
+	if s.opt.Fleet == nil || !strings.HasPrefix(p, "/m/") {
+		return p
+	}
+	if i := strings.IndexByte(p[len("/m/"):], '/'); i >= 0 {
+		return p[len("/m/")+i:]
+	}
+	return "/"
 }
 
 // isPage says whether a path is a page a browser opens (sent to sign in),
@@ -100,12 +115,20 @@ func (s *Server) mayKnown(r *http.Request, instance string, project uint64) (ok,
 	return ok, true
 }
 
+// memberProjects is how many projects a hub's page asks GitLab about.
+const memberProjects = 500
+
 // readable keeps the projects the person on r may see, asking GitLab about
 // several at a time; unanswered says GitLab could not say about some of
 // them (hidden meanwhile).
 func (s *Server) readable(r *http.Request, ps []store.Project) (out []store.Project, unanswered bool) {
 	if s.opt.Auth == nil {
 		return ps, false
+	}
+	if s.opt.Fleet != nil && len(ps) > memberProjects {
+		// A cluster names them, and each is a GitLab request made with the
+		// person's own token: the most recently built ones only.
+		ps = ps[:memberProjects]
 	}
 	keep, known := make([]bool, len(ps)), make([]bool, len(ps))
 	sem := make(chan struct{}, 8)
@@ -149,6 +172,9 @@ type SignIn struct {
 	Bad     bool // the message reports a failure
 	// Origin and Path, for the link preview.
 	Origin, Path string
+	// Hub: the sign-in of a fleet hub; NoOwners: nobody may manage it yet
+	// (no owner in the values or the store, no bootstrap token).
+	Hub, NoOwners bool
 }
 
 // SignInChoice is a GitLab to sign in with.
@@ -180,14 +206,15 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request) {
 	to := auth.SafePath(r.URL.Query().Get("to"))
 	msg, hasMsg := signInMessages[r.URL.Query().Get("e")]
 	choices := a.Instances()
-	if len(choices) == 1 && !hasMsg && !previewFetcher(r) {
+	noOwners := s.opt.Hub != nil && s.opt.Hub.NoOwners != nil && s.opt.Hub.NoOwners()
+	if len(choices) == 1 && !hasMsg && !noOwners && !previewFetcher(r) {
 		// One GitLab: straight there. With a valid grant GitLab sends the
 		// person back at once. A chat app fetching a link's preview stays
 		// on this page and shows its card, not GitLab's sign-in.
 		http.Redirect(w, r, "/auth/sign-in/"+choices[0].Instance+"?to="+url.QueryEscape(to), http.StatusFound)
 		return
 	}
-	v := SignIn{Title: "Sign in", Message: msg.text, Bad: msg.bad, Origin: s.origin(r), Path: "/"}
+	v := SignIn{Title: "Sign in", Message: msg.text, Bad: msg.bad, Origin: s.origin(r), Path: "/", Hub: s.opt.Hub != nil, NoOwners: noOwners}
 	for _, c := range choices {
 		v.Choices = append(v.Choices, SignInChoice{Host: c.Host, URL: "/auth/sign-in/" + c.Instance + "?to=" + url.QueryEscape(to)})
 	}
