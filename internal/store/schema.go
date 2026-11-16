@@ -349,6 +349,10 @@ var toleratedColumns = []struct{ table, column, def string }{
 	// GitLab's comparison proved (OrderHint; 0.7.0). 0: none, or not
 	// known (an older release, a build settled before it).
 	{"builds", "order_ms", "INTEGER NOT NULL DEFAULT 0"},
+	// When a bucket folder's listing was last tried (0.7.0); scanned_at is
+	// then the last listing that succeeded. NULL: written by an older
+	// release, whose scanned_at is the last attempt.
+	{"cache_stores", "attempted_at", "INTEGER"},
 }
 
 // toleratedIndexes are created by the repairs when missing, on tolerated

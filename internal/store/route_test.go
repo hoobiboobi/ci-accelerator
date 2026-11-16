@@ -113,9 +113,9 @@ func TestWarmAndDecisions(t *testing.T) {
 	if w, _ := s.Warm(ctx, since, []string{"bk-y"}); len(w[q]) != 0 {
 		t.Errorf("a decision for a daemon replaced since still warm: %v", w[q])
 	}
-	got, err := s.JobRoutes(ctx, inst, 900)
-	if err != nil || len(got) != 1 || got[0].Daemon != "bk-x" || got[0].Reason != route.ZoneHash || got[0].Cands != 3 || got[0].JobNode != "node-1" || got[0].Project != q {
-		t.Fatalf("job routes %+v, %v", got, err)
+	got, err := s.JobRoute(ctx, inst, 900, "bk-x", c.t.Add(time.Hour))
+	if err != nil || got == nil || got.Daemon != "bk-x" || got.Reason != route.ZoneHash || got.Cands != 3 || got.JobNode != "node-1" || got.Project != q {
+		t.Fatalf("job route %+v, %v", got, err)
 	}
 
 	// The Nodes page counts them per daemon and reason, within its window.
@@ -141,7 +141,7 @@ func TestWarmAndDecisions(t *testing.T) {
 	if _, err := s.Prune(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.JobRoutes(ctx, inst, 900); len(got) != 0 {
+	if got, _ := s.JobRoute(ctx, inst, 900, "bk-x", c.t); got != nil {
 		t.Errorf("decisions kept past retention: %+v", got)
 	}
 }

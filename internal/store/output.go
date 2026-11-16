@@ -59,8 +59,11 @@ type outputFile struct {
 	day int
 	db  *sql.DB
 
-	mu    sync.Mutex
-	dicts map[string]*dictState // by project
+	mu sync.Mutex
+	// closed: the file was pruned (or the store closed) while a reader or
+	// writer that took it from s.outputs waited for mu.
+	closed bool
+	dicts  map[string]*dictState // by project
 	// Encoders exist only while the day is being written: a file stays
 	// open for the whole retention, and one encoder per project and day
 	// would add up to hundreds of megabytes.
@@ -102,10 +105,17 @@ func (s *Store) output(ctx context.Context, d int, create bool) (*outputFile, er
 	return f, nil
 }
 
-// close closes a file taken out of s.outputs. Its encoders go with it
-// (they hold no goroutines): releaseEncoders may still hold the file and
-// drop them under f.mu, which close does not take.
+// close closes a file taken out of s.outputs; s.mu must not be held (a
+// reader holds f.mu while it opens another day's file). Its encoders go
+// with it (they hold no goroutines). Whoever got the file before waits for
+// f.mu and then finds it closed.
 func (f *outputFile) close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil
+	}
+	f.closed = true
 	f.dec.Close()
 	return f.db.Close()
 }
@@ -199,6 +209,10 @@ func (s *Store) writeOutputs(ctx context.Context, d int, buildID int64, project 
 	s.releaseEncoders(d)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.closed {
+		// Pruned meanwhile: the output is past retention.
+		return nil
+	}
 	dict, err := s.dictFor(ctx, f, project)
 	if err != nil {
 		return err
@@ -327,7 +341,13 @@ func (s *Store) recentOutput(ctx context.Context, project string, current *outpu
 		}
 		refs = append(refs, r)
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	var chunks [][]byte
 	total := 0
 	for _, r := range refs {
@@ -340,6 +360,10 @@ func (s *Store) recentOutput(ctx context.Context, project string, current *outpu
 				continue // deleted or never written
 			}
 			f.mu.Lock()
+			if f.closed {
+				f.mu.Unlock()
+				continue
+			}
 		}
 		out, err := f.read(ctx, outputKey(r.build, r.step))
 		if f != current {
@@ -401,6 +425,10 @@ func (s *Store) Output(ctx context.Context, buildID int64, step int) (string, er
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.closed {
+		// Pruned meanwhile: past retention.
+		return "", nil
+	}
 	out, err := f.read(ctx, outputKey(buildID, step))
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -422,11 +450,12 @@ func (s *Store) pruneOutputs(now time.Time) error {
 			continue
 		}
 		s.mu.Lock()
-		if f, ok := s.outputs[d]; ok {
-			errs = append(errs, f.close())
-			delete(s.outputs, d)
-		}
+		f, ok := s.outputs[d]
+		delete(s.outputs, d)
 		s.mu.Unlock()
+		if ok {
+			errs = append(errs, f.close())
+		}
 		for _, suffix := range []string{"", "-wal", "-shm"} {
 			if err := os.Remove(n + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
 				errs = append(errs, err)

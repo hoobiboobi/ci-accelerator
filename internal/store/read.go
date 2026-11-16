@@ -265,10 +265,16 @@ func (s *Store) Load(ctx context.Context, id int64) (*Stored, error) {
 }
 
 // Pipeline returns the stored builds of a pipeline with their steps and
-// reasons, enough for Settle; their graphs are not restored.
+// reasons, enough for Settle; their graphs are not restored. Once the
+// pipeline's project is known, only that project's builds: the pipeline id
+// in a build's trace is the job's choice, and a build of another project,
+// or of no known job, that names it must not settle (witness) the
+// project's own builds.
 func (s *Store) Pipeline(ctx context.Context, instance string, pipeline uint64) ([]*Stored, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+buildColumns+` FROM builds b JOIN daemons d ON d.id = b.daemon_id
-		WHERE b.instance = ? AND b.pipeline_id = ? ORDER BY b.started_at`, nullInstance(instance), nullUint(pipeline))
+		WHERE b.instance = ?1 AND b.pipeline_id = ?2 AND NOT EXISTS (SELECT 1 FROM pipelines p
+			WHERE p.instance = ?1 AND p.pipeline_id = ?2 AND p.project_id IS NOT NULL AND b.project_id IS NOT p.project_id)
+		ORDER BY b.started_at`, nullInstance(instance), nullUint(pipeline))
 	if err != nil {
 		return nil, err
 	}

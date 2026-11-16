@@ -3,11 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"modernc.org/sqlite"
 )
 
 // PipeQuery selects a page of a project's pipelines, newest first.
@@ -30,14 +33,36 @@ type PipeQuery struct {
 	Limit    int
 }
 
+// foldFunc is an SQL function that lower-cases a text for any script:
+// SQLite's LIKE ignores the case of ASCII letters only.
+const foldFunc = "store_fold"
+
+func init() {
+	sqlite.MustRegisterDeterministicScalarFunction(foldFunc, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		switch v := args[0].(type) {
+		case string:
+			return strings.ToLower(v), nil
+		case []byte:
+			return strings.ToLower(string(v)), nil
+		}
+		return args[0], nil
+	})
+}
+
 // searchWhere is the condition for PipeQuery.Search on table "pipelines".
 func searchWhere(q string) (string, []any) {
 	q = strings.TrimSpace(q)
-	like := "%" + likeEscape(q) + "%"
-	conds := []string{`commit_title LIKE ? ESCAPE '\'`, `ref LIKE ? ESCAPE '\'`, `commit_author LIKE ? ESCAPE '\'`,
+	// ASCII text by LIKE, which is faster; other text lower-cased on
+	// both sides.
+	contains, arg := func(col string) string { return col + ` LIKE ? ESCAPE '\'` }, any("%"+likeEscape(q)+"%")
+	if !isASCII(q) {
+		contains = func(col string) string { return "instr(" + foldFunc + "(" + col + "), ?) > 0" }
+		arg = strings.ToLower(q)
+	}
+	conds := []string{contains("commit_title"), contains("ref"), contains("commit_author"),
 		`EXISTS (SELECT 1 FROM jobs INDEXED BY jobs_pipeline WHERE jobs.instance = pipelines.instance AND jobs.pipeline_id = pipelines.pipeline_id
-			AND jobs.name LIKE ? ESCAPE '\' AND ` + pipelinesOwn + `)`}
-	args := []any{like, like, like, like}
+			AND ` + contains("jobs.name") + ` AND ` + pipelinesOwn + `)`}
+	args := []any{arg, arg, arg, arg}
 	if digits := strings.TrimPrefix(q, "#"); digits != "" {
 		if n, err := strconv.ParseUint(digits, 10, 64); err == nil && n > 0 {
 			conds, args = append(conds, "pipeline_id = ?"), append(args, nullUint(n))
@@ -51,6 +76,15 @@ func searchWhere(q string) (string, []any) {
 		conds, args = append(conds, "sha LIKE ?"), append(args, strings.ToLower(q)+"%")
 	}
 	return "(" + strings.Join(conds, " OR ") + ")", args
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // likeEscape makes s match itself in a LIKE pattern with ESCAPE '\'.

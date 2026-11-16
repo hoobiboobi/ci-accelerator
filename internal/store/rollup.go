@@ -3,7 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -42,14 +46,15 @@ var statusCase = `CASE
 // to yesterday.
 func (s *Store) Rollup(ctx context.Context) error {
 	today := dayOf(s.opts.Now())
-	var last, first sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, "SELECT max(day) FROM image_days").Scan(&last); err != nil {
+	last, ok, err := s.rolledUp(ctx)
+	if err != nil {
 		return err
 	}
 	// Days summed up again must still have all their builds: retention
 	// cuts into the day of its cutoff. New days are summed up anyway.
-	from := max(last.Int64-rollupRedo+1, min(last.Int64+1, dayOf(s.opts.Now().Add(-s.opts.Keep))+1))
-	if !last.Valid {
+	from := max(last-rollupRedo+1, min(last+1, dayOf(s.opts.Now().Add(-s.opts.Keep))+1))
+	if !ok {
+		var first sql.NullInt64
 		if err := s.db.QueryRowContext(ctx, "SELECT min(started_at) FROM builds WHERE project_id IS NOT NULL").Scan(&first); err != nil {
 			return err
 		}
@@ -58,11 +63,59 @@ func (s *Store) Rollup(ctx context.Context) error {
 		}
 		from = first.Int64 / dayMs
 	}
-	return s.rollupDays(ctx, from, today)
+	if err := s.rollupDays(ctx, from, today); err != nil {
+		return err
+	}
+	if today-1 <= last && ok {
+		return nil
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO meta (name, value) VALUES ('rollup_last', ?)
+		ON CONFLICT (name) DO UPDATE SET value = excluded.value`, strconv.FormatInt(today-1, 10))
+	return err
 }
 
-// rollupDays sums up the days from (included) to to (excluded) again.
+// rolledUp returns the last day Rollup summed up (ok false before the
+// first). A single day summed up again elsewhere (SettleElsewhere) does
+// not count: the days before it may not be summed yet. A store that never
+// kept it takes the latest day summed up. A release rolled back to sums
+// days up without keeping it: the latest day summed up that is past
+// retention, which only Rollup writes, catches up with it.
+func (s *Store) rolledUp(ctx context.Context) (last int64, ok bool, err error) {
+	var kept sql.NullString
+	err = s.db.QueryRowContext(ctx, "SELECT value FROM meta WHERE name = 'rollup_last'").Scan(&kept)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, err
+	}
+	var day sql.NullInt64
+	floor := dayOf(s.opts.Now().Add(-s.opts.Keep))
+	if !kept.Valid {
+		floor = math.MaxInt64
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT max(day) FROM image_days WHERE day <= ?", floor).Scan(&day); err != nil {
+		return 0, false, err
+	}
+	if kept.Valid {
+		v, err := strconv.ParseInt(kept.String, 10, 64)
+		if err != nil {
+			return 0, false, fmt.Errorf("store: rollup_last %q: %w", kept.String, err)
+		}
+		return max(v, day.Int64), true, nil
+	}
+	return day.Int64, day.Valid, nil
+}
+
+// rollupDays sums up the days from (included) to to (excluded) again,
+// never a day up to rollup_floor: the size bound (pruneToSize) deleted
+// builds of those days after they were summed up.
 func (s *Store) rollupDays(ctx context.Context, from, to int64) error {
+	var floor sql.NullInt64
+	err := s.db.QueryRowContext(ctx, "SELECT CAST(value AS INTEGER) FROM meta WHERE name = 'rollup_floor'").Scan(&floor)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if floor.Valid {
+		from = max(from, floor.Int64+1)
+	}
 	if from >= to {
 		return nil
 	}

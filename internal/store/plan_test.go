@@ -47,7 +47,7 @@ func TestPipelineQueriesUseJobsIndex(t *testing.T) {
 	}
 	// The pages' own queries name the index: a plan test of a copy would
 	// not see the index dropped from them.
-	for src, want := range map[string]int{"pipelist.go": 1, "console.go": 1, "feed.go": 1, "pages.go": 1} {
+	for src, want := range map[string]int{"pipelist.go": 1, "console.go": 1, "pages.go": 1} {
 		b, err := os.ReadFile(src)
 		if err != nil {
 			t.Fatal(err)

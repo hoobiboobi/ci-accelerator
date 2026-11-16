@@ -119,7 +119,7 @@ func (s *Store) JobRoute(ctx context.Context, instance string, job uint64, daemo
 	var at int64
 	err := s.db.QueryRowContext(ctx, `SELECT project_id, node, daemon, reason, candidates, job_node, at
 		FROM route_decisions WHERE instance = ? AND job_id = ? AND daemon = ? AND at <= ? ORDER BY at DESC, id DESC LIMIT 1`,
-		nullInstance(instance), job, daemon, t.UnixMilli()).Scan(&project, &d.Node, &d.Daemon, &d.Reason, &d.Cands, &d.JobNode, &at)
+		nullInstance(instance), nullUint(job), daemon, t.UnixMilli()).Scan(&project, &d.Node, &d.Daemon, &d.Reason, &d.Cands, &d.JobNode, &at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -128,26 +128,4 @@ func (s *Store) JobRoute(ctx context.Context, instance string, job uint64, daemo
 	}
 	d.Project.ID, d.At = uint64(project.Int64), time.UnixMilli(at).UTC()
 	return &d, nil
-}
-
-// JobRoutes is the routers' decisions for a job, oldest first.
-func (s *Store) JobRoutes(ctx context.Context, instance string, job uint64) ([]Decision, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT project_id, node, daemon, reason, candidates, job_node, at
-		FROM route_decisions WHERE instance = ? AND job_id = ? ORDER BY at, id LIMIT 50`, nullInstance(instance), job)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Decision
-	for rows.Next() {
-		d := Decision{Project: route.Project{Instance: instance}, JobID: job}
-		var project sql.NullInt64
-		var at int64
-		if err := rows.Scan(&project, &d.Node, &d.Daemon, &d.Reason, &d.Cands, &d.JobNode, &at); err != nil {
-			return nil, err
-		}
-		d.Project.ID, d.At = uint64(project.Int64), time.UnixMilli(at).UTC()
-		out = append(out, d)
-	}
-	return out, rows.Err()
 }

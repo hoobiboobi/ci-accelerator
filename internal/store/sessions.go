@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"math"
 	"time"
 )
 
@@ -23,6 +25,9 @@ type Session struct {
 
 // SaveSession stores a new session.
 func (s *Store) SaveSession(ctx context.Context, x Session) error {
+	if x.UserID > math.MaxInt64 {
+		return fmt.Errorf("store: user id %d out of range", x.UserID)
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions (id, instance, user_id, username, name, token, created_at, seen_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, x.ID, x.Instance, x.UserID, x.Username, x.Name, x.Token, x.Created.UnixMilli(), x.Seen.UnixMilli())
 	return err

@@ -173,6 +173,11 @@ func (s *Store) Elsewhere(ctx context.Context, p ProjectKey, since time.Time, li
 		out = append(out, e)
 		builds = append(builds, b)
 	}
+	// An error part way through ends the loop as if the rows ran out.
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
@@ -319,7 +324,7 @@ func (s *Store) applyGitTrust(ctx context.Context) error {
 	q := `UPDATE builds SET reason_kind = 'cache-elsewhere' WHERE reason_kind IN ` + farmKinds + ` AND ` + fromComparisonSQL + `
 		AND context_commit = '' RETURNING started_at`
 	if want == "1" {
-		q = `UPDATE builds SET reason_via = '' WHERE reason_kind = 'cache-elsewhere' AND ` + fromComparisonSQL + ` RETURNING started_at`
+		q = `UPDATE builds SET reason_via = '', order_ms = 0 WHERE reason_kind = 'cache-elsewhere' AND ` + fromComparisonSQL + ` RETURNING started_at`
 	}
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
@@ -333,6 +338,10 @@ func (s *Store) applyGitTrust(ctx context.Context) error {
 			return err
 		}
 		days[started/dayMs] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
 	}
 	if err := rows.Close(); err != nil {
 		return err

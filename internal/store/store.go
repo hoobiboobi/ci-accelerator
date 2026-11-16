@@ -30,6 +30,11 @@ type Options struct {
 	// KeepDays is how many days the images' daily figures are kept
 	// (default 365).
 	KeepDays int
+	// MaxBytes bounds what the database holds (its pages in use; the
+	// output files have their own days, KeepOutput): above it Prune
+	// deletes the oldest builds of days already summed up before their
+	// retention ends, down to nine tenths of it. 0: no bound.
+	MaxBytes int64
 	// Now replaces the clock in tests.
 	Now func() time.Time
 	// TrustGitComparison counts a rebuild as the build farm's when GitLab's
@@ -95,8 +100,10 @@ func Open(ctx context.Context, dir string, opts Options) (*Store, error) {
 	// jobs and builds tables through the wrong index (a pipeline search took
 	// seconds at a few hundred thousand jobs). 0x10002: analyze every table
 	// that needs it, bounded, as SQLite recommends at open; Prune refreshes
-	// them.
-	if _, err := s.db.ExecContext(ctx, "PRAGMA optimize=0x10002"); err != nil {
+	// them. They are only statistics: on a full volume the store still
+	// opens without them, so that its pages stay readable and Prune can
+	// free room.
+	if _, err := s.db.ExecContext(ctx, "PRAGMA optimize=0x10002"); err != nil && !isFull(err) {
 		db.Close()
 		return nil, err
 	}
@@ -110,13 +117,17 @@ func Open(ctx context.Context, dir string, opts Options) (*Store, error) {
 // openSQLite opens a database file with the settings every file here uses:
 // WAL (readers do not block the writer), NORMAL sync (durable at
 // checkpoints; a power cut can lose the last transactions, which the
-// collector reads again), foreign keys, a busy timeout, and write
-// transactions that take the lock when they begin.
+// collector reads again), foreign keys, a busy timeout, write transactions
+// that take the lock when they begin, and a write-ahead log cut back to
+// walLimit after a checkpoint (it otherwise keeps its largest size until
+// the file is closed). The file and its log are the owner's only.
 func openSQLite(path string) (*sql.DB, error) {
+	ownerOnly(path)
 	q := url.Values{}
 	// auto_vacuum first: it takes effect only before the file is set up,
 	// which switching to WAL already does.
-	for _, p := range []string{"auto_vacuum(INCREMENTAL)", "busy_timeout(10000)", "foreign_keys(1)", "journal_mode(WAL)", "synchronous(NORMAL)"} {
+	for _, p := range []string{"auto_vacuum(INCREMENTAL)", "busy_timeout(10000)", "foreign_keys(1)", "journal_mode(WAL)",
+		"synchronous(NORMAL)", fmt.Sprintf("journal_size_limit(%d)", walLimit)} {
 		q.Add("_pragma", p)
 	}
 	q.Set("_txlock", "immediate")
@@ -126,6 +137,25 @@ func openSQLite(path string) (*sql.DB, error) {
 	}
 	db.SetMaxOpenConns(4)
 	return db, nil
+}
+
+// walLimit is the size a database's write-ahead log is cut back to.
+const walLimit = 64 << 20
+
+// ownerOnly makes a database file (created empty when missing: SQLite
+// takes an empty file for a new database) and its log and shared-memory
+// files readable by their owner only. They hold build output, Dockerfiles
+// and sealed tokens; SQLite creates the log files with the database
+// file's mode. Errors are left to SQLite's open.
+func ownerOnly(path string) {
+	if f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o600); err == nil {
+		f.Close()
+	}
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().Perm()&0o077 != 0 {
+			_ = os.Chmod(p, fi.Mode().Perm()&0o700)
+		}
+	}
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -210,11 +240,12 @@ func (s *Store) SecretKey() []byte { return s.key }
 // Close closes the store and its output files.
 func (s *Store) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	files := s.outputs
+	s.outputs = map[int]*outputFile{}
+	s.mu.Unlock()
 	var errs []error
-	for day, f := range s.outputs {
+	for _, f := range files {
 		errs = append(errs, f.close())
-		delete(s.outputs, day)
 	}
 	errs = append(errs, s.db.Close())
 	return errors.Join(errs...)

@@ -271,6 +271,11 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 		}
 		p.Printed[i] = true
 	}
+	// An error part way through ends the loop as if the rows ran out.
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
@@ -320,7 +325,7 @@ func (s *Store) BuildPage(ctx context.Context, id int64) (*BuildPage, error) {
 		return nil, err
 	}
 	p.Order = orderHints(st.Build, st.Reason, st.Via, p.Dockerfile)
-	if err := s.orderRuns(ctx, id, st.Build.Started, p.Order); err != nil {
+	if err := s.orderRuns(ctx, st, p.Order); err != nil {
 		return nil, err
 	}
 	if p.OrderFixed, err = s.orderFixed(ctx, st, p.Order); err != nil {
