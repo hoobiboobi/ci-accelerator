@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
@@ -103,6 +104,10 @@ type live struct {
 	// build shows), by daemon and ref. Neither leaves the collector.
 	sources map[string]Source
 	args    map[string]map[string]map[string]string
+	// done are the builds each daemon's latest stream saw complete, and
+	// when: BuildKit sends each event in its own goroutine, so a build's
+	// STARTED may come after its COMPLETE.
+	done map[string]map[string]time.Time
 	// instances are the GitLabs' trace-id prefixes, for TraceParent.
 	instances map[string]bool
 	// changed is called when what pages show live changes.
@@ -113,6 +118,9 @@ func (l *live) state(name string) *DaemonState {
 	if l.daemons == nil {
 		l.daemons, l.active, l.streams = map[string]*DaemonState{}, map[string]map[string]Active{}, map[string]uint64{}
 		l.sources, l.args = map[string]Source{}, map[string]map[string]map[string]string{}
+	}
+	if l.done == nil {
+		l.done = map[string]map[string]time.Time{}
 	}
 	d := l.daemons[name]
 	if d == nil {
@@ -125,20 +133,20 @@ func (l *live) state(name string) *DaemonState {
 	if l.args[name] == nil {
 		l.args[name] = map[string]map[string]string{}
 	}
+	if l.done[name] == nil {
+		l.done[name] = map[string]time.Time{}
+	}
 	return d
 }
 
-// connect marks a daemon connected by a new stream and returns the
-// stream's number.
-func (l *live) connect(name string) uint64 { return l.connectSource(name, nil) }
-
-// connectSource is connect for a stream read from src.
+// connectSource marks a daemon connected by a new stream read from src
+// and returns the stream's number.
 func (l *live) connectSource(name string, src Source) uint64 {
 	l.mu.Lock()
 	d := l.state(name)
 	d.Connected, d.Since = true, time.Now()
 	// A new stream reports the running builds again.
-	l.active[name], l.args[name] = map[string]Active{}, map[string]map[string]string{}
+	l.active[name], l.args[name], l.done[name] = map[string]Active{}, map[string]map[string]string{}, map[string]time.Time{}
 	l.sources[name] = src
 	l.seq++
 	l.streams[name] = l.seq
@@ -157,7 +165,7 @@ func (l *live) disconnected(name string, stream uint64) {
 	}
 	d := l.state(name)
 	d.Connected, d.Since = false, time.Now()
-	l.active[name], l.args[name] = map[string]Active{}, map[string]map[string]string{}
+	l.active[name], l.args[name], l.done[name] = map[string]Active{}, map[string]map[string]string{}, map[string]time.Time{}
 	delete(l.sources, name)
 	l.mu.Unlock()
 	l.notify()
@@ -176,16 +184,25 @@ func (l *live) forget(name string, stream uint64) bool {
 	delete(l.streams, name)
 	delete(l.sources, name)
 	delete(l.args, name)
+	delete(l.done, name)
 	l.mu.Unlock()
 	l.notify()
 	return true
 }
+
+// doneFor is how long a completed build is remembered against a late
+// STARTED: far longer than goroutines delivering one event take.
+const doneFor = 10 * time.Minute
 
 func (l *live) event(name string, t controlapi.BuildHistoryEventType, rec *controlapi.BuildHistoryRecord) {
 	l.mu.Lock()
 	l.state(name)
 	switch t {
 	case controlapi.BuildHistoryEventType_STARTED:
+		if _, ok := l.done[name][rec.Ref]; ok {
+			l.mu.Unlock()
+			return // it completed already
+		}
 		a := Active{Daemon: name, Ref: rec.Ref, Target: rec.FrontendAttrs["target"]}
 		if rec.CreatedAt != nil {
 			a.Started = rec.CreatedAt.AsTime()
@@ -202,6 +219,13 @@ func (l *live) event(name string, t controlapi.BuildHistoryEventType, rec *contr
 		}
 		l.args[name][rec.Ref] = args
 	case controlapi.BuildHistoryEventType_COMPLETE, controlapi.BuildHistoryEventType_DELETED:
+		now := time.Now()
+		for ref, at := range l.done[name] {
+			if now.Sub(at) > doneFor {
+				delete(l.done[name], ref)
+			}
+		}
+		l.done[name][rec.Ref] = now
 		if _, ok := l.active[name][rec.Ref]; !ok {
 			l.mu.Unlock()
 			return
@@ -224,7 +248,15 @@ func (l *live) inspected(name string, in Inspection, err error) {
 		return
 	}
 	same := false
-	if err != nil {
+	var partial *usageError
+	if errors.As(err, &partial) {
+		// The cache could not be listed; the rest was read now: the node's
+		// disk and load stay current, the cache's figures are the last
+		// ones read (InspectedAt dates them).
+		in.Usage = d.Inspection.Usage
+		same = d.InspectErr == err.Error() && reflect.DeepEqual(d.Inspection, in)
+		d.Inspection, d.InspectErr = in, err.Error()
+	} else if err != nil {
 		same = d.InspectErr == err.Error()
 		d.InspectErr = err.Error()
 	} else {

@@ -26,17 +26,24 @@ const Selector = "ci-accelerator.io/component=ci-job"
 
 // Job reads a job from its pod. gitlabURLs are the installation's GitLab
 // URLs as configured, which the trace-id prefix is derived from; the job's
-// URL tells which one ran it. ok is false for a pod that is not a known
-// GitLab instance's job.
+// URL tells which one ran it: the longest one it starts with, the scheme,
+// host name case and a default port aside. ok is false for a pod that is
+// not a known GitLab instance's job.
 func Job(pod *corev1.Pod, gitlabURLs []string) (store.Job, bool) {
 	a := pod.Annotations
 	url := a["job.runner.gitlab.com/url"]
 	instance, path := "", ""
+	origin, rest := splitURL(url)
+	best := -1
 	for _, u := range gitlabURLs {
-		if rest, ok := strings.CutPrefix(url, strings.TrimSuffix(u, "/")+"/"); ok {
+		o, p := splitURL(strings.TrimSuffix(u, "/") + "/")
+		if o == "" || o != origin || len(p) <= best {
+			continue
+		}
+		if r, ok := strings.CutPrefix(rest, p); ok {
+			best = len(p)
 			instance = history.InstancePrefix(u)
-			path, _, _ = strings.Cut(rest, "/-/jobs/")
-			break
+			path, _, _ = strings.Cut(r, "/-/jobs/")
 		}
 	}
 	id := number(a["job.runner.gitlab.com/id"])
@@ -78,6 +85,31 @@ func Job(pod *corev1.Pod, gitlabURLs []string) (store.Job, bool) {
 	}, true
 }
 
+// splitURL splits an absolute URL into its origin, written one way
+// (scheme and host in lower case, no default port), and the rest from the
+// path on, as written; origin is "" when s is not an absolute URL.
+func splitURL(s string) (origin, rest string) {
+	scheme, after, ok := strings.Cut(s, "://")
+	if !ok || scheme == "" {
+		return "", s
+	}
+	host, rest := after, ""
+	if i := strings.IndexAny(after, "/?#"); i >= 0 {
+		host, rest = after[:i], after[i:]
+	}
+	scheme, host = strings.ToLower(scheme), strings.ToLower(host)
+	switch scheme {
+	case "https":
+		host = strings.TrimSuffix(host, ":443")
+	case "http":
+		host = strings.TrimSuffix(host, ":80")
+	}
+	if host == "" {
+		return "", s
+	}
+	return scheme + "://" + host, rest
+}
+
 // buildStarted is when the pod's build container started (the
 // Kubernetes executor names it "build"); zero until it has.
 func buildStarted(pod *corev1.Pod) time.Time {
@@ -103,6 +135,10 @@ func buildStarted(pod *corev1.Pod) time.Time {
 type Handlers struct {
 	Job  func(context.Context, store.Job)
 	Gone func(ctx context.Context, j store.Job, at time.Time)
+	// Unknown is called once for each job pod whose job URL starts with
+	// none of the GitLab URLs (or has no job id): its builds and route
+	// decisions get no job. url is the pod's job URL.
+	Unknown func(ctx context.Context, pod, url string)
 }
 
 // endedAt is when deleting a pod was asked for: its deletion deadline less
@@ -129,11 +165,17 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 		informers.WithNamespace(namespace),
 		informers.WithTweakListOptions(func(o *metav1.ListOptions) { o.LabelSelector = Selector }))
 	pods := factory.Core().V1().Pods().Informer()
+	unknown := map[string]bool{} // pods told to Unknown; the informer calls one at a time
 	call := func(fn func(context.Context, store.Job), pod *corev1.Pod) {
-		if fn == nil {
+		j, ok := Job(pod, gitlabURLs)
+		if !ok {
+			if key := pod.Namespace + "/" + pod.Name; h.Unknown != nil && !unknown[key] {
+				unknown[key] = true
+				h.Unknown(ctx, key, pod.Annotations["job.runner.gitlab.com/url"])
+			}
 			return
 		}
-		if j, ok := Job(pod, gitlabURLs); ok {
+		if fn != nil {
 			fn(ctx, j)
 		}
 	}
@@ -196,6 +238,7 @@ func Watch(ctx context.Context, client kubernetes.Interface, namespace string, g
 				obj = d.Obj
 			}
 			if p, ok := obj.(*corev1.Pod); ok {
+				delete(unknown, p.Namespace+"/"+p.Name)
 				gone(p, true)
 			}
 		},

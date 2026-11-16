@@ -23,6 +23,7 @@ import (
 	"github.com/hoobiboobi/ci-accelerator/internal/diskprobe"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
+	"google.golang.org/grpc"
 )
 
 // TLS names the client certificate files the collector presents to the
@@ -208,15 +209,12 @@ func (d *Daemon) Inspect(ctx context.Context) (Inspection, error) {
 				Reserved: p.ReservedSpace, MaxUsed: p.MaxUsedSpace, MinFree: p.MinFreeSpace})
 		}
 	}
-	du, err := d.c.DiskUsage(ctx)
-	if err != nil {
-		return in, err
+	// The disk and load come from the probe: read also when the cache
+	// cannot be listed, since a full disk is when that matters most.
+	records, uerr := diskUsage(ctx, d.c.ControlClient())
+	if uerr == nil {
+		in.Usage = Classify(records)
 	}
-	records := make([]Record, len(du))
-	for i, r := range du {
-		records[i] = Record{Type: string(r.RecordType), Description: r.Description, Size: r.Size, LastUsed: r.LastUsedAt}
-	}
-	in.Usage = Classify(records)
 	if probe := d.probeURL(); probe != "" {
 		// The daemon answered: a probe that does not is noted, not fatal.
 		if disk, err := diskprobe.Fetch(ctx, probeClient, probe); err != nil {
@@ -231,8 +229,40 @@ func (d *Daemon) Inspect(ctx context.Context) (Inspection, error) {
 			in.Load = &load
 		}
 	}
+	if uerr != nil {
+		return in, &usageError{uerr}
+	}
 	return in, nil
 }
+
+// maxUsageMessage bounds the answer listing a daemon's cache: BuildKit's
+// client accepts 16 MiB, about 80,000 records, and a cache of several TB
+// holds more.
+const maxUsageMessage = 512 << 20
+
+// diskUsage lists a daemon's cache records.
+func diskUsage(ctx context.Context, cc controlapi.ControlClient) ([]Record, error) {
+	resp, err := cc.DiskUsage(ctx, &controlapi.DiskUsageRequest{}, grpc.MaxCallRecvMsgSize(maxUsageMessage))
+	if err != nil {
+		return nil, fmt.Errorf("listing the cache: %w", err)
+	}
+	records := make([]Record, len(resp.Record))
+	for i, r := range resp.Record {
+		records[i] = Record{Type: r.RecordType, Description: r.Description, Size: r.Size}
+		if r.LastUsedAt != nil {
+			t := r.LastUsedAt.AsTime()
+			records[i].LastUsed = &t
+		}
+	}
+	return records, nil
+}
+
+// usageError: the daemon's cache could not be listed; what else Inspect
+// read is current.
+type usageError struct{ err error }
+
+func (e *usageError) Error() string { return e.err.Error() }
+func (e *usageError) Unwrap() error { return e.err }
 
 // Record is one record of a daemon's cache.
 type Record struct {

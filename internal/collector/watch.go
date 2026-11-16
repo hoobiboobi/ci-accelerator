@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -45,6 +46,10 @@ type LoadReader interface {
 const (
 	// MaxWatched bounds the builds whose progress is read at once.
 	MaxWatched = 32
+	// MaxWatchedPerJob bounds those that name one CI job: a build names
+	// its job itself (its trace context), so builds of any job can name
+	// another one, and must not take every watcher from the rest.
+	MaxWatchedPerJob = 8
 	// LoadEvery is how often the load of a followed build's node is read.
 	LoadEvery = 10 * time.Second
 )
@@ -74,6 +79,7 @@ type watches struct {
 // watcher reads one running build's progress while its page is open.
 type watcher struct {
 	first chan struct{} // closed with the first update, or the end
+	job   string        // the CI job the build names; "" for none
 
 	mu    sync.Mutex
 	live  *history.Live
@@ -137,11 +143,21 @@ func (c *Collector) LiveBuild(ctx context.Context, daemon, ref string) (*LiveBui
 		}
 	}
 	if w == nil {
-		if len(c.watch.m) >= MaxWatched {
+		job := ""
+		if a.Job != 0 {
+			job = fmt.Sprintf("%s/%d/%d", a.Instance, a.Pipeline, a.Job)
+		}
+		same := 0
+		for k, o := range c.watch.m {
+			if job != "" && o.job == job && k != key {
+				same++
+			}
+		}
+		if len(c.watch.m) >= MaxWatched || same >= MaxWatchedPerJob {
 			c.watch.mu.Unlock()
 			return nil, ErrTooManyWatched
 		}
-		w = &watcher{first: make(chan struct{}), live: history.NewLive(args), until: now.Add(watchFor)}
+		w = &watcher{first: make(chan struct{}), job: job, live: history.NewLive(args), until: now.Add(watchFor)}
 		c.watch.m[key] = w
 		lr, _ := src.(LoadReader)
 		go c.follow(w, st, lr, daemon, ref, watchTick)

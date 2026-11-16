@@ -197,8 +197,10 @@ func TestGoneDaemonLeavesMemory(t *testing.T) {
 	}
 	run("gone", ErrGone)
 	run("broken", nil)
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	if err := c.lock(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer c.unlock()
 	if _, ok := c.daemons["gone"]; ok {
 		t.Error("the builds of a daemon that is gone stay in memory")
 	}
