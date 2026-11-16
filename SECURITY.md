@@ -14,10 +14,13 @@ GitHub's advisory workflow.
 
 | Version | Fixes |
 |---|---|
+| 1.0.x | yes |
 | 0.6.x | yes |
 | 0.5.x and older | no |
 
-The latest 0.x minor receives fixes; older minors do not. A release
+1.0.x is in alpha pre-releases (`1.0.0-alpha.<n>`): a fix comes as the
+next pre-release. 0.6.x, the latest stable line, receives fixes as patch
+releases until 1.0.0 is out; older minors do not. A release
 upgrades in place from the previous one, with one exception: 0.2.x does
 not upgrade to 0.3.0 (the console became the control plane and its objects
 have new names), so move from 0.2.x by installing again as the

@@ -63,8 +63,8 @@ hides what you type: paste, press Enter.
 ## 2. Download the script and check it
 
 ```sh
-curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.6.0/quickstart.sh
-curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v0.6.0/SHA256SUMS | grep quickstart.sh | sha256sum -c -
+curl -fsSLO https://github.com/hoobiboobi/ci-accelerator/releases/download/v1.0.0-alpha.1/quickstart.sh
+curl -fsSL https://github.com/hoobiboobi/ci-accelerator/releases/download/v1.0.0-alpha.1/SHA256SUMS | grep quickstart.sh | sha256sum -c -
 ```
 
 The second command prints `quickstart.sh: OK`. Anything else (`FAILED`):
@@ -87,9 +87,9 @@ What follows, with the time each step takes on a small cloud VM:
 ==> Waiting for Kubernetes
 ==> Installing Helm v4.3.1
 ==> Installing cert-manager v1.21.3      (half a minute)
-==> Installing ci-accelerator 0.6.0      (one to three minutes: the images)
+==> Installing ci-accelerator 1.0.0-alpha.1      (one to three minutes: the images)
 
-Done. ci-accelerator 0.6.0 runs on this machine.
+Done. ci-accelerator 1.0.0-alpha.1 runs on this machine.
 ```
 
 Then the install notes (the commands of the next steps and the `include:`
@@ -281,7 +281,7 @@ the Helm to use):
 
 ```sh
 sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/lib/ci-accelerator/helm-v4.3.1/helm upgrade ci-accelerator \
-  oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
+  oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 1.0.0-alpha.1 \
   -n ci-accelerator -f /var/lib/ci-accelerator/values.yaml --wait --timeout 15m
 ```
 

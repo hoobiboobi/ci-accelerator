@@ -256,7 +256,7 @@ Either way:
    release:
 
    ```sh
-   curl -fsSLO https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.6.0/integrations/gitlab-runner/values.yaml
+   curl -fsSLO https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v1.0.0-alpha.1/integrations/gitlab-runner/values.yaml
    ```
 
    Change the lines marked `ADJUST`: the GitLab URL (the same string as

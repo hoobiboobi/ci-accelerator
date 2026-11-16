@@ -179,7 +179,7 @@ Every change below is applied the same way, with the version you run
 (`helm list -n ci-accelerator`, the CHART column) and your values file:
 
 ```sh
-helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
+helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 1.0.0-alpha.1 \
   -n ci-accelerator -f values.yaml --wait --timeout 15m
 ```
 

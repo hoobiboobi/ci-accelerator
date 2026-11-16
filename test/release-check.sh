@@ -43,5 +43,6 @@ expect "a guide installs another chart version" fail "1s/^/helm install buildkit
 /" docs/troubleshooting.md
 expect "the disk probe runs an unreleased image" fail 's/default "v[0-9][^"]*" \$img\.tag/default "v9.9.9" $img.tag/' charts/buildkit/templates/_helpers.tpl
 expect "the changelog entry has no upgrade notes" fail '/^### Upgrade notes/d' CHANGELOG.md
-expect "SECURITY.md supports another line" fail "s/^| ${version%.*}.x | yes |/| 0.0.x | yes |/" SECURITY.md
+line=${version%%-*}   # a pre-release (1.0.0-alpha.1) belongs to its line (1.0.x)
+expect "SECURITY.md supports another line" fail "s/^| ${line%.*}.x | yes |/| 0.0.x | yes |/" SECURITY.md
 exit $fail

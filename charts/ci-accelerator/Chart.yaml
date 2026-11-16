@@ -5,9 +5,9 @@ description: >-
   shared cache on dedicated build nodes, and a gitlab-runner that sends CI
   jobs to them.
 type: application
-version: 0.6.0
+version: 1.0.0-alpha.1
 # The box's own version (its control plane's image); the daemons' BuildKit version is in charts/buildkit.
-appVersion: "0.6.0"
+appVersion: "1.0.0-alpha.1"
 kubeVersion: ">=1.34.0-0"
 home: https://ci-accelerator.io
 sources:
@@ -21,12 +21,12 @@ keywords:
 icon: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/main/docs/icon.svg
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/prerelease: "false"
+  artifacthub.io/prerelease: "true"
   artifacthub.io/images: |
     - name: buildkit
       image: moby/buildkit:v0.34.2
     - name: ci-accelerator
-      image: ghcr.io/hoobiboobi/ci-accelerator:v0.6.0
+      image: ghcr.io/hoobiboobi/ci-accelerator:v1.0.0-alpha.1
       platforms:
         - linux/amd64
         - linux/arm64
@@ -45,16 +45,18 @@ annotations:
       url: https://github.com/hoobiboobi/ci-accelerator/issues
   # The release's changes, for Artifact Hub's version page; rewrite with each release (docs/releasing.md).
   artifacthub.io/changes: |
-    - kind: fixed
-      description: "The daemons cap the open-files limit of every RUN step (buildkit.openFilesLimit): yum on CentOS 7 no longer hangs for an hour"
-    - kind: fixed
-      description: "Console: builds with a provenance that maps other digests, Dockerfiles of ten steps or more, a rebuild with the job's .git in the context, and the previous build of an image are read right"
-    - kind: changed
-      description: "A stopping daemon finishes its builds before SIGTERM and the console reads a leaving daemon to the end: builds that finish during a rollout are stored"
     - kind: added
-      description: "The CI component notes in the job's log when the checkout's .git is in the build context"
+      description: "Alpha pre-release; 0.6.0 stays the latest stable release"
+    - kind: added
+      description: "A fleet (experimental): several boxes under one console, a hub that members dial out to, with roles, API tokens, an audit log and clusters added from the console"
+    - kind: added
+      description: "Console: the order speed-up says when dependencies were installed again only because the whole context is copied before the install"
     - kind: changed
-      description: "Documentation: the install, the upgrades and the settings as step-by-step procedures, each rehearsed on a fresh stand"
+      description: "Console: the compare page shows every step difference, the live forecast counts the steps still to run, and failed builds differ by more than colour"
+    - kind: security
+      description: "With several GitLabs and sign-in, a person's GitLab token goes only to the GitLab that issued it; wider secret masking; the controller checks TokenReview audiences; the router bounds connections"
+    - kind: security
+      description: "golang.org/x/net v0.62.0"
 maintainers:
   - name: hoobiboobi
     url: https://github.com/hoobiboobi
@@ -62,10 +64,10 @@ maintainers:
 # archives checked against pinned sha256 sums).
 dependencies:
   - name: buildkit
-    version: 0.6.0
+    version: 1.0.0-alpha.1
     repository: file://../buildkit
   - name: control-plane
-    version: 0.6.0
+    version: 1.0.0-alpha.1
     repository: file://../control-plane
     condition: control-plane.enabled
   - name: gitlab-runner

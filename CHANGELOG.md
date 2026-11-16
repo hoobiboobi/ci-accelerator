@@ -9,6 +9,17 @@ workflow copies them into the GitHub release.
 
 ### Upgrade notes
 
+None.
+
+## 1.0.0-alpha.1 - 2026-11-17
+
+An alpha pre-release: it brings the fleet hub (experimental) and the
+fixes of a full audit, for trying out before 1.0.0. 0.6.0 stays the latest
+stable release (`--version 0.6.0`) and keeps receiving fixes. It upgrades
+in place from 0.6.0 and rolls back to it.
+
+### Upgrade notes
+
 - The console's store gains a column (`builds.order_ms`) on its first
   start; a rollback to 0.6.0 keeps working on the same store. A box that
   does not set `fleet.role` renders as before.

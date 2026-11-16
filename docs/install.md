@@ -243,12 +243,12 @@ and is lost when the daemon's pod is replaced (a rollout, an eviction). That is 
 dedicated disk comes later without a reinstall
 ([production.md](production.md#a-dedicated-cache-disk)). Every other
 setting and its default: `helm show values
-oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0`.
+oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 1.0.0-alpha.1`.
 
 ## 7. Install
 
 ```sh
-helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
+helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 1.0.0-alpha.1 \
   -n ci-accelerator -f values.yaml --wait --timeout 10m
 ```
 
@@ -266,7 +266,7 @@ NAMESPACE: ci-accelerator
 STATUS: deployed
 REVISION: 1
 NOTES:
-ci-accelerator 0.6.0 in namespace ci-accelerator.
+ci-accelerator 1.0.0-alpha.1 in namespace ci-accelerator.
 ...
 ```
 

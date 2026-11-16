@@ -68,7 +68,7 @@ that for you.
    [docs/install-existing-cluster.md](../../docs/install-existing-cluster.md#the-cluster-has-its-own-gitlab-runner).
 
    ```sh
-   helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
+   helm install ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 1.0.0-alpha.1 \
      -n ci-accelerator \
      --set gitlab-runner.enabled=false \
      --set gitlab-runner.gitlabUrl=https://gitlab.example.com/ \
@@ -85,7 +85,7 @@ that for you.
    the runner's namespace, as described in
    [The runner token Secret](#the-runner-token-secret).
 3. Download the fragment at the box's release
-   (`curl -fsSLO https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.6.0/integrations/gitlab-runner/values.yaml`)
+   (`curl -fsSLO https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v1.0.0-alpha.1/integrations/gitlab-runner/values.yaml`)
    and change the lines marked `ADJUST` in `values.yaml`:
    - the GitLab URL (`gitlabUrl`), the same string as in step 1;
    - the token Secret's name (`runners.secret`);

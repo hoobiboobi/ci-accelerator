@@ -16,7 +16,7 @@ Both are changes to `values.yaml`, applied with the install's command
 and the version you run (`helm list -n ci-accelerator`):
 
 ```sh
-helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 0.6.0 \
+helm upgrade ci-accelerator oci://ghcr.io/hoobiboobi/charts/ci-accelerator --version 1.0.0-alpha.1 \
   -n ci-accelerator -f values.yaml --wait --timeout 15m
 ```
 
@@ -412,8 +412,8 @@ the build pushed:
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v0.6.0/ci/gitlab/build.yml
-    integrity: sha256-Hp1o0lc/x3VdadiYVMbcFywe2DL8YkGSGr2K/KpQ8w8=
+  - remote: https://raw.githubusercontent.com/hoobiboobi/ci-accelerator/v1.0.0-alpha.1/ci/gitlab/build.yml
+    integrity: sha256-mXeWjZPeANlsJA+RGY1aDDuYHHtO083/MJAFEl7XGzE=
     inputs:
       runner-tags: [ci-accelerator]
 
