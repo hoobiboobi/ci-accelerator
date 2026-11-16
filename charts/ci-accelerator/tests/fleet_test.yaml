@@ -1,0 +1,80 @@
+suite: a fleet member, and no hub, in the box
+values:
+  - values/required.yaml
+# The daemons' node check lists Nodes, which the fake cluster cannot.
+set:
+  buildkit.preflight.buildNodes: false
+release:
+  name: box
+  namespace: ci-accelerator
+capabilities:
+  apiVersions:
+    - cert-manager.io/v1
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+    "v1/Node":
+      gvr:
+        version: v1
+        resource: nodes
+      namespaced: false
+    "v1/Namespace":
+      gvr:
+        version: v1
+        resource: namespaces
+      namespaced: false
+    "apps/v1/Deployment":
+      gvr:
+        group: apps
+        version: v1
+        resource: deployments
+      namespaced: true
+tests:
+  # A hub has no daemons or runner: the box would run builds into a
+  # router and a controller the hub does not have.
+  - it: refuses a hub in the box
+    template: validate.yaml
+    set:
+      control-plane.fleet.role: hub
+      control-plane.fleet.key.existingSecret: hub-key
+      control-plane.fleet.apiToken.existingSecret: hub-token
+      global.console.url: https://hub.example.com
+    asserts:
+      - failedTemplate: { errorPattern: "a fleet hub is not a box" }
+  - it: tells a member where its pages are, without a web to port-forward
+    template: NOTES.txt
+    values: [values/fleet-member.yaml]
+    asserts:
+      - matchRegexRaw:
+          pattern: "This box is a member of the fleet at https://hub.example.com, as prod-ap"
+      - matchRegexRaw:
+          pattern: "https://hub.example.com/m/prod-ap/"
+      - notMatchRegexRaw:
+          pattern: "port-forward|box-web|Sign-in is off"
+  # The member's runner Secret is created empty and filled once the hub
+  # delivers the token: an upgrade before that is not refused.
+  - it: lets a member's runner Secret wait for the hub's token
+    template: validate.yaml
+    values: [values/fleet-member.yaml]
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: { name: fleet-runner-token, namespace: ci-accelerator }
+    asserts:
+      - hasDocuments: { count: 0 }
+  - it: still checks a box's runner Secret
+    template: validate.yaml
+    set:
+      gitlab-runner.runners.secret: fleet-runner-token
+    kubernetesProvider:
+      objects:
+        - apiVersion: v1
+          kind: Secret
+          metadata: { name: fleet-runner-token, namespace: ci-accelerator }
+    asserts:
+      - failedTemplate: { errorPattern: "has no runner-registration-token key" }

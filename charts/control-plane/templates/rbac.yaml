@@ -1,3 +1,5 @@
+{{- if ne (include "control-plane.fleetRole" .) "hub" }}
+{{- /* A fleet hub runs none of this: hub.yaml. */}}
 {{- $jobs := include "control-plane.jobsNamespace" . }}
 {{- if and $jobs .Values.jobs.rbac.create }}
 # Read-only access to the CI job pods, for their jobs' names, pipelines and
@@ -29,4 +31,43 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "control-plane.controllerName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if eq (include "control-plane.fleetRole" .) "member" }}
+---
+# A fleet member writes the Secrets its hub delivers (the runner's token,
+# the S3 keys, named in the values the hub generated), and, joining with a
+# token, keeps the key it makes. It may read and change only those, and
+# create none: this chart creates them, empty (fleet-secrets.yaml), since a
+# right to create Secrets here would let it mint a token of any
+# ServiceAccount of the namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "control-plane.controllerName" . }}-fleet
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      {{- include "control-plane.fleetSecretNames" . | nindent 6 }}
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "control-plane.controllerName" . }}-fleet
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "control-plane.controllerName" . }}-fleet
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "control-plane.controllerName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

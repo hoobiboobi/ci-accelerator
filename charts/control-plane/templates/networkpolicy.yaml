@@ -1,5 +1,9 @@
+{{- $role := include "control-plane.fleetRole" . }}
 {{- $np := default (dict) .Values.networkPolicy }}
 {{- if dig "enabled" false $np }}
+{{- /* The console's pages: the web's, or a fleet hub's (a member has none). */}}
+{{- $console := ternary "hub" "web" (eq $role "hub") }}
+{{- if ne $role "member" }}
 {{- $denied := list .Release.Namespace }}
 {{- with include "control-plane.jobsNamespace" . }}{{ $denied = append $denied . }}{{ end }}
 {{- range (dig "deniedNamespaces" (list) $np) }}{{ $denied = append $denied (tpl . $) }}{{ end }}
@@ -8,18 +12,19 @@
 # project to whoever reaches it: the jobs namespace and the daemons (RUN
 # steps share their network) are kept out; Ingress controllers and other
 # namespaces, and kubectl port-forward (it enters the pod from the node),
-# still reach it. Only ingress is limited.
+# still reach it. Only ingress is limited. On a fleet hub the same holds
+# for its pages; its members reach it through the Ingress.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "control-plane.webName" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "control-plane.labels" (dict "root" . "role" "web") | nindent 4 }}
+    {{- include "control-plane.labels" (dict "root" . "role" $console) | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "control-plane.selectorLabels" (dict "root" . "role" "web") | nindent 6 }}
+      {{- include "control-plane.selectorLabels" (dict "root" . "role" $console) | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
@@ -48,11 +53,19 @@ spec:
         {{- with (dig "extraFrom" (list) $np) }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+{{- end }}
+{{- if ne $role "hub" }}
+{{- $callers := list }}
+{{- if ne $role "member" }}{{ $callers = append $callers "web" }}{{ end }}
+{{- if include "control-plane.router" . }}{{ $callers = append $callers "router" }}{{ end }}
+{{- if ne $role "member" }}
 ---
+{{- end }}
 # Who may call the controller: the web's and the routers' pods, nothing
 # else (the kubelet's probes come from the node, which a NetworkPolicy does
-# not limit). Its own connections (daemons, the API server, GitLab, S3)
-# stay open.
+# not limit; a fleet member's hub calls it over the link the controller
+# dials). Its own connections (daemons, the API server, GitLab, S3, the
+# hub) stay open.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -66,19 +79,20 @@ spec:
       {{- include "control-plane.selectorLabels" (dict "root" . "role" "controller") | nindent 6 }}
   policyTypes:
     - Ingress
+  {{- if $callers }}
   ingress:
     - ports:
         - port: api
           protocol: TCP
       from:
+        {{- range $callers }}
         - podSelector:
             matchLabels:
-              {{- include "control-plane.selectorLabels" (dict "root" . "role" "web") | nindent 14 }}
-        {{- if include "control-plane.router" . }}
-        - podSelector:
-            matchLabels:
-              {{- include "control-plane.selectorLabels" (dict "root" . "role" "router") | nindent 14 }}
+              {{- include "control-plane.selectorLabels" (dict "root" $ "role" .) | nindent 14 }}
         {{- end }}
+  {{- else }}
+  ingress: []
+  {{- end }}
 {{- if include "control-plane.router" . }}
 ---
 # Who may connect to the routers: the CI jobs' namespaces. Their daemons
@@ -107,5 +121,6 @@ spec:
                 operator: In
                 values:
                   {{- include "control-plane.routerClients" . | fromJsonArray | toYaml | nindent 18 }}
+{{- end }}
 {{- end }}
 {{- end }}

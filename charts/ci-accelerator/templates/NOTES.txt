@@ -67,6 +67,19 @@ The runners never delete old caches: give each bucket a lifecycle rule
 {{- $prefix := default .Release.Name $cp.fullnameOverride | trunc 40 | trimSuffix "-" }}
 {{- $svc := printf "%s-web" $prefix }}
 {{- $port := int (dig "web" "port" 8080 $cp) }}
+{{- if eq (toString (dig "fleet" "role" "" $cp)) "member" }}
+{{- $hubURL := trimSuffix "/" (dig "fleet" "hub" "url" "" $cp) }}
+{{- $name := dig "fleet" "name" "" $cp }}
+
+This box is a member of the fleet at {{ $hubURL }}, as {{ $name }}: the
+controller ({{ $prefix }}-controller) collects the daemons' history and dials
+the hub; the box installs no web. Its pages are at the hub,
+{{ $hubURL }}/m/{{ $name }}/, behind the hub's sign-in. The Secrets the hub
+delivers once the box is connected (fleet-runner-token, fleet-gitlab-token,
+fleet-s3-cache) are created empty and filled then: the runner waits for
+its token until it is there.
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ $prefix }}-controller | grep fleet:
+{{- else }}
 
 The console explains each build: the controller ({{ $prefix }}-controller)
 collects the daemons' history, the web ({{ $svc }}) serves the pages.
@@ -106,6 +119,7 @@ settles "files or node" by comparing commits. Sign-in through GitLab
 (control-plane.signIn; docs/console.md, "Setting up the console") would show each
 person only the projects GitLab lets them read; its redirect URI would be
   {{ default "<global.console.url>" $cu }}/auth/callback/{{ $runner.gitlabUrl | sha256sum | trunc 6 }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

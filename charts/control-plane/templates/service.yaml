@@ -1,3 +1,5 @@
+{{- $role := include "control-plane.fleetRole" . }}
+{{- if not $role }}
 # The console: its pages and JSON API, served by the web's pods.
 apiVersion: v1
 kind: Service
@@ -14,6 +16,8 @@ spec:
     - name: http
       port: {{ int .Values.web.port }}
       targetPort: http
+{{- end }}
+{{- if ne $role "hub" }}
 ---
 # The controller's API, for the web (HTTPS; callers prove themselves with
 # a ServiceAccount token).
@@ -33,3 +37,4 @@ spec:
       port: {{ int .Values.controller.api.port }}
       targetPort: api
       appProtocol: https
+{{- end }}

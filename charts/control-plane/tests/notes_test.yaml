@@ -20,3 +20,25 @@ tests:
     asserts:
       - notMatchRegexRaw:
           pattern: build router
+
+  # A hub has no controller, web or daemons; a member has no web.
+  - it: tells a hub where its pages and its members' connections are
+    values: [values/fleet-hub.yaml]
+    asserts:
+      - matchRegexRaw:
+          pattern: "A fleet hub \\(docs/fleet.md\\)"
+      - matchRegexRaw:
+          pattern: "https://hub.example.com/fleet/v1/connect, a WebSocket"
+      - matchRegexRaw:
+          pattern: "https://gitlab.example.com/: https://hub.example.com/auth/callback/[0-9a-f]{6}"
+      - notMatchRegexRaw:
+          pattern: "daemons behind|deploy/c-controller|port-forward"
+  - it: tells a member that its pages are at the hub
+    values: [values/fleet-member.yaml]
+    asserts:
+      - matchRegexRaw:
+          pattern: "the cluster's pages are at the hub,\\s+https://hub.example.com/m/prod-eu/"
+      - matchRegexRaw:
+          pattern: "fleet-runner-token,\\s+fleet-gitlab-token, fleet-s3-cache\\) are created here empty"
+      - notMatchRegexRaw:
+          pattern: "port-forward|svc/c-web|Sign-in is off"

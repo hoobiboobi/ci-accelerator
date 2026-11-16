@@ -1,0 +1,31 @@
+# A fleet hub with every option: sign-in, the API token, the secrets key,
+# a private CA and its NetworkPolicy (rendered by make lint and validate).
+fleet:
+  role: hub
+  key:
+    existingSecret: lint-hub-key
+  apiToken:
+    existingSecret: lint-hub-token
+  secretsKey:
+    existingSecret: lint-hub-secrets
+  hub:
+    caCert: |
+      -----BEGIN CERTIFICATE-----
+      MIIB
+      -----END CERTIFICATE-----
+global:
+  console:
+    url: https://hub.example.com
+signIn:
+  enabled: true
+  sessionKey:
+    existingSecret: lint-session
+  gitlab:
+    - url: https://gitlab.example.com/
+      existingSecret: lint-oauth
+      owners: ["id:1"]
+networkPolicy:
+  enabled: true
+controller:
+  podLabels:
+    team: ci

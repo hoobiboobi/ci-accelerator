@@ -109,13 +109,14 @@ ci-accelerator.io/component: {{ .role }}
 
 {{/*
 Pod labels: without the chart version, so a chart release that changes
-nothing else does not restart the pods.
+nothing else does not restart the pods. .from: the values block whose
+podLabels apply, when it is not the role's own (a hub: controller).
 */}}
 {{- define "control-plane.podLabels" -}}
 {{- $own := merge
   (include "control-plane.selectorLabels" . | fromYaml)
   (include "control-plane.componentLabels" . | fromYaml) }}
-{{- $pod := dig .role "podLabels" (dict) .root.Values.AsMap }}
+{{- $pod := dig (default .role .from) "podLabels" (dict) .root.Values.AsMap }}
 {{- toYaml (merge $own $pod (default (dict) .root.Values.commonLabels)) }}
 {{- end }}
 
@@ -220,8 +221,13 @@ too. As YAML.
 {{- default (printf "%s-data" (include "control-plane.controllerName" .)) .Values.controller.persistence.existingClaim }}
 {{- end }}
 
+{{/*
+Sign-in to this release's pages. A fleet member has no pages of its own
+(people sign in at the hub), so its signIn values are ignored: values
+of the box it was before may stay in place.
+*/}}
 {{- define "control-plane.signIn" -}}
-{{- if .Values.signIn.enabled }}true{{ end }}
+{{- if and .Values.signIn.enabled (ne (include "control-plane.fleetRole" .) "member") }}true{{ end }}
 {{- end }}
 
 {{/*
@@ -240,7 +246,9 @@ secret.
 {{- define "control-plane.signInConfig" -}}
 {{- $gl := list }}
 {{- range $i, $g := .Values.signIn.gitlab }}
-{{- $gl = append $gl (dict "url" (default "" $g.url) "clientIdFile" (printf "/sign-in/gitlab-%d/client-id" $i) "secretFile" (printf "/sign-in/gitlab-%d/client-secret" $i) "admins" (default (list) $g.admins)) }}
+{{- $admins := default (list) $g.admins }}
+{{- if eq (include "control-plane.fleetRole" $) "hub" }}{{ $admins = default (list) $g.owners }}{{ end }}
+{{- $gl = append $gl (dict "url" (default "" $g.url) "clientIdFile" (printf "/sign-in/gitlab-%d/client-id" $i) "secretFile" (printf "/sign-in/gitlab-%d/client-secret" $i) "admins" $admins) }}
 {{- end }}
 {{- toJson (dict "url" (include "control-plane.signInURL" .) "sessionKeyFile" "/sign-in/key/key" "gitlab" $gl) }}
 {{- end }}
@@ -268,6 +276,7 @@ Checks that fail the render with a message naming the value to set.
 */}}
 {{- define "control-plane.validate" -}}
 {{- include "control-plane.refuseOld" . }}
+{{- include "control-plane.validateFleet" . }}
 {{- if and (not .Values.gitlab.urls) (not (include "control-plane.urlsConfigMap" .)) }}
 {{- fail "control-plane: set gitlab.urls (the runners' gitlabUrl, exactly) or gitlab.urlsFrom.configMap" }}
 {{- end }}
@@ -291,41 +300,7 @@ Checks that fail the render with a message naming the value to set.
 {{- fail (printf "control-plane: caches.stores[%d].server is a host (and port), without https:// or a path" $i) }}
 {{- end }}
 {{- end }}
-{{- if include "control-plane.signIn" . }}
-{{- $u := include "control-plane.signInURL" . }}
-{{- if not $u }}
-{{- fail "control-plane: sign-in needs signIn.url (or global.console.url): where browsers reach the console" }}
-{{- end }}
-{{- if not (regexMatch "^(https://[^/?#\\s]+|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?)(/[^?#\\s]*)?$" $u) }}
-{{- fail (printf "control-plane: signIn.url must be https (plain http only on localhost, for a port-forward), got %q" $u) }}
-{{- end }}
-{{- if not .Values.signIn.sessionKey.existingSecret }}
-{{- fail "control-plane: sign-in needs signIn.sessionKey.existingSecret: a Secret with 32 random bytes in base64 (openssl rand -base64 32)" }}
-{{- end }}
-{{- $gl := .Values.signIn.gitlab }}
-{{- if not $gl }}
-{{- fail "control-plane: sign-in needs signIn.gitlab: the OAuth application of each GitLab (url, existingSecret)" }}
-{{- end }}
-{{- $seen := dict }}
-{{- range $gl }}
-{{- if not .existingSecret }}
-{{- fail (printf "control-plane: signIn.gitlab %q needs existingSecret: a Secret with the OAuth application's client-id and client-secret" (default "" .url)) }}
-{{- end }}
-{{- if and (not .url) (gt (len $gl) 1) }}
-{{- fail "control-plane: with several signIn.gitlab entries each needs its url, exactly as the runners have it" }}
-{{- end }}
-{{- if hasKey $seen (default "" .url) }}
-{{- fail (printf "control-plane: signIn.gitlab names %q twice" (default "" .url)) }}
-{{- end }}
-{{- $_ := set $seen (default "" .url) true }}
-{{- if and .url $.Values.gitlab.urls (not (has .url $.Values.gitlab.urls)) }}
-{{- fail (printf "control-plane: signIn.gitlab url %q is not one of gitlab.urls (they must match exactly)" .url) }}
-{{- end }}
-{{- end }}
-{{- if .Values.gitlab.token.existingSecret }}
-{{- fail "control-plane: gitlab.token and sign-in exclude each other: with sign-in GitLab is read with each person's own token" }}
-{{- end }}
-{{- end }}
+{{- include "control-plane.validateSignIn" . }}
 {{- if and .Values.gitlab.token.existingSecret (gt (len (default (list) .Values.gitlab.urls)) 1) }}
 {{- fail "control-plane: gitlab.token is a token of one GitLab, but gitlab.urls names several: the console would send it to each of them. Use sign-in (each person's own token), or one URL" }}
 {{- end }}
@@ -391,4 +366,159 @@ holds "console" (or fullnameOverride). Read by name: no list. */}}
 {{- define "control-plane.logArgs" -}}
 - -log-level={{ .role.logLevel | default .root.Values.log.level }}
 - -log-format={{ .root.Values.log.format }}
+{{- end }}
+
+{{/*
+The box's part in a fleet: "" (a box on its own), "hub" or "member".
+Read with dig: values of releases before the fleet have no fleet key.
+*/}}
+{{- define "control-plane.fleetRole" -}}
+{{- dig "fleet" "role" "" .Values.AsMap }}
+{{- end }}
+
+{{- define "control-plane.hubName" -}}
+{{- include "control-plane.webName" . }}
+{{- end }}
+
+{{/*
+The Secret a fleet member's key is in: the user's, or the one the
+controller makes when it joins with a join token.
+*/}}
+{{- define "control-plane.fleetKeySecret" -}}
+{{- $f := dig "fleet" (dict) .Values.AsMap }}
+{{- default (printf "%s-fleet-key" (include "control-plane.controllerName" .)) (dig "key" "existingSecret" "" $f) }}
+{{- end }}
+
+{{/*
+The Secrets a fleet member's controller writes, as a YAML list: those its
+hub delivers (the names the hub's generated values use) and, joining with
+a token, the one it keeps its key in.
+*/}}
+{{- define "control-plane.fleetSecretNames" -}}
+{{- $names := list "fleet-runner-token" "fleet-gitlab-token" "fleet-s3-cache" }}
+{{- if dig "fleet" "join" "existingSecret" "" .Values.AsMap }}
+{{- $names = append $names (include "control-plane.fleetKeySecret" .) }}
+{{- end }}
+{{- toYaml $names }}
+{{- end }}
+
+{{/*
+Checks of a fleet hub or member: fail the render with the value to set.
+Also refuses turning one release from a box into a hub or back: the hub's
+Deployment has the web's name with another (immutable) selector, and it
+would open the box's store. lookup is empty under helm template.
+*/}}
+{{- define "control-plane.validateFleet" -}}
+{{- $role := include "control-plane.fleetRole" . }}
+{{- $f := dig "fleet" (dict) .Values.AsMap }}
+{{- if not (has $role (list "" "hub" "member")) }}
+{{- fail (printf "control-plane: fleet.role is \"\" (a box), \"hub\" or \"member\", got %q" $role) }}
+{{- end }}
+{{- $web := lookup "apps/v1" "Deployment" .Release.Namespace (include "control-plane.webName" .) }}
+{{- $webLabels := dig "metadata" "labels" (dict) $web }}
+{{- $webOurs := eq (get $webLabels "app.kubernetes.io/instance") .Release.Name }}
+{{- if eq $role "hub" }}
+{{- $ctrl := lookup "apps/v1" "Deployment" .Release.Namespace (include "control-plane.controllerName" .) }}
+{{- if or (and $webOurs (eq (get $webLabels "app.kubernetes.io/component") "web")) (eq (dig "metadata" "labels" "app.kubernetes.io/instance" "" $ctrl) .Release.Name) }}
+{{- fail (printf "control-plane: release %s is a box (it runs a controller or a web); a fleet hub is a release of its own, in its own namespace: install it with another release name, and keep this one as it is" .Release.Name) }}
+{{- end }}
+{{- else if and $webOurs (eq (get $webLabels "app.kubernetes.io/component") "hub") }}
+{{- fail (printf "control-plane: release %s is a fleet hub; it cannot become a box: keep fleet.role=hub, and install a box as a release of its own" .Release.Name) }}
+{{- end }}
+{{- if eq $role "hub" }}
+{{- if not (dig "key" "existingSecret" "" $f) }}
+{{- fail "control-plane: a fleet hub needs fleet.key.existingSecret: a Secret with its private key (PEM) under fleet.key.key; ci-accelerator fleet-keygen or openssl genpkey -algorithm ed25519 make one" }}
+{{- end }}
+{{- if or (dig "join" "existingSecret" "" $f) (dig "name" "" $f) (dig "hub" "url" "" $f) (dig "hub" "publicKeys" "" $f) }}
+{{- fail "control-plane: fleet.join, fleet.name, fleet.hub.url and fleet.hub.publicKeys are a member's values; a fleet hub takes fleet.key, fleet.apiToken, fleet.secretsKey, fleet.hub.caCert and fleet.keepRemovedDays" }}
+{{- end }}
+{{- $u := include "control-plane.signInURL" . }}
+{{- if not (regexMatch "^https?://[^/?#@\\s]+$" $u) }}
+{{- fail (printf "control-plane: a fleet hub needs its console address, at the root of its host: global.console.url (or signIn.url), e.g. https://ci.example.com; the hub writes it into the values of its clusters, got %q" $u) }}
+{{- end }}
+{{- if include "control-plane.signIn" . }}
+{{- range .Values.signIn.gitlab }}
+{{- if and (not .url) (not $.Values.gitlab.urls) }}
+{{- fail "control-plane: a fleet hub with sign-in needs the GitLab people sign in with: signIn.gitlab[].url (or gitlab.urls); a hub has no runners to take it from" }}
+{{- end }}
+{{- end }}
+{{- else if not (dig "apiToken" "existingSecret" "" $f) }}
+{{- fail "control-plane: a fleet hub needs a way in for its owners: sign-in (signIn.enabled, with signIn.gitlab[].owners) or a bootstrap token for its API (fleet.apiToken.existingSecret)" }}
+{{- end }}
+{{- range .Values.signIn.gitlab }}
+{{- if .admins }}
+{{- fail "control-plane: on a fleet hub signIn.gitlab[].admins is replaced by owners: the people who see and manage the whole fleet" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if eq $role "member" }}
+{{- if and (not (dig "key" "existingSecret" "" $f)) (not (dig "join" "existingSecret" "" $f)) }}
+{{- fail "control-plane: a fleet member needs fleet.join.existingSecret (a Secret with a join token issued by the hub) or fleet.key.existingSecret (a Secret with its private key, PEM, registered at the hub)" }}
+{{- end }}
+{{- if and (dig "key" "existingSecret" "" $f) (dig "join" "existingSecret" "" $f) }}
+{{- fail "control-plane: a fleet member takes fleet.key.existingSecret (a key registered at the hub) or fleet.join.existingSecret (a join token), not both" }}
+{{- end }}
+{{- if or (dig "apiToken" "existingSecret" "" $f) (dig "secretsKey" "existingSecret" "" $f) }}
+{{- fail "control-plane: fleet.apiToken and fleet.secretsKey are a hub's values; a fleet member does not use them" }}
+{{- end }}
+{{- $u := dig "hub" "url" "" $f }}
+{{- if not (regexMatch "^https?://[^/?#@\\s]+/?$" $u) }}
+{{- fail (printf "control-plane: a fleet member needs fleet.hub.url, the hub's console address (https://...), at the root of its host and without user or password, got %q" $u) }}
+{{- end }}
+{{- /* The binary's rule (hubAddress): http only to localhost, a loopback IP or a Service (*.svc, *.svc.*). */ -}}
+{{- if and (hasPrefix "http://" (lower $u)) (dig "join" "existingSecret" "" $f) (not (regexMatch "^(?i)http://(localhost|127\\.[0-9]+\\.[0-9]+\\.[0-9]+|\\[::1\\]|[^/:?#@\\s]+\\.svc(\\.[^/:?#@\\s]+)*)(:[0-9]+)?/?$" $u)) }}
+{{- fail (printf "control-plane: a fleet member with a join token needs an https fleet.hub.url (http only to localhost or a Service of the cluster), got %q" $u) }}
+{{- end }}
+{{- if not (contains "BEGIN PUBLIC KEY" (dig "hub" "publicKeys" "" $f)) }}
+{{- fail "control-plane: a fleet member needs fleet.hub.publicKeys: the hub's public key(s), PEM (-----BEGIN PUBLIC KEY-----)" }}
+{{- end }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$" (dig "name" "" $f)) }}
+{{- fail (printf "control-plane: a fleet member needs fleet.name: lower-case letters, digits and dashes, at most 40, got %q" (dig "name" "" $f)) }}
+{{- end }}
+{{- end }}
+{{- if and (eq $role "") .Values.signIn.enabled }}
+{{- range .Values.signIn.gitlab }}
+{{- if .owners }}
+{{- fail "control-plane: signIn.gitlab[].owners is for a fleet hub (fleet.role hub); a box names its admins in signIn.gitlab[].admins" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "control-plane.validateSignIn" -}}
+{{- if include "control-plane.signIn" . }}
+{{- $u := include "control-plane.signInURL" . }}
+{{- if not $u }}
+{{- fail "control-plane: sign-in needs signIn.url (or global.console.url): where browsers reach the console" }}
+{{- end }}
+{{- if not (regexMatch "^(https://[^/?#\\s]+|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?)(/[^?#\\s]*)?$" $u) }}
+{{- fail (printf "control-plane: signIn.url must be https (plain http only on localhost, for a port-forward), got %q" $u) }}
+{{- end }}
+{{- if not .Values.signIn.sessionKey.existingSecret }}
+{{- fail "control-plane: sign-in needs signIn.sessionKey.existingSecret: a Secret with 32 random bytes in base64 (openssl rand -base64 32)" }}
+{{- end }}
+{{- $gl := .Values.signIn.gitlab }}
+{{- if not $gl }}
+{{- fail "control-plane: sign-in needs signIn.gitlab: the OAuth application of each GitLab (url, existingSecret)" }}
+{{- end }}
+{{- $seen := dict }}
+{{- range $gl }}
+{{- if not .existingSecret }}
+{{- fail (printf "control-plane: signIn.gitlab %q needs existingSecret: a Secret with the OAuth application's client-id and client-secret" (default "" .url)) }}
+{{- end }}
+{{- if and (not .url) (gt (len $gl) 1) }}
+{{- fail "control-plane: with several signIn.gitlab entries each needs its url, exactly as the runners have it" }}
+{{- end }}
+{{- if hasKey $seen (default "" .url) }}
+{{- fail (printf "control-plane: signIn.gitlab names %q twice" (default "" .url)) }}
+{{- end }}
+{{- $_ := set $seen (default "" .url) true }}
+{{- if and .url $.Values.gitlab.urls (not (has .url $.Values.gitlab.urls)) }}
+{{- fail (printf "control-plane: signIn.gitlab url %q is not one of gitlab.urls (they must match exactly)" .url) }}
+{{- end }}
+{{- end }}
+{{- if .Values.gitlab.token.existingSecret }}
+{{- fail "control-plane: gitlab.token and sign-in exclude each other: with sign-in GitLab is read with each person's own token" }}
+{{- end }}
+{{- end }}
 {{- end }}

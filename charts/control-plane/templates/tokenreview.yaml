@@ -1,3 +1,5 @@
+{{- if ne (include "control-plane.fleetRole" .) "hub" }}
+{{- /* A fleet hub runs none of this: hub.yaml. */}}
 {{- $name := printf "%s-%s-tokenreview" .Release.Namespace (include "control-plane.controllerName" .) }}
 # The controller asks Kubernetes whose ServiceAccount token a caller of its
 # API sent (TokenReview): nothing else cluster-wide.
@@ -26,3 +28,4 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "control-plane.controllerName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}

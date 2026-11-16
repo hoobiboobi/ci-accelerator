@@ -1,3 +1,5 @@
+{{- if ne (include "control-plane.fleetRole" .) "hub" }}
+{{- /* A fleet hub runs none of this: hub.yaml. */}}
 {{- $stores := .Values.caches.stores }}
 {{- if $stores }}
 {{- $secrets := list }}
@@ -42,4 +44,5 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "control-plane.controllerName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

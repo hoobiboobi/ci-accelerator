@@ -1,0 +1,23 @@
+# A fleet member that joins with a token, with a private CA for the hub's
+# address and the NetworkPolicies (rendered by make lint and validate,
+# with the required values).
+fleet:
+  role: member
+  name: prod-eu
+  join:
+    existingSecret: fleet-join
+  hub:
+    url: https://hub.example.com
+    publicKeys: |
+      -----BEGIN PUBLIC KEY-----
+      MCowBQYDK2VwAyEAhub
+      -----END PUBLIC KEY-----
+    caCert: |
+      -----BEGIN CERTIFICATE-----
+      MIIB
+      -----END CERTIFICATE-----
+gitlab:
+  token:
+    existingSecret: fleet-gitlab-token
+networkPolicy:
+  enabled: true

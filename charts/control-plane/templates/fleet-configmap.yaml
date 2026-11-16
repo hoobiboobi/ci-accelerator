@@ -1,0 +1,33 @@
+{{- if eq (include "control-plane.fleetRole" .) "member" }}
+{{- $f := dig "fleet" (dict) .Values.AsMap }}
+# The hub this member joins: its public keys and the CA of its address.
+# Public: no secret here (the member's own key is in fleet.key.existingSecret).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "control-plane.controllerName" . }}-fleet
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" . "role" "controller") | nindent 4 }}
+data:
+  keys.pem: {{ dig "hub" "publicKeys" "" $f | quote }}
+  {{- with dig "hub" "caCert" "" $f }}
+  ca.pem: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- if eq (include "control-plane.fleetRole" .) "hub" }}
+{{- $f := dig "fleet" (dict) .Values.AsMap }}
+{{- with dig "hub" "caCert" "" $f }}
+# The CA of the hub's address, written into the values it generates for
+# its clusters. Public: no secret here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "control-plane.hubName" $ }}-fleet
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "control-plane.labels" (dict "root" $ "role" "hub") | nindent 4 }}
+data:
+  ca.pem: {{ . | quote }}
+{{- end }}
+{{- end }}
