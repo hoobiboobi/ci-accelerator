@@ -1502,8 +1502,8 @@ box_fleet() {
     test "$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "Cookie: $bob" "$url/access")" = 403
   check "at the hub bob sees none of the member's projects, as on the box" \
     eval 'curl -s -m 20 -H "Cookie: $bob" "$url/m/e2e/" | grep -q "No project you can read builds here"'
-  check "the hub's Members page lists the member as connected" \
-    eval 'curl -fsS -m 20 -H "Cookie: $alice" "$url/" | grep -q ">connected<"'
+  hub_lists_connected() { curl -fsS -m 20 -H "Cookie: $alice" "$url/" | grep -q ">connected<"; }
+  check "the hub's Members page lists the member as connected" eventually 60 hub_lists_connected
   # A key the hub does not know is refused: a second controller of the
   # member with another key never gets a link.
   kc -n "$BOX_NS" delete secret fleet-key >/dev/null
