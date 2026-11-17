@@ -321,6 +321,8 @@ func TestMaskCommonCredentialShapes(t *testing.T) {
 		"key AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz0123456":                                                                                           "AbCdEfGhIj",
 		"vault hvs.AbCdEfGhIjKlMnOpQrStUvWxYz012345":                                                                                            "AbCdEfGhIj",
 		"hook https://hooks.slack.com/services/T000/B000/AbCdEfGhIjKlMnOp":                                                                      "AbCdEfGhIj",
+		"hook http://hooks.slack.com/services/T000/B000/QrStUvWxYz0123456":                                                                      "QrStUvWxYz",
+		"SLACK_WEBHOOK=hooks.slack.com/services/T000/B000/ZyXwVuTsRqPoNmLk":                                                                     "ZyXwVuTsRq",
 	} {
 		if got := MaskSecrets(in); strings.Contains(got, secret) {
 			t.Errorf("MaskSecrets(%q) = %q", in, got)
