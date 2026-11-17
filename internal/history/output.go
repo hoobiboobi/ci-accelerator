@@ -35,7 +35,7 @@ var secretPatterns = []secretPattern{
 	pat(`github_pat_[0-9A-Za-z_]{22,}`, "github_pat_"),
 	// Slack tokens and webhook addresses.
 	pat(`xox[abposr]-[0-9A-Za-z\-]{10,}`, "xox"),
-	pat(`https://hooks\.slack\.com/services/[0-9A-Za-z/_\-]+`, "hooks.slack.com"),
+	pat(`hooks\.slack\.com/services/[0-9A-Za-z/_\-]+`, "hooks.slack.com"),
 	// npm, PyPI, Stripe, Google API and Vault tokens.
 	pat(`npm_[0-9A-Za-z]{36,}`, "npm_"),
 	pat(`pypi-AgEIcHlwaS5vcmc[0-9A-Za-z_\-]{16,}`, "pypi-"),
