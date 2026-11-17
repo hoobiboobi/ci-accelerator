@@ -97,9 +97,10 @@ spec:
         Prefix of the names the job hands to later jobs (IMAGE, IMAGE_DIGEST,
         IMAGE_REF), e.g. API_ for API_IMAGE_REF. Give each component job of a
         pipeline its own: later jobs get the dotenv reports of all of them,
-        and names that repeat keep the value of one only.
+        and names that repeat keep the value of one only. Letters, digits
+        and _, not first a digit; the job checks it (GitLab 17.9 refuses a
+        regex that the empty default matches).
       default: ""
-      regex: ^([A-Za-z_][A-Za-z0-9_]*)?$
     buildkit-image:
       description: Image with buildctl for the job; keep it at the daemons' BuildKit release.
       # renovate: datasource=docker depName=moby/buildkit
