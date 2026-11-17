@@ -276,16 +276,27 @@ func addrAttr(before []byte) bool {
 	return false
 }
 
+// sitePath says whether p is a path of this site: it starts with one
+// slash, not two and not a slash and a backslash, which browsers read as
+// the start of another host's address.
+func sitePath(p string) bool {
+	return strings.HasPrefix(p, "/") && (len(p) == 1 || (p[1] != '/' && p[1] != '\\'))
+}
+
 // based puts the pages' base path in front of an absolute address.
 func (s *Server) based(to string) string {
-	if s.opt.Base == "" || !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") {
+	if s.opt.Base == "" || !sitePath(to) {
 		return to
 	}
 	return s.opt.Base + to
 }
 
-// redirect sends the browser to one of the pages' own addresses.
+// redirect sends the browser to one of the pages' own addresses; anything
+// that is not a path of the site sends it to the home page.
 func (s *Server) redirect(w http.ResponseWriter, r *http.Request, to string, code int) {
+	if !sitePath(to) {
+		to = "/"
+	}
 	http.Redirect(w, r, s.based(to), code)
 }
 

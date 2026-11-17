@@ -215,7 +215,7 @@ func (s *Server) back(w http.ResponseWriter, r *http.Request, to, msg string, ba
 // query kept as it is; anything that is not a path of the site is "/".
 func safeBack(to string) string {
 	p, q, _ := strings.Cut(to, "?")
-	if !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") {
+	if !sitePath(p) {
 		return "/"
 	}
 	segs := strings.Split(p, "/")
