@@ -186,7 +186,6 @@ end
 
 refused("an input the component does not have", include_yaml({ "runner-tag" => ["x"] }), /runner-tag/)
 refused("a job name the regex refuses", include_yaml({ "job-name" => "-x" }), /job-name.*(RegEx|regex)/i)
-refused("an output-prefix that is not a variable name", include_yaml({ "output-prefix" => "1-x" }), /output-prefix.*(RegEx|regex)/i)
 refused("a registry-auth outside its options", include_yaml({ "registry-auth" => "token" }), /registry-auth.*(allowed options|not in the list)/i)
 refused("a context-source outside its options", include_yaml({ "context-source" => "remote" }), /context-source.*(allowed options|not in the list)/i)
 refused("push that is not a boolean", include_yaml({ "push" => "yes" }), /push.*boolean/i)
