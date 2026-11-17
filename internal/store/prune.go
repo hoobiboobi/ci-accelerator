@@ -25,8 +25,8 @@ const (
 // step definitions and Dockerfiles no build has used since, jobs and
 // pipelines of that age without builds, and projects nothing is kept of.
 // Builds go in small batches so the writer is never held for long. It
-// returns the number of builds deleted. It also says when the store's
-// volume is nearly full (lowSpace).
+// returns the number of builds deleted; a nearly full volume is not its
+// error but LowSpace's warning.
 //
 // With Options.MaxBytes it then deletes the oldest builds until the
 // database fits (pruneToSize), and says so.
@@ -101,7 +101,6 @@ func (s *Store) Prune(ctx context.Context) (int64, error) {
 	if _, err := s.db.ExecContext(ctx, "PRAGMA optimize"); err != nil {
 		errs = append(errs, err)
 	}
-	errs = append(errs, s.lowSpace())
 	return deleted, errors.Join(errs...)
 }
 
@@ -261,9 +260,10 @@ const (
 	lowSpaceBytes = 256 << 20
 )
 
-// lowSpace returns an error naming the store's free space when its volume
-// is nearly full; nil otherwise, or when the space is not known.
-func (s *Store) lowSpace() error {
+// LowSpace returns a warning naming the store's free space when its volume
+// is nearly full; nil otherwise, or when the space is not known. The
+// controller logs it with each retention run.
+func (s *Store) LowSpace() error {
 	free, total, err := volumeSpace(s.dir)
 	if err != nil || total == 0 {
 		return nil

@@ -424,8 +424,9 @@ workflow copies them into the GitHub release.
 - Store: retention on a full controller volume deletes expired
   step-output files first, deletes builds of days already summed even
   when the daily figures cannot be written, cuts the write-ahead log back
-  to 64 MiB after checkpoints, and starts on a full volume; the hourly
-  `retention` log line says when the volume is nearly full. Retention
+  to 64 MiB after checkpoints, and starts on a full volume; each hourly
+  retention run logs a `store volume` warning when the volume is nearly
+  full. Retention
   deletes in pauses, so the collector is not held off for seconds after a
   long outage; it keeps a job while a build of it is kept, and forgets
   projects of which nothing is kept (they leave the project menu).
