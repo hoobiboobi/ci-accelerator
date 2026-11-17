@@ -967,6 +967,9 @@ func prune(ctx context.Context, st *store.Store, signIn *auth.Auth, log *slog.Lo
 		} else if n > 0 {
 			log.Info("retention", "builds_deleted", n)
 		}
+		if err := st.LowSpace(); err != nil {
+			log.Warn("store volume", "err", err)
+		}
 		if signIn != nil {
 			if n, err := signIn.Prune(ctx); err != nil {
 				log.Warn("sessions", "err", err)

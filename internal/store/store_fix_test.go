@@ -461,8 +461,8 @@ func TestStoreFullVolume(t *testing.T) {
 	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the output file past retention: %v", err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "nearly full") {
-		t.Errorf("Prune does not say the volume is nearly full: %v", err)
+	if err := s.LowSpace(); err == nil || !strings.Contains(err.Error(), "nearly full") {
+		t.Errorf("LowSpace does not say the volume is nearly full: %v", err)
 	}
 	if err := s.Close(); err != nil {
 		t.Logf("Close: %v", err)
