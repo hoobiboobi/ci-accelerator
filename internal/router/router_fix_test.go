@@ -52,6 +52,13 @@ func TestSilentConnectionClosedBeforeAnyDial(t *testing.T) {
 // Connections above MaxPerSource from one address, or above MaxConns in
 // all, are closed at once; the ones within the bounds are served.
 func TestConnectionCaps(t *testing.T) {
+	// Two source addresses: Linux answers on all of 127/8, macOS only on
+	// 127.0.0.1 unless 127.0.0.2 is added as an alias.
+	if l, err := net.Listen("tcp", "127.0.0.2:0"); err != nil {
+		t.Skipf("127.0.0.2 is not a local address here: %v", err)
+	} else {
+		l.Close()
+	}
 	// The backend answers only once the client ends its sending half: the
 	// connections stay open until the test closes them.
 	b := newBackend(t, "d1")
