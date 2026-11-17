@@ -127,7 +127,7 @@ newroot
 (cd "$R" && env -i PATH="$R/stub:/usr/bin:/bin" HOME="$R/home" TMPDIR="$R/tmp" \
   bash quickstart.sh "${G[@]}" --runner-token-file "$R/tok" >"$R/out" 2>&1 </dev/null)
 check "the closing line names the script by its path, run with bash" \
-  eval 'tail -n 1 "$R/out" | grep -qx "Remove everything: sudo bash $R/quickstart.sh --uninstall"'
+  eval 'tail -n 1 "$R/out" | grep -qx "Remove everything: sudo bash $(cd "$R" && pwd -P)/quickstart.sh --uninstall"'
 check "the chart's notes name kubectl as this machine runs it" \
   eval 'grep -qx "  sudo k3s kubectl -n ci get ds b" "$R/out" && grep -qx "  (the log prints it: sudo k3s kubectl -n ci logs deploy/c)" "$R/out" && ! sed "s/k3s kubectl //g" "$R/out" | grep -q "kubectl "'
 
