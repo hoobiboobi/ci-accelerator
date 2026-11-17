@@ -1515,8 +1515,8 @@ box_fleet() {
       hub "http://127.0.0.1:$port/api/v1/fleet/members/e2e" | jv 'v["status"]["connected"]' | grep -qx False
   }
   check "a member with a key the hub does not know is refused" eventually 60 stranger_refused
-  check "while the member is away, the hub shows the page alice saw before, dated" \
-    eval 'curl -s -m 20 -H "Cookie: $alice" "$(cat "$d/job-page.url")" | grep -q "e2e is not connected now"'
+  hub_shows_kept() { curl -s -m 20 -H "Cookie: $alice" "$(cat "$d/job-page.url")" | grep -q "e2e is not connected now"; }
+  check "while the member is away, the hub shows the page alice saw before, dated" eventually 30 hub_shows_kept
   kc -n "$BOX_NS" delete secret fleet-key >/dev/null
   kc -n "$BOX_NS" create secret generic fleet-key --from-file=key="$s/member.key" >/dev/null
   kc -n "$BOX_NS" rollout restart "deploy/$BOX_REL-controller" >/dev/null
