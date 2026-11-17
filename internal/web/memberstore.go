@@ -77,7 +77,8 @@ func (s *Server) OldStore(w http.ResponseWriter, r *http.Request, seg string) bo
 		if r.URL.RawQuery != "" {
 			to += "?" + r.URL.RawQuery
 		}
-		http.Redirect(w, r, to, http.StatusFound)
+		// Through redirect, which sends only to a path of the site.
+		s.redirect(w, r, to, http.StatusFound)
 		return true
 	}
 	sh, err := s.shell(r, "", "")
