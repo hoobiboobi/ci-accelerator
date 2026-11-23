@@ -271,7 +271,7 @@ Either way:
 
    ```sh
    helm upgrade --install ci-accelerator-runner gitlab-runner \
-     --repo https://charts.gitlab.io --version 0.94.1 \
+     --repo https://charts.gitlab.io --version 0.94.3 \
      -n gitlab-runner --create-namespace -f values.yaml
    ```
 

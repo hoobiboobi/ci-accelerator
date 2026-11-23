@@ -128,7 +128,7 @@ gitlab-runner:
   # the same image), append it to the tag: alpine-v19.5.1@sha256:<digest>.
   image:
     # renovate: datasource=docker depName=registry.gitlab.com/gitlab-org/gitlab-runner
-    tag: alpine-v19.5.1
+    tag: alpine-v19.6.0
   # -- Required: your GitLab, e.g. `https://gitlab.example.com/`
   gitlabUrl: ""
   # The runner chart's defaults, plus the RuntimeDefault seccomp profile

@@ -35,7 +35,7 @@ Kubernetes: `>=1.34.0-0`
 |------------|------|---------|
 | file://../buildkit | buildkit | 1.0.0-alpha.1 |
 | file://../control-plane | control-plane | 1.0.0-alpha.1 |
-| https://charts.gitlab.io | gitlab-runner | 0.94.1 |
+| https://charts.gitlab.io | gitlab-runner | 0.94.3 |
 
 ## Values
 
@@ -58,7 +58,7 @@ Kubernetes: `>=1.34.0-0`
 | control-plane.tls.existingSecret | string | `""` |  |
 | gitlab-runner.enabled | bool | `true` |  |
 | gitlab-runner.gitlabUrl | string | `""` | Required: your GitLab, e.g. `https://gitlab.example.com/` |
-| gitlab-runner.image.tag | string | `"alpine-v19.5.1"` |  |
+| gitlab-runner.image.tag | string | `"alpine-v19.6.0"` |  |
 | gitlab-runner.metrics.enabled | bool | `false` |  |
 | gitlab-runner.metrics.from | list | `[]` |  |
 | gitlab-runner.podSecurityContext.fsGroup | int | `65533` |  |

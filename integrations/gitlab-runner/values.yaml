@@ -1,10 +1,10 @@
 # Values fragment for the official gitlab-runner Helm chart that sends CI jobs
-# to the buildkit daemons of this project. Tested with chart 0.94.1 and
-# runner 19.5.1, the versions the box installs (see README.md next to this
+# to the buildkit daemons of this project. Tested with chart 0.94.3 and
+# runner 19.6.0, the versions the box installs (see README.md next to this
 # file).
 #
 #   helm upgrade --install gitlab-runner gitlab-runner \
-#     --repo https://charts.gitlab.io --version 0.94.1 \
+#     --repo https://charts.gitlab.io --version 0.94.3 \
 #     -n ci-accelerator -f values.yaml -f my-values.yaml
 #
 # Replace the names marked ADJUST if your buildkit release is not
@@ -17,7 +17,7 @@
 # older chart.
 image:
   # renovate: datasource=docker depName=registry.gitlab.com/gitlab-org/gitlab-runner
-  tag: alpine-v19.5.1
+  tag: alpine-v19.6.0
 
 # ADJUST: your GitLab.
 gitlabUrl: https://gitlab.example.com/
