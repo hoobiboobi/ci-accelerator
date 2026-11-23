@@ -72,9 +72,9 @@ KIND_VERSION := v0.33.0
 KIND_SHA256_linux_amd64 := aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
 KIND_SHA256_linux_arm64 := 20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2
 # renovate: datasource=github-tags depName=kubernetes/kubernetes
-KUBECTL_VERSION := v1.37.1
-KUBECTL_SHA256_linux_amd64 := 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
-KUBECTL_SHA256_linux_arm64 := ff749f4b78d9c4f1ec87307df9b50119ed819e2094aa9810cb9acffc3286c8c7
+KUBECTL_VERSION := v1.37.2
+KUBECTL_SHA256_linux_amd64 := c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4
+KUBECTL_SHA256_linux_arm64 := fcc16f63186659d9722014b7e02d5fdd2d4e669cb8c0ab66365d7d3b8ba03509
 # Vulnerability scanners: govulncheck (golang.org/x/vuln, installed with Go,
 # verified by the Go checksum database) for the Go code, trivy for
 # its image. Checksums from trivy's <version>_checksums.txt release asset.
