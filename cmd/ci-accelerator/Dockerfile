@@ -51,7 +51,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
          [ -z "$mpl" ] || { echo; echo "Under MPL-2.0 (its source as above):"; for m in $mpl; do grep "^$m " /tmp/modules | cut -d' ' -f1,2; done; }; \
          echo; echo "Modules (path version):"; cut -d' ' -f1,2 /tmp/modules; } > /out/licenses/README
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5
 COPY --from=build /out/ci-accelerator /ci-accelerator
 COPY --from=build /out/licenses /licenses
 USER 65532:65532
