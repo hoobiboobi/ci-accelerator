@@ -8,7 +8,7 @@ and makes the job pods thin clients. It is the same runner configuration
 the box gives its own runner (`make validate` checks that both stay
 identical).
 
-Tested with chart 0.94.1 and gitlab-runner 19.5.1, the versions the box
+Tested with chart 0.94.3 and gitlab-runner 19.6.0, the versions the box
 installs: `make validate` renders the chart with the fragment, and `make e2e`
 (scenario `runner`) runs the real runner end to end. See "What the e2e
 proves" below.
@@ -108,7 +108,7 @@ that for you.
 
    ```sh
    helm upgrade --install gitlab-runner gitlab-runner \
-     --repo https://charts.gitlab.io --version 0.94.1 \
+     --repo https://charts.gitlab.io --version 0.94.3 \
      -n ci-accelerator -f values.yaml
    ```
 
